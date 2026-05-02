@@ -43,7 +43,7 @@ Option Explicit
 '   Office CommandBars object model
 '   MSForms / VBA.UserForms
 '   cDatePickerManager
-'   Frm_DatePicker
+'   UF_DatePicker
 '
 ' NOTES
 '   This module deliberately does not use Option Private Module because Excel UI
@@ -181,7 +181,7 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-    Private Const DP_FORM_NAME                     As String = "Frm_DatePicker"          'DatePicker UserForm name
+    Private Const DP_FORM_NAME                     As String = "UF_DatePicker"          'DatePicker UserForm name
 
     Private Const DP_SETTINGS_SECTION_DISPLAY      As String = "Display"                 'Display settings section
     Private Const DP_SETTINGS_SECTION_FEATURES     As String = "Features"                'Feature settings section
@@ -2203,10 +2203,10 @@ Public Sub DP_Show()
 ' BEHAVIOR
 '   - Loads persisted DatePicker settings
 '   - Resolves the initial display date from ActiveCell
-'   - Stores the initial-date bridge state consumed by Frm_DatePicker
+'   - Stores the initial-date bridge state consumed by UF_DatePicker
 '   - Stores selected-date state only when ActiveCell contains a valid date
 '   - Unloads any existing DatePicker instance so UserForm_Initialize runs again
-'   - Shows Frm_DatePicker modelessly
+'   - Shows UF_DatePicker modelessly
 '   - Resolves the loaded form instance
 '   - Moves the loaded form close to the current mouse position
 '
@@ -2218,7 +2218,7 @@ Public Sub DP_Show()
 '   M_Settings_Load
 '   M_FormBridge_UnloadLoadedPicker
 '   M_FormBridge_GetLoadedForm
-'   Frm_DatePicker
+'   UF_DatePicker
 '   M_Window_MoveFormToMouse
 '
 ' NOTES
@@ -2278,7 +2278,7 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ' STORE FORM BRIDGE STATE
 '------------------------------------------------------------------------------
-    'Store the initial date for the next Frm_DatePicker instance
+    'Store the initial date for the next UF_DatePicker instance
         gDP_InitialDate = InitialDate
 
     'Mark the initial date as available
@@ -2303,7 +2303,7 @@ Public Sub DP_Show()
 ' SHOW FORM
 '------------------------------------------------------------------------------
     'Show the DatePicker form modelessly
-        Frm_DatePicker.Show vbModeless
+        UF_DatePicker.Show vbModeless
 
 '------------------------------------------------------------------------------
 ' POSITION LOADED FORM
@@ -2394,7 +2394,7 @@ Public Sub DP_Close()
 '   Nothing
 '
 ' BEHAVIOR
-'   Stops the live clock timer and unloads Frm_DatePicker only when it is loaded
+'   Stops the live clock timer and unloads UF_DatePicker only when it is loaded
 '
 ' ERROR POLICY
 '   Best-effort cleanup. Does not intentionally raise outward
@@ -2448,15 +2448,15 @@ Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Bo
 '                         CONSUME FORM INITIAL DATE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Supplies the initial date to Frm_DatePicker during initialization
+'   Supplies the initial date to UF_DatePicker during initialization
 '
 ' WHY THIS EXISTS
 '   DP_Show resolves the initial date from ActiveCell before the form is shown.
-'   Frm_DatePicker then consumes that value during UserForm_Initialize
+'   UF_DatePicker then consumes that value during UserForm_Initialize
 '
 ' INPUTS
 '   InitialDate
-'     Output date consumed by Frm_DatePicker
+'     Output date consumed by UF_DatePicker
 '
 ' RETURNS
 '   True if an initial date was available; otherwise False
@@ -2518,7 +2518,7 @@ Public Sub M_Picker_SelectDate( _
 '   closes or refreshes the picker according to the configured lifecycle setting
 '
 ' WHY THIS EXISTS
-'   Day-label click handling in Frm_DatePicker should delegate write-back to the
+'   Day-label click handling in UF_DatePicker should delegate write-back to the
 '   companion module so single-cell, multi-cell, and table-column behavior stays
 '   centralized
 '
@@ -6060,7 +6060,7 @@ Public Sub M_FormBridge_RefreshFromActiveCell()
 ' DEPENDENCIES
 '   Application.ActiveCell
 '   M_FormBridge_GetLoadedForm
-'   Frm_DatePicker.UF_DP_RefreshFromExternalSelection
+'   UF_DatePicker.UF_DP_RefreshFromExternalSelection
 '
 ' NOTES
 '   This routine avoids direct default-instance references
@@ -6154,7 +6154,7 @@ Private Sub M_FormBridge_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 '
 ' DEPENDENCIES
 '   VBA.UserForms
-'   Frm_DatePicker
+'   UF_DatePicker
 '
 ' NOTES
 '   Keep this routine aligned with the DatePicker companion-module API
@@ -6213,7 +6213,7 @@ Private Sub M_FormBridge_RefreshSettings()
 '
 ' DEPENDENCIES
 '   VBA.UserForms
-'   Frm_DatePicker
+'   UF_DatePicker
 '
 ' NOTES
 '   Keep this routine aligned with the DatePicker companion-module API
@@ -6275,7 +6275,7 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '
 ' DEPENDENCIES
 '   VBA.UserForms
-'   Frm_DatePicker
+'   UF_DatePicker
 '
 ' NOTES
 '   Keep this routine aligned with the DatePicker companion-module API

@@ -68,7 +68,7 @@ Option Explicit
 '
 ' NOTES
 '   Runtime UserForm control / label event wiring does not belong here. It is
-'   handled by cDatePickerLabelHook and Frm_DatePicker
+'   handled by cDatePickerLabelHook and UF_DatePicker
 '
 '   The manager distinguishes between:
 '     - the picker being loaded in memory
@@ -93,7 +93,7 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-    Private Const DP_FORM_NAME                    As String = "Frm_DatePicker"    'DatePicker UserForm name
+    Private Const DP_FORM_NAME                    As String = "UF_DatePicker"    'DatePicker UserForm name
 
 '------------------------------------------------------------------------------
 ' EVENTS
@@ -288,7 +288,7 @@ Public Property Get Is_PickerLoaded() As Boolean
 '   None
 '
 ' RETURNS
-'   True if Frm_DatePicker is loaded; otherwise False
+'   True if UF_DatePicker is loaded; otherwise False
 '
 ' BEHAVIOR
 '   Scans the loaded VBA.UserForms collection without touching the default form
@@ -301,7 +301,7 @@ Public Property Get Is_PickerLoaded() As Boolean
 '   Is_UserFormLoaded
 '
 ' NOTES
-'   This property deliberately avoids direct references to Frm_DatePicker
+'   This property deliberately avoids direct references to UF_DatePicker
 '
 ' UPDATED
 '   2026-04-30
@@ -332,7 +332,7 @@ Public Property Get PickerVisible() As Boolean
 '   None
 '
 ' RETURNS
-'   True if Frm_DatePicker is loaded and visible; otherwise False
+'   True if UF_DatePicker is loaded and visible; otherwise False
 '
 ' BEHAVIOR
 '   Scans the loaded VBA.UserForms collection and reads the Visible property of
@@ -345,7 +345,7 @@ Public Property Get PickerVisible() As Boolean
 '   Is_UserFormVisible
 '
 ' NOTES
-'   This property deliberately avoids direct references to Frm_DatePicker
+'   This property deliberately avoids direct references to UF_DatePicker
 '
 ' UPDATED
 '   2026-04-30
