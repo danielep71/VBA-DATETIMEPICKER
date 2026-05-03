@@ -479,10 +479,11 @@ Option Explicit
     Private mHoveredSettingsPanelLabelName              As String                       'Currently hovered settings-panel label name
 
     '-----------------------------CONTROL CACHE--------------------------------
-    Private mDayTextLabels(1 To DP_DAY_LABEL_COUNT)     As MSForms.Label                'Cached day text labels
-    Private mDayBackLabels(1 To DP_DAY_LABEL_COUNT)     As MSForms.Label                'Cached day background labels
-    Private mPickerTextLabels(1 To DP_PICKER_ITEM_COUNT) As MSForms.Label               'Cached picker text labels
-    Private mPickerBackLabels(1 To DP_PICKER_ITEM_COUNT) As MSForms.Label               'Cached picker background labels
+    Private mDayTextLabels(1 To DP_DAY_LABEL_COUNT)         As MSForms.Label            'Cached day text labels
+    Private mDayBackLabels(1 To DP_DAY_LABEL_COUNT)         As MSForms.Label            'Cached day background labels
+    Private mPickerTextLabels(1 To DP_PICKER_ITEM_COUNT)    As MSForms.Label            'Cached picker text labels
+    Private mPickerBackLabels(1 To DP_PICKER_ITEM_COUNT)    As MSForms.Label            'Cached picker background labels
+    Private mLbl_Time                                       As MSForms.Label            'Cached footer Time value label
 
     '-----------------------------DATE CACHE-----------------------------------
     Private mDayCellDates(1 To DP_DAY_LABEL_COUNT)      As Date                         'Cached date for each day cell
@@ -1245,6 +1246,8 @@ Private Sub UserForm_Terminate()
         Set mDayFontNormal = Nothing
     'Release cached weekend day font
         Set mDayFontWeekend = Nothing
+    'Release cached footer Time value label
+        Set mLbl_Time = Nothing
 
 '------------------------------------------------------------------------------
 ' CLEAR HOVER STATE
@@ -2895,8 +2898,6 @@ Public Sub UF_DayGrid_Populate( _
         UF_DayGrid_EnsureCache
     'Ensure cached day-grid fonts are available
         UF_DayGrid_EnsureFonts
-    'Clear cached day-cell date state before repopulating the grid
-        UF_DayGrid_ClearDateCache
 
 '------------------------------------------------------------------------------
 ' RESOLVE DISPLAY PERIOD
@@ -4751,6 +4752,8 @@ Private Sub UF_Footer_BuildLabels()
 '------------------------------------------------------------------------------
     'Create or retrieve the Time value label
         Set Lbl_Time = UF_Ensure_Label("Lbl_Time")
+    'Cache the Time value label for live-clock updates
+        Set mLbl_Time = Lbl_Time
     'Apply layout and visual properties
         With Lbl_Time
             .Caption = vbNullString
@@ -5216,8 +5219,9 @@ Public Sub UF_Footer_HoverApply(ByVal LabelName As String)
         With Lbl_Halo
             .BackStyle = fmBackStyleOpaque
             .BackColor = DP_FOOTER_HALO_BACK_COLOR
-            .BorderStyle = fmBorderStyleNone
-            .SpecialEffect = fmSpecialEffectFlat
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = vbWhite
+            .SpecialEffect = fmSpecialEffectRaised
             .Visible = True
         End With
     'Move the halo above the footer banner
@@ -6133,15 +6137,15 @@ Private Sub UF_PickerPanel_ShowMonths()
 ' RESET ACTIVE HOVER STATE
 '------------------------------------------------------------------------------
     'Clear active picker hover before changing picker-panel mode
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear active day-cell hover before showing the picker panel
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear active header-label hover before showing the picker panel
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear active footer hover before showing the picker panel
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover before showing the picker panel
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' HIDE SETTINGS PANEL
@@ -6346,15 +6350,15 @@ Private Sub UF_PickerPanel_ShowYears()
 ' RESET ACTIVE HOVER STATE
 '------------------------------------------------------------------------------
     'Clear active picker hover before changing picker-panel mode
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear active day-cell hover before showing the picker panel
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear active header-label hover before showing the picker panel
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear active footer hover before showing the picker panel
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover before showing the picker panel
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' HIDE SETTINGS PANEL
@@ -7126,15 +7130,15 @@ Private Sub UF_Settings_Show()
 ' RESET ACTIVE HOVER STATE
 '------------------------------------------------------------------------------
     'Clear active day-cell hover before showing settings
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear active header-label hover before showing settings
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear active picker-panel hover before showing settings
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear active footer hover before showing settings
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover before showing settings
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' HIDE PICKER PANEL
@@ -7748,7 +7752,7 @@ Private Sub UF_SettingsPanel_Build()
     'Move the settings title to the front
         Lbl_Title.ZOrder 0
     'Move the settings save label above the title label
-        Lbl_Save.ZOrder
+        Lbl_Save.ZOrder 0
     'Move the settings close label above the title label
         Lbl_Close.ZOrder 0
     'Move the settings panel in front of the day grid
@@ -7895,15 +7899,15 @@ Private Sub UF_SettingsPanel_Show()
 ' RESET TRANSIENT HOVER STATE
 '------------------------------------------------------------------------------
     'Clear active picker hover before showing settings
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear active day-cell hover before showing settings
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear active header-label hover before showing settings
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear active footer hover before showing settings
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover before showing settings
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' HIDE PICKER PANEL
@@ -8070,6 +8074,17 @@ Private Sub UF_SettingsPanel_Save()
     Dim OldShowGridIcon         As Boolean                      'Previous grid-icon setting
     Dim OldUseWinAPI            As Boolean                      'Previous WinAPI setting
     Dim OldEnableKeyboard       As Boolean                      'Previous keyboard shortcut fallback setting
+
+    Dim FirstDayChanged         As Boolean                      'True when first-day setting changed
+    Dim LocalNamesChanged       As Boolean                      'True when local-name setting changed
+    Dim ClockModeChanged        As Boolean                      'True when clock mode changed
+    Dim SizeModeChanged         As Boolean                      'True when size mode changed
+    Dim WeekendChanged          As Boolean                      'True when weekend highlight setting changed
+    Dim AllowOutsideChanged     As Boolean                      'True when outside-month selection changed
+    Dim RightClickChanged       As Boolean                      'True when right-click integration changed
+    Dim GridIconChanged         As Boolean                      'True when in-grid icon integration changed
+    Dim WinAPIChanged           As Boolean                      'True when WinAPI styling setting changed
+    Dim KeyboardChanged         As Boolean                      'True when keyboard shortcut setting changed
 
     Dim SettingsMutated         As Boolean                      'True after global settings are changed
     Dim SettingsPersisted       As Boolean                      'True after settings are saved successfully
@@ -8323,6 +8338,32 @@ Private Sub UF_SettingsPanel_Save()
         OldEnableKeyboard = gDP_EnableKeyboardShortcut
 
 '------------------------------------------------------------------------------
+' RESOLVE CHANGE FLAGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve change flags"
+    'Resolve whether first-day setting changed
+        FirstDayChanged = (NewFirstDay <> OldFirstDay)
+    'Resolve whether local-name setting changed
+        LocalNamesChanged = (NewUseLocalNames <> OldUseLocalNames)
+    'Resolve whether clock mode changed
+        ClockModeChanged = (NewClockMode <> OldClockMode)
+    'Resolve whether size mode changed
+        SizeModeChanged = (NewSizeMode <> OldSizeMode)
+    'Resolve whether weekend-highlight setting changed
+        WeekendChanged = (NewHighlightWeekends <> OldHighlightWeekends)
+    'Resolve whether outside-month selection changed
+        AllowOutsideChanged = (NewAllowOutside <> OldAllowOutside)
+    'Resolve whether right-click integration changed
+        RightClickChanged = (NewShowRightClick <> OldShowRightClick)
+    'Resolve whether grid-icon integration changed
+        GridIconChanged = (NewShowGridIcon <> OldShowGridIcon)
+    'Resolve whether WinAPI styling changed
+        WinAPIChanged = (NewUseWinAPI <> OldUseWinAPI)
+    'Resolve whether keyboard shortcut fallback changed
+        KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
+
+'------------------------------------------------------------------------------
 ' UPDATE IN-MEMORY SETTINGS
 '------------------------------------------------------------------------------
     'Track the current handler step
@@ -8366,36 +8407,63 @@ Private Sub UF_SettingsPanel_Save()
         SettingsPersisted = True
 
 '------------------------------------------------------------------------------
-' APPLY INTEGRATION SIDE EFFECTS
+' APPLY LIGHTWEIGHT INTEGRATION SIDE EFFECTS
 '------------------------------------------------------------------------------
     'Track the current handler step
-        HandlerStep = "Apply integration side effects"
-
-    'Synchronize right-click menu integration
-        M_ContextMenu_Update
-    'Synchronize keyboard shortcut fallback
-        M_KeyboardShortcut_Update
-    'Remove any stale in-grid icon when the feature is disabled
-        If Not gDP_ShowGridIcon Then
-            M_GridIcon_Remove
+        HandlerStep = "Apply lightweight integration side effects"
+        
+    'Synchronize right-click menu integration only when it changed
+        If RightClickChanged Then M_ContextMenu_Update
+    'Synchronize keyboard shortcut fallback only when it changed
+        If KeyboardChanged Then M_KeyboardShortcut_Update
+    'Remove any stale in-grid icon only when the feature was disabled
+        If GridIconChanged Then
+            If Not gDP_ShowGridIcon Then M_GridIcon_Remove
         End If
 
 '------------------------------------------------------------------------------
-' APPLY UI SIDE EFFECTS
+' APPLY LIGHTWEIGHT CLOCK SIDE EFFECTS
 '------------------------------------------------------------------------------
     'Track the current handler step
-        HandlerStep = "Apply UI side effects"
+        HandlerStep = "Apply lightweight clock side effects"
 
-    'Apply the static or live clock mode
-        M_Timer_ApplyClockMode
-    'Apply form sizing and shell formatting
-        UF_Form_Format
-    'Attempt immediate title-bar removal when WinAPI styling is enabled
-        If M_Platform_ShouldUseWinAPI Then
-            M_Window_RemoveTitleBar Me
+    'Apply clock mode only when it changed
+        If ClockModeChanged Then M_Timer_ApplyClockMode
+
+'------------------------------------------------------------------------------
+' UNLOAD AFTER STRUCTURAL SETTINGS CHANGE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Unload after structural settings change"
+
+    'Unload the current UserForm when shell layout or WinAPI styling changed
+        If SizeModeChanged Or WinAPIChanged Then
+            'Unload the form so the next open rebuilds it with the new shell settings
+                Unload Me
+            'Exit because the current UserForm instance is terminating
+                Exit Sub
         End If
-    'Refresh DatePicker captions and day grid
-        UF_DP_RefreshSettings
+
+'------------------------------------------------------------------------------
+' APPLY NON-STRUCTURAL VISUAL REFRESH
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply non-structural visual refresh"
+
+    'Refresh DatePicker captions and day grid only when needed
+        If FirstDayChanged _
+        Or LocalNamesChanged _
+        Or WeekendChanged _
+        Or AllowOutsideChanged Then
+            UF_DP_RefreshSettings
+        End If
+
+'------------------------------------------------------------------------------
+' REFRESH SETTINGS PANEL VALUES
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh settings panel values after save"
+
     'Refresh the settings panel values after save
         UF_SettingsPanel_RefreshCaptions
 
@@ -10992,15 +11060,15 @@ Private Sub UF_Header_MoveMonth(ByVal MonthOffset As Long)
         HandlerStep = "Reset transient hover state"
 
     'Clear picker-panel hover before hiding overlays
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear day-cell hover before repopulating the grid
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear header hover before refreshing captions
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear footer hover before hiding overlays
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear settings-panel hover before hiding overlays
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' HIDE PICKER PANEL
@@ -11286,15 +11354,15 @@ Private Sub UF_Header_MoveYear(ByVal YearOffset As Long)
         HandlerStep = "Reset transient hover state"
 
     'Clear picker-panel hover before hiding overlays
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear day-cell hover before repopulating the grid
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear header hover before refreshing captions
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear footer hover before hiding overlays
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear settings-panel hover before hiding overlays
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' HIDE PICKER PANEL
@@ -11935,7 +12003,7 @@ Private Sub UF_KeyboardDate_Set(ByVal NewKeyboardDate As Date)
         HandlerStep = "Hide picker panel"
 
     'Clear active picker hover before hiding the picker panel
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Suppress lookup errors when the picker panel is not available
         On Error Resume Next
     'Retrieve the picker panel control when available
@@ -12186,7 +12254,8 @@ Public Sub UF_Header_HoverApply(ByVal LabelName As String)
             .BackStyle = fmBackStyleOpaque
             .BackColor = DP_HEADER_HOVER_BACK_COLOR
             .ForeColor = vbWhite
-            .BorderStyle = fmBorderStyleNone
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = vbWhite
             .SpecialEffect = fmSpecialEffectFlat
         End With
     'Move the hovered header label to the front
@@ -12407,7 +12476,7 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 ' HIDE PICKER PANEL
 '------------------------------------------------------------------------------
     'Clear active picker hover before hiding the picker panel
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Suppress missing picker-panel lookup errors
         On Error Resume Next
     'Retrieve the picker panel control when available
@@ -12433,16 +12502,16 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 ' CLEAR TRANSIENT HOVER STATE
 '------------------------------------------------------------------------------
     'Clear active day-cell hover after selection
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Clear active header hover after selection
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear active footer hover after selection
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover after selection
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
     'Clear the legacy day-label hover tracker defensively
         mHoveredDayLabelName = vbNullString
-
+        
 '------------------------------------------------------------------------------
 ' REFRESH ONLY AFFECTED DAY CELLS
 '------------------------------------------------------------------------------
@@ -12572,15 +12641,15 @@ Public Sub UF_DP_RefreshFromExternalSelection( _
         HandlerStep = "Reset transient hover state"
 
     'Remove current day-cell hover formatting
-        UF_DayCell_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
     'Remove current header hover formatting
-        UF_Header_HoverReset
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Remove current picker-panel hover formatting
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Remove current footer hover formatting
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Remove current settings-panel hover formatting
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' RESOLVE DISPLAY DATE
@@ -12813,15 +12882,15 @@ Public Sub UF_DP_RefreshSettings()
         HandlerStep = "Reset transient hover state"
 
     'Clear active day-cell hover before refreshing the grid
-        UF_DayCell_HoverReset
-    'Clear active header hover before rebuilding header labels
-        UF_Header_HoverReset
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
+    'Clear active header hover before refreshing header labels
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
     'Clear active picker-panel hover before refreshing display state
-        UF_PickerPanel_HoverReset
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
     'Clear active footer hover before refreshing footer value captions
-        UF_Footer_HoverReset
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover before refreshing settings-dependent UI
-        UF_SettingsPanel_HoverReset
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
 
 '------------------------------------------------------------------------------
 ' REFRESH HEADER CAPTIONS
@@ -12914,7 +12983,7 @@ Public Sub UF_DP_UpdateLiveClock()
 '
 ' WHY THIS EXISTS
 '   The live clock timer should update only the time text without rebuilding,
-'   repainting, or refreshing the UserForm
+'   repainting, refreshing, or repeatedly resolving UserForm controls
 '
 ' INPUTS
 '   None
@@ -12923,8 +12992,9 @@ Public Sub UF_DP_UpdateLiveClock()
 '   Nothing
 '
 ' BEHAVIOR
-'   Resolves Lbl_Time safely and updates its caption only when the displayed time
-'   value has changed
+'   Uses the cached Lbl_Time reference when available, restores the cache from
+'   the UserForm controls collection only when needed, and updates the caption
+'   only when the displayed time value has changed
 '
 ' ERROR POLICY
 '   Best-effort UI update. Suppresses update failures because timer callbacks may
@@ -12933,6 +13003,7 @@ Public Sub UF_DP_UpdateLiveClock()
 ' DEPENDENCIES
 '   UserForm.Controls collection
 '   Lbl_Time
+'   mLbl_Time
 '
 ' NOTES
 '   This routine deliberately does not call Repaint
@@ -12948,10 +13019,8 @@ Public Sub UF_DP_UpdateLiveClock()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ExistingControl     As MSForms.Control    'Control resolved by name
-    Dim Lbl_Time            As MSForms.Label      'Footer Time value label
-    
-    Dim NewTimeCaption      As String             'Current formatted time caption
+    Dim ExistingControl     As MSForms.Control      'Control resolved by name
+    Dim NewTimeCaption      As String               'Current formatted time caption
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -12966,30 +13035,33 @@ Public Sub UF_DP_UpdateLiveClock()
         NewTimeCaption = VBA.Format$(VBA.Time, "hh:nn:ss")
 
 '------------------------------------------------------------------------------
-' RESOLVE TIME LABEL
+' RESTORE CACHE WHEN NEEDED
 '------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the Time value label
-        On Error Resume Next
-    'Retrieve the Time value label
-        Set ExistingControl = Me.Controls("Lbl_Time")
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore fail-safe error handling
-        On Error GoTo FailSafe
+    'Restore the cached Time label reference only when missing
+        If mLbl_Time Is Nothing Then
+            'Suppress lookup errors while resolving the Time value label
+                On Error Resume Next
+            'Retrieve the Time value label
+                Set ExistingControl = Me.Controls("Lbl_Time")
+            'Clear any suppressed lookup error
+                Err.Clear
+            'Restore fail-safe error handling
+                On Error GoTo FailSafe
 
-    'Exit when the Time value label is not available
-        If ExistingControl Is Nothing Then Exit Sub
-    'Exit when the resolved control is not a label
-        If VBA.TypeName(ExistingControl) <> "Label" Then Exit Sub
-    'Use the resolved Time value label
-        Set Lbl_Time = ExistingControl
+            'Exit when the Time value label is not available
+                If ExistingControl Is Nothing Then Exit Sub
+            'Exit when the resolved control is not a label
+                If VBA.TypeName(ExistingControl) <> "Label" Then Exit Sub
+            'Cache the resolved Time value label
+                Set mLbl_Time = ExistingControl
+        End If
 
 '------------------------------------------------------------------------------
 ' UPDATE TIME LABEL
 '------------------------------------------------------------------------------
     'Update the label only if the caption changed
-        If Lbl_Time.Caption <> NewTimeCaption Then
-            Lbl_Time.Caption = NewTimeCaption
+        If mLbl_Time.Caption <> NewTimeCaption Then
+            mLbl_Time.Caption = NewTimeCaption
         End If
 
 '------------------------------------------------------------------------------
@@ -13004,12 +13076,15 @@ Public Sub UF_DP_UpdateLiveClock()
 FailSafe:
     'Suppress timer-update failures
         On Error Resume Next
+    'Clear the stale cached Time label reference
+        Set mLbl_Time = Nothing
     'Clear any pending timer-update error
         Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
+
 
 '------------------------------------------------------------------------------
 ' SHARED HELPERS
