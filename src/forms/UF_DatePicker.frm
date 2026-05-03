@@ -507,9 +507,15 @@ Option Explicit
     '-----------------------------FONT CACHE-----------------------------------
     Private mDayFontNormal                              As Object                       'Cached normal day font
     Private mDayFontWeekend                             As Object                       'Cached weekend day font
+
+
+'
 '------------------------------------------------------------------------------
-' FORM LIFECYCLE
+'
+'                               FORM LIFECYCLE
+'
 '------------------------------------------------------------------------------
+'
 
 Private Sub UserForm_Initialize()
 
@@ -644,6 +650,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, Err.Description
 
 End Sub
+
 Private Sub UserForm_Activate()
 
 '
@@ -751,6 +758,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, Err.Description
 
 End Sub
+
 Private Sub UserForm_KeyDown( _
     ByVal KeyCode As MSForms.ReturnInteger, _
     ByVal Shift As Integer)
@@ -1035,6 +1043,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, Err.Description
 
 End Sub
+
 Private Sub UserForm_MouseMove( _
     ByVal Button As Integer, _
     ByVal Shift As Integer, _
@@ -1160,6 +1169,7 @@ FailSafe:
         On Error GoTo 0
 
 End Sub
+
 Private Sub UserForm_Terminate()
 
 '
@@ -1295,9 +1305,13 @@ Private Sub UserForm_Terminate()
 
 End Sub
 
+'
 '------------------------------------------------------------------------------
-' USERFORM SHELL
+'
+'                               USERFORM SHELL
+'
 '------------------------------------------------------------------------------
+'
 
 Private Sub UF_Form_Format()
 
@@ -1414,6 +1428,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, Err.Description
 
 End Sub
+
 Private Sub UF_Form_ApplyEffectiveSize(ByVal TargetFormHeight As Single)
 
 '
@@ -1519,9 +1534,1147 @@ ErrorHandler:
 
 End Sub
 
+'
 '------------------------------------------------------------------------------
-' HEADER
+'
+'                           DISPLAY AND KEYBOARD STATE
+'
 '------------------------------------------------------------------------------
+'
+
+
+Private Sub UF_DisplayPeriod_Initialize( _
+    Optional ByVal InitialDate As Date = 0)
+
+'
+'------------------------------------------------------------------------------
+'                           INITIALIZE DISPLAY PERIOD
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Initializes the DatePicker displayed month and year
+'
+' WHY THIS EXISTS
+'   Header labels, keyboard navigation, picker-panel state, and the day grid
+'   depend on mDisplayMonth and mDisplayYear being initialized before runtime UI
+'   controls are built or refreshed
+'
+' INPUTS
+'   InitialDate
+'     Initial date used to set the displayed month and year
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Uses the current system date when InitialDate is zero, normalizes the
+'   resolved date to a date-only value, validates the resulting display year and
+'   renderable calendar boundary, then stores mDisplayYear and mDisplayMonth
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the resolved display period is outside
+'   the supported DatePicker range or cannot render a complete calendar grid
+'
+' DEPENDENCIES
+'   VBA.Date
+'   VBA.DateValue
+'   DP_MIN_YEAR
+'   DP_MAX_YEAR
+'
+' NOTES
+'   A zero date is treated as no explicit initial date
+'
+'   January 100 and December 9999 are rejected because the fixed calendar grid
+'   cannot render the required adjacent-month dates outside the VBA Date
+'   supported range
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "UF_DatePicker.UF_DisplayPeriod_Initialize"
+    
+    Const VBA_DATE_MIN_YEAR     As Long = 100           'Minimum year supported by VBA Date
+    Const VBA_DATE_MAX_YEAR     As Long = 9999          'Maximum year supported by VBA Date
+
+    Dim EffectiveDate           As Date                 'Resolved initial display date
+    Dim EffectiveYear           As Long                 'Resolved display year
+    Dim EffectiveMonth          As Long                 'Resolved display month
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RESOLVE INITIAL DATE
+'------------------------------------------------------------------------------
+    'Use the current system date when no initial date is supplied
+        If InitialDate = 0 Then
+            EffectiveDate = VBA.Date
+        Else
+            EffectiveDate = VBA.DateValue(InitialDate)
+        End If
+    'Resolve the effective display year
+        EffectiveYear = VBA.Year(EffectiveDate)
+    'Resolve the effective display month
+        EffectiveMonth = VBA.Month(EffectiveDate)
+
+'------------------------------------------------------------------------------
+' VALIDATE DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Reject years outside the supported display range
+        If EffectiveYear < DP_MIN_YEAR Or EffectiveYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "InitialDate year must be between " & VBA.CStr(DP_MIN_YEAR) & _
+                " and " & VBA.CStr(DP_MAX_YEAR)
+        End If
+    'Reject the lower VBA Date rendering boundary
+        If EffectiveYear = VBA_DATE_MIN_YEAR And EffectiveMonth = 1 Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+    'Reject the upper VBA Date rendering boundary
+        If EffectiveYear = VBA_DATE_MAX_YEAR And EffectiveMonth = 12 Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+
+'------------------------------------------------------------------------------
+' STORE DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Store the displayed year
+        mDisplayYear = EffectiveYear
+    'Store the displayed month
+        mDisplayMonth = EffectiveMonth
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Display period initialization failed: " & Err.Description
+
+End Sub
+
+'------------------------------------------------------------------------------
+' KEYBOARD NAVIGATION STATE
+'------------------------------------------------------------------------------
+
+Private Sub UF_KeyboardDate_Initialize(ByVal InitialDate As Date)
+
+'
+'------------------------------------------------------------------------------
+'                           INITIALIZE KEYBOARD DATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Initializes the DatePicker keyboard-navigation date
+'
+' WHY THIS EXISTS
+'   Keyboard navigation needs one internal date representing the currently
+'   highlighted day before the user confirms the selection
+'
+' INPUTS
+'   InitialDate
+'     Initial date resolved when the form opens
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Uses the current selected date when available, otherwise uses InitialDate.
+'   If InitialDate is zero, falls back to the current system date
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the keyboard date cannot be initialized
+'
+' DEPENDENCIES
+'   gDP_HasSelectedDate
+'   gDP_SelectedDate
+'
+' NOTES
+'   This routine does not write to Excel
+'
+'   The keyboard date is stored as a date-only value
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_KeyboardDate_Initialize"
+
+    Dim EffectiveDate       As Date 'Resolved keyboard navigation date
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RESOLVE KEYBOARD DATE
+'------------------------------------------------------------------------------
+    'Use the selected date when one exists
+        If gDP_HasSelectedDate Then
+            'Resolve the selected date as the keyboard navigation date
+                EffectiveDate = VBA.DateValue(gDP_SelectedDate)
+        Else
+            'Use the current system date when no explicit initial date is supplied
+                If InitialDate = 0 Then
+                    EffectiveDate = VBA.Date
+                Else
+                    EffectiveDate = VBA.DateValue(InitialDate)
+                End If
+        End If
+
+'------------------------------------------------------------------------------
+' STORE KEYBOARD STATE
+'------------------------------------------------------------------------------
+    'Store the keyboard navigation date
+        mKeyboardDate = EffectiveDate
+    'Mark keyboard navigation as initialized
+        mHasKeyboardDate = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Keyboard date initialization failed: " & Err.Description
+
+End Sub
+
+Private Sub UF_KeyboardDate_MoveDays(ByVal DayOffset As Long)
+
+'
+'------------------------------------------------------------------------------
+'                           MOVE KEYBOARD DATE BY DAYS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Moves the keyboard-selected DatePicker date by a number of days
+'
+' WHY THIS EXISTS
+'   Arrow-key navigation moves within the calendar grid by day or by week
+'
+' INPUTS
+'   DayOffset
+'     Number of days to move
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures the keyboard date is initialized, applies the requested day offset,
+'   and delegates display synchronization to UF_KeyboardDate_Set
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the movement cannot be applied
+'
+' DEPENDENCIES
+'   UF_DisplayPeriod_Initialize
+'   UF_KeyboardDate_Set
+'
+' NOTES
+'   This routine does not write to Excel
+'
+'   A zero DayOffset is treated as a safe no-op
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_KeyboardDate_MoveDays"
+
+    Dim EffectiveBaseDate   As Date     'Resolved starting keyboard date
+    Dim NewKeyboardDate     As Date     'Resolved moved keyboard date
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' EXIT IF NO MOVEMENT IS REQUESTED
+'------------------------------------------------------------------------------
+    'Exit when no date movement is requested
+        If DayOffset = 0 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' ENSURE DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Initialize the display period when it is not yet usable
+        If mDisplayYear = 0 Or mDisplayMonth < 1 Or mDisplayMonth > 12 Then
+            UF_DisplayPeriod_Initialize VBA.Date
+        End If
+
+'------------------------------------------------------------------------------
+' ENSURE KEYBOARD DATE
+'------------------------------------------------------------------------------
+    'Initialize keyboard date to the first displayed day when missing
+        If Not mHasKeyboardDate Then
+            'Resolve the first day of the displayed month
+                EffectiveBaseDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
+            'Store the keyboard navigation date
+                mKeyboardDate = EffectiveBaseDate
+            'Mark keyboard navigation as initialized
+                mHasKeyboardDate = True
+        Else
+            'Use the current keyboard date as the movement base
+                EffectiveBaseDate = VBA.DateValue(mKeyboardDate)
+        End If
+
+'------------------------------------------------------------------------------
+' MOVE DATE
+'------------------------------------------------------------------------------
+    'Resolve the moved keyboard date
+        NewKeyboardDate = VBA.DateAdd("d", DayOffset, EffectiveBaseDate)
+    'Apply the moved keyboard date and refresh visible state
+        UF_KeyboardDate_Set NewKeyboardDate
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Keyboard day movement failed: " & Err.Description
+
+End Sub
+
+Private Sub UF_KeyboardDate_MoveMonths(ByVal MonthOffset As Long)
+
+'
+'------------------------------------------------------------------------------
+'                           MOVE KEYBOARD DATE BY MONTHS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Moves the keyboard-selected DatePicker date by a number of months
+'
+' WHY THIS EXISTS
+'   PageUp / PageDown keyboard navigation should move across months and years
+'
+' INPUTS
+'   MonthOffset
+'     Number of months to move
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures the keyboard date is initialized, applies the requested month offset,
+'   and delegates display synchronization to UF_KeyboardDate_Set
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the movement cannot be applied
+'
+' DEPENDENCIES
+'   UF_DisplayPeriod_Initialize
+'   UF_KeyboardDate_Set
+'
+' NOTES
+'   This routine does not write to Excel
+'
+'   VBA DateAdd handles month-end adjustment automatically
+'
+'   A zero MonthOffset is treated as a safe no-op
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_KeyboardDate_MoveMonths"
+
+    Dim EffectiveBaseDate   As Date     'Resolved starting keyboard date
+    Dim NewKeyboardDate     As Date     'Resolved moved keyboard date
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' EXIT IF NO MOVEMENT IS REQUESTED
+'------------------------------------------------------------------------------
+    'Exit when no date movement is requested
+        If MonthOffset = 0 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' ENSURE DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Initialize the display period when it is not yet usable
+        If mDisplayYear = 0 Or mDisplayMonth < 1 Or mDisplayMonth > 12 Then
+            UF_DisplayPeriod_Initialize VBA.Date
+        End If
+
+'------------------------------------------------------------------------------
+' ENSURE KEYBOARD DATE
+'------------------------------------------------------------------------------
+    'Initialize keyboard date to the first displayed day when missing
+        If Not mHasKeyboardDate Then
+            'Resolve the first day of the displayed month
+                EffectiveBaseDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
+            'Store the keyboard navigation date
+                mKeyboardDate = EffectiveBaseDate
+            'Mark keyboard navigation as initialized
+                mHasKeyboardDate = True
+        Else
+            'Use the current keyboard date as the movement base
+                EffectiveBaseDate = VBA.DateValue(mKeyboardDate)
+        End If
+
+'------------------------------------------------------------------------------
+' MOVE DATE
+'------------------------------------------------------------------------------
+    'Resolve the moved keyboard date
+        NewKeyboardDate = VBA.DateAdd("m", MonthOffset, EffectiveBaseDate)
+    'Apply the moved keyboard date and refresh visible state
+        UF_KeyboardDate_Set NewKeyboardDate
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Keyboard month movement failed: " & Err.Description
+
+End Sub
+
+Private Sub UF_KeyboardDate_Set(ByVal NewKeyboardDate As Date)
+
+'
+'------------------------------------------------------------------------------
+'                           SET KEYBOARD DATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets the keyboard-selected DatePicker date and refreshes the minimum
+'   necessary visual state
+'
+' WHY THIS EXISTS
+'   Keyboard navigation can fire repeatedly. Rebuilding all day cells on every
+'   arrow-key movement is unnecessary when the new keyboard date remains inside
+'   the currently displayed month
+'
+' INPUTS
+'   NewKeyboardDate
+'     New date selected by keyboard navigation
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Captures the previous keyboard date, stores the new keyboard date, hides the
+'   picker panel when present, applies a full grid refresh when the new date
+'   moves to another displayed month, and otherwise refreshes only the previous
+'   and new visible day cells
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if NewKeyboardDate cannot be displayed or
+'   the visual state cannot be refreshed
+'
+' DEPENDENCIES
+'   UF_PickerPanel_HoverReset
+'   UF_DayCell_RefreshVisibleDate
+'   UF_DayGrid_Populate
+'
+' NOTES
+'   This routine preserves the full-refresh behavior when navigation crosses a
+'   month boundary
+'
+'   January 100 and December 9999 are rejected because the fixed calendar grid
+'   cannot render the required adjacent-month dates outside the VBA Date
+'   supported range
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "UF_DatePicker.UF_KeyboardDate_Set"
+    
+    Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
+    Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
+
+    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
+    Dim PreviousDate            As Date                     'Previous keyboard-selected date
+    Dim HasPreviousDate         As Boolean                  'True when previous keyboard date exists
+    Dim NewDateOnly             As Date                     'New keyboard date without time
+    Dim NewDisplayYear          As Long                     'New keyboard-date year
+    Dim NewDisplayMonth         As Long                     'New keyboard-date month
+    Dim NeedsFullRefresh        As Boolean                  'True when the displayed month must change
+    Dim HandlerStep             As String                   'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' CAPTURE PREVIOUS STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture previous keyboard state"
+    'Capture the previous keyboard date when available
+        If mHasKeyboardDate Then
+            PreviousDate = VBA.DateValue(mKeyboardDate)
+            HasPreviousDate = True
+        End If
+
+'------------------------------------------------------------------------------
+' NORMALIZE NEW KEYBOARD DATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize new keyboard date"
+
+    'Normalize the new keyboard date
+        NewDateOnly = VBA.DateValue(NewKeyboardDate)
+    'Resolve the new display year
+        NewDisplayYear = VBA.Year(NewDateOnly)
+    'Resolve the new display month
+        NewDisplayMonth = VBA.Month(NewDateOnly)
+
+'------------------------------------------------------------------------------
+' VALIDATE NEW KEYBOARD DATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate new keyboard date"
+
+    'Reject years outside the supported DatePicker range
+        If NewDisplayYear < DP_MIN_YEAR Or NewDisplayYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "NewKeyboardDate year must be between " & VBA.CStr(DP_MIN_YEAR) & _
+                " and " & VBA.CStr(DP_MAX_YEAR)
+        End If
+    'Reject the lower VBA Date rendering boundary
+        If NewDisplayYear = VBA_DATE_MIN_YEAR And NewDisplayMonth = 1 Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+    'Reject the upper VBA Date rendering boundary
+        If NewDisplayYear = VBA_DATE_MAX_YEAR And NewDisplayMonth = 12 Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE REFRESH STRATEGY
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve refresh strategy"
+
+    'Force a full refresh when the current display state is not usable
+        If mDisplayYear = 0 Or mDisplayMonth < 1 Or mDisplayMonth > 12 Then
+            NeedsFullRefresh = True
+        Else
+            'Resolve whether the keyboard date moved outside the displayed month
+                NeedsFullRefresh = _
+                    (NewDisplayYear <> mDisplayYear Or _
+                     NewDisplayMonth <> mDisplayMonth)
+        End If
+
+'------------------------------------------------------------------------------
+' STORE NEW KEYBOARD STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Store keyboard state"
+
+    'Store the new keyboard date
+        mKeyboardDate = NewDateOnly
+    'Mark keyboard navigation as initialized
+        mHasKeyboardDate = True
+
+'------------------------------------------------------------------------------
+' HIDE PICKER PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Hide picker panel"
+
+    'Clear active picker hover before hiding the picker panel
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
+    'Suppress lookup errors when the picker panel is not available
+        On Error Resume Next
+    'Retrieve the picker panel control when available
+        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Hide the picker panel when it exists and is a frame
+        If Not ExistingControl Is Nothing Then
+            If VBA.TypeName(ExistingControl) = "Frame" Then
+                Set Fra_PickerPanel = ExistingControl
+                Fra_PickerPanel.Visible = False
+            End If
+        End If
+    'Clear picker-panel mode after hiding the panel
+        mPickerPanelMode = 0
+    'Clear picker-panel hover state after hiding the panel
+        mHoveredPickerItemIndex = 0
+
+'------------------------------------------------------------------------------
+' APPLY FULL REFRESH WHEN MONTH CHANGES
+'------------------------------------------------------------------------------
+    'Apply a full grid refresh when the new keyboard date changes displayed month
+        If NeedsFullRefresh Then
+            'Track the current handler step
+                HandlerStep = "Apply full grid refresh"
+            'Store the displayed year
+                mDisplayYear = NewDisplayYear
+            'Store the displayed month
+                mDisplayMonth = NewDisplayMonth
+            'Refresh the full calendar grid
+                UF_DayGrid_Populate mDisplayYear, mDisplayMonth
+            'Exit after full refresh
+                Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY MINIMAL REFRESH WHEN MONTH IS UNCHANGED
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply minimal day-cell refresh"
+
+    'Refresh the previously highlighted visible day when it changed
+        If HasPreviousDate Then
+            If PreviousDate <> NewDateOnly Then
+                UF_DayCell_RefreshVisibleDate PreviousDate
+            End If
+        End If
+    'Refresh the newly highlighted visible day
+        UF_DayCell_RefreshVisibleDate NewDateOnly
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Keyboard date update failed: " & Err.Description
+
+End Sub
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                            CENTRAL ACTION ROUTING
+'
+'------------------------------------------------------------------------------
+'
+
+Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
+
+'
+'------------------------------------------------------------------------------
+'                           HANDLE LABEL ACTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Handles click actions raised by DatePicker header labels, day labels, footer
+'   labels, settings labels, and picker-panel item labels
+'
+' WHY THIS EXISTS
+'   Runtime-created labels route their Click events through
+'   cDatePickerLabelHook. A central action router keeps dynamic UI controls
+'   loosely coupled from the DatePicker business logic
+'
+' INPUTS
+'   ActionName
+'     Action name routed by cDatePickerLabelHook
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Routes header navigation, picker-panel display, footer shortcuts, settings
+'   panel actions, day selection, month selection, and year selection
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if ActionName is blank, unsupported, or
+'   contains an invalid day-label / picker-item index
+'
+' DEPENDENCIES
+'   UF_Header_MoveMonth
+'   UF_Header_MoveYear
+'   UF_PickerPanel_ShowMonths
+'   UF_PickerPanel_ShowYears
+'   UF_DayGrid_Populate
+'   UF_PickerPanel_EnsureCache
+'   M_DatePolicy_CanSelectDate
+'   M_Picker_SelectDate
+'   DP_Today
+'   DP_Now
+'   DP_Close
+'   UF_Settings_Show
+'   UF_SettingsPanel_Hide
+'   UF_SettingsPanel_Save
+'   UF_SettingsPanel_SelectPage
+'
+' NOTES
+'   This routine is the central action router for runtime-created DatePicker
+'   labels
+'
+'   The current procedure name is kept for compatibility with existing
+'   cDatePickerLabelHook calls. A future semantic rename to
+'   UF_LabelAction_Handle would be clearer
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "UF_DatePicker.UF_PickerPanel_HandleAction"
+    
+    Const PICKER_ITEM_PREFIX    As String = "PICKER_ITEM_"          'Picker item action prefix
+    Const DAY_PICKED_PREFIX     As String = "DAY_PICKED_"           'Day label click action prefix
+    Const PICKER_MODE_NONE      As Long = 0                         'No picker-panel mode
+    Const PICKER_MODE_MONTHS    As Long = 1                         'Month picker-panel mode
+    Const PICKER_MODE_YEARS     As Long = 2                         'Year picker-panel mode
+
+    Dim RoutedAction            As String                           'Normalized routed action name
+    Dim ItemIndex               As Long                             'Clicked item index
+    Dim SelectedValue           As Long                             'Selected month or year value
+    Dim RawItemIndex            As String                           'Raw item index text
+    Dim RawTagValue             As String                           'Raw label Tag value
+    Dim ExistingControl         As MSForms.Control                  'Existing control using the picker-panel name
+    Dim Fra_PickerPanel         As MSForms.Frame                    'Reusable picker panel
+    Dim SelectedDate            As Date                             'Selected date from clicked day label
+    Dim Lbl_SelectedItem        As MSForms.Label                    'Selected picker item text label
+    Dim HandlerStep             As String                           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Track the current handler step
+        HandlerStep = "Normalize action"
+    'Normalize the routed action name
+        RoutedAction = VBA.UCase$(VBA.Trim$(ActionName))
+    'Reject an empty action name
+        If VBA.Len(RoutedAction) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "ActionName cannot be empty"
+        End If
+
+'------------------------------------------------------------------------------
+' ROUTE DIRECT ACTIONS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Route direct action"
+    'Route the requested direct action
+        Select Case RoutedAction
+
+            Case "PREV_MONTH"
+                'Track the current handler step
+                    HandlerStep = "Move previous month"
+                'Move to the previous displayed month
+                    UF_Header_MoveMonth -1
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "NEXT_MONTH"
+                'Track the current handler step
+                    HandlerStep = "Move next month"
+                'Move to the next displayed month
+                    UF_Header_MoveMonth 1
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "PREV_YEAR"
+                'Track the current handler step
+                    HandlerStep = "Move previous year"
+                'Move or scroll to the previous year range
+                    UF_Header_MoveYear -1
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "NEXT_YEAR"
+                'Track the current handler step
+                    HandlerStep = "Move next year"
+                'Move or scroll to the next year range
+                    UF_Header_MoveYear 1
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SHOW_MONTH_PANEL"
+                'Track the current handler step
+                    HandlerStep = "Show month picker panel"
+                'Show the month picker panel
+                    UF_PickerPanel_ShowMonths
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SHOW_YEAR_PANEL"
+                'Track the current handler step
+                    HandlerStep = "Show year picker panel"
+                'Show the year picker panel
+                    UF_PickerPanel_ShowYears
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "WRITE_NOW"
+                'Track the current handler step
+                    HandlerStep = "Write now"
+                'Write today with the current system time
+                    DP_Now
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "WRITE_TODAY"
+                'Track the current handler step
+                    HandlerStep = "Write today"
+                'Write today without time
+                    DP_Today
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SHOW_SETTINGS"
+                'Track the current handler step
+                    HandlerStep = "Show settings panel"
+                'Show the settings panel
+                    UF_Settings_Show
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "HIDE_SETTINGS"
+                'Track the current handler step
+                    HandlerStep = "Hide settings panel"
+                'Hide the settings panel
+                    UF_SettingsPanel_Hide
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SAVE_SETTINGS"
+                'Track the current handler step
+                    HandlerStep = "Save settings"
+                'Save settings from the settings panel
+                    UF_SettingsPanel_Save
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SHOW_SETTINGS_DISPLAY"
+                'Track the current handler step
+                    HandlerStep = "Show Display Settings page"
+                'Show the Display Settings page
+                    UF_SettingsPanel_SelectPage 0
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SHOW_SETTINGS_BEHAVIOR"
+                'Track the current handler step
+                    HandlerStep = "Show Behavior Settings page"
+                'Show the Behavior Settings page
+                    UF_SettingsPanel_SelectPage 1
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "SHOW_SETTINGS_INTEGRATION"
+                'Track the current handler step
+                    HandlerStep = "Show Integration Settings page"
+                'Show the Integration Settings page
+                    UF_SettingsPanel_SelectPage 2
+                'Exit after routing the action
+                    Exit Sub
+
+            Case "CLOSE_PICKER", "CLOSE"
+                'Track the current handler step
+                    HandlerStep = "Close picker"
+                'Close the DatePicker
+                    DP_Close
+                'Exit after routing the action
+                    Exit Sub
+
+        End Select
+
+'------------------------------------------------------------------------------
+' HANDLE DAY LABEL CLICK
+'------------------------------------------------------------------------------
+    'Handle day-label click actions
+        If VBA.Left$(RoutedAction, VBA.Len(DAY_PICKED_PREFIX)) = DAY_PICKED_PREFIX Then
+            'Track the current handler step
+                HandlerStep = "Extract day index"
+            'Extract the raw day-cell index
+                RawItemIndex = VBA.Mid$(RoutedAction, VBA.Len(DAY_PICKED_PREFIX) + 1)
+            'Reject empty or non-digit day-cell indexes
+                If VBA.Len(RawItemIndex) = 0 Or RawItemIndex Like "*[!0-9]*" Then
+                    Err.Raise vbObjectError + 514, PROC_NAME, "Day cell index must be numeric"
+                End If
+            'Track the current handler step
+                HandlerStep = "Parse day index"
+            'Parse the clicked day-cell index
+                ItemIndex = VBA.CLng(RawItemIndex)
+            'Reject invalid day-cell indexes
+                If ItemIndex < 1 Or ItemIndex > DP_DAY_LABEL_COUNT Then
+                    Err.Raise vbObjectError + 515, PROC_NAME, _
+                        "Day cell index must be between 1 and " & VBA.CStr(DP_DAY_LABEL_COUNT)
+                End If
+            'Track the current handler step
+                HandlerStep = "Validate cached day-cell date"
+            'Reject day cells with no cached date
+                If Not mDayCellHasDate(ItemIndex) Then
+                    Err.Raise vbObjectError + 516, PROC_NAME, _
+                        "Clicked day cell does not have a cached date"
+                End If
+            'Resolve the selected date from the cached day-cell date
+                SelectedDate = VBA.DateValue(mDayCellDates(ItemIndex))
+            'Track the current handler step
+                HandlerStep = "Validate selectable date"
+            'Accept the selected date only if it is selectable
+                If M_DatePolicy_CanSelectDate(SelectedDate, mDisplayYear, mDisplayMonth) Then
+                    'Track the current handler step
+                        HandlerStep = "Select date"
+                    'Delegate write-back to the companion module
+                        M_Picker_SelectDate SelectedDate
+                End If
+            'Exit after handling the day click
+                Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' HANDLE PICKER ITEM CLICK
+'------------------------------------------------------------------------------
+    'Reject unsupported non-picker actions
+        If VBA.Left$(RoutedAction, VBA.Len(PICKER_ITEM_PREFIX)) <> PICKER_ITEM_PREFIX Then
+            Err.Raise vbObjectError + 517, PROC_NAME, _
+                "Unsupported DatePicker action: " & RoutedAction
+        End If
+    'Track the current handler step
+        HandlerStep = "Extract picker item index"
+    'Extract the raw picker-item index
+        RawItemIndex = VBA.Mid$(RoutedAction, VBA.Len(PICKER_ITEM_PREFIX) + 1)
+    'Reject empty or non-digit picker-item indexes
+        If VBA.Len(RawItemIndex) = 0 Or RawItemIndex Like "*[!0-9]*" Then
+            Err.Raise vbObjectError + 518, PROC_NAME, "Picker item index must be numeric"
+        End If
+    'Track the current handler step
+        HandlerStep = "Parse picker item index"
+    'Parse the picker-item index
+        ItemIndex = VBA.CLng(RawItemIndex)
+    'Reject invalid picker item indexes
+        If ItemIndex < 1 Or ItemIndex > DP_PICKER_ITEM_COUNT Then
+            Err.Raise vbObjectError + 519, PROC_NAME, _
+                "Picker item index must be between 1 and " & VBA.CStr(DP_PICKER_ITEM_COUNT)
+        End If
+
+'------------------------------------------------------------------------------
+' RETRIEVE PICKER PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve picker panel"
+    
+    'Suppress lookup errors while resolving the picker panel
+        On Error Resume Next
+    'Retrieve the existing picker panel control
+        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject missing picker panel
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 520, PROC_NAME, _
+                "Unable to resolve expected picker panel " & DP_PICKER_PANEL_NAME
+        End If
+    'Reject a name collision with a non-frame control
+        If VBA.TypeName(ExistingControl) <> "Frame" Then
+            Err.Raise vbObjectError + 521, PROC_NAME, _
+                "Control '" & DP_PICKER_PANEL_NAME & "' exists but is not an MSForms.Frame"
+        End If
+    'Use the resolved picker panel frame
+        Set Fra_PickerPanel = ExistingControl
+
+'------------------------------------------------------------------------------
+' ROUTE PICKER MODE
+'------------------------------------------------------------------------------
+    'Route the picker item according to the active picker mode
+        Select Case mPickerPanelMode
+
+            Case PICKER_MODE_MONTHS
+
+'------------------------------------------------------------------------------
+' APPLY MONTH SELECTION
+'------------------------------------------------------------------------------
+                'Track the current handler step
+                    HandlerStep = "Apply month selection"
+                'Store the selected month
+                    SelectedValue = ItemIndex
+                'Reject unsupported selected months
+                    If SelectedValue < 1 Or SelectedValue > 12 Then
+                        Err.Raise vbObjectError + 522, PROC_NAME, _
+                            "Selected month must be between 1 and 12"
+                    End If
+                'Reject invalid display year state
+                    If mDisplayYear < DP_MIN_YEAR Or mDisplayYear > DP_MAX_YEAR Then
+                        Err.Raise vbObjectError + 523, PROC_NAME, _
+                            "mDisplayYear is outside the supported DatePicker range"
+                    End If
+                'Store the selected month
+                    mDisplayMonth = SelectedValue
+                'Initialize keyboard date to the first day of the selected display month
+                    mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
+                'Mark keyboard navigation date as available
+                    mHasKeyboardDate = True
+                'Hide the picker panel
+                    Fra_PickerPanel.Visible = False
+                'Clear picker-panel mode
+                    mPickerPanelMode = PICKER_MODE_NONE
+                'Clear picker-panel hover state
+                    mHoveredPickerItemIndex = 0
+                'Refresh the calendar grid
+                    UF_DayGrid_Populate mDisplayYear, mDisplayMonth
+                'Exit after applying month selection
+                    Exit Sub
+
+            Case PICKER_MODE_YEARS
+
+'------------------------------------------------------------------------------
+' APPLY YEAR SELECTION
+'------------------------------------------------------------------------------
+                'Track the current handler step
+                    HandlerStep = "Ensure picker cache"
+                'Ensure cached picker-panel references are available
+                    UF_PickerPanel_EnsureCache
+                'Retrieve the selected picker text label
+                    Set Lbl_SelectedItem = mPickerTextLabels(ItemIndex)
+                'Reject a missing selected picker item label
+                    If Lbl_SelectedItem Is Nothing Then
+                        Err.Raise vbObjectError + 524, PROC_NAME, _
+                            "Cached picker text label is missing for item " & VBA.CStr(ItemIndex)
+                    End If
+                'Track the current handler step
+                    HandlerStep = "Read selected year tag"
+                'Read the selected year value from the cached picker item Tag
+                    RawTagValue = VBA.Trim$(VBA.CStr(Lbl_SelectedItem.Tag))
+                'Reject an empty year picker Tag
+                    If VBA.Len(RawTagValue) = 0 Then
+                        Err.Raise vbObjectError + 525, PROC_NAME, _
+                            "Selected year picker item does not contain a value"
+                    End If
+                'Reject non-digit year picker Tag values
+                    If RawTagValue Like "*[!0-9]*" Then
+                        Err.Raise vbObjectError + 526, PROC_NAME, _
+                            "Selected year picker item Tag must contain a numeric year"
+                    End If
+                'Track the current handler step
+                    HandlerStep = "Parse selected year"
+                'Parse the selected year
+                    SelectedValue = VBA.CLng(RawTagValue)
+                'Reject unsupported selected years
+                    If SelectedValue < DP_MIN_YEAR Or SelectedValue > DP_MAX_YEAR Then
+                        Err.Raise vbObjectError + 527, PROC_NAME, _
+                            "Selected year must be between " & VBA.CStr(DP_MIN_YEAR) & " and " & VBA.CStr(DP_MAX_YEAR)
+                    End If
+                'Reject invalid display month state
+                    If mDisplayMonth < 1 Or mDisplayMonth > 12 Then
+                        Err.Raise vbObjectError + 528, PROC_NAME, _
+                            "mDisplayMonth must be between 1 and 12 before applying year selection"
+                    End If
+                'Track the current handler step
+                    HandlerStep = "Apply year selection"
+                'Store the selected year
+                    mDisplayYear = SelectedValue
+                'Initialize keyboard date to the first day of the selected display period
+                    mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
+                'Mark keyboard navigation date as available
+                    mHasKeyboardDate = True
+                'Hide the picker panel
+                    Fra_PickerPanel.Visible = False
+                'Clear picker-panel mode
+                    mPickerPanelMode = PICKER_MODE_NONE
+                'Clear picker-panel hover state
+                    mHoveredPickerItemIndex = 0
+                'Refresh the calendar grid
+                    UF_DayGrid_Populate mDisplayYear, mDisplayMonth
+                'Exit after applying year selection
+                    Exit Sub
+
+            Case Else
+                'Reject unsupported picker panel modes
+                    Err.Raise vbObjectError + 529, PROC_NAME, _
+                        "mPickerPanelMode must be 1 for months or 2 for years"
+
+        End Select
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Action=" & RoutedAction & " | Step=" & HandlerStep, _
+            "DatePicker action routing failed: " & Err.Description
+
+End Sub
+
+'
+'------------------------------------------------------------------------------
+'
+'                                   HEADER
+'
+'------------------------------------------------------------------------------
+'
 
 Private Sub UF_Header_Build()
 
@@ -1599,6 +2752,99 @@ Private Sub UF_Header_Build()
 ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, "Header creation failed. " & Err.Description
+
+End Sub
+
+Private Sub UF_Header_BuildBanner()
+
+'
+'------------------------------------------------------------------------------
+'                           CREATE HEADER BANNER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Creates and formats the DatePicker header background banner
+'
+' WHY THIS EXISTS
+'   The header banner visually groups the month and year display controls into a
+'   distinct top section and provides the visual background for the header
+'   navigation labels
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Creates or reuses Lbl_HeaderBanner, formats it as the top header band, and
+'   sends it behind the clickable header labels
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the banner cannot be created or
+'   formatted
+'
+' DEPENDENCIES
+'   UF_Ensure_Label
+'
+' NOTES
+'   The banner is sized to the DatePicker designed canvas width. Native-title-bar
+'   compensation is handled by UF_Form_ApplyEffectiveSize and should not be
+'   duplicated here
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_Header_BuildBanner"
+
+    Dim Lbl_HeaderBanner    As MSForms.Label        'Header banner control
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' CREATE / FORMAT BANNER
+'------------------------------------------------------------------------------
+    'Create or retrieve the header banner label
+        Set Lbl_HeaderBanner = UF_Ensure_Label("Lbl_HeaderBanner")
+
+    'Apply layout and visual properties
+        With Lbl_HeaderBanner
+            .Caption = vbNullString
+            .Left = 0
+            .Top = DP_HEADER_TOP
+            .Width = DP_FORM_WIDTH
+            .Height = DP_HEADER_HEIGHT
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_HEADER_BACK_COLOR
+            .ForeColor = DP_HEADER_FORE_COLOR
+            .BorderStyle = fmBorderStyleNone
+            .SpecialEffect = fmSpecialEffectFlat
+            .Enabled = True
+            .Visible = True
+        End With
+
+    'Send the banner behind all clickable header labels
+        Lbl_HeaderBanner.ZOrder 1
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Header banner creation failed: " & Err.Description
 
 End Sub
 
@@ -2103,41 +3349,59 @@ ErrorHandler:
 
 End Sub
 
-Private Sub UF_Header_BuildBanner()
+'------------------------------------------------------------------------------
+' NAVIGATION AND DISPLAY STATE
+'------------------------------------------------------------------------------
+
+Private Sub UF_Header_MoveMonth(ByVal MonthOffset As Long)
 
 '
 '------------------------------------------------------------------------------
-'                           CREATE HEADER BANNER
+'                           MOVE HEADER MONTH
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates and formats the DatePicker header background banner
+'   Moves the displayed DatePicker month backward or forward
 '
 ' WHY THIS EXISTS
-'   The header banner visually groups the month and year display controls into a
-'   distinct top section and provides the visual background for the header
-'   navigation labels
+'   The header month arrows should allow direct navigation across months while
+'   keeping the header captions, keyboard date, overlay panels, and day grid
+'   synchronized
 '
 ' INPUTS
-'   None
+'   MonthOffset
+'     Number of months to move
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Creates or reuses Lbl_HeaderBanner, formats it as the top header band, and
-'   sends it behind the clickable header labels
+'   Validates the current display period, resolves the new display period,
+'   rejects non-renderable calendar boundaries, stores the new display state,
+'   resets transient overlay / hover state, hides overlay panels, initializes
+'   keyboard navigation to the first day of the new month, and refreshes the day
+'   grid
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the banner cannot be created or
-'   formatted
+'   Raises a descriptive runtime error if MonthOffset is unsupported, if the
+'   current display period is invalid, if the resulting display period cannot be
+'   rendered, or if the day grid cannot be refreshed
 '
 ' DEPENDENCIES
-'   UF_Ensure_Label
+'   UF_PickerPanel_HoverReset
+'   UF_DayCell_HoverReset
+'   UF_Header_HoverReset
+'   UF_Footer_HoverReset
+'   UF_SettingsPanel_HoverReset
+'   UF_SettingsPanel_Hide
+'   UF_DayGrid_Populate
 '
 ' NOTES
-'   The banner is sized to the DatePicker designed canvas width. Native-title-bar
-'   compensation is handled by UF_Form_ApplyEffectiveSize and should not be
-'   duplicated here
+'   DateAdd is used so month transitions across year boundaries are handled by
+'   VBA date arithmetic
+'
+'   January 100 and December 9999 are rejected because the fixed calendar grid
+'   cannot render the required adjacent-month dates outside the VBA Date
+'   supported range
 '
 ' UPDATED
 '   2026-05-02
@@ -2146,40 +3410,179 @@ Private Sub UF_Header_BuildBanner()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_Header_BuildBanner"
+    Const PROC_NAME             As String = "UF_DatePicker.UF_Header_MoveMonth"
+    
+    Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
+    Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
 
-    Dim Lbl_HeaderBanner    As MSForms.Label        'Header banner control
+    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
+    Dim NewDisplayDate          As Date                     'New first day of displayed month
+    Dim NewDisplayYear          As Long                     'New displayed year
+    Dim NewDisplayMonth         As Long                     'New displayed month
+    Dim HandlerStep             As String                   'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
-' CREATE / FORMAT BANNER
+' VALIDATE INPUTS
 '------------------------------------------------------------------------------
-    'Create or retrieve the header banner label
-        Set Lbl_HeaderBanner = UF_Ensure_Label("Lbl_HeaderBanner")
+    'Track the current handler step
+        HandlerStep = "Validate MonthOffset"
 
-    'Apply layout and visual properties
-        With Lbl_HeaderBanner
-            .Caption = vbNullString
-            .Left = 0
-            .Top = DP_HEADER_TOP
-            .Width = DP_FORM_WIDTH
-            .Height = DP_HEADER_HEIGHT
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_HEADER_BACK_COLOR
-            .ForeColor = DP_HEADER_FORE_COLOR
-            .BorderStyle = fmBorderStyleNone
-            .SpecialEffect = fmSpecialEffectFlat
-            .Enabled = True
-            .Visible = True
-        End With
+    'Reject unsupported month movement
+        If MonthOffset <> -1 And MonthOffset <> 1 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "MonthOffset must be -1 or 1"
+        End If
 
-    'Send the banner behind all clickable header labels
-        Lbl_HeaderBanner.ZOrder 1
+'------------------------------------------------------------------------------
+' VALIDATE CURRENT DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate current display period"
+
+    'Reject invalid current display year
+        If mDisplayYear < DP_MIN_YEAR Or mDisplayYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "mDisplayYear must be between " & VBA.CStr(DP_MIN_YEAR) & _
+                " and " & VBA.CStr(DP_MAX_YEAR)
+        End If
+    'Reject invalid current display month
+        If mDisplayMonth < 1 Or mDisplayMonth > 12 Then
+            Err.Raise vbObjectError + 515, PROC_NAME, "mDisplayMonth must be between 1 and 12"
+        End If
+    'Reject movement before the lower supported DatePicker boundary
+        If mDisplayYear = DP_MIN_YEAR And mDisplayMonth = 1 And MonthOffset < 0 Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "Displayed month cannot move before January " & VBA.CStr(DP_MIN_YEAR)
+        End If
+    'Reject movement after the upper supported DatePicker boundary
+        If mDisplayYear = DP_MAX_YEAR And mDisplayMonth = 12 And MonthOffset > 0 Then
+            Err.Raise vbObjectError + 517, PROC_NAME, _
+                "Displayed month cannot move after December " & VBA.CStr(DP_MAX_YEAR)
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE NEW DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve new display period"
+
+    'Resolve the new display date
+        NewDisplayDate = VBA.DateAdd("m", MonthOffset, _
+            VBA.DateSerial(mDisplayYear, mDisplayMonth, 1))
+    'Resolve the new display year
+        NewDisplayYear = VBA.Year(NewDisplayDate)
+    'Resolve the new display month
+        NewDisplayMonth = VBA.Month(NewDisplayDate)
+
+'------------------------------------------------------------------------------
+' VALIDATE NEW DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate new display period"
+
+    'Reject display years outside the supported DatePicker range
+        If NewDisplayYear < DP_MIN_YEAR Or NewDisplayYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 518, PROC_NAME, _
+                "New display year must be between " & VBA.CStr(DP_MIN_YEAR) & _
+                " and " & VBA.CStr(DP_MAX_YEAR)
+        End If
+    'Reject the lower VBA Date rendering boundary
+        If NewDisplayYear = VBA_DATE_MIN_YEAR And NewDisplayMonth = 1 Then
+            Err.Raise vbObjectError + 519, PROC_NAME, _
+                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+    'Reject the upper VBA Date rendering boundary
+        If NewDisplayYear = VBA_DATE_MAX_YEAR And NewDisplayMonth = 12 Then
+            Err.Raise vbObjectError + 520, PROC_NAME, _
+                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+
+'------------------------------------------------------------------------------
+' STORE DISPLAY STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Store display state"
+
+    'Store the new display year
+        mDisplayYear = NewDisplayYear
+    'Store the new display month
+        mDisplayMonth = NewDisplayMonth
+    'Initialize keyboard date to the first day of the new display month
+        mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
+    'Mark keyboard navigation as initialized
+        mHasKeyboardDate = True
+
+'------------------------------------------------------------------------------
+' RESET TRANSIENT HOVER STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Reset transient hover state"
+
+    'Clear picker-panel hover before hiding overlays
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
+    'Clear day-cell hover before repopulating the grid
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
+    'Clear header hover before refreshing captions
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
+    'Clear footer hover before hiding overlays
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
+    'Clear settings-panel hover before hiding overlays
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
+
+'------------------------------------------------------------------------------
+' HIDE PICKER PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Hide picker panel"
+
+    'Suppress lookup errors when the picker panel is not available
+        On Error Resume Next
+    'Retrieve the picker panel control when available
+        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Hide the picker panel when it exists and is a frame
+        If Not ExistingControl Is Nothing Then
+            If VBA.TypeName(ExistingControl) = "Frame" Then
+                Set Fra_PickerPanel = ExistingControl
+                Fra_PickerPanel.Visible = False
+            End If
+        End If
+    'Clear picker-panel mode after month navigation
+        mPickerPanelMode = 0
+    'Clear picker-panel hover state after month navigation
+        mHoveredPickerItemIndex = 0
+
+'------------------------------------------------------------------------------
+' HIDE SETTINGS PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Hide settings panel"
+
+    'Hide the settings panel after month navigation
+        UF_SettingsPanel_Hide
+
+'------------------------------------------------------------------------------
+' REFRESH CALENDAR
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh day grid"
+
+    'Refresh the day grid
+        UF_DayGrid_Populate mDisplayYear, mDisplayMonth
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -2192,15 +3595,606 @@ Private Sub UF_Header_BuildBanner()
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Header banner creation failed: " & Err.Description
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Header month navigation failed: " & Err.Description
 
 End Sub
 
+Private Sub UF_Header_MoveYear(ByVal YearOffset As Long)
 
+'
+'------------------------------------------------------------------------------
+'                           MOVE HEADER YEAR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Handles header year-arrow navigation
+'
+' WHY THIS EXISTS
+'   The year arrows scroll the visible year picker range when the year panel is
+'   visible, otherwise they move the displayed calendar year
+'
+' INPUTS
+'   YearOffset
+'     Direction of movement
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Scrolls the 12-year picker range when the year panel is visible in year mode.
+'   Otherwise validates the current display period, resolves the new display
+'   year, rejects non-renderable calendar boundaries, stores the new display
+'   state, hides overlay panels, initializes keyboard navigation to the first day
+'   of the displayed month, and refreshes the day grid
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if YearOffset is unsupported, if the
+'   current display period is invalid, if the resulting display period cannot be
+'   rendered, or if the panel / grid cannot be refreshed
+'
+' DEPENDENCIES
+'   UF_PickerPanel_HoverReset
+'   UF_DayCell_HoverReset
+'   UF_Header_HoverReset
+'   UF_Footer_HoverReset
+'   UF_SettingsPanel_HoverReset
+'   UF_SettingsPanel_Hide
+'   UF_PickerPanel_PopulateYears
+'   UF_DayGrid_Populate
+'
+' NOTES
+'   The year panel start is clamped to the valid 12-year display range
+'
+'   January 100 and December 9999 are rejected because the fixed calendar grid
+'   cannot render the required adjacent-month dates outside the VBA Date
+'   supported range
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
-' DAY OF WEEK
+' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "UF_DatePicker.UF_Header_MoveYear"
+    
+    Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
+    Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
+    Const PICKER_MODE_NONE      As Long = 0                 'No picker-panel mode
+    Const PICKER_MODE_YEARS     As Long = 2                 'Year picker-panel mode
+
+    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
+    
+    Dim NewDisplayYear          As Long                     'New displayed year
+    Dim NewYearPanelStart       As Long                     'New first year shown in panel
+    Dim HandlerStep             As String                   'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate YearOffset"
+
+    'Reject unsupported year movement
+        If YearOffset <> -1 And YearOffset <> 1 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "YearOffset must be -1 or 1"
+        End If
+
+'------------------------------------------------------------------------------
+' RETRIEVE PICKER PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve picker panel"
+
+    'Suppress lookup errors when the picker panel is not available
+        On Error Resume Next
+    'Retrieve the picker panel control when available
+        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Use the picker panel when it exists and is a frame
+        If Not ExistingControl Is Nothing Then
+            'Reject a name collision with a non-frame control
+                If VBA.TypeName(ExistingControl) <> "Frame" Then
+                    Err.Raise vbObjectError + 514, PROC_NAME, _
+                        "Control '" & DP_PICKER_PANEL_NAME & "' exists but is not an MSForms.Frame"
+                End If
+            'Store the picker panel reference
+                Set Fra_PickerPanel = ExistingControl
+        End If
+
+'------------------------------------------------------------------------------
+' SCROLL YEAR PANEL IF VISIBLE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Evaluate year-panel scrolling"
+
+    'Scroll the 12-year panel when it is visible in year-selection mode
+        If Not Fra_PickerPanel Is Nothing Then
+            If Fra_PickerPanel.Visible Then
+                If mPickerPanelMode = PICKER_MODE_YEARS Then
+                    'Track the current handler step
+                        HandlerStep = "Scroll year picker panel"
+                    'Clear active picker hover before repopulating the year panel
+                        UF_PickerPanel_HoverReset
+                    'Calculate the new first visible year
+                        NewYearPanelStart = mYearPanelStart + _
+                            (YearOffset * DP_PICKER_ITEM_COUNT)
+                    'Clamp the first visible year to the lower supported range
+                        If NewYearPanelStart < DP_MIN_YEAR Then
+                            NewYearPanelStart = DP_MIN_YEAR
+                        End If
+                    'Clamp the first visible year to the upper supported range
+                        If NewYearPanelStart > DP_YEAR_PANEL_MAX_START Then
+                            NewYearPanelStart = DP_YEAR_PANEL_MAX_START
+                        End If
+                    'Exit if the year-panel range did not change
+                        If NewYearPanelStart = mYearPanelStart Then Exit Sub
+                    'Store the new first visible year
+                        mYearPanelStart = NewYearPanelStart
+                    'Refresh the year picker panel
+                        UF_PickerPanel_PopulateYears
+                    'Exit after scrolling the panel
+                        Exit Sub
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE CURRENT DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate current display period"
+
+    'Reject invalid current displayed year
+        If mDisplayYear < DP_MIN_YEAR Or mDisplayYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "mDisplayYear must be between " & VBA.CStr(DP_MIN_YEAR) & _
+                " and " & VBA.CStr(DP_MAX_YEAR)
+        End If
+    'Reject invalid current displayed month
+        If mDisplayMonth < 1 Or mDisplayMonth > 12 Then
+            Err.Raise vbObjectError + 516, PROC_NAME, "mDisplayMonth must be between 1 and 12"
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE NEW DISPLAY YEAR
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve new display year"
+
+    'Resolve the new displayed year
+        NewDisplayYear = mDisplayYear + YearOffset
+    'Reject years outside the supported DatePicker range
+        If NewDisplayYear < DP_MIN_YEAR Or NewDisplayYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 517, PROC_NAME, _
+                "Displayed year must remain between " & VBA.CStr(DP_MIN_YEAR) & _
+                " and " & VBA.CStr(DP_MAX_YEAR)
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE NEW DISPLAY PERIOD
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate new display period"
+
+    'Reject the lower VBA Date rendering boundary
+        If NewDisplayYear = VBA_DATE_MIN_YEAR And mDisplayMonth = 1 Then
+            Err.Raise vbObjectError + 518, PROC_NAME, _
+                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+    'Reject the upper VBA Date rendering boundary
+        If NewDisplayYear = VBA_DATE_MAX_YEAR And mDisplayMonth = 12 Then
+            Err.Raise vbObjectError + 519, PROC_NAME, _
+                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
+                " cannot render a complete DatePicker grid"
+        End If
+
+'------------------------------------------------------------------------------
+' STORE DISPLAY STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Store display state"
+
+    'Store the new displayed year
+        mDisplayYear = NewDisplayYear
+    'Initialize keyboard date to the first day of the current display month in the new year
+        mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
+    'Mark keyboard navigation as initialized
+        mHasKeyboardDate = True
+
+'------------------------------------------------------------------------------
+' RESET TRANSIENT HOVER STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Reset transient hover state"
+
+    'Clear picker-panel hover before hiding overlays
+        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
+    'Clear day-cell hover before repopulating the grid
+        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
+    'Clear header hover before refreshing captions
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
+    'Clear footer hover before hiding overlays
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
+    'Clear settings-panel hover before hiding overlays
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
+
+'------------------------------------------------------------------------------
+' HIDE PICKER PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Hide picker panel"
+
+    'Hide the reusable picker panel when available
+        If Not Fra_PickerPanel Is Nothing Then
+            Fra_PickerPanel.Visible = False
+        End If
+    'Clear picker-panel mode after normal year navigation
+        mPickerPanelMode = PICKER_MODE_NONE
+    'Clear picker-panel hover state after normal year navigation
+        mHoveredPickerItemIndex = 0
+
+'------------------------------------------------------------------------------
+' HIDE SETTINGS PANEL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Hide settings panel"
+
+    'Hide the settings panel after year navigation
+        UF_SettingsPanel_Hide
+
+'------------------------------------------------------------------------------
+' REFRESH CALENDAR
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh day grid"
+
+    'Refresh the day grid using the new displayed year
+        UF_DayGrid_Populate mDisplayYear, mDisplayMonth
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Header year navigation failed: " & Err.Description
+
+End Sub
+
+'------------------------------------------------------------------------------
+' HEADER HOVER
+'------------------------------------------------------------------------------
+
+Public Sub UF_Header_HoverApply(ByVal LabelName As String)
+
+'
+'------------------------------------------------------------------------------
+'                           APPLY HEADER CLICKABLE HOVER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies hover formatting to one clickable DatePicker header label
+'
+' WHY THIS EXISTS
+'   Runtime-created header labels are clickable. The UI should give the user a
+'   visible cue when the mouse moves over them
+'
+' INPUTS
+'   LabelName
+'     Name of the header label currently under the mouse pointer
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves supported clickable header labels, resets active hover state from
+'   other DatePicker areas, exits when the same header label is already hovered,
+'   applies a subtle hover state to the requested header label, and stores the
+'   current header hover state
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if LabelName is empty or if a supported
+'   header label cannot be resolved or formatted
+'
+'   Unsupported header labels are treated as neutral hover-reset areas
+'
+' DEPENDENCIES
+'   UF_DayCell_HoverReset
+'   UF_Header_HoverReset
+'   UF_PickerPanel_HoverReset
+'   UF_Footer_HoverReset
+'   UF_SettingsPanel_HoverReset
+'
+' NOTES
+'   This routine avoids changing Font properties because header labels have
+'   different normal bold states
+'
+'   Label matching is normalized so behavior is independent from Option Compare
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "UF_DatePicker.UF_Header_HoverApply"
+
+    Dim RawLabelName            As String               'Trimmed label name supplied by caller
+    Dim NormalizedLabelName     As String               'Uppercase label name used for routing
+    Dim TargetLabelName         As String               'Canonical target label name
+    
+    Dim ExistingControl         As MSForms.Control      'Control resolved by name
+    Dim Lbl_Header              As MSForms.Label        'Hovered header label
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Normalize the supplied label name
+        RawLabelName = VBA.Trim$(LabelName)
+    'Reject an empty label name
+        If VBA.Len(RawLabelName) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "LabelName cannot be empty"
+        End If
+    'Normalize the label name for Option Compare independent routing
+        NormalizedLabelName = VBA.UCase$(RawLabelName)
+
+'------------------------------------------------------------------------------
+' RESOLVE TARGET HEADER LABEL
+'------------------------------------------------------------------------------
+    'Resolve supported clickable header labels
+        Select Case NormalizedLabelName
+            Case "LBL_HEADERMONTH"
+                TargetLabelName = "Lbl_HeaderMonth"
+            Case "LBL_HEADERYEAR"
+                TargetLabelName = "Lbl_HeaderYear"
+            Case "LBL_PREVMONTH"
+                TargetLabelName = "Lbl_PrevMonth"
+            Case "LBL_NEXTMONTH"
+                TargetLabelName = "Lbl_NextMonth"
+            Case "LBL_PREVYEAR"
+                TargetLabelName = "Lbl_PrevYear"
+            Case "LBL_NEXTYEAR"
+                TargetLabelName = "Lbl_NextYear"
+            Case "LBL_HEADERSETTINGS"
+                TargetLabelName = "Lbl_HeaderSettings"
+            Case Else
+                'Remove previous header hover state when moving over neutral header surfaces
+                    If VBA.Len(mHoveredHeaderLabelName) <> 0 Then
+                        UF_Header_HoverReset
+                    End If
+                'Exit because neutral header labels do not receive hover styling
+                    Exit Sub
+        End Select
+
+'------------------------------------------------------------------------------
+' RESET OTHER HOVER STATES
+'------------------------------------------------------------------------------
+    'Clear active day-cell hover when entering the header
+        If mHoveredDayCellIndex <> 0 Then
+            UF_DayCell_HoverReset
+        End If
+    'Clear active picker-panel hover when entering the header
+        If mHoveredPickerItemIndex <> 0 Then
+            UF_PickerPanel_HoverReset
+        End If
+    'Clear active footer hover when entering the header
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then
+            UF_Footer_HoverReset
+        End If
+    'Clear active settings-panel hover when entering the header
+        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then
+            UF_SettingsPanel_HoverReset
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT IF ALREADY HOVERED
+'------------------------------------------------------------------------------
+    'Exit when the same header label is already highlighted
+        If VBA.StrComp(mHoveredHeaderLabelName, TargetLabelName, vbBinaryCompare) = 0 Then
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' RESET CURRENT HEADER HOVER STATE
+'------------------------------------------------------------------------------
+    'Remove hover formatting from the previously highlighted header label
+        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then
+            UF_Header_HoverReset
+        End If
+
+'------------------------------------------------------------------------------
+' RETRIEVE TARGET LABEL
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the target header label
+        On Error Resume Next
+    'Retrieve the target header label
+        Set ExistingControl = Me.Controls(TargetLabelName)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing target header label
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "Unable to resolve expected header label " & TargetLabelName
+        End If
+    'Reject a name collision with a non-label control
+        If VBA.TypeName(ExistingControl) <> "Label" Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Control '" & TargetLabelName & "' exists but is not an MSForms.Label"
+        End If
+    'Use the resolved header label
+        Set Lbl_Header = ExistingControl
+
+'------------------------------------------------------------------------------
+' APPLY HOVER STATE
+'------------------------------------------------------------------------------
+    'Apply clickable hover visual formatting
+        With Lbl_Header
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_HEADER_HOVER_BACK_COLOR
+            .ForeColor = vbWhite
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = vbWhite
+            .SpecialEffect = fmSpecialEffectFlat
+        End With
+    'Move the hovered header label to the front
+        Lbl_Header.ZOrder 0
+
+'------------------------------------------------------------------------------
+' STORE HOVER STATE
+'------------------------------------------------------------------------------
+    'Store the current hovered header label name
+        mHoveredHeaderLabelName = TargetLabelName
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Header hover application failed: " & Err.Description
+
+End Sub
+
+Private Sub UF_Header_HoverReset()
+
+'
+'------------------------------------------------------------------------------
+'                           RESET HEADER CLICKABLE HOVER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes hover formatting from the currently highlighted clickable header
+'   label
+'
+' WHY THIS EXISTS
+'   Header hover formatting must be removed when the mouse leaves clickable
+'   header labels and moves back over another DatePicker surface
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the currently highlighted header label, restores its normal visual
+'   state when available, and clears the stored header hover state
+'
+' ERROR POLICY
+'   Best-effort UI cleanup. Suppresses reset errors because hover reset should
+'   never interrupt UserForm interaction
+'
+' DEPENDENCIES
+'   UserForm.Controls collection
+'
+' NOTES
+'   This routine restores only the visual properties changed by
+'   UF_Header_HoverApply
+'
+'   Stale or missing runtime labels are ignored because controls may have been
+'   rebuilt while a hover state was active
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CurrentLabelName    As String               'Current hovered header label name
+    Dim Lbl_Header          As MSForms.Label        'Previously highlighted header label
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress hover-reset errors
+        On Error Resume Next
+    'Capture the current hovered header label
+        CurrentLabelName = VBA.Trim$(mHoveredHeaderLabelName)
+
+'------------------------------------------------------------------------------
+' EXIT IF NOTHING IS HOVERED
+'------------------------------------------------------------------------------
+    'Exit if no header label is currently highlighted
+        If VBA.Len(CurrentLabelName) = 0 Then GoTo Clean_Exit
+
+'------------------------------------------------------------------------------
+' RETRIEVE CURRENTLY HOVERED LABEL
+'------------------------------------------------------------------------------
+    'Retrieve the previously highlighted header label
+        Set Lbl_Header = Me.Controls(CurrentLabelName)
+
+'------------------------------------------------------------------------------
+' RESET VISUAL STATE
+'------------------------------------------------------------------------------
+    'Restore normal clickable-header formatting when available
+        If Not Lbl_Header Is Nothing Then
+            With Lbl_Header
+                .BackStyle = fmBackStyleTransparent
+                .BackColor = DP_HEADER_BACK_COLOR
+                .ForeColor = DP_HEADER_FORE_COLOR
+                .BorderStyle = fmBorderStyleNone
+                .BorderColor = DP_HEADER_BACK_COLOR
+                .SpecialEffect = fmSpecialEffectFlat
+            End With
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+Clean_Exit:
+    'Clear the current hovered header label name
+        mHoveredHeaderLabelName = vbNullString
+    'Clear suppressed reset errors
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
+'
+'------------------------------------------------------------------------------
+'
+'                               DAY-OF-WEEK ROW
+'
+'------------------------------------------------------------------------------
+'
 
 Public Sub UF_WeekdayRow_Build()
 
@@ -2354,6 +4348,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Weekday row creation failed: " & Err.Description
 
 End Sub
+
 Private Function UF_WeekdayCaption_Get( _
     ByVal Index As Long, _
     ByVal FirstDayOfWeek As Long, _
@@ -2471,9 +4466,117 @@ ErrorHandler:
 
 End Function
 
+Private Function UF_WeekdayCaption_GetFixedEnglish(ByVal DayNumber As Long) As String
+
+'
 '------------------------------------------------------------------------------
-' DAY GRID
+'                   GET FIXED ENGLISH DAY OF WEEK CAPTION
 '------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the fixed English weekday caption for a VBA weekday number
+'
+' WHY THIS EXISTS
+'   The DatePicker can operate in local-independent mode, where weekday captions
+'   should not depend on Windows, Office, or regional language settings
+'
+' INPUTS
+'   DayNumber
+'     VBA weekday number from vbSunday to vbSaturday
+'
+' RETURNS
+'   Fixed three-letter English weekday caption
+'
+' BEHAVIOR
+'   Maps the supplied VBA weekday number to a fixed English caption:
+'     - SUN
+'     - MON
+'     - TUE
+'     - WED
+'     - THU
+'     - FRI
+'     - SAT
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if DayNumber is outside vbSunday to
+'   vbSaturday
+'
+' DEPENDENCIES
+'   VBA weekday constants
+'
+' NOTES
+'   Returned captions are intentionally fixed in English
+'
+'   This function is used when local-dependent weekday names are disabled
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "UF_DatePicker.UF_WeekdayCaption_GetFixedEnglish"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject invalid day numbers
+        If DayNumber < vbSunday Or DayNumber > vbSaturday Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "DayNumber must be between vbSunday and vbSaturday"
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN CAPTION
+'------------------------------------------------------------------------------
+    'Return the fixed English caption
+        Select Case DayNumber
+
+            Case vbSunday
+                UF_WeekdayCaption_GetFixedEnglish = "SUN"
+            Case vbMonday
+                UF_WeekdayCaption_GetFixedEnglish = "MON"
+            Case vbTuesday
+                UF_WeekdayCaption_GetFixedEnglish = "TUE"
+            Case vbWednesday
+                UF_WeekdayCaption_GetFixedEnglish = "WED"
+            Case vbThursday
+                UF_WeekdayCaption_GetFixedEnglish = "THU"
+            Case vbFriday
+                UF_WeekdayCaption_GetFixedEnglish = "FRI"
+            Case vbSaturday
+                UF_WeekdayCaption_GetFixedEnglish = "SAT"
+
+        End Select
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Fixed English weekday caption resolution failed: " & Err.Description
+
+End Function
+
+'
+'------------------------------------------------------------------------------
+'
+'                                   DAY GRID
+'
+'------------------------------------------------------------------------------
+'
 
 Private Sub UF_DayGrid_Build()
 
@@ -2685,6 +4788,127 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Day grid creation failed: " & Err.Description
 
 End Sub
+
+Private Sub UF_DayGrid_EnsureCache()
+
+'
+'------------------------------------------------------------------------------
+'                           ENSURE DAY GRID CACHE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Ensures the day-grid label cache is populated
+'
+' WHY THIS EXISTS
+'   The DatePicker uses cached references to Lbl_Day1 to Lbl_Day42 and
+'   Lbl_DayBg1 to Lbl_DayBg42 to avoid repeated Me.Controls string lookups
+'   during grid refresh, hover, and selection handling
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Rebuilds missing cached references from the UserForm Controls collection
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if one or more expected labels cannot be
+'   resolved from the UserForm
+'
+' DEPENDENCIES
+'   UserForm.Controls collection
+'   Lbl_Day1 to Lbl_Day42
+'   Lbl_DayBg1 to Lbl_DayBg42
+'
+' NOTES
+'   This routine does not create controls. Controls are created by
+'   UF_DayGrid_Build
+'
+'   Developer-owned grid constants are intentionally not validated here. They
+'   should be checked by a dedicated debug or regression routine
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_DayGrid_EnsureCache"
+
+    Dim Index               As Long             'Sequential day-cell index
+    Dim TextControlName     As String           'Runtime day text label name
+    Dim BgControlName       As String           'Runtime day background label name
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REBUILD MISSING CACHE REFERENCES
+'------------------------------------------------------------------------------
+    'Loop through all day cells
+        For Index = 1 To DP_DAY_LABEL_COUNT
+            'Build the runtime day text label name
+                TextControlName = "Lbl_Day" & VBA.CStr(Index)
+            'Build the runtime day background label name
+                BgControlName = "Lbl_DayBg" & VBA.CStr(Index)
+
+'------------------------------------------------------------------------------
+' RESOLVE DAY TEXT LABEL
+'------------------------------------------------------------------------------
+            'Resolve the cached day text label when missing
+                If mDayTextLabels(Index) Is Nothing Then
+                    'Suppress missing-control lookup errors
+                        On Error Resume Next
+                    'Resolve the day text label from the UserForm controls collection
+                        Set mDayTextLabels(Index) = Me.Controls(TextControlName)
+                    'Restore controlled error handling
+                        On Error GoTo ErrorHandler
+                    'Reject unresolved day text label
+                        If mDayTextLabels(Index) Is Nothing Then
+                            Err.Raise vbObjectError + 513, PROC_NAME, _
+                                "Unable to resolve expected day text label " & TextControlName
+                        End If
+                End If
+
+'------------------------------------------------------------------------------
+' RESOLVE DAY BACKGROUND LABEL
+'------------------------------------------------------------------------------
+            'Resolve the cached day background label when missing
+                If mDayBackLabels(Index) Is Nothing Then
+                    'Suppress missing-control lookup errors
+                        On Error Resume Next
+                    'Resolve the day background label from the UserForm controls collection
+                        Set mDayBackLabels(Index) = Me.Controls(BgControlName)
+                    'Restore controlled error handling
+                        On Error GoTo ErrorHandler
+                    'Reject unresolved day background label
+                        If mDayBackLabels(Index) Is Nothing Then
+                            Err.Raise vbObjectError + 514, PROC_NAME, _
+                                "Unable to resolve expected day background label " & BgControlName
+                        End If
+                End If
+        Next Index
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Day grid cache initialization failed: " & Err.Description
+
+End Sub
+
 Private Sub UF_DayGrid_EnsureFonts()
 
 '
@@ -2814,6 +5038,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, "Day grid font cache initialization failed: " & ErrorDescription
 
 End Sub
+
 Public Sub UF_DayGrid_Populate( _
     Optional ByVal DisplayYear As Long = 0, _
     Optional ByVal DisplayMonth As Long = 0)
@@ -3059,125 +5284,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Day grid population failed: " & Err.Description
 
 End Sub
-Private Sub UF_DayGrid_EnsureCache()
 
-'
-'------------------------------------------------------------------------------
-'                           ENSURE DAY GRID CACHE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Ensures the day-grid label cache is populated
-'
-' WHY THIS EXISTS
-'   The DatePicker uses cached references to Lbl_Day1 to Lbl_Day42 and
-'   Lbl_DayBg1 to Lbl_DayBg42 to avoid repeated Me.Controls string lookups
-'   during grid refresh, hover, and selection handling
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Rebuilds missing cached references from the UserForm Controls collection
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if one or more expected labels cannot be
-'   resolved from the UserForm
-'
-' DEPENDENCIES
-'   UserForm.Controls collection
-'   Lbl_Day1 to Lbl_Day42
-'   Lbl_DayBg1 to Lbl_DayBg42
-'
-' NOTES
-'   This routine does not create controls. Controls are created by
-'   UF_DayGrid_Build
-'
-'   Developer-owned grid constants are intentionally not validated here. They
-'   should be checked by a dedicated debug or regression routine
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_DayGrid_EnsureCache"
-
-    Dim Index               As Long             'Sequential day-cell index
-    Dim TextControlName     As String           'Runtime day text label name
-    Dim BgControlName       As String           'Runtime day background label name
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' REBUILD MISSING CACHE REFERENCES
-'------------------------------------------------------------------------------
-    'Loop through all day cells
-        For Index = 1 To DP_DAY_LABEL_COUNT
-            'Build the runtime day text label name
-                TextControlName = "Lbl_Day" & VBA.CStr(Index)
-            'Build the runtime day background label name
-                BgControlName = "Lbl_DayBg" & VBA.CStr(Index)
-
-'------------------------------------------------------------------------------
-' RESOLVE DAY TEXT LABEL
-'------------------------------------------------------------------------------
-            'Resolve the cached day text label when missing
-                If mDayTextLabels(Index) Is Nothing Then
-                    'Suppress missing-control lookup errors
-                        On Error Resume Next
-                    'Resolve the day text label from the UserForm controls collection
-                        Set mDayTextLabels(Index) = Me.Controls(TextControlName)
-                    'Restore controlled error handling
-                        On Error GoTo ErrorHandler
-                    'Reject unresolved day text label
-                        If mDayTextLabels(Index) Is Nothing Then
-                            Err.Raise vbObjectError + 513, PROC_NAME, _
-                                "Unable to resolve expected day text label " & TextControlName
-                        End If
-                End If
-
-'------------------------------------------------------------------------------
-' RESOLVE DAY BACKGROUND LABEL
-'------------------------------------------------------------------------------
-            'Resolve the cached day background label when missing
-                If mDayBackLabels(Index) Is Nothing Then
-                    'Suppress missing-control lookup errors
-                        On Error Resume Next
-                    'Resolve the day background label from the UserForm controls collection
-                        Set mDayBackLabels(Index) = Me.Controls(BgControlName)
-                    'Restore controlled error handling
-                        On Error GoTo ErrorHandler
-                    'Reject unresolved day background label
-                        If mDayBackLabels(Index) Is Nothing Then
-                            Err.Raise vbObjectError + 514, PROC_NAME, _
-                                "Unable to resolve expected day background label " & BgControlName
-                        End If
-                End If
-        Next Index
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Day grid cache initialization failed: " & Err.Description
-
-End Sub
 Private Sub UF_DayGrid_ClearDateCache()
 
 '
@@ -3257,6 +5364,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Day grid date cache clearing failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_DayGrid_ClearCache()
 
 '
@@ -3330,6 +5438,16 @@ Private Sub UF_DayGrid_ClearCache()
         On Error GoTo 0
 
 End Sub
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                               DAY CELL STATE AND HOVER
+'
+'------------------------------------------------------------------------------
+'
+
 Private Sub UF_DayCell_ApplyDateStateByIndex( _
     ByVal DayIndex As Long, _
     ByVal CellDate As Date)
@@ -3562,6 +5680,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Day-cell state application failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_DayCell_RefreshVisibleDate(ByVal TargetDate As Date)
 
 '
@@ -3655,6 +5774,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Visible day-cell refresh failed: " & Err.Description
 
 End Sub
+
 Public Sub UF_DayCell_HoverApply(ByVal LabelName As String)
 
 '
@@ -3895,6 +6015,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Day-cell hover application failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_DayCell_HoverReset()
 
 '
@@ -4091,8 +6212,154 @@ FailSafe:
 End Sub
 
 '------------------------------------------------------------------------------
-' FOOTER
+' SHARED HELPERS
 '------------------------------------------------------------------------------
+
+Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As Long
+
+'
+'==============================================================================
+'                   GET DAY CELL INDEX FROM LABEL NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the day-cell index from a DatePicker day label name
+'
+' WHY THIS EXISTS
+'   Each calendar day cell is composed of two runtime labels:
+'     - Lbl_DayBg1 to Lbl_DayBg42
+'     - Lbl_Day1 to Lbl_Day42
+'
+'   Hovering or clicking either label must resolve to the same day-cell index
+'
+' INPUTS
+'   LabelName
+'     Runtime day label name
+'
+' RETURNS
+'   Day-cell index from 1 to DP_DAY_LABEL_COUNT
+'
+'   Zero when the label name is blank, unsupported, malformed, or outside the
+'   supported day-cell range
+'
+' BEHAVIOR
+'   Normalizes the supplied label name, checks the background-label prefix first,
+'   checks the text-label prefix second, extracts the numeric suffix, applies
+'   strict digit-only parsing, and returns the validated day-cell index
+'
+' ERROR POLICY
+'   Does not raise errors. Unsupported or malformed label names return zero
+'
+' DEPENDENCIES
+'   DP_DAY_LABEL_COUNT
+'
+' NOTES
+'   The background-label prefix must be tested before the text-label prefix
+'   because Lbl_DayBg also starts with Lbl_Day
+'
+'   Matching is normalized with UCase$ so behavior is independent from
+'   Option Compare
+'
+' UPDATED
+'   2026-05-02
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const BG_PREFIX         As String = "LBL_DAYBG"     'Day background label prefix
+    Const TEXT_PREFIX       As String = "LBL_DAY"       'Day text label prefix
+
+    Dim EffectiveName       As String                   'Normalized day label name
+    Dim RawIndex            As String                   'Raw numeric suffix
+    Dim ParsedIndex         As Long                     'Parsed day-cell index
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe parsing
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Normalize the supplied label name
+        EffectiveName = VBA.UCase$(VBA.Trim$(LabelName))
+    'Return zero for empty label names
+        If VBA.Len(EffectiveName) = 0 Then
+            UF_DayCell_GetIndexFromLabelName = 0
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE INDEX FROM BACKGROUND LABEL
+'------------------------------------------------------------------------------
+    'Resolve indexes from day background labels first
+        If VBA.Left$(EffectiveName, VBA.Len(BG_PREFIX)) = BG_PREFIX Then
+            'Extract the raw numeric suffix
+                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(BG_PREFIX) + 1)
+            'Return zero when the suffix is empty
+                If VBA.Len(RawIndex) = 0 Then Exit Function
+            'Return zero when the suffix is not strictly numeric
+                If RawIndex Like "*[!0-9]*" Then Exit Function
+            'Parse the day-cell index
+                ParsedIndex = VBA.CLng(RawIndex)
+            'Return zero when the index is outside the supported day-cell range
+                If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
+            'Return the validated day-cell index
+                UF_DayCell_GetIndexFromLabelName = ParsedIndex
+            'Exit after resolving the background label
+                Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE INDEX FROM TEXT LABEL
+'------------------------------------------------------------------------------
+    'Resolve indexes from day text labels
+        If VBA.Left$(EffectiveName, VBA.Len(TEXT_PREFIX)) = TEXT_PREFIX Then
+            'Extract the raw numeric suffix
+                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(TEXT_PREFIX) + 1)
+            'Return zero when the suffix is empty
+                If VBA.Len(RawIndex) = 0 Then Exit Function
+            'Return zero when the suffix is not strictly numeric
+                If RawIndex Like "*[!0-9]*" Then Exit Function
+            'Parse the day-cell index
+                ParsedIndex = VBA.CLng(RawIndex)
+            'Return zero when the index is outside the supported day-cell range
+                If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
+            'Return the validated day-cell index
+                UF_DayCell_GetIndexFromLabelName = ParsedIndex
+            'Exit after resolving the text label
+                Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN FALLBACK
+'------------------------------------------------------------------------------
+    'Return zero for unsupported day label names
+        UF_DayCell_GetIndexFromLabelName = 0
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit the function
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Return zero for malformed or oversized numeric suffixes
+        UF_DayCell_GetIndexFromLabelName = 0
+
+End Function
+
+'
+'------------------------------------------------------------------------------
+'
+'                                   FOOTER
+'
+'------------------------------------------------------------------------------
+'
 
 Private Sub UF_Footer_Build()
 
@@ -4187,6 +6454,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Footer creation failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_Footer_BuildDivider()
 
 '
@@ -4293,6 +6561,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Footer divider creation failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_Footer_BuildBanner()
 
 '
@@ -4400,6 +6669,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Footer banner creation failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_Footer_BuildLabels()
 
 '
@@ -4798,6 +7068,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Footer label creation failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_Footer_BuildSettingsArea()
 
 '
@@ -5009,6 +7280,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Footer settings area creation failed: " & Err.Description
 
 End Sub
+
 Public Sub UF_Footer_HoverApply(ByVal LabelName As String)
 
 '
@@ -5298,6 +7570,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Footer hover application failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_Footer_HoverReset()
 
 '
@@ -5483,6 +7756,7 @@ Clean_Exit:
         On Error GoTo 0
 
 End Sub
+
 Private Function UF_Footer_ActionFromLabelName(ByVal LabelName As String) As String
 
 '
@@ -5574,6 +7848,16 @@ Private Function UF_Footer_ActionFromLabelName(ByVal LabelName As String) As Str
         UF_Footer_ActionFromLabelName = vbNullString
 
 End Function
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                                 PICKER PANEL
+'
+'------------------------------------------------------------------------------
+'
+
 Private Sub UF_PickerPanel_Build()
 
 '
@@ -5833,6 +8117,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Picker panel creation failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_PickerPanel_EnsureCache()
 
 '
@@ -5989,6 +8274,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Picker panel cache initialization failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_PickerPanel_ClearCache()
 
 '
@@ -6059,6 +8345,7 @@ Private Sub UF_PickerPanel_ClearCache()
         On Error GoTo 0
 
 End Sub
+
 Private Sub UF_PickerPanel_ShowMonths()
 
 '
@@ -6280,6 +8567,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Month picker panel display failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_PickerPanel_ShowYears()
 
 '
@@ -6444,6 +8732,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Year picker panel display failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_PickerPanel_PopulateYears()
 
 '
@@ -6617,60 +8906,52 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Year picker panel population failed: " & Err.Description
 
 End Sub
-Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
+
+Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
 
 '
 '------------------------------------------------------------------------------
-'                           HANDLE LABEL ACTION
+'                           APPLY PICKER PANEL HOVER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Handles click actions raised by DatePicker header labels, day labels, footer
-'   labels, settings labels, and picker-panel item labels
+'   Applies hover formatting to one month/year picker-panel item
 '
 ' WHY THIS EXISTS
-'   Runtime-created labels route their Click events through
-'   cDatePickerLabelHook. A central action router keeps dynamic UI controls
-'   loosely coupled from the DatePicker business logic
+'   Picker-panel items are built from two runtime labels. Hovering either label
+'   should highlight the full picker item consistently
 '
 ' INPUTS
-'   ActionName
-'     Action name routed by cDatePickerLabelHook
+'   LabelName
+'     Name of the picker-panel label currently under the mouse pointer
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Routes header navigation, picker-panel display, footer shortcuts, settings
-'   panel actions, day selection, month selection, and year selection
+'   Resolves the picker item index, exits when the same item is already hovered,
+'   resets previous picker/footer hover state, retrieves the paired labels from
+'   cache, resolves selected state, and applies hover formatting to the current
+'   picker item
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if ActionName is blank, unsupported, or
-'   contains an invalid day-label / picker-item index
+'   Raises a descriptive runtime error if LabelName is blank, if the label name
+'   does not map to a picker-panel item, or if the target picker item cannot be
+'   resolved or formatted
 '
 ' DEPENDENCIES
-'   UF_Header_MoveMonth
-'   UF_Header_MoveYear
-'   UF_PickerPanel_ShowMonths
-'   UF_PickerPanel_ShowYears
-'   UF_DayGrid_Populate
+'   UF_PickerPanel_ItemIndexFromLabelName
+'   UF_PickerPanel_HoverReset
 '   UF_PickerPanel_EnsureCache
-'   M_DatePolicy_CanSelectDate
-'   M_Picker_SelectDate
-'   DP_Today
-'   DP_Now
-'   DP_Close
-'   UF_Settings_Show
-'   UF_SettingsPanel_Hide
-'   UF_SettingsPanel_Save
-'   UF_SettingsPanel_SelectPage
+'   UF_Footer_HoverReset
+'   mPickerBackLabels
+'   mPickerTextLabels
 '
 ' NOTES
-'   This routine is the central action router for runtime-created DatePicker
-'   labels
+'   This routine is called by cDatePickerLabelHook when the hook category is
+'   PICKER
 '
-'   The current procedure name is kept for compatibility with existing
-'   cDatePickerLabelHook calls. A future semantic rename to
-'   UF_LabelAction_Handle would be clearer
+'   The picker-panel cache is rebuilt only when the requested cached label pair
+'   is missing
 '
 ' UPDATED
 '   2026-05-02
@@ -6679,378 +8960,169 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_PickerPanel_HandleAction"
+    Const PROC_NAME             As String = "UF_DatePicker.UF_PickerPanel_HoverApply"
     
-    Const PICKER_ITEM_PREFIX    As String = "PICKER_ITEM_"          'Picker item action prefix
-    Const DAY_PICKED_PREFIX     As String = "DAY_PICKED_"           'Day label click action prefix
-    Const PICKER_MODE_NONE      As Long = 0                         'No picker-panel mode
-    Const PICKER_MODE_MONTHS    As Long = 1                         'Month picker-panel mode
-    Const PICKER_MODE_YEARS     As Long = 2                         'Year picker-panel mode
+    Const PICKER_MODE_MONTHS    As Long = 1             'Month picker-panel mode
+    Const PICKER_MODE_YEARS     As Long = 2             'Year picker-panel mode
 
-    Dim RoutedAction            As String                           'Normalized routed action name
-    Dim ItemIndex               As Long                             'Clicked item index
-    Dim SelectedValue           As Long                             'Selected month or year value
-    Dim RawItemIndex            As String                           'Raw item index text
-    Dim RawTagValue             As String                           'Raw label Tag value
-    Dim ExistingControl         As MSForms.Control                  'Existing control using the picker-panel name
-    Dim Fra_PickerPanel         As MSForms.Frame                    'Reusable picker panel
-    Dim SelectedDate            As Date                             'Selected date from clicked day label
-    Dim Lbl_SelectedItem        As MSForms.Label                    'Selected picker item text label
-    Dim HandlerStep             As String                           'Current handler step for diagnostics
+    Dim EffectiveLabelName      As String               'Normalized label name
+    Dim ItemIndex               As Long                 'Resolved picker item index
+    Dim IsSelected              As Boolean              'True when hovered item is selected
+    Dim CacheRefreshRequired    As Boolean              'True when cached labels must be rebuilt
+    Dim RawTagValue             As String               'Picker text label Tag value
+    
+    Dim Lbl_ItemBg              As MSForms.Label        'Picker item background label
+    Dim Lbl_Item                As MSForms.Label        'Picker item text label
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-    'Track the current handler step
-        HandlerStep = "Normalize action"
-    'Normalize the routed action name
-        RoutedAction = VBA.UCase$(VBA.Trim$(ActionName))
-    'Reject an empty action name
-        If VBA.Len(RoutedAction) = 0 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "ActionName cannot be empty"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Normalize the supplied label name
+        EffectiveLabelName = VBA.Trim$(LabelName)
+    'Reject an empty label name
+        If VBA.Len(EffectiveLabelName) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "LabelName cannot be empty"
         End If
 
 '------------------------------------------------------------------------------
-' ROUTE DIRECT ACTIONS
+' RESOLVE PICKER ITEM
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Route direct action"
-    'Route the requested direct action
-        Select Case RoutedAction
-
-            Case "PREV_MONTH"
-                'Track the current handler step
-                    HandlerStep = "Move previous month"
-                'Move to the previous displayed month
-                    UF_Header_MoveMonth -1
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "NEXT_MONTH"
-                'Track the current handler step
-                    HandlerStep = "Move next month"
-                'Move to the next displayed month
-                    UF_Header_MoveMonth 1
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "PREV_YEAR"
-                'Track the current handler step
-                    HandlerStep = "Move previous year"
-                'Move or scroll to the previous year range
-                    UF_Header_MoveYear -1
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "NEXT_YEAR"
-                'Track the current handler step
-                    HandlerStep = "Move next year"
-                'Move or scroll to the next year range
-                    UF_Header_MoveYear 1
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SHOW_MONTH_PANEL"
-                'Track the current handler step
-                    HandlerStep = "Show month picker panel"
-                'Show the month picker panel
-                    UF_PickerPanel_ShowMonths
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SHOW_YEAR_PANEL"
-                'Track the current handler step
-                    HandlerStep = "Show year picker panel"
-                'Show the year picker panel
-                    UF_PickerPanel_ShowYears
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "WRITE_NOW"
-                'Track the current handler step
-                    HandlerStep = "Write now"
-                'Write today with the current system time
-                    DP_Now
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "WRITE_TODAY"
-                'Track the current handler step
-                    HandlerStep = "Write today"
-                'Write today without time
-                    DP_Today
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SHOW_SETTINGS"
-                'Track the current handler step
-                    HandlerStep = "Show settings panel"
-                'Show the settings panel
-                    UF_Settings_Show
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "HIDE_SETTINGS"
-                'Track the current handler step
-                    HandlerStep = "Hide settings panel"
-                'Hide the settings panel
-                    UF_SettingsPanel_Hide
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SAVE_SETTINGS"
-                'Track the current handler step
-                    HandlerStep = "Save settings"
-                'Save settings from the settings panel
-                    UF_SettingsPanel_Save
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SHOW_SETTINGS_DISPLAY"
-                'Track the current handler step
-                    HandlerStep = "Show Display Settings page"
-                'Show the Display Settings page
-                    UF_SettingsPanel_SelectPage 0
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SHOW_SETTINGS_BEHAVIOR"
-                'Track the current handler step
-                    HandlerStep = "Show Behavior Settings page"
-                'Show the Behavior Settings page
-                    UF_SettingsPanel_SelectPage 1
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "SHOW_SETTINGS_INTEGRATION"
-                'Track the current handler step
-                    HandlerStep = "Show Integration Settings page"
-                'Show the Integration Settings page
-                    UF_SettingsPanel_SelectPage 2
-                'Exit after routing the action
-                    Exit Sub
-
-            Case "CLOSE_PICKER", "CLOSE"
-                'Track the current handler step
-                    HandlerStep = "Close picker"
-                'Close the DatePicker
-                    DP_Close
-                'Exit after routing the action
-                    Exit Sub
-
-        End Select
-
-'------------------------------------------------------------------------------
-' HANDLE DAY LABEL CLICK
-'------------------------------------------------------------------------------
-    'Handle day-label click actions
-        If VBA.Left$(RoutedAction, VBA.Len(DAY_PICKED_PREFIX)) = DAY_PICKED_PREFIX Then
-            'Track the current handler step
-                HandlerStep = "Extract day index"
-            'Extract the raw day-cell index
-                RawItemIndex = VBA.Mid$(RoutedAction, VBA.Len(DAY_PICKED_PREFIX) + 1)
-            'Reject empty or non-digit day-cell indexes
-                If VBA.Len(RawItemIndex) = 0 Or RawItemIndex Like "*[!0-9]*" Then
-                    Err.Raise vbObjectError + 514, PROC_NAME, "Day cell index must be numeric"
-                End If
-            'Track the current handler step
-                HandlerStep = "Parse day index"
-            'Parse the clicked day-cell index
-                ItemIndex = VBA.CLng(RawItemIndex)
-            'Reject invalid day-cell indexes
-                If ItemIndex < 1 Or ItemIndex > DP_DAY_LABEL_COUNT Then
-                    Err.Raise vbObjectError + 515, PROC_NAME, _
-                        "Day cell index must be between 1 and " & VBA.CStr(DP_DAY_LABEL_COUNT)
-                End If
-            'Track the current handler step
-                HandlerStep = "Validate cached day-cell date"
-            'Reject day cells with no cached date
-                If Not mDayCellHasDate(ItemIndex) Then
-                    Err.Raise vbObjectError + 516, PROC_NAME, _
-                        "Clicked day cell does not have a cached date"
-                End If
-            'Resolve the selected date from the cached day-cell date
-                SelectedDate = VBA.DateValue(mDayCellDates(ItemIndex))
-            'Track the current handler step
-                HandlerStep = "Validate selectable date"
-            'Accept the selected date only if it is selectable
-                If M_DatePolicy_CanSelectDate(SelectedDate, mDisplayYear, mDisplayMonth) Then
-                    'Track the current handler step
-                        HandlerStep = "Select date"
-                    'Delegate write-back to the companion module
-                        M_Picker_SelectDate SelectedDate
-                End If
-            'Exit after handling the day click
-                Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' HANDLE PICKER ITEM CLICK
-'------------------------------------------------------------------------------
-    'Reject unsupported non-picker actions
-        If VBA.Left$(RoutedAction, VBA.Len(PICKER_ITEM_PREFIX)) <> PICKER_ITEM_PREFIX Then
-            Err.Raise vbObjectError + 517, PROC_NAME, _
-                "Unsupported DatePicker action: " & RoutedAction
-        End If
-    'Track the current handler step
-        HandlerStep = "Extract picker item index"
-    'Extract the raw picker-item index
-        RawItemIndex = VBA.Mid$(RoutedAction, VBA.Len(PICKER_ITEM_PREFIX) + 1)
-    'Reject empty or non-digit picker-item indexes
-        If VBA.Len(RawItemIndex) = 0 Or RawItemIndex Like "*[!0-9]*" Then
-            Err.Raise vbObjectError + 518, PROC_NAME, "Picker item index must be numeric"
-        End If
-    'Track the current handler step
-        HandlerStep = "Parse picker item index"
-    'Parse the picker-item index
-        ItemIndex = VBA.CLng(RawItemIndex)
+    'Resolve the picker item index from the hovered label name
+        ItemIndex = UF_PickerPanel_ItemIndexFromLabelName(EffectiveLabelName)
     'Reject invalid picker item indexes
         If ItemIndex < 1 Or ItemIndex > DP_PICKER_ITEM_COUNT Then
-            Err.Raise vbObjectError + 519, PROC_NAME, _
-                "Picker item index must be between 1 and " & VBA.CStr(DP_PICKER_ITEM_COUNT)
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "LabelName does not resolve to a valid picker-panel item"
         End If
 
 '------------------------------------------------------------------------------
-' RETRIEVE PICKER PANEL
+' EXIT IF ALREADY HOVERED
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve picker panel"
-    
-    'Suppress lookup errors while resolving the picker panel
+    'Exit if the requested item is already highlighted
+        If mHoveredPickerItemIndex = ItemIndex Then Exit Sub
+
+'------------------------------------------------------------------------------
+' RESET OTHER HOVER STATE
+'------------------------------------------------------------------------------
+    'Remove footer hover when entering the picker panel
+        If VBA.Len(mHoveredFooterActionName) <> 0 Then
+            UF_Footer_HoverReset
+        End If
+
+'------------------------------------------------------------------------------
+' RESET CURRENT PICKER HOVER STATE
+'------------------------------------------------------------------------------
+    'Remove hover formatting from the previously highlighted picker item
+        If mHoveredPickerItemIndex <> 0 Then
+            UF_PickerPanel_HoverReset
+        End If
+
+'------------------------------------------------------------------------------
+' RETRIEVE CACHED PICKER LABELS
+'------------------------------------------------------------------------------
+    'Suppress cache probing errors
         On Error Resume Next
-    'Retrieve the existing picker panel control
-        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
-    'Clear any suppressed lookup error
+    'Retrieve the cached picker item background label
+        Set Lbl_ItemBg = mPickerBackLabels(ItemIndex)
+    'Retrieve the cached picker item text label
+        Set Lbl_Item = mPickerTextLabels(ItemIndex)
+    'Clear any suppressed cache probing error
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
 
-    'Reject missing picker panel
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 520, PROC_NAME, _
-                "Unable to resolve expected picker panel " & DP_PICKER_PANEL_NAME
+'------------------------------------------------------------------------------
+' RESTORE CACHE WHEN NEEDED
+'------------------------------------------------------------------------------
+    'Request cache refresh when the background label is missing
+        If Lbl_ItemBg Is Nothing Then CacheRefreshRequired = True
+    'Request cache refresh when the text label is missing
+        If Lbl_Item Is Nothing Then CacheRefreshRequired = True
+    'Rebuild missing cached references only when needed
+        If CacheRefreshRequired Then
+            'Ensure cached picker-panel references are available
+                UF_PickerPanel_EnsureCache
+            'Retrieve the cached picker item background label after cache refresh
+                Set Lbl_ItemBg = mPickerBackLabels(ItemIndex)
+            'Retrieve the cached picker item text label after cache refresh
+                Set Lbl_Item = mPickerTextLabels(ItemIndex)
         End If
-    'Reject a name collision with a non-frame control
-        If VBA.TypeName(ExistingControl) <> "Frame" Then
-            Err.Raise vbObjectError + 521, PROC_NAME, _
-                "Control '" & DP_PICKER_PANEL_NAME & "' exists but is not an MSForms.Frame"
+
+'------------------------------------------------------------------------------
+' VALIDATE CACHED LABELS
+'------------------------------------------------------------------------------
+    'Reject a missing cached picker background label
+        If Lbl_ItemBg Is Nothing Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Cached picker background label is missing for item " & VBA.CStr(ItemIndex)
         End If
-    'Use the resolved picker panel frame
-        Set Fra_PickerPanel = ExistingControl
+    'Reject a missing cached picker text label
+        If Lbl_Item Is Nothing Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "Cached picker text label is missing for item " & VBA.CStr(ItemIndex)
+        End If
 
 '------------------------------------------------------------------------------
-' ROUTE PICKER MODE
+' RESOLVE SELECTED STATE
 '------------------------------------------------------------------------------
-    'Route the picker item according to the active picker mode
-        Select Case mPickerPanelMode
-
-            Case PICKER_MODE_MONTHS
-
-'------------------------------------------------------------------------------
-' APPLY MONTH SELECTION
-'------------------------------------------------------------------------------
-                'Track the current handler step
-                    HandlerStep = "Apply month selection"
-                'Store the selected month
-                    SelectedValue = ItemIndex
-                'Reject unsupported selected months
-                    If SelectedValue < 1 Or SelectedValue > 12 Then
-                        Err.Raise vbObjectError + 522, PROC_NAME, _
-                            "Selected month must be between 1 and 12"
+    'Resolve whether the hovered month item is currently selected
+        If mPickerPanelMode = PICKER_MODE_MONTHS Then
+            IsSelected = (ItemIndex = mDisplayMonth)
+        End If
+    'Resolve whether the hovered year item is currently selected
+        If mPickerPanelMode = PICKER_MODE_YEARS Then
+            'Read the picker item Tag safely
+                RawTagValue = VBA.Trim$(VBA.CStr(Lbl_Item.Tag))
+            'Evaluate numeric year tags only
+                If VBA.Len(RawTagValue) <> 0 Then
+                    If Not RawTagValue Like "*[!0-9]*" Then
+                        IsSelected = (VBA.CLng(RawTagValue) = mDisplayYear)
                     End If
-                'Reject invalid display year state
-                    If mDisplayYear < DP_MIN_YEAR Or mDisplayYear > DP_MAX_YEAR Then
-                        Err.Raise vbObjectError + 523, PROC_NAME, _
-                            "mDisplayYear is outside the supported DatePicker range"
-                    End If
-                'Store the selected month
-                    mDisplayMonth = SelectedValue
-                'Initialize keyboard date to the first day of the selected display month
-                    mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
-                'Mark keyboard navigation date as available
-                    mHasKeyboardDate = True
-                'Hide the picker panel
-                    Fra_PickerPanel.Visible = False
-                'Clear picker-panel mode
-                    mPickerPanelMode = PICKER_MODE_NONE
-                'Clear picker-panel hover state
-                    mHoveredPickerItemIndex = 0
-                'Refresh the calendar grid
-                    UF_DayGrid_Populate mDisplayYear, mDisplayMonth
-                'Exit after applying month selection
-                    Exit Sub
-
-            Case PICKER_MODE_YEARS
+                End If
+        End If
 
 '------------------------------------------------------------------------------
-' APPLY YEAR SELECTION
+' APPLY SELECTED HOVER STATE
 '------------------------------------------------------------------------------
-                'Track the current handler step
-                    HandlerStep = "Ensure picker cache"
-                'Ensure cached picker-panel references are available
-                    UF_PickerPanel_EnsureCache
-                'Retrieve the selected picker text label
-                    Set Lbl_SelectedItem = mPickerTextLabels(ItemIndex)
-                'Reject a missing selected picker item label
-                    If Lbl_SelectedItem Is Nothing Then
-                        Err.Raise vbObjectError + 524, PROC_NAME, _
-                            "Cached picker text label is missing for item " & VBA.CStr(ItemIndex)
-                    End If
-                'Track the current handler step
-                    HandlerStep = "Read selected year tag"
-                'Read the selected year value from the cached picker item Tag
-                    RawTagValue = VBA.Trim$(VBA.CStr(Lbl_SelectedItem.Tag))
-                'Reject an empty year picker Tag
-                    If VBA.Len(RawTagValue) = 0 Then
-                        Err.Raise vbObjectError + 525, PROC_NAME, _
-                            "Selected year picker item does not contain a value"
-                    End If
-                'Reject non-digit year picker Tag values
-                    If RawTagValue Like "*[!0-9]*" Then
-                        Err.Raise vbObjectError + 526, PROC_NAME, _
-                            "Selected year picker item Tag must contain a numeric year"
-                    End If
-                'Track the current handler step
-                    HandlerStep = "Parse selected year"
-                'Parse the selected year
-                    SelectedValue = VBA.CLng(RawTagValue)
-                'Reject unsupported selected years
-                    If SelectedValue < DP_MIN_YEAR Or SelectedValue > DP_MAX_YEAR Then
-                        Err.Raise vbObjectError + 527, PROC_NAME, _
-                            "Selected year must be between " & VBA.CStr(DP_MIN_YEAR) & " and " & VBA.CStr(DP_MAX_YEAR)
-                    End If
-                'Reject invalid display month state
-                    If mDisplayMonth < 1 Or mDisplayMonth > 12 Then
-                        Err.Raise vbObjectError + 528, PROC_NAME, _
-                            "mDisplayMonth must be between 1 and 12 before applying year selection"
-                    End If
-                'Track the current handler step
-                    HandlerStep = "Apply year selection"
-                'Store the selected year
-                    mDisplayYear = SelectedValue
-                'Initialize keyboard date to the first day of the selected display period
-                    mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
-                'Mark keyboard navigation date as available
-                    mHasKeyboardDate = True
-                'Hide the picker panel
-                    Fra_PickerPanel.Visible = False
-                'Clear picker-panel mode
-                    mPickerPanelMode = PICKER_MODE_NONE
-                'Clear picker-panel hover state
-                    mHoveredPickerItemIndex = 0
-                'Refresh the calendar grid
-                    UF_DayGrid_Populate mDisplayYear, mDisplayMonth
-                'Exit after applying year selection
-                    Exit Sub
+    'Preserve selected-item formatting when hovering the selected item
+        If IsSelected Then
+            'Apply selected picker-item background formatting
+                With Lbl_ItemBg
+                    .BackColor = DP_DAY_SELECTED_BACK_COLOR
+                    .BorderColor = DP_DAY_SELECTED_BACK_COLOR
+                    .SpecialEffect = fmSpecialEffectFlat
+                End With
+            'Apply selected picker-item text formatting
+                Lbl_Item.ForeColor = DP_DAY_SELECTED_FORE_COLOR
+            'Store the current hovered picker item index
+                mHoveredPickerItemIndex = ItemIndex
+            'Exit after applying selected hover state
+                Exit Sub
+        End If
 
-            Case Else
-                'Reject unsupported picker panel modes
-                    Err.Raise vbObjectError + 529, PROC_NAME, _
-                        "mPickerPanelMode must be 1 for months or 2 for years"
+'------------------------------------------------------------------------------
+' APPLY NORMAL HOVER STATE
+'------------------------------------------------------------------------------
+    'Apply hover background formatting
+        With Lbl_ItemBg
+            .BackColor = DP_PICKER_ITEM_HOVER_BACK_COLOR
+            .BorderColor = DP_PICKER_ITEM_HOVER_BORDER_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+        End With
+    'Apply normal picker item text color
+        Lbl_Item.ForeColor = DP_PICKER_ITEM_FORE_COLOR
 
-        End Select
+'------------------------------------------------------------------------------
+' STORE HOVER STATE
+'------------------------------------------------------------------------------
+    'Store the current hovered picker item index
+        mHoveredPickerItemIndex = ItemIndex
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -7063,11 +9135,357 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Action=" & RoutedAction & " | Step=" & HandlerStep, _
-            "DatePicker action routing failed: " & Err.Description
+        Err.Raise Err.Number, PROC_NAME, "Picker-panel hover application failed: " & Err.Description
 
 End Sub
+
+Private Sub UF_PickerPanel_HoverReset()
+
+'
+'------------------------------------------------------------------------------
+'                           RESET PICKER PANEL HOVER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes hover formatting from the currently highlighted picker-panel item
+'
+' WHY THIS EXISTS
+'   Picker-panel hover formatting must be removed when the mouse moves away from
+'   an item, when the picker panel is hidden, or when another item is highlighted
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the currently highlighted picker item to its normal or selected
+'   visual state and clears the current picker-panel hover tracker
+'
+' ERROR POLICY
+'   Best-effort UI cleanup. Suppresses reset failures because hover reset should
+'   never interrupt UserForm interaction
+'
+' DEPENDENCIES
+'   UF_PickerPanel_EnsureCache
+'   mPickerTextLabels
+'   mPickerBackLabels
+'
+' NOTES
+'   This routine resets only the currently hovered picker item, not all 12 items
+'
+'   The picker-panel cache is rebuilt only when the requested cached label pair
+'   is missing
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PICKER_MODE_MONTHS    As Long = 1             'Month picker-panel mode
+    Const PICKER_MODE_YEARS     As Long = 2             'Year picker-panel mode
+
+    Dim HoveredIndex            As Long                 'Cached hovered picker item index
+    Dim IsSelected              As Boolean              'True when hovered item is selected
+    Dim CacheRefreshRequired    As Boolean              'True when cached labels must be rebuilt
+    Dim RawTagValue             As String               'Picker text label Tag value
+    
+    Dim Lbl_ItemBg              As MSForms.Label        'Picker item background label
+    Dim Lbl_Item                As MSForms.Label        'Picker item text label
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe error handling
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' EXIT IF NOTHING IS HOVERED
+'------------------------------------------------------------------------------
+    'Exit if no picker item is currently highlighted
+        If mHoveredPickerItemIndex = 0 Then Exit Sub
+    'Capture the hovered index before any best-effort operation
+        HoveredIndex = mHoveredPickerItemIndex
+
+'------------------------------------------------------------------------------
+' VALIDATE HOVER INDEX
+'------------------------------------------------------------------------------
+    'Clear hover state and exit when the stored hover index is no longer valid
+        If HoveredIndex < 1 Or HoveredIndex > DP_PICKER_ITEM_COUNT Then
+            GoTo Clean_Exit
+        End If
+
+'------------------------------------------------------------------------------
+' RETRIEVE CACHED PICKER LABELS
+'------------------------------------------------------------------------------
+    'Suppress cache probing errors
+        On Error Resume Next
+    'Retrieve the cached picker item background label
+        Set Lbl_ItemBg = mPickerBackLabels(HoveredIndex)
+    'Retrieve the cached picker item text label
+        Set Lbl_Item = mPickerTextLabels(HoveredIndex)
+    'Clear any suppressed cache probing error
+        Err.Clear
+    'Restore fail-safe error handling
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' RESTORE CACHE WHEN NEEDED
+'------------------------------------------------------------------------------
+    'Request cache refresh when the background label is missing
+        If Lbl_ItemBg Is Nothing Then CacheRefreshRequired = True
+    'Request cache refresh when the text label is missing
+        If Lbl_Item Is Nothing Then CacheRefreshRequired = True
+    'Rebuild missing cached references only when needed
+        If CacheRefreshRequired Then
+            'Ensure cached picker-panel references are available
+                UF_PickerPanel_EnsureCache
+            'Retrieve the cached picker item background label after cache refresh
+                Set Lbl_ItemBg = mPickerBackLabels(HoveredIndex)
+            'Retrieve the cached picker item text label after cache refresh
+                Set Lbl_Item = mPickerTextLabels(HoveredIndex)
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT IF LABELS ARE UNAVAILABLE
+'------------------------------------------------------------------------------
+    'Clear hover state and exit if the cached labels are unavailable
+        If Lbl_ItemBg Is Nothing Then GoTo Clean_Exit
+    'Clear hover state and exit if the cached labels are unavailable
+        If Lbl_Item Is Nothing Then GoTo Clean_Exit
+
+'------------------------------------------------------------------------------
+' RESOLVE SELECTED STATE
+'------------------------------------------------------------------------------
+    'Resolve whether the hovered month item is currently selected
+        If mPickerPanelMode = PICKER_MODE_MONTHS Then
+            IsSelected = (HoveredIndex = mDisplayMonth)
+        End If
+    'Resolve whether the hovered year item is currently selected
+        If mPickerPanelMode = PICKER_MODE_YEARS Then
+            'Read the picker item Tag safely
+                RawTagValue = VBA.Trim$(VBA.CStr(Lbl_Item.Tag))
+            'Evaluate numeric year tags only
+                If VBA.Len(RawTagValue) <> 0 Then
+                    If Not RawTagValue Like "*[!0-9]*" Then
+                        IsSelected = (VBA.CLng(RawTagValue) = mDisplayYear)
+                    End If
+                End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE NORMAL BACKGROUND STATE
+'------------------------------------------------------------------------------
+    'Restore the normal picker-item background state
+        With Lbl_ItemBg
+            .Caption = vbNullString
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_PICKER_ITEM_BACK_COLOR
+            .ForeColor = DP_PICKER_ITEM_FORE_COLOR
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = DP_PICKER_ITEM_BORDER_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+            .Enabled = True
+            .Visible = True
+        End With
+
+'------------------------------------------------------------------------------
+' RESTORE NORMAL TEXT STATE
+'------------------------------------------------------------------------------
+    'Restore the normal picker-item text state
+        With Lbl_Item
+            .BackStyle = fmBackStyleTransparent
+            .ForeColor = DP_PICKER_ITEM_FORE_COLOR
+            .BorderStyle = fmBorderStyleNone
+            .SpecialEffect = fmSpecialEffectFlat
+            .Enabled = True
+            .Visible = True
+        End With
+
+'------------------------------------------------------------------------------
+' RESTORE SELECTED STATE
+'------------------------------------------------------------------------------
+    'Restore selected-item formatting when applicable
+        If IsSelected Then
+            With Lbl_ItemBg
+                .BackColor = DP_DAY_SELECTED_BACK_COLOR
+                .BorderColor = DP_DAY_SELECTED_BACK_COLOR
+            End With
+            'Apply selected picker-item text formatting
+                Lbl_Item.ForeColor = DP_DAY_SELECTED_FORE_COLOR
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+Clean_Exit:
+    'Clear the current hovered picker item index
+        mHoveredPickerItemIndex = 0
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
+FailSafe:
+    'Suppress secondary cleanup errors
+        On Error Resume Next
+    'Clear the current hovered picker item index
+        mHoveredPickerItemIndex = 0
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
+Private Function UF_PickerPanel_ItemIndexFromLabelName(ByVal LabelName As String) As Long
+
+'
+'------------------------------------------------------------------------------
+'                    GET PICKER ITEM INDEX FROM LABEL NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the picker-panel item index from a picker-panel label name
+'
+' WHY THIS EXISTS
+'   Each picker-panel item is composed of two labels:
+'     - a background label
+'     - a text label
+'
+'   Hovering or clicking either label must resolve to the same picker item index
+'
+' INPUTS
+'   LabelName
+'     Picker-panel label name
+'
+' RETURNS
+'   Picker-panel item index from 1 to DP_PICKER_ITEM_COUNT
+'
+'   Zero when the label name is blank, unsupported, malformed, or outside the
+'   supported picker-item range
+'
+' BEHAVIOR
+'   Normalizes the supplied label name, checks the background-label prefix first,
+'   checks the text-label prefix second, extracts the numeric suffix, applies
+'   strict digit-only parsing, and returns the validated picker-item index
+'
+' ERROR POLICY
+'   Does not raise errors. Unsupported or malformed label names return zero
+'
+' DEPENDENCIES
+'   DP_PICKER_ITEM_COUNT
+'
+' NOTES
+'   The background-label prefix must be tested before the text-label prefix
+'   because Lbl_MonthYearBg also starts with Lbl_MonthYear
+'
+'   Matching is normalized with UCase$ so behavior is independent from
+'   Option Compare
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const BG_PREFIX         As String = "LBL_MONTHYEARBG"       'Picker background label prefix
+    Const TEXT_PREFIX       As String = "LBL_MONTHYEAR"         'Picker text label prefix
+
+    Dim EffectiveName       As String                           'Normalized picker label name
+    Dim RawIndex            As String                           'Raw numeric suffix
+    Dim ParsedIndex         As Long                             'Parsed picker item index
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe parsing
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Normalize the supplied label name
+        EffectiveName = VBA.UCase$(VBA.Trim$(LabelName))
+    'Return zero for empty label names
+        If VBA.Len(EffectiveName) = 0 Then
+            UF_PickerPanel_ItemIndexFromLabelName = 0
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE INDEX FROM BACKGROUND LABEL
+'------------------------------------------------------------------------------
+    'Resolve indexes from picker background labels first
+        If VBA.Left$(EffectiveName, VBA.Len(BG_PREFIX)) = BG_PREFIX Then
+            'Extract the raw numeric suffix
+                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(BG_PREFIX) + 1)
+            'Return zero when the suffix is empty
+                If VBA.Len(RawIndex) = 0 Then Exit Function
+            'Return zero when the suffix is not strictly numeric
+                If RawIndex Like "*[!0-9]*" Then Exit Function
+            'Parse the picker item index
+                ParsedIndex = VBA.CLng(RawIndex)
+            'Return zero when the index is outside the supported picker range
+                If ParsedIndex < 1 Or ParsedIndex > DP_PICKER_ITEM_COUNT Then Exit Function
+            'Return the validated picker item index
+                UF_PickerPanel_ItemIndexFromLabelName = ParsedIndex
+            'Exit after resolving the background label
+                Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE INDEX FROM TEXT LABEL
+'------------------------------------------------------------------------------
+    'Resolve indexes from picker text labels
+        If VBA.Left$(EffectiveName, VBA.Len(TEXT_PREFIX)) = TEXT_PREFIX Then
+            'Extract the raw numeric suffix
+                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(TEXT_PREFIX) + 1)
+            'Return zero when the suffix is empty
+                If VBA.Len(RawIndex) = 0 Then Exit Function
+            'Return zero when the suffix is not strictly numeric
+                If RawIndex Like "*[!0-9]*" Then Exit Function
+            'Parse the picker item index
+                ParsedIndex = VBA.CLng(RawIndex)
+            'Return zero when the index is outside the supported picker range
+                If ParsedIndex < 1 Or ParsedIndex > DP_PICKER_ITEM_COUNT Then Exit Function
+            'Return the validated picker item index
+                UF_PickerPanel_ItemIndexFromLabelName = ParsedIndex
+            'Exit after resolving the text label
+                Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN FALLBACK
+'------------------------------------------------------------------------------
+    'Return zero for unsupported picker label names
+        UF_PickerPanel_ItemIndexFromLabelName = 0
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit the function
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Return zero for malformed or oversized numeric suffixes
+        UF_PickerPanel_ItemIndexFromLabelName = 0
+
+End Function
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                                SETTINGS PANEL
+'
+'------------------------------------------------------------------------------
+'
+
 Private Sub UF_Settings_Show()
 
 '
@@ -7187,6 +9605,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Settings panel display failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_SettingsPanel_Build()
 
 '
@@ -7774,6 +10193,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Settings panel creation failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_SettingsPanel_Show()
 
 '
@@ -8510,6 +10930,101 @@ ErrorHandler:
             "Settings panel save failed: " & ErrorDescription
 
 End Sub
+
+Private Sub UF_SettingsPanel_Hide()
+
+'
+'------------------------------------------------------------------------------
+'                           HIDE SETTINGS PANEL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Hides the reusable settings panel
+'
+' WHY THIS EXISTS
+'   Settings is an overlay panel and must be removable without rebuilding the
+'   DatePicker grid or changing persisted settings
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resets settings-panel hover state, resolves Fra_Settings when available, and
+'   hides it safely
+'
+' ERROR POLICY
+'   Best-effort UI cleanup. Missing or stale settings-panel controls are treated
+'   as safe no-ops
+'
+' DEPENDENCIES
+'   UF_SettingsPanel_HoverReset
+'   DP_SETTINGS_PANEL_NAME
+'
+' NOTES
+'   This routine does not clear saved settings
+'
+'   This routine does not rebuild the settings panel
+'
+'   This routine intentionally does not raise outward because hiding an overlay
+'   panel should never interrupt DatePicker interaction
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ExistingControl     As MSForms.Control      'Control resolved by settings-panel name
+    Dim Fra_Settings        As MSForms.Frame        'Reusable settings panel
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress hide errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' RESET HOVER STATE
+'------------------------------------------------------------------------------
+    'Reset settings-panel hover before hiding the panel
+        UF_SettingsPanel_HoverReset
+    'Clear the settings-panel hover tracker defensively
+        mHoveredSettingsPanelLabelName = vbNullString
+
+'------------------------------------------------------------------------------
+' RESOLVE PANEL
+'------------------------------------------------------------------------------
+    'Retrieve the settings panel control when available
+        Set ExistingControl = Me.Controls(DP_SETTINGS_PANEL_NAME)
+    'Use the resolved control only when it is the expected frame
+        If Not ExistingControl Is Nothing Then
+            If VBA.TypeName(ExistingControl) = "Frame" Then
+                Set Fra_Settings = ExistingControl
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' HIDE PANEL
+'------------------------------------------------------------------------------
+    'Hide the settings panel when available
+        If Not Fra_Settings Is Nothing Then
+            Fra_Settings.Visible = False
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+Clean_Exit:
+    'Clear suppressed hide errors
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
 Public Sub UF_SettingsPanel_HoverApply(ByVal LabelName As String)
 
 '
@@ -8713,6 +11228,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Settings-panel hover application failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_SettingsPanel_HoverReset()
 
 '
@@ -8813,850 +11329,7 @@ Clean_Exit:
         On Error GoTo 0
 
 End Sub
-Private Sub UF_SettingsPanel_Hide()
 
-'
-'------------------------------------------------------------------------------
-'                           HIDE SETTINGS PANEL
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Hides the reusable settings panel
-'
-' WHY THIS EXISTS
-'   Settings is an overlay panel and must be removable without rebuilding the
-'   DatePicker grid or changing persisted settings
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Resets settings-panel hover state, resolves Fra_Settings when available, and
-'   hides it safely
-'
-' ERROR POLICY
-'   Best-effort UI cleanup. Missing or stale settings-panel controls are treated
-'   as safe no-ops
-'
-' DEPENDENCIES
-'   UF_SettingsPanel_HoverReset
-'   DP_SETTINGS_PANEL_NAME
-'
-' NOTES
-'   This routine does not clear saved settings
-'
-'   This routine does not rebuild the settings panel
-'
-'   This routine intentionally does not raise outward because hiding an overlay
-'   panel should never interrupt DatePicker interaction
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim ExistingControl     As MSForms.Control      'Control resolved by settings-panel name
-    Dim Fra_Settings        As MSForms.Frame        'Reusable settings panel
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress hide errors
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' RESET HOVER STATE
-'------------------------------------------------------------------------------
-    'Reset settings-panel hover before hiding the panel
-        UF_SettingsPanel_HoverReset
-    'Clear the settings-panel hover tracker defensively
-        mHoveredSettingsPanelLabelName = vbNullString
-
-'------------------------------------------------------------------------------
-' RESOLVE PANEL
-'------------------------------------------------------------------------------
-    'Retrieve the settings panel control when available
-        Set ExistingControl = Me.Controls(DP_SETTINGS_PANEL_NAME)
-    'Use the resolved control only when it is the expected frame
-        If Not ExistingControl Is Nothing Then
-            If VBA.TypeName(ExistingControl) = "Frame" Then
-                Set Fra_Settings = ExistingControl
-            End If
-        End If
-
-'------------------------------------------------------------------------------
-' HIDE PANEL
-'------------------------------------------------------------------------------
-    'Hide the settings panel when available
-        If Not Fra_Settings Is Nothing Then
-            Fra_Settings.Visible = False
-        End If
-
-'------------------------------------------------------------------------------
-' CLEAN EXIT
-'------------------------------------------------------------------------------
-Clean_Exit:
-    'Clear suppressed hide errors
-        Err.Clear
-    'Restore normal error handling
-        On Error GoTo 0
-
-End Sub
-Private Sub UF_SettingsTabs_Build( _
-    ByVal ParentFrame As MSForms.Frame, _
-    ByVal BodyFont As Object)
-
-'
-'------------------------------------------------------------------------------
-'                           BUILD SETTINGS TABS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Creates the label-based tab strip used by the settings panel
-'
-' WHY THIS EXISTS
-'   Native MSForms.MultiPage tabs are rendered by the host environment and cannot
-'   be styled reliably. A label-based tab strip gives the DatePicker full visual
-'   control while the hidden MultiPage remains responsible for page switching
-'
-' INPUTS
-'   ParentFrame
-'     Settings frame that owns the fake tab labels
-'
-'   BodyFont
-'     Clean font object used for the tab captions
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Creates or reuses the Display, Behavior, and Integration tab labels,
-'   formats them, registers their click / hover hooks, applies the initial tab
-'   visual state, and restores tab layering
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the parent frame, font, labels, or
-'   hooks cannot be resolved or created
-'
-' DEPENDENCIES
-'   UF_Ensure_FrameLabel
-'   UF_SettingsTab_ApplyVisualState
-'   cDatePickerLabelHook
-'   mSettingsPanelHooks
-'
-' NOTES
-'   The native MultiPage tab strip must remain hidden through fmTabStyleNone
-'
-'   This routine does not reset mSettingsPanelHooks because it may be called as
-'   part of the wider settings-panel build. It initializes the collection only
-'   when missing
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsTabs_Build"
-
-    Dim LabelHook               As cDatePickerLabelHook         'Runtime tab click / hover hook
-    Dim Lbl_TabDisplay          As MSForms.Label                'Display tab label
-    Dim Lbl_TabBehavior         As MSForms.Label                'Behavior tab label
-    Dim Lbl_TabIntegration      As MSForms.Label                'Integration tab label
-    Dim TabLeft                 As Single                       'Current tab left position
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-    'Create settings-panel hook storage when this routine is called independently
-        If mSettingsPanelHooks Is Nothing Then
-            Set mSettingsPanelHooks = New Collection
-        End If
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Reject a missing parent frame
-        If ParentFrame Is Nothing Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "ParentFrame cannot be Nothing"
-        End If
-    'Reject a missing body font
-        If BodyFont Is Nothing Then
-            Err.Raise vbObjectError + 514, PROC_NAME, "BodyFont cannot be Nothing"
-        End If
-
-'------------------------------------------------------------------------------
-' CREATE / FORMAT DISPLAY TAB
-'------------------------------------------------------------------------------
-    'Initialize the first tab left position
-        TabLeft = DP_SETTINGS_TAB_LEFT
-
-    'Create or retrieve the Display tab label
-        Set Lbl_TabDisplay = UF_Ensure_FrameLabel(ParentFrame, DP_SETTINGS_TAB_DISPLAY_NAME)
-    'Apply layout and visual properties to the Display tab
-        With Lbl_TabDisplay
-            .Caption = DP_SETTINGS_TAB_DISPLAY_CAPTION
-            .Left = TabLeft
-            .Top = DP_SETTINGS_TAB_TOP
-            .Width = DP_SETTINGS_TAB_DISPLAY_WIDTH
-            .Height = DP_SETTINGS_TAB_HEIGHT
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_SETTINGS_TAB_SELECTED_BACK_COLOR
-            .ForeColor = DP_SETTINGS_TAB_SELECTED_FORE_COLOR
-            .BorderStyle = fmBorderStyleSingle
-            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .TextAlign = fmTextAlignCenter
-            .WordWrap = False
-            .Enabled = True
-            .Visible = True
-            .MousePointer = fmMousePointerCustom
-            .ControlTipText = DP_SETTINGS_PAGE_DISPLAY_CAPTION
-        End With
-    'Assign the clean body font to the Display tab
-        Set Lbl_TabDisplay.Font = BodyFont
-    'Remove any previous Display tab hook key when rebuilding independently
-        On Error Resume Next
-        mSettingsPanelHooks.Remove Lbl_TabDisplay.Name
-        Err.Clear
-        On Error GoTo ErrorHandler
-    'Create the Display tab click / hover hook
-        Set LabelHook = New cDatePickerLabelHook
-    'Connect the Display tab to the Display Settings page
-        LabelHook.Initialize Me, Lbl_TabDisplay, "SHOW_SETTINGS_DISPLAY", "SETTINGS"
-    'Store the hook so that the click / hover events remain alive
-        mSettingsPanelHooks.Add LabelHook, Lbl_TabDisplay.Name
-
-'------------------------------------------------------------------------------
-' CREATE / FORMAT BEHAVIOR TAB
-'------------------------------------------------------------------------------
-    'Advance the tab left position
-        TabLeft = TabLeft + DP_SETTINGS_TAB_DISPLAY_WIDTH + DP_SETTINGS_TAB_GAP
-
-    'Create or retrieve the Behavior tab label
-        Set Lbl_TabBehavior = UF_Ensure_FrameLabel(ParentFrame, DP_SETTINGS_TAB_BEHAVIOR_NAME)
-    'Apply layout and visual properties to the Behavior tab
-        With Lbl_TabBehavior
-            .Caption = DP_SETTINGS_TAB_BEHAVIOR_CAPTION
-            .Left = TabLeft
-            .Top = DP_SETTINGS_TAB_TOP
-            .Width = DP_SETTINGS_TAB_BEHAVIOR_WIDTH
-            .Height = DP_SETTINGS_TAB_HEIGHT
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_SETTINGS_TAB_NORMAL_BACK_COLOR
-            .ForeColor = DP_SETTINGS_TAB_NORMAL_FORE_COLOR
-            .BorderStyle = fmBorderStyleSingle
-            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .TextAlign = fmTextAlignCenter
-            .WordWrap = False
-            .Enabled = True
-            .Visible = True
-            .MousePointer = fmMousePointerCustom
-            .ControlTipText = DP_SETTINGS_PAGE_BEHAVIOR_CAPTION
-        End With
-    'Assign the clean body font to the Behavior tab
-        Set Lbl_TabBehavior.Font = BodyFont
-    'Remove any previous Behavior tab hook key when rebuilding independently
-        On Error Resume Next
-        mSettingsPanelHooks.Remove Lbl_TabBehavior.Name
-        Err.Clear
-        On Error GoTo ErrorHandler
-    'Create the Behavior tab click / hover hook
-        Set LabelHook = New cDatePickerLabelHook
-    'Connect the Behavior tab to the Behavior Settings page
-        LabelHook.Initialize Me, Lbl_TabBehavior, "SHOW_SETTINGS_BEHAVIOR", "SETTINGS"
-    'Store the hook so that the click / hover events remain alive
-        mSettingsPanelHooks.Add LabelHook, Lbl_TabBehavior.Name
-
-'------------------------------------------------------------------------------
-' CREATE / FORMAT INTEGRATION TAB
-'------------------------------------------------------------------------------
-    'Advance the tab left position
-        TabLeft = TabLeft + DP_SETTINGS_TAB_BEHAVIOR_WIDTH + DP_SETTINGS_TAB_GAP
-
-    'Create or retrieve the Integration tab label
-        Set Lbl_TabIntegration = UF_Ensure_FrameLabel(ParentFrame, DP_SETTINGS_TAB_INTEGRATION_NAME)
-    'Apply layout and visual properties to the Integration tab
-        With Lbl_TabIntegration
-            .Caption = DP_SETTINGS_TAB_INTEGRATION_CAPTION
-            .Left = TabLeft
-            .Top = DP_SETTINGS_TAB_TOP
-            .Width = DP_SETTINGS_TAB_INTEGRATION_WIDTH
-            .Height = DP_SETTINGS_TAB_HEIGHT
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_SETTINGS_TAB_NORMAL_BACK_COLOR
-            .ForeColor = DP_SETTINGS_TAB_NORMAL_FORE_COLOR
-            .BorderStyle = fmBorderStyleSingle
-            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .TextAlign = fmTextAlignCenter
-            .WordWrap = False
-            .Enabled = True
-            .Visible = True
-            .MousePointer = fmMousePointerCustom
-            .ControlTipText = DP_SETTINGS_PAGE_INTEGRATION_CAPTION
-        End With
-    'Assign the clean body font to the Integration tab
-        Set Lbl_TabIntegration.Font = BodyFont
-    'Remove any previous Integration tab hook key when rebuilding independently
-        On Error Resume Next
-        mSettingsPanelHooks.Remove Lbl_TabIntegration.Name
-        Err.Clear
-        On Error GoTo ErrorHandler
-    'Create the Integration tab click / hover hook
-        Set LabelHook = New cDatePickerLabelHook
-    'Connect the Integration tab to the Integration Settings page
-        LabelHook.Initialize Me, Lbl_TabIntegration, "SHOW_SETTINGS_INTEGRATION", "SETTINGS"
-    'Store the hook so that the click / hover events remain alive
-        mSettingsPanelHooks.Add LabelHook, Lbl_TabIntegration.Name
-
-'------------------------------------------------------------------------------
-' APPLY INITIAL VISUAL STATE
-'------------------------------------------------------------------------------
-    'Apply selected state to the tabs
-        UF_SettingsTab_ApplyVisualState Lbl_TabDisplay, True
-        UF_SettingsTab_ApplyVisualState Lbl_TabBehavior, False
-        UF_SettingsTab_ApplyVisualState Lbl_TabIntegration, False
-
-'------------------------------------------------------------------------------
-' RESTORE LAYERING
-'------------------------------------------------------------------------------
-    'Move the tabs to the front
-        Lbl_TabDisplay.ZOrder 0
-        Lbl_TabBehavior.ZOrder 0
-        Lbl_TabIntegration.ZOrder 0
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings tab creation failed: " & Err.Description
-
-End Sub
-Private Sub UF_SettingsPanel_SelectPage(ByVal PageIndex As Long)
-
-'
-'------------------------------------------------------------------------------
-'                           SELECT SETTINGS PAGE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Selects one settings MultiPage page through the label-based tab strip
-'
-' WHY THIS EXISTS
-'   The native MultiPage tabs are hidden. Page navigation is therefore routed
-'   through fake tab labels
-'
-' INPUTS
-'   PageIndex
-'     Zero-based settings page index
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Validates the requested page, resolves Fra_Settings and Mp_Settings safely,
-'   changes the selected MultiPage page, clears settings-header hover state, and
-'   refreshes the visual state of the fake tabs
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the settings panel, MultiPage, or page
-'   index is invalid
-'
-' DEPENDENCIES
-'   UF_SettingsPanel_HoverReset
-'   UF_SettingsTabs_RefreshVisualState
-'
-' NOTES
-'   This routine does not rebuild the settings panel
-'
-'   The settings panel currently supports three pages:
-'     - 0 Display Settings
-'     - 1 Behavior Settings
-'     - 2 Integration Settings
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsPanel_SelectPage"
-    
-    Const SETTINGS_PAGE_FIRST   As Long = 0                 'First supported settings page index
-    Const SETTINGS_PAGE_LAST    As Long = 2                 'Last supported settings page index
-
-    Dim ExistingControl         As MSForms.Control          'Control resolved by name
-    Dim Fra_Settings            As MSForms.Frame            'Reusable settings panel
-    Dim Mp_Settings             As MSForms.MultiPage        'Settings MultiPage
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Reject unsupported page indexes
-        If PageIndex < SETTINGS_PAGE_FIRST Or PageIndex > SETTINGS_PAGE_LAST Then
-            Err.Raise vbObjectError + 513, PROC_NAME, _
-                "PageIndex must be between " & VBA.CStr(SETTINGS_PAGE_FIRST) & _
-                " and " & VBA.CStr(SETTINGS_PAGE_LAST)
-        End If
-
-'------------------------------------------------------------------------------
-' RETRIEVE SETTINGS PANEL
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the settings panel
-        On Error Resume Next
-    'Retrieve the settings panel control
-        Set ExistingControl = Me.Controls(DP_SETTINGS_PANEL_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing settings panel
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "Unable to resolve expected settings panel " & DP_SETTINGS_PANEL_NAME
-        End If
-    'Reject a name collision with a non-frame control
-        If VBA.TypeName(ExistingControl) <> "Frame" Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "Control '" & DP_SETTINGS_PANEL_NAME & "' exists but is not an MSForms.Frame"
-        End If
-    'Use the resolved settings panel frame
-        Set Fra_Settings = ExistingControl
-
-'------------------------------------------------------------------------------
-' RETRIEVE SETTINGS MULTIPAGE
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the settings MultiPage
-        On Error Resume Next
-    'Retrieve the settings MultiPage control
-        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_MULTIPAGE_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing settings MultiPage
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "Unable to resolve expected settings MultiPage " & DP_SETTINGS_MULTIPAGE_NAME
-        End If
-    'Reject a name collision with a non-MultiPage control
-        If VBA.TypeName(ExistingControl) <> "MultiPage" Then
-            Err.Raise vbObjectError + 517, PROC_NAME, _
-                "Control '" & DP_SETTINGS_MULTIPAGE_NAME & "' exists but is not an MSForms.MultiPage"
-        End If
-    'Use the resolved settings MultiPage
-        Set Mp_Settings = ExistingControl
-
-'------------------------------------------------------------------------------
-' VALIDATE MULTIPAGE STATE
-'------------------------------------------------------------------------------
-    'Reject page indexes outside the actual MultiPage page count
-        If PageIndex > Mp_Settings.Pages.Count - 1 Then
-            Err.Raise vbObjectError + 518, PROC_NAME, _
-                "PageIndex exceeds the current MultiPage page count"
-        End If
-
-'------------------------------------------------------------------------------
-' RESET SETTINGS HOVER STATE
-'------------------------------------------------------------------------------
-    'Clear Save / Close hover state before switching settings page
-        UF_SettingsPanel_HoverReset
-
-'------------------------------------------------------------------------------
-' SELECT PAGE
-'------------------------------------------------------------------------------
-    'Select the requested settings page
-        Mp_Settings.Value = PageIndex
-
-'------------------------------------------------------------------------------
-' REFRESH TAB VISUAL STATE
-'------------------------------------------------------------------------------
-    'Refresh the fake settings tab visual state
-        UF_SettingsTabs_RefreshVisualState PageIndex
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings page selection failed: " & Err.Description
-
-End Sub
-Private Sub UF_SettingsTabs_RefreshVisualState( _
-    Optional ByVal ActivePageIndex As Long = -1)
-
-'
-'------------------------------------------------------------------------------
-'                       REFRESH SETTINGS TAB VISUAL STATE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Refreshes the selected / unselected formatting of the fake settings tabs
-'
-' WHY THIS EXISTS
-'   The hidden MultiPage no longer displays native tabs. The label-based tabs
-'   must therefore reflect the active page explicitly
-'
-' INPUTS
-'   ActivePageIndex
-'     Optional zero-based active page index. If omitted, the routine reads the
-'     current value from Mp_Settings
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Resolves the settings panel, MultiPage, and fake tab labels, determines the
-'   active settings page, applies selected formatting to the active tab, applies
-'   normal formatting to the remaining tabs, and restores tab layering
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the settings panel, MultiPage, tab
-'   labels, or active page index cannot be resolved
-'
-' DEPENDENCIES
-'   UF_SettingsTab_ApplyVisualState
-'
-' NOTES
-'   This routine changes only visual state
-'
-'   Developer-owned settings-tab constants are intentionally not validated here.
-'   They should be checked by a dedicated debug or regression routine
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsTabs_RefreshVisualState"
-    
-    Const SETTINGS_PAGE_FIRST   As Long = 0                     'First supported settings page index
-    Const SETTINGS_PAGE_LAST    As Long = 2                     'Last supported settings page index
-
-    Dim ExistingControl         As MSForms.Control              'Control resolved by name
-    Dim Fra_Settings            As MSForms.Frame                'Reusable settings panel
-    Dim Mp_Settings             As MSForms.MultiPage            'Settings MultiPage
-    Dim Lbl_TabDisplay          As MSForms.Label                'Display tab label
-    Dim Lbl_TabBehavior         As MSForms.Label                'Behavior tab label
-    Dim Lbl_TabIntegration      As MSForms.Label                'Integration tab label
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' RETRIEVE SETTINGS PANEL
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the settings panel
-        On Error Resume Next
-    'Retrieve the settings panel control
-        Set ExistingControl = Me.Controls(DP_SETTINGS_PANEL_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing settings panel
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 513, PROC_NAME, _
-                "Unable to resolve expected settings panel " & DP_SETTINGS_PANEL_NAME
-        End If
-    'Reject a name collision with a non-frame control
-        If VBA.TypeName(ExistingControl) <> "Frame" Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "Control '" & DP_SETTINGS_PANEL_NAME & "' exists but is not an MSForms.Frame"
-        End If
-    'Use the resolved settings panel frame
-        Set Fra_Settings = ExistingControl
-
-'------------------------------------------------------------------------------
-' RETRIEVE SETTINGS MULTIPAGE
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the settings MultiPage
-        On Error Resume Next
-    'Retrieve the settings MultiPage control
-        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_MULTIPAGE_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing settings MultiPage
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "Unable to resolve expected settings MultiPage " & DP_SETTINGS_MULTIPAGE_NAME
-        End If
-    'Reject a name collision with a non-MultiPage control
-        If VBA.TypeName(ExistingControl) <> "MultiPage" Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "Control '" & DP_SETTINGS_MULTIPAGE_NAME & "' exists but is not an MSForms.MultiPage"
-        End If
-    'Use the resolved settings MultiPage
-        Set Mp_Settings = ExistingControl
-
-'------------------------------------------------------------------------------
-' RESOLVE ACTIVE PAGE
-'------------------------------------------------------------------------------
-    'Resolve the active page index from the MultiPage when not supplied
-        If ActivePageIndex < SETTINGS_PAGE_FIRST Then
-            ActivePageIndex = Mp_Settings.Value
-        End If
-    'Reject unsupported active page indexes
-        If ActivePageIndex < SETTINGS_PAGE_FIRST Or ActivePageIndex > SETTINGS_PAGE_LAST Then
-            Err.Raise vbObjectError + 517, PROC_NAME, _
-                "ActivePageIndex must be between " & VBA.CStr(SETTINGS_PAGE_FIRST) & _
-                " and " & VBA.CStr(SETTINGS_PAGE_LAST)
-        End If
-    'Reject active page indexes outside the actual MultiPage page count
-        If ActivePageIndex > Mp_Settings.Pages.Count - 1 Then
-            Err.Raise vbObjectError + 518, PROC_NAME, _
-                "ActivePageIndex exceeds the current MultiPage page count"
-        End If
-
-'------------------------------------------------------------------------------
-' RETRIEVE DISPLAY TAB
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the Display tab
-        On Error Resume Next
-    'Retrieve the Display tab label
-        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_TAB_DISPLAY_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing Display tab
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 519, PROC_NAME, _
-                "Unable to resolve expected settings tab " & DP_SETTINGS_TAB_DISPLAY_NAME
-        End If
-    'Reject a name collision with a non-label control
-        If VBA.TypeName(ExistingControl) <> "Label" Then
-            Err.Raise vbObjectError + 520, PROC_NAME, _
-                "Control '" & DP_SETTINGS_TAB_DISPLAY_NAME & "' exists but is not an MSForms.Label"
-        End If
-    'Use the resolved Display tab label
-        Set Lbl_TabDisplay = ExistingControl
-
-'------------------------------------------------------------------------------
-' RETRIEVE BEHAVIOR TAB
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the Behavior tab
-        On Error Resume Next
-    'Retrieve the Behavior tab label
-        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_TAB_BEHAVIOR_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing Behavior tab
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 521, PROC_NAME, _
-                "Unable to resolve expected settings tab " & DP_SETTINGS_TAB_BEHAVIOR_NAME
-        End If
-    'Reject a name collision with a non-label control
-        If VBA.TypeName(ExistingControl) <> "Label" Then
-            Err.Raise vbObjectError + 522, PROC_NAME, _
-                "Control '" & DP_SETTINGS_TAB_BEHAVIOR_NAME & "' exists but is not an MSForms.Label"
-        End If
-    'Use the resolved Behavior tab label
-        Set Lbl_TabBehavior = ExistingControl
-
-'------------------------------------------------------------------------------
-' RETRIEVE INTEGRATION TAB
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the Integration tab
-        On Error Resume Next
-    'Retrieve the Integration tab label
-        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_TAB_INTEGRATION_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing Integration tab
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 523, PROC_NAME, _
-                "Unable to resolve expected settings tab " & DP_SETTINGS_TAB_INTEGRATION_NAME
-        End If
-    'Reject a name collision with a non-label control
-        If VBA.TypeName(ExistingControl) <> "Label" Then
-            Err.Raise vbObjectError + 524, PROC_NAME, _
-                "Control '" & DP_SETTINGS_TAB_INTEGRATION_NAME & "' exists but is not an MSForms.Label"
-        End If
-    'Use the resolved Integration tab label
-        Set Lbl_TabIntegration = ExistingControl
-
-'------------------------------------------------------------------------------
-' APPLY TAB VISUAL STATE
-'------------------------------------------------------------------------------
-    'Refresh the tabs visual state
-        UF_SettingsTab_ApplyVisualState Lbl_TabDisplay, (ActivePageIndex = 0)
-        UF_SettingsTab_ApplyVisualState Lbl_TabBehavior, (ActivePageIndex = 1)
-        UF_SettingsTab_ApplyVisualState Lbl_TabIntegration, (ActivePageIndex = 2)
-
-'------------------------------------------------------------------------------
-' RESTORE LAYERING
-'------------------------------------------------------------------------------
-    'Move the tab to the front
-        Lbl_TabDisplay.ZOrder 0
-        Lbl_TabBehavior.ZOrder 0
-        Lbl_TabIntegration.ZOrder 0
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings tab visual refresh failed: " & Err.Description
-
-End Sub
-Private Sub UF_SettingsTab_ApplyVisualState( _
-    ByVal TabLabel As MSForms.Label, _
-    ByVal IsSelected As Boolean)
-
-'
-'------------------------------------------------------------------------------
-'                       APPLY SETTINGS TAB VISUAL STATE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Applies selected or normal formatting to one fake settings tab
-'
-' WHY THIS EXISTS
-'   The fake tab strip needs deterministic formatting independent from the native
-'   MultiPage renderer
-'
-' INPUTS
-'   TabLabel
-'     Tab label to format
-'
-'   IsSelected
-'     True to apply selected-tab formatting
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Applies common tab formatting and then selected or normal colors
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if TabLabel is missing or cannot be
-'   formatted
-'
-' DEPENDENCIES
-'   None
-'
-' NOTES
-'   This routine does not change the MultiPage value
-'
-'   Developer-owned tab color constants are intentionally not validated here.
-'   They should be checked by a dedicated debug or regression routine
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "UF_DatePicker.UF_SettingsTab_ApplyVisualState"
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Reject a missing tab label
-        If TabLabel Is Nothing Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "TabLabel cannot be Nothing"
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY COMMON TAB STATE
-'------------------------------------------------------------------------------
-    'Apply shared tab formatting
-        With TabLabel
-            .BackStyle = fmBackStyleOpaque
-            .BorderStyle = fmBorderStyleSingle
-            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .Enabled = True
-            .Visible = True
-        End With
-
-'------------------------------------------------------------------------------
-' APPLY SELECTED OR NORMAL COLORS
-'------------------------------------------------------------------------------
-    'Apply selected-tab colors when requested
-        If IsSelected Then
-            With TabLabel
-                .BackColor = DP_SETTINGS_TAB_SELECTED_BACK_COLOR
-                .ForeColor = DP_SETTINGS_TAB_SELECTED_FORE_COLOR
-            End With
-        Else
-            With TabLabel
-                .BackColor = DP_SETTINGS_TAB_NORMAL_BACK_COLOR
-                .ForeColor = DP_SETTINGS_TAB_NORMAL_FORE_COLOR
-            End With
-        End If
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings tab visual-state application failed: " & Err.Description
-
-End Sub
 Private Sub UF_SettingsPanel_RefreshCaptions()
 
 '
@@ -9937,64 +11610,63 @@ ErrorHandler:
             "Settings panel value refresh failed: " & Err.Description
 
 End Sub
-Private Sub UF_SettingsCheckBox_Format( _
-    ByVal TargetCheckBox As MSForms.CheckBox, _
-    ByVal CaptionText As String, _
-    ByVal ControlLeft As Single, _
-    ByVal ControlTop As Single)
+
 
 '
 '------------------------------------------------------------------------------
-'                           FORMAT SETTINGS CHECKBOX
+'
+'                           SETTINGS TABS AND PAGE SUPPORT
+'
+'------------------------------------------------------------------------------
+'
+
+Private Sub UF_SettingsTabs_Build( _
+    ByVal ParentFrame As MSForms.Frame, _
+    ByVal BodyFont As Object)
+
+'
+'------------------------------------------------------------------------------
+'                           BUILD SETTINGS TABS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Applies deterministic formatting to one settings CheckBox
+'   Creates the label-based tab strip used by the settings panel
 '
 ' WHY THIS EXISTS
-'   Runtime-created and reused MSForms CheckBox controls can retain stale font
-'   states when their existing Font object is edited in place or when a shared
-'   font object is reused
-'
-'   Assigning a fresh cloned StdFont object to each CheckBox removes stale
-'   Italic, Underline, and Strikethrough states consistently
+'   Native MSForms.MultiPage tabs are rendered by the host environment and cannot
+'   be styled reliably. A label-based tab strip gives the DatePicker full visual
+'   control while the hidden MultiPage remains responsible for page switching
 '
 ' INPUTS
-'   TargetCheckBox
-'     CheckBox control to format
+'   ParentFrame
+'     Settings frame that owns the fake tab labels
 '
-'   CaptionText
-'     Caption to display
-'
-'   ControlLeft
-'     Left position inside the parent page
-'
-'   ControlTop
-'     Top position inside the parent page
+'   BodyFont
+'     Clean font object used for the tab captions
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Clears the caption, applies layout and visual state, assigns a fresh font,
-'   restores the caption, and preserves the current CheckBox value
+'   Creates or reuses the Display, Behavior, and Integration tab labels,
+'   formats them, registers their click / hover hooks, applies the initial tab
+'   visual state, and restores tab layering
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if TargetCheckBox is missing or the
-'   CheckBox cannot be formatted
+'   Raises a descriptive runtime error if the parent frame, font, labels, or
+'   hooks cannot be resolved or created
 '
 ' DEPENDENCIES
-'   UF_SettingsCheckBoxFont_Create
-'   DP_SETTINGS_CHECKBOX_WIDTH
-'   DP_SETTINGS_CHECKBOX_HEIGHT
+'   UF_Ensure_FrameLabel
+'   UF_SettingsTab_ApplyVisualState
+'   cDatePickerLabelHook
+'   mSettingsPanelHooks
 '
 ' NOTES
-'   The caption is assigned after the fresh font is assigned
+'   The native MultiPage tab strip must remain hidden through fmTabStyleNone
 '
-'   The CheckBox Value property is intentionally not changed here. Value refresh
-'   is handled separately by UF_SettingsPanel_RefreshCaptions
-'
-'   Developer-owned CheckBox layout constants are intentionally not validated
-'   here. They should be checked by a dedicated debug or regression routine
+'   This routine does not reset mSettingsPanelHooks because it may be called as
+'   part of the wider settings-panel build. It initializes the collection only
+'   when missing
 '
 ' UPDATED
 '   2026-05-02
@@ -10003,54 +11675,177 @@ Private Sub UF_SettingsCheckBox_Format( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_SettingsCheckBox_Format"
+    Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsTabs_Build"
 
-    Dim CheckBoxFont        As Object       'Fresh CheckBox font object
+    Dim LabelHook               As cDatePickerLabelHook         'Runtime tab click / hover hook
+    Dim Lbl_TabDisplay          As MSForms.Label                'Display tab label
+    Dim Lbl_TabBehavior         As MSForms.Label                'Behavior tab label
+    Dim Lbl_TabIntegration      As MSForms.Label                'Integration tab label
+    Dim TabLeft                 As Single                       'Current tab left position
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Create settings-panel hook storage when this routine is called independently
+        If mSettingsPanelHooks Is Nothing Then
+            Set mSettingsPanelHooks = New Collection
+        End If
 
 '------------------------------------------------------------------------------
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
-    'Reject a missing CheckBox
-        If TargetCheckBox Is Nothing Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "TargetCheckBox cannot be Nothing"
+    'Reject a missing parent frame
+        If ParentFrame Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "ParentFrame cannot be Nothing"
+        End If
+    'Reject a missing body font
+        If BodyFont Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "BodyFont cannot be Nothing"
         End If
 
 '------------------------------------------------------------------------------
-' CREATE FRESH FONT
+' CREATE / FORMAT DISPLAY TAB
 '------------------------------------------------------------------------------
-    'Create a fresh independent CheckBox font
-        Set CheckBoxFont = UF_SettingsCheckBoxFont_Create()
+    'Initialize the first tab left position
+        TabLeft = DP_SETTINGS_TAB_LEFT
 
-'------------------------------------------------------------------------------
-' FORMAT CHECKBOX
-'------------------------------------------------------------------------------
-    'Apply deterministic CheckBox formatting
-        With TargetCheckBox
-            .Caption = VBA.vbNullString
-            .Left = ControlLeft
-            .Top = ControlTop
-            .Width = DP_SETTINGS_CHECKBOX_WIDTH
-            .Height = DP_SETTINGS_CHECKBOX_HEIGHT
-            .AutoSize = False
-            .BackStyle = fmBackStyleTransparent
-            .ForeColor = DP_FOOTER_FORE_COLOR
-            .TripleState = False
+    'Create or retrieve the Display tab label
+        Set Lbl_TabDisplay = UF_Ensure_FrameLabel(ParentFrame, DP_SETTINGS_TAB_DISPLAY_NAME)
+    'Apply layout and visual properties to the Display tab
+        With Lbl_TabDisplay
+            .Caption = DP_SETTINGS_TAB_DISPLAY_CAPTION
+            .Left = TabLeft
+            .Top = DP_SETTINGS_TAB_TOP
+            .Width = DP_SETTINGS_TAB_DISPLAY_WIDTH
+            .Height = DP_SETTINGS_TAB_HEIGHT
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_SETTINGS_TAB_SELECTED_BACK_COLOR
+            .ForeColor = DP_SETTINGS_TAB_SELECTED_FORE_COLOR
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
             .SpecialEffect = fmSpecialEffectFlat
-            .TabStop = False
+            .TextAlign = fmTextAlignCenter
+            .WordWrap = False
             .Enabled = True
             .Visible = True
-            .ControlTipText = CaptionText
+            .MousePointer = fmMousePointerCustom
+            .ControlTipText = DP_SETTINGS_PAGE_DISPLAY_CAPTION
         End With
-    'Assign the fresh font object
-        Set TargetCheckBox.Font = CheckBoxFont
-    'Apply the caption after assigning the fresh font
-        TargetCheckBox.Caption = CaptionText
+    'Assign the clean body font to the Display tab
+        Set Lbl_TabDisplay.Font = BodyFont
+    'Remove any previous Display tab hook key when rebuilding independently
+        On Error Resume Next
+        mSettingsPanelHooks.Remove Lbl_TabDisplay.Name
+        Err.Clear
+        On Error GoTo ErrorHandler
+    'Create the Display tab click / hover hook
+        Set LabelHook = New cDatePickerLabelHook
+    'Connect the Display tab to the Display Settings page
+        LabelHook.Initialize Me, Lbl_TabDisplay, "SHOW_SETTINGS_DISPLAY", "SETTINGS"
+    'Store the hook so that the click / hover events remain alive
+        mSettingsPanelHooks.Add LabelHook, Lbl_TabDisplay.Name
+
+'------------------------------------------------------------------------------
+' CREATE / FORMAT BEHAVIOR TAB
+'------------------------------------------------------------------------------
+    'Advance the tab left position
+        TabLeft = TabLeft + DP_SETTINGS_TAB_DISPLAY_WIDTH + DP_SETTINGS_TAB_GAP
+
+    'Create or retrieve the Behavior tab label
+        Set Lbl_TabBehavior = UF_Ensure_FrameLabel(ParentFrame, DP_SETTINGS_TAB_BEHAVIOR_NAME)
+    'Apply layout and visual properties to the Behavior tab
+        With Lbl_TabBehavior
+            .Caption = DP_SETTINGS_TAB_BEHAVIOR_CAPTION
+            .Left = TabLeft
+            .Top = DP_SETTINGS_TAB_TOP
+            .Width = DP_SETTINGS_TAB_BEHAVIOR_WIDTH
+            .Height = DP_SETTINGS_TAB_HEIGHT
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_SETTINGS_TAB_NORMAL_BACK_COLOR
+            .ForeColor = DP_SETTINGS_TAB_NORMAL_FORE_COLOR
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+            .TextAlign = fmTextAlignCenter
+            .WordWrap = False
+            .Enabled = True
+            .Visible = True
+            .MousePointer = fmMousePointerCustom
+            .ControlTipText = DP_SETTINGS_PAGE_BEHAVIOR_CAPTION
+        End With
+    'Assign the clean body font to the Behavior tab
+        Set Lbl_TabBehavior.Font = BodyFont
+    'Remove any previous Behavior tab hook key when rebuilding independently
+        On Error Resume Next
+        mSettingsPanelHooks.Remove Lbl_TabBehavior.Name
+        Err.Clear
+        On Error GoTo ErrorHandler
+    'Create the Behavior tab click / hover hook
+        Set LabelHook = New cDatePickerLabelHook
+    'Connect the Behavior tab to the Behavior Settings page
+        LabelHook.Initialize Me, Lbl_TabBehavior, "SHOW_SETTINGS_BEHAVIOR", "SETTINGS"
+    'Store the hook so that the click / hover events remain alive
+        mSettingsPanelHooks.Add LabelHook, Lbl_TabBehavior.Name
+
+'------------------------------------------------------------------------------
+' CREATE / FORMAT INTEGRATION TAB
+'------------------------------------------------------------------------------
+    'Advance the tab left position
+        TabLeft = TabLeft + DP_SETTINGS_TAB_BEHAVIOR_WIDTH + DP_SETTINGS_TAB_GAP
+
+    'Create or retrieve the Integration tab label
+        Set Lbl_TabIntegration = UF_Ensure_FrameLabel(ParentFrame, DP_SETTINGS_TAB_INTEGRATION_NAME)
+    'Apply layout and visual properties to the Integration tab
+        With Lbl_TabIntegration
+            .Caption = DP_SETTINGS_TAB_INTEGRATION_CAPTION
+            .Left = TabLeft
+            .Top = DP_SETTINGS_TAB_TOP
+            .Width = DP_SETTINGS_TAB_INTEGRATION_WIDTH
+            .Height = DP_SETTINGS_TAB_HEIGHT
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_SETTINGS_TAB_NORMAL_BACK_COLOR
+            .ForeColor = DP_SETTINGS_TAB_NORMAL_FORE_COLOR
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+            .TextAlign = fmTextAlignCenter
+            .WordWrap = False
+            .Enabled = True
+            .Visible = True
+            .MousePointer = fmMousePointerCustom
+            .ControlTipText = DP_SETTINGS_PAGE_INTEGRATION_CAPTION
+        End With
+    'Assign the clean body font to the Integration tab
+        Set Lbl_TabIntegration.Font = BodyFont
+    'Remove any previous Integration tab hook key when rebuilding independently
+        On Error Resume Next
+        mSettingsPanelHooks.Remove Lbl_TabIntegration.Name
+        Err.Clear
+        On Error GoTo ErrorHandler
+    'Create the Integration tab click / hover hook
+        Set LabelHook = New cDatePickerLabelHook
+    'Connect the Integration tab to the Integration Settings page
+        LabelHook.Initialize Me, Lbl_TabIntegration, "SHOW_SETTINGS_INTEGRATION", "SETTINGS"
+    'Store the hook so that the click / hover events remain alive
+        mSettingsPanelHooks.Add LabelHook, Lbl_TabIntegration.Name
+
+'------------------------------------------------------------------------------
+' APPLY INITIAL VISUAL STATE
+'------------------------------------------------------------------------------
+    'Apply selected state to the tabs
+        UF_SettingsTab_ApplyVisualState Lbl_TabDisplay, True
+        UF_SettingsTab_ApplyVisualState Lbl_TabBehavior, False
+        UF_SettingsTab_ApplyVisualState Lbl_TabIntegration, False
+
+'------------------------------------------------------------------------------
+' RESTORE LAYERING
+'------------------------------------------------------------------------------
+    'Move the tabs to the front
+        Lbl_TabDisplay.ZOrder 0
+        Lbl_TabBehavior.ZOrder 0
+        Lbl_TabIntegration.ZOrder 0
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -10063,48 +11858,50 @@ Private Sub UF_SettingsCheckBox_Format( _
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings CheckBox formatting failed: " & Err.Description
+        Err.Raise Err.Number, PROC_NAME, "Settings tab creation failed: " & Err.Description
 
 End Sub
-Private Function UF_SettingsCheckBoxFont_Create() As Object
+
+Private Sub UF_SettingsPanel_SelectPage(ByVal PageIndex As Long)
 
 '
 '------------------------------------------------------------------------------
-'                       CREATE SETTINGS CHECKBOX FONT
+'                           SELECT SETTINGS PAGE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Creates a fresh StdFont object for one settings CheckBox
+'   Selects one settings MultiPage page through the label-based tab strip
 '
 ' WHY THIS EXISTS
-'   Reused MSForms CheckBox controls can retain stale font states such as Italic,
-'   Underline, or Strikethrough
-'
-'   Assigning a newly created font object to each CheckBox gives each control a
-'   clean independent font state
+'   The native MultiPage tabs are hidden. Page navigation is therefore routed
+'   through fake tab labels
 '
 ' INPUTS
-'   None
+'   PageIndex
+'     Zero-based settings page index
 '
 ' RETURNS
-'   Fresh StdFont object configured for settings CheckBoxes
+'   Nothing
 '
 ' BEHAVIOR
-'   Creates and returns a new StdFont object with deterministic font properties
+'   Validates the requested page, resolves Fra_Settings and Mp_Settings safely,
+'   changes the selected MultiPage page, clears settings-header hover state, and
+'   refreshes the visual state of the fake tabs
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the font object cannot be created or
-'   configured
+'   Raises a descriptive runtime error if the settings panel, MultiPage, or page
+'   index is invalid
 '
 ' DEPENDENCIES
-'   StdFont
-'   DP_FORM_FONT_NAME
-'   DP_SETTINGS_CHECKBOX_FONT_SIZE
+'   UF_SettingsPanel_HoverReset
+'   UF_SettingsTabs_RefreshVisualState
 '
 ' NOTES
-'   Do not reuse the returned font object across multiple CheckBoxes
+'   This routine does not rebuild the settings panel
 '
-'   Developer-owned font constants are intentionally not validated here. They
-'   should be checked by a dedicated debug or regression routine
+'   The settings panel currently supports three pages:
+'     - 0 Display Settings
+'     - 1 Behavior Settings
+'     - 2 Integration Settings
 '
 ' UPDATED
 '   2026-05-02
@@ -10113,9 +11910,14 @@ Private Function UF_SettingsCheckBoxFont_Create() As Object
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "UF_DatePicker.UF_SettingsCheckBoxFont_Create"
+    Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsPanel_SelectPage"
     
-    Dim NewFont         As Object       'Fresh CheckBox font object
+    Const SETTINGS_PAGE_FIRST   As Long = 0                 'First supported settings page index
+    Const SETTINGS_PAGE_LAST    As Long = 2                 'Last supported settings page index
+
+    Dim ExistingControl         As MSForms.Control          'Control resolved by name
+    Dim Fra_Settings            As MSForms.Frame            'Reusable settings panel
+    Dim Mp_Settings             As MSForms.MultiPage        'Settings MultiPage
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10124,46 +11926,455 @@ Private Function UF_SettingsCheckBoxFont_Create() As Object
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' CREATE FONT
+' VALIDATE INPUTS
 '------------------------------------------------------------------------------
-    'Create a fresh font object
-        Set NewFont = CreateObject("StdFont")
-    'Configure the fresh font object
-        With NewFont
-            .Name = DP_FORM_FONT_NAME
-            .Size = DP_SETTINGS_CHECKBOX_FONT_SIZE
-            .Bold = False
-            .Italic = False
-            .Underline = False
-            .Strikethrough = False
-        End With
+    'Reject unsupported page indexes
+        If PageIndex < SETTINGS_PAGE_FIRST Or PageIndex > SETTINGS_PAGE_LAST Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "PageIndex must be between " & VBA.CStr(SETTINGS_PAGE_FIRST) & _
+                " and " & VBA.CStr(SETTINGS_PAGE_LAST)
+        End If
 
 '------------------------------------------------------------------------------
-' RETURN FONT
+' RETRIEVE SETTINGS PANEL
 '------------------------------------------------------------------------------
-    'Return the fresh font object
-        Set UF_SettingsCheckBoxFont_Create = NewFont
+    'Suppress lookup errors while resolving the settings panel
+        On Error Resume Next
+    'Retrieve the settings panel control
+        Set ExistingControl = Me.Controls(DP_SETTINGS_PANEL_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing settings panel
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "Unable to resolve expected settings panel " & DP_SETTINGS_PANEL_NAME
+        End If
+    'Reject a name collision with a non-frame control
+        If VBA.TypeName(ExistingControl) <> "Frame" Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Control '" & DP_SETTINGS_PANEL_NAME & "' exists but is not an MSForms.Frame"
+        End If
+    'Use the resolved settings panel frame
+        Set Fra_Settings = ExistingControl
+
+'------------------------------------------------------------------------------
+' RETRIEVE SETTINGS MULTIPAGE
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the settings MultiPage
+        On Error Resume Next
+    'Retrieve the settings MultiPage control
+        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_MULTIPAGE_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing settings MultiPage
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "Unable to resolve expected settings MultiPage " & DP_SETTINGS_MULTIPAGE_NAME
+        End If
+    'Reject a name collision with a non-MultiPage control
+        If VBA.TypeName(ExistingControl) <> "MultiPage" Then
+            Err.Raise vbObjectError + 517, PROC_NAME, _
+                "Control '" & DP_SETTINGS_MULTIPAGE_NAME & "' exists but is not an MSForms.MultiPage"
+        End If
+    'Use the resolved settings MultiPage
+        Set Mp_Settings = ExistingControl
+
+'------------------------------------------------------------------------------
+' VALIDATE MULTIPAGE STATE
+'------------------------------------------------------------------------------
+    'Reject page indexes outside the actual MultiPage page count
+        If PageIndex > Mp_Settings.Pages.Count - 1 Then
+            Err.Raise vbObjectError + 518, PROC_NAME, _
+                "PageIndex exceeds the current MultiPage page count"
+        End If
+
+'------------------------------------------------------------------------------
+' RESET SETTINGS HOVER STATE
+'------------------------------------------------------------------------------
+    'Clear Save / Close hover state before switching settings page
+        UF_SettingsPanel_HoverReset
+
+'------------------------------------------------------------------------------
+' SELECT PAGE
+'------------------------------------------------------------------------------
+    'Select the requested settings page
+        Mp_Settings.Value = PageIndex
+
+'------------------------------------------------------------------------------
+' REFRESH TAB VISUAL STATE
+'------------------------------------------------------------------------------
+    'Refresh the fake settings tab visual state
+        UF_SettingsTabs_RefreshVisualState PageIndex
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
     'Exit before the error handler
-        Exit Function
+        Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Suppress cleanup errors
-        On Error Resume Next
-    'Release any partially configured font object
-        Set NewFont = Nothing
-    'Restore normal error handling
-        On Error GoTo 0
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings CheckBox font creation failed: " & Err.Description
+        Err.Raise Err.Number, PROC_NAME, "Settings page selection failed: " & Err.Description
 
-End Function
+End Sub
+
+Private Sub UF_SettingsTabs_RefreshVisualState( _
+    Optional ByVal ActivePageIndex As Long = -1)
+
+'
+'------------------------------------------------------------------------------
+'                       REFRESH SETTINGS TAB VISUAL STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Refreshes the selected / unselected formatting of the fake settings tabs
+'
+' WHY THIS EXISTS
+'   The hidden MultiPage no longer displays native tabs. The label-based tabs
+'   must therefore reflect the active page explicitly
+'
+' INPUTS
+'   ActivePageIndex
+'     Optional zero-based active page index. If omitted, the routine reads the
+'     current value from Mp_Settings
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the settings panel, MultiPage, and fake tab labels, determines the
+'   active settings page, applies selected formatting to the active tab, applies
+'   normal formatting to the remaining tabs, and restores tab layering
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the settings panel, MultiPage, tab
+'   labels, or active page index cannot be resolved
+'
+' DEPENDENCIES
+'   UF_SettingsTab_ApplyVisualState
+'
+' NOTES
+'   This routine changes only visual state
+'
+'   Developer-owned settings-tab constants are intentionally not validated here.
+'   They should be checked by a dedicated debug or regression routine
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsTabs_RefreshVisualState"
+    
+    Const SETTINGS_PAGE_FIRST   As Long = 0                     'First supported settings page index
+    Const SETTINGS_PAGE_LAST    As Long = 2                     'Last supported settings page index
+
+    Dim ExistingControl         As MSForms.Control              'Control resolved by name
+    Dim Fra_Settings            As MSForms.Frame                'Reusable settings panel
+    Dim Mp_Settings             As MSForms.MultiPage            'Settings MultiPage
+    Dim Lbl_TabDisplay          As MSForms.Label                'Display tab label
+    Dim Lbl_TabBehavior         As MSForms.Label                'Behavior tab label
+    Dim Lbl_TabIntegration      As MSForms.Label                'Integration tab label
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RETRIEVE SETTINGS PANEL
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the settings panel
+        On Error Resume Next
+    'Retrieve the settings panel control
+        Set ExistingControl = Me.Controls(DP_SETTINGS_PANEL_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing settings panel
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "Unable to resolve expected settings panel " & DP_SETTINGS_PANEL_NAME
+        End If
+    'Reject a name collision with a non-frame control
+        If VBA.TypeName(ExistingControl) <> "Frame" Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "Control '" & DP_SETTINGS_PANEL_NAME & "' exists but is not an MSForms.Frame"
+        End If
+    'Use the resolved settings panel frame
+        Set Fra_Settings = ExistingControl
+
+'------------------------------------------------------------------------------
+' RETRIEVE SETTINGS MULTIPAGE
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the settings MultiPage
+        On Error Resume Next
+    'Retrieve the settings MultiPage control
+        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_MULTIPAGE_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing settings MultiPage
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Unable to resolve expected settings MultiPage " & DP_SETTINGS_MULTIPAGE_NAME
+        End If
+    'Reject a name collision with a non-MultiPage control
+        If VBA.TypeName(ExistingControl) <> "MultiPage" Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "Control '" & DP_SETTINGS_MULTIPAGE_NAME & "' exists but is not an MSForms.MultiPage"
+        End If
+    'Use the resolved settings MultiPage
+        Set Mp_Settings = ExistingControl
+
+'------------------------------------------------------------------------------
+' RESOLVE ACTIVE PAGE
+'------------------------------------------------------------------------------
+    'Resolve the active page index from the MultiPage when not supplied
+        If ActivePageIndex < SETTINGS_PAGE_FIRST Then
+            ActivePageIndex = Mp_Settings.Value
+        End If
+    'Reject unsupported active page indexes
+        If ActivePageIndex < SETTINGS_PAGE_FIRST Or ActivePageIndex > SETTINGS_PAGE_LAST Then
+            Err.Raise vbObjectError + 517, PROC_NAME, _
+                "ActivePageIndex must be between " & VBA.CStr(SETTINGS_PAGE_FIRST) & _
+                " and " & VBA.CStr(SETTINGS_PAGE_LAST)
+        End If
+    'Reject active page indexes outside the actual MultiPage page count
+        If ActivePageIndex > Mp_Settings.Pages.Count - 1 Then
+            Err.Raise vbObjectError + 518, PROC_NAME, _
+                "ActivePageIndex exceeds the current MultiPage page count"
+        End If
+
+'------------------------------------------------------------------------------
+' RETRIEVE DISPLAY TAB
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the Display tab
+        On Error Resume Next
+    'Retrieve the Display tab label
+        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_TAB_DISPLAY_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing Display tab
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 519, PROC_NAME, _
+                "Unable to resolve expected settings tab " & DP_SETTINGS_TAB_DISPLAY_NAME
+        End If
+    'Reject a name collision with a non-label control
+        If VBA.TypeName(ExistingControl) <> "Label" Then
+            Err.Raise vbObjectError + 520, PROC_NAME, _
+                "Control '" & DP_SETTINGS_TAB_DISPLAY_NAME & "' exists but is not an MSForms.Label"
+        End If
+    'Use the resolved Display tab label
+        Set Lbl_TabDisplay = ExistingControl
+
+'------------------------------------------------------------------------------
+' RETRIEVE BEHAVIOR TAB
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the Behavior tab
+        On Error Resume Next
+    'Retrieve the Behavior tab label
+        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_TAB_BEHAVIOR_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing Behavior tab
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 521, PROC_NAME, _
+                "Unable to resolve expected settings tab " & DP_SETTINGS_TAB_BEHAVIOR_NAME
+        End If
+    'Reject a name collision with a non-label control
+        If VBA.TypeName(ExistingControl) <> "Label" Then
+            Err.Raise vbObjectError + 522, PROC_NAME, _
+                "Control '" & DP_SETTINGS_TAB_BEHAVIOR_NAME & "' exists but is not an MSForms.Label"
+        End If
+    'Use the resolved Behavior tab label
+        Set Lbl_TabBehavior = ExistingControl
+
+'------------------------------------------------------------------------------
+' RETRIEVE INTEGRATION TAB
+'------------------------------------------------------------------------------
+    'Suppress lookup errors while resolving the Integration tab
+        On Error Resume Next
+    'Retrieve the Integration tab label
+        Set ExistingControl = Fra_Settings.Controls(DP_SETTINGS_TAB_INTEGRATION_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject a missing Integration tab
+        If ExistingControl Is Nothing Then
+            Err.Raise vbObjectError + 523, PROC_NAME, _
+                "Unable to resolve expected settings tab " & DP_SETTINGS_TAB_INTEGRATION_NAME
+        End If
+    'Reject a name collision with a non-label control
+        If VBA.TypeName(ExistingControl) <> "Label" Then
+            Err.Raise vbObjectError + 524, PROC_NAME, _
+                "Control '" & DP_SETTINGS_TAB_INTEGRATION_NAME & "' exists but is not an MSForms.Label"
+        End If
+    'Use the resolved Integration tab label
+        Set Lbl_TabIntegration = ExistingControl
+
+'------------------------------------------------------------------------------
+' APPLY TAB VISUAL STATE
+'------------------------------------------------------------------------------
+    'Refresh the tabs visual state
+        UF_SettingsTab_ApplyVisualState Lbl_TabDisplay, (ActivePageIndex = 0)
+        UF_SettingsTab_ApplyVisualState Lbl_TabBehavior, (ActivePageIndex = 1)
+        UF_SettingsTab_ApplyVisualState Lbl_TabIntegration, (ActivePageIndex = 2)
+
+'------------------------------------------------------------------------------
+' RESTORE LAYERING
+'------------------------------------------------------------------------------
+    'Move the tab to the front
+        Lbl_TabDisplay.ZOrder 0
+        Lbl_TabBehavior.ZOrder 0
+        Lbl_TabIntegration.ZOrder 0
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Settings tab visual refresh failed: " & Err.Description
+
+End Sub
+
+Private Sub UF_SettingsTab_ApplyVisualState( _
+    ByVal TabLabel As MSForms.Label, _
+    ByVal IsSelected As Boolean)
+
+'
+'------------------------------------------------------------------------------
+'                       APPLY SETTINGS TAB VISUAL STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies selected or normal formatting to one fake settings tab
+'
+' WHY THIS EXISTS
+'   The fake tab strip needs deterministic formatting independent from the native
+'   MultiPage renderer
+'
+' INPUTS
+'   TabLabel
+'     Tab label to format
+'
+'   IsSelected
+'     True to apply selected-tab formatting
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Applies common tab formatting and then selected or normal colors
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if TabLabel is missing or cannot be
+'   formatted
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   This routine does not change the MultiPage value
+'
+'   Developer-owned tab color constants are intentionally not validated here.
+'   They should be checked by a dedicated debug or regression routine
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "UF_DatePicker.UF_SettingsTab_ApplyVisualState"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject a missing tab label
+        If TabLabel Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "TabLabel cannot be Nothing"
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY COMMON TAB STATE
+'------------------------------------------------------------------------------
+    'Apply shared tab formatting
+        With TabLabel
+            .BackStyle = fmBackStyleOpaque
+            .BorderStyle = fmBorderStyleSingle
+            .BorderColor = DP_SETTINGS_TAB_BORDER_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+            .Enabled = True
+            .Visible = True
+        End With
+
+'------------------------------------------------------------------------------
+' APPLY SELECTED OR NORMAL COLORS
+'------------------------------------------------------------------------------
+    'Apply selected-tab colors when requested
+        If IsSelected Then
+            With TabLabel
+                .BackColor = DP_SETTINGS_TAB_SELECTED_BACK_COLOR
+                .ForeColor = DP_SETTINGS_TAB_SELECTED_FORE_COLOR
+            End With
+        Else
+            With TabLabel
+                .BackColor = DP_SETTINGS_TAB_NORMAL_BACK_COLOR
+                .ForeColor = DP_SETTINGS_TAB_NORMAL_FORE_COLOR
+            End With
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Settings tab visual-state application failed: " & Err.Description
+
+End Sub
+
 Private Sub UF_SettingsPage_BackgroundBuild( _
     ByVal ParentMultiPage As MSForms.MultiPage, _
     ByVal PageIndex As Long, _
@@ -10312,51 +12523,65 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Settings page background creation failed: " & Err.Description
 
 End Sub
-Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
+
+Private Sub UF_SettingsCheckBox_Format( _
+    ByVal TargetCheckBox As MSForms.CheckBox, _
+    ByVal CaptionText As String, _
+    ByVal ControlLeft As Single, _
+    ByVal ControlTop As Single)
 
 '
 '------------------------------------------------------------------------------
-'                           APPLY PICKER PANEL HOVER
+'                           FORMAT SETTINGS CHECKBOX
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Applies hover formatting to one month/year picker-panel item
+'   Applies deterministic formatting to one settings CheckBox
 '
 ' WHY THIS EXISTS
-'   Picker-panel items are built from two runtime labels. Hovering either label
-'   should highlight the full picker item consistently
+'   Runtime-created and reused MSForms CheckBox controls can retain stale font
+'   states when their existing Font object is edited in place or when a shared
+'   font object is reused
+'
+'   Assigning a fresh cloned StdFont object to each CheckBox removes stale
+'   Italic, Underline, and Strikethrough states consistently
 '
 ' INPUTS
-'   LabelName
-'     Name of the picker-panel label currently under the mouse pointer
+'   TargetCheckBox
+'     CheckBox control to format
+'
+'   CaptionText
+'     Caption to display
+'
+'   ControlLeft
+'     Left position inside the parent page
+'
+'   ControlTop
+'     Top position inside the parent page
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Resolves the picker item index, exits when the same item is already hovered,
-'   resets previous picker/footer hover state, retrieves the paired labels from
-'   cache, resolves selected state, and applies hover formatting to the current
-'   picker item
+'   Clears the caption, applies layout and visual state, assigns a fresh font,
+'   restores the caption, and preserves the current CheckBox value
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if LabelName is blank, if the label name
-'   does not map to a picker-panel item, or if the target picker item cannot be
-'   resolved or formatted
+'   Raises a descriptive runtime error if TargetCheckBox is missing or the
+'   CheckBox cannot be formatted
 '
 ' DEPENDENCIES
-'   UF_PickerPanel_ItemIndexFromLabelName
-'   UF_PickerPanel_HoverReset
-'   UF_PickerPanel_EnsureCache
-'   UF_Footer_HoverReset
-'   mPickerBackLabels
-'   mPickerTextLabels
+'   UF_SettingsCheckBoxFont_Create
+'   DP_SETTINGS_CHECKBOX_WIDTH
+'   DP_SETTINGS_CHECKBOX_HEIGHT
 '
 ' NOTES
-'   This routine is called by cDatePickerLabelHook when the hook category is
-'   PICKER
+'   The caption is assigned after the fresh font is assigned
 '
-'   The picker-panel cache is rebuilt only when the requested cached label pair
-'   is missing
+'   The CheckBox Value property is intentionally not changed here. Value refresh
+'   is handled separately by UF_SettingsPanel_RefreshCaptions
+'
+'   Developer-owned CheckBox layout constants are intentionally not validated
+'   here. They should be checked by a dedicated debug or regression routine
 '
 ' UPDATED
 '   2026-05-02
@@ -10365,19 +12590,9 @@ Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_PickerPanel_HoverApply"
-    
-    Const PICKER_MODE_MONTHS    As Long = 1             'Month picker-panel mode
-    Const PICKER_MODE_YEARS     As Long = 2             'Year picker-panel mode
+    Const PROC_NAME         As String = "UF_DatePicker.UF_SettingsCheckBox_Format"
 
-    Dim EffectiveLabelName      As String               'Normalized label name
-    Dim ItemIndex               As Long                 'Resolved picker item index
-    Dim IsSelected              As Boolean              'True when hovered item is selected
-    Dim CacheRefreshRequired    As Boolean              'True when cached labels must be rebuilt
-    Dim RawTagValue             As String               'Picker text label Tag value
-    
-    Dim Lbl_ItemBg              As MSForms.Label        'Picker item background label
-    Dim Lbl_Item                As MSForms.Label        'Picker item text label
+    Dim CheckBoxFont        As Object       'Fresh CheckBox font object
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10388,146 +12603,41 @@ Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
 '------------------------------------------------------------------------------
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
-    'Normalize the supplied label name
-        EffectiveLabelName = VBA.Trim$(LabelName)
-    'Reject an empty label name
-        If VBA.Len(EffectiveLabelName) = 0 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "LabelName cannot be empty"
+    'Reject a missing CheckBox
+        If TargetCheckBox Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "TargetCheckBox cannot be Nothing"
         End If
 
 '------------------------------------------------------------------------------
-' RESOLVE PICKER ITEM
+' CREATE FRESH FONT
 '------------------------------------------------------------------------------
-    'Resolve the picker item index from the hovered label name
-        ItemIndex = UF_PickerPanel_ItemIndexFromLabelName(EffectiveLabelName)
-    'Reject invalid picker item indexes
-        If ItemIndex < 1 Or ItemIndex > DP_PICKER_ITEM_COUNT Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "LabelName does not resolve to a valid picker-panel item"
-        End If
+    'Create a fresh independent CheckBox font
+        Set CheckBoxFont = UF_SettingsCheckBoxFont_Create()
 
 '------------------------------------------------------------------------------
-' EXIT IF ALREADY HOVERED
+' FORMAT CHECKBOX
 '------------------------------------------------------------------------------
-    'Exit if the requested item is already highlighted
-        If mHoveredPickerItemIndex = ItemIndex Then Exit Sub
-
-'------------------------------------------------------------------------------
-' RESET OTHER HOVER STATE
-'------------------------------------------------------------------------------
-    'Remove footer hover when entering the picker panel
-        If VBA.Len(mHoveredFooterActionName) <> 0 Then
-            UF_Footer_HoverReset
-        End If
-
-'------------------------------------------------------------------------------
-' RESET CURRENT PICKER HOVER STATE
-'------------------------------------------------------------------------------
-    'Remove hover formatting from the previously highlighted picker item
-        If mHoveredPickerItemIndex <> 0 Then
-            UF_PickerPanel_HoverReset
-        End If
-
-'------------------------------------------------------------------------------
-' RETRIEVE CACHED PICKER LABELS
-'------------------------------------------------------------------------------
-    'Suppress cache probing errors
-        On Error Resume Next
-    'Retrieve the cached picker item background label
-        Set Lbl_ItemBg = mPickerBackLabels(ItemIndex)
-    'Retrieve the cached picker item text label
-        Set Lbl_Item = mPickerTextLabels(ItemIndex)
-    'Clear any suppressed cache probing error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' RESTORE CACHE WHEN NEEDED
-'------------------------------------------------------------------------------
-    'Request cache refresh when the background label is missing
-        If Lbl_ItemBg Is Nothing Then CacheRefreshRequired = True
-    'Request cache refresh when the text label is missing
-        If Lbl_Item Is Nothing Then CacheRefreshRequired = True
-    'Rebuild missing cached references only when needed
-        If CacheRefreshRequired Then
-            'Ensure cached picker-panel references are available
-                UF_PickerPanel_EnsureCache
-            'Retrieve the cached picker item background label after cache refresh
-                Set Lbl_ItemBg = mPickerBackLabels(ItemIndex)
-            'Retrieve the cached picker item text label after cache refresh
-                Set Lbl_Item = mPickerTextLabels(ItemIndex)
-        End If
-
-'------------------------------------------------------------------------------
-' VALIDATE CACHED LABELS
-'------------------------------------------------------------------------------
-    'Reject a missing cached picker background label
-        If Lbl_ItemBg Is Nothing Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "Cached picker background label is missing for item " & VBA.CStr(ItemIndex)
-        End If
-    'Reject a missing cached picker text label
-        If Lbl_Item Is Nothing Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "Cached picker text label is missing for item " & VBA.CStr(ItemIndex)
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE SELECTED STATE
-'------------------------------------------------------------------------------
-    'Resolve whether the hovered month item is currently selected
-        If mPickerPanelMode = PICKER_MODE_MONTHS Then
-            IsSelected = (ItemIndex = mDisplayMonth)
-        End If
-    'Resolve whether the hovered year item is currently selected
-        If mPickerPanelMode = PICKER_MODE_YEARS Then
-            'Read the picker item Tag safely
-                RawTagValue = VBA.Trim$(VBA.CStr(Lbl_Item.Tag))
-            'Evaluate numeric year tags only
-                If VBA.Len(RawTagValue) <> 0 Then
-                    If Not RawTagValue Like "*[!0-9]*" Then
-                        IsSelected = (VBA.CLng(RawTagValue) = mDisplayYear)
-                    End If
-                End If
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY SELECTED HOVER STATE
-'------------------------------------------------------------------------------
-    'Preserve selected-item formatting when hovering the selected item
-        If IsSelected Then
-            'Apply selected picker-item background formatting
-                With Lbl_ItemBg
-                    .BackColor = DP_DAY_SELECTED_BACK_COLOR
-                    .BorderColor = DP_DAY_SELECTED_BACK_COLOR
-                    .SpecialEffect = fmSpecialEffectFlat
-                End With
-            'Apply selected picker-item text formatting
-                Lbl_Item.ForeColor = DP_DAY_SELECTED_FORE_COLOR
-            'Store the current hovered picker item index
-                mHoveredPickerItemIndex = ItemIndex
-            'Exit after applying selected hover state
-                Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY NORMAL HOVER STATE
-'------------------------------------------------------------------------------
-    'Apply hover background formatting
-        With Lbl_ItemBg
-            .BackColor = DP_PICKER_ITEM_HOVER_BACK_COLOR
-            .BorderColor = DP_PICKER_ITEM_HOVER_BORDER_COLOR
+    'Apply deterministic CheckBox formatting
+        With TargetCheckBox
+            .Caption = VBA.vbNullString
+            .Left = ControlLeft
+            .Top = ControlTop
+            .Width = DP_SETTINGS_CHECKBOX_WIDTH
+            .Height = DP_SETTINGS_CHECKBOX_HEIGHT
+            .AutoSize = False
+            .BackStyle = fmBackStyleTransparent
+            .ForeColor = DP_FOOTER_FORE_COLOR
+            .TripleState = False
             .SpecialEffect = fmSpecialEffectFlat
+            .TabStop = False
+            .Enabled = True
+            .Visible = True
+            .ControlTipText = CaptionText
         End With
-    'Apply normal picker item text color
-        Lbl_Item.ForeColor = DP_PICKER_ITEM_FORE_COLOR
-
-'------------------------------------------------------------------------------
-' STORE HOVER STATE
-'------------------------------------------------------------------------------
-    'Store the current hovered picker item index
-        mHoveredPickerItemIndex = ItemIndex
+    'Assign the fresh font object
+        Set TargetCheckBox.Font = CheckBoxFont
+    'Apply the caption after assigning the fresh font
+        TargetCheckBox.Caption = CaptionText
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -10540,46 +12650,49 @@ Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Picker-panel hover application failed: " & Err.Description
+        Err.Raise Err.Number, PROC_NAME, "Settings CheckBox formatting failed: " & Err.Description
 
 End Sub
-Private Sub UF_PickerPanel_HoverReset()
+
+Private Function UF_SettingsCheckBoxFont_Create() As Object
 
 '
 '------------------------------------------------------------------------------
-'                           RESET PICKER PANEL HOVER
+'                       CREATE SETTINGS CHECKBOX FONT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Removes hover formatting from the currently highlighted picker-panel item
+'   Creates a fresh StdFont object for one settings CheckBox
 '
 ' WHY THIS EXISTS
-'   Picker-panel hover formatting must be removed when the mouse moves away from
-'   an item, when the picker panel is hidden, or when another item is highlighted
+'   Reused MSForms CheckBox controls can retain stale font states such as Italic,
+'   Underline, or Strikethrough
+'
+'   Assigning a newly created font object to each CheckBox gives each control a
+'   clean independent font state
 '
 ' INPUTS
 '   None
 '
 ' RETURNS
-'   Nothing
+'   Fresh StdFont object configured for settings CheckBoxes
 '
 ' BEHAVIOR
-'   Restores the currently highlighted picker item to its normal or selected
-'   visual state and clears the current picker-panel hover tracker
+'   Creates and returns a new StdFont object with deterministic font properties
 '
 ' ERROR POLICY
-'   Best-effort UI cleanup. Suppresses reset failures because hover reset should
-'   never interrupt UserForm interaction
+'   Raises a descriptive runtime error if the font object cannot be created or
+'   configured
 '
 ' DEPENDENCIES
-'   UF_PickerPanel_EnsureCache
-'   mPickerTextLabels
-'   mPickerBackLabels
+'   StdFont
+'   DP_FORM_FONT_NAME
+'   DP_SETTINGS_CHECKBOX_FONT_SIZE
 '
 ' NOTES
-'   This routine resets only the currently hovered picker item, not all 12 items
+'   Do not reuse the returned font object across multiple CheckBoxes
 '
-'   The picker-panel cache is rebuilt only when the requested cached label pair
-'   is missing
+'   Developer-owned font constants are intentionally not validated here. They
+'   should be checked by a dedicated debug or regression routine
 '
 ' UPDATED
 '   2026-05-02
@@ -10588,1798 +12701,65 @@ Private Sub UF_PickerPanel_HoverReset()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PICKER_MODE_MONTHS    As Long = 1             'Month picker-panel mode
-    Const PICKER_MODE_YEARS     As Long = 2             'Year picker-panel mode
-
-    Dim HoveredIndex            As Long                 'Cached hovered picker item index
-    Dim IsSelected              As Boolean              'True when hovered item is selected
-    Dim CacheRefreshRequired    As Boolean              'True when cached labels must be rebuilt
-    Dim RawTagValue             As String               'Picker text label Tag value
+    Const PROC_NAME     As String = "UF_DatePicker.UF_SettingsCheckBoxFont_Create"
     
-    Dim Lbl_ItemBg              As MSForms.Label        'Picker item background label
-    Dim Lbl_Item                As MSForms.Label        'Picker item text label
+    Dim NewFont         As Object       'Fresh CheckBox font object
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Enable fail-safe error handling
-        On Error GoTo FailSafe
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' EXIT IF NOTHING IS HOVERED
+' CREATE FONT
 '------------------------------------------------------------------------------
-    'Exit if no picker item is currently highlighted
-        If mHoveredPickerItemIndex = 0 Then Exit Sub
-    'Capture the hovered index before any best-effort operation
-        HoveredIndex = mHoveredPickerItemIndex
-
-'------------------------------------------------------------------------------
-' VALIDATE HOVER INDEX
-'------------------------------------------------------------------------------
-    'Clear hover state and exit when the stored hover index is no longer valid
-        If HoveredIndex < 1 Or HoveredIndex > DP_PICKER_ITEM_COUNT Then
-            GoTo Clean_Exit
-        End If
-
-'------------------------------------------------------------------------------
-' RETRIEVE CACHED PICKER LABELS
-'------------------------------------------------------------------------------
-    'Suppress cache probing errors
-        On Error Resume Next
-    'Retrieve the cached picker item background label
-        Set Lbl_ItemBg = mPickerBackLabels(HoveredIndex)
-    'Retrieve the cached picker item text label
-        Set Lbl_Item = mPickerTextLabels(HoveredIndex)
-    'Clear any suppressed cache probing error
-        Err.Clear
-    'Restore fail-safe error handling
-        On Error GoTo FailSafe
-
-'------------------------------------------------------------------------------
-' RESTORE CACHE WHEN NEEDED
-'------------------------------------------------------------------------------
-    'Request cache refresh when the background label is missing
-        If Lbl_ItemBg Is Nothing Then CacheRefreshRequired = True
-    'Request cache refresh when the text label is missing
-        If Lbl_Item Is Nothing Then CacheRefreshRequired = True
-    'Rebuild missing cached references only when needed
-        If CacheRefreshRequired Then
-            'Ensure cached picker-panel references are available
-                UF_PickerPanel_EnsureCache
-            'Retrieve the cached picker item background label after cache refresh
-                Set Lbl_ItemBg = mPickerBackLabels(HoveredIndex)
-            'Retrieve the cached picker item text label after cache refresh
-                Set Lbl_Item = mPickerTextLabels(HoveredIndex)
-        End If
-
-'------------------------------------------------------------------------------
-' EXIT IF LABELS ARE UNAVAILABLE
-'------------------------------------------------------------------------------
-    'Clear hover state and exit if the cached labels are unavailable
-        If Lbl_ItemBg Is Nothing Then GoTo Clean_Exit
-    'Clear hover state and exit if the cached labels are unavailable
-        If Lbl_Item Is Nothing Then GoTo Clean_Exit
-
-'------------------------------------------------------------------------------
-' RESOLVE SELECTED STATE
-'------------------------------------------------------------------------------
-    'Resolve whether the hovered month item is currently selected
-        If mPickerPanelMode = PICKER_MODE_MONTHS Then
-            IsSelected = (HoveredIndex = mDisplayMonth)
-        End If
-    'Resolve whether the hovered year item is currently selected
-        If mPickerPanelMode = PICKER_MODE_YEARS Then
-            'Read the picker item Tag safely
-                RawTagValue = VBA.Trim$(VBA.CStr(Lbl_Item.Tag))
-            'Evaluate numeric year tags only
-                If VBA.Len(RawTagValue) <> 0 Then
-                    If Not RawTagValue Like "*[!0-9]*" Then
-                        IsSelected = (VBA.CLng(RawTagValue) = mDisplayYear)
-                    End If
-                End If
-        End If
-
-'------------------------------------------------------------------------------
-' RESTORE NORMAL BACKGROUND STATE
-'------------------------------------------------------------------------------
-    'Restore the normal picker-item background state
-        With Lbl_ItemBg
-            .Caption = vbNullString
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_PICKER_ITEM_BACK_COLOR
-            .ForeColor = DP_PICKER_ITEM_FORE_COLOR
-            .BorderStyle = fmBorderStyleSingle
-            .BorderColor = DP_PICKER_ITEM_BORDER_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .Enabled = True
-            .Visible = True
+    'Create a fresh font object
+        Set NewFont = CreateObject("StdFont")
+    'Configure the fresh font object
+        With NewFont
+            .Name = DP_FORM_FONT_NAME
+            .Size = DP_SETTINGS_CHECKBOX_FONT_SIZE
+            .Bold = False
+            .Italic = False
+            .Underline = False
+            .Strikethrough = False
         End With
 
 '------------------------------------------------------------------------------
-' RESTORE NORMAL TEXT STATE
+' RETURN FONT
 '------------------------------------------------------------------------------
-    'Restore the normal picker-item text state
-        With Lbl_Item
-            .BackStyle = fmBackStyleTransparent
-            .ForeColor = DP_PICKER_ITEM_FORE_COLOR
-            .BorderStyle = fmBorderStyleNone
-            .SpecialEffect = fmSpecialEffectFlat
-            .Enabled = True
-            .Visible = True
-        End With
-
-'------------------------------------------------------------------------------
-' RESTORE SELECTED STATE
-'------------------------------------------------------------------------------
-    'Restore selected-item formatting when applicable
-        If IsSelected Then
-            With Lbl_ItemBg
-                .BackColor = DP_DAY_SELECTED_BACK_COLOR
-                .BorderColor = DP_DAY_SELECTED_BACK_COLOR
-            End With
-            'Apply selected picker-item text formatting
-                Lbl_Item.ForeColor = DP_DAY_SELECTED_FORE_COLOR
-        End If
-
-'------------------------------------------------------------------------------
-' CLEAN EXIT
-'------------------------------------------------------------------------------
-Clean_Exit:
-    'Clear the current hovered picker item index
-        mHoveredPickerItemIndex = 0
-    'Exit the procedure
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' FAIL-SAFE
-'------------------------------------------------------------------------------
-FailSafe:
-    'Suppress secondary cleanup errors
-        On Error Resume Next
-    'Clear the current hovered picker item index
-        mHoveredPickerItemIndex = 0
-    'Restore normal error handling
-        On Error GoTo 0
-
-End Sub
-Private Function UF_PickerPanel_ItemIndexFromLabelName(ByVal LabelName As String) As Long
-
-'
-'------------------------------------------------------------------------------
-'                    GET PICKER ITEM INDEX FROM LABEL NAME
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Resolves the picker-panel item index from a picker-panel label name
-'
-' WHY THIS EXISTS
-'   Each picker-panel item is composed of two labels:
-'     - a background label
-'     - a text label
-'
-'   Hovering or clicking either label must resolve to the same picker item index
-'
-' INPUTS
-'   LabelName
-'     Picker-panel label name
-'
-' RETURNS
-'   Picker-panel item index from 1 to DP_PICKER_ITEM_COUNT
-'
-'   Zero when the label name is blank, unsupported, malformed, or outside the
-'   supported picker-item range
-'
-' BEHAVIOR
-'   Normalizes the supplied label name, checks the background-label prefix first,
-'   checks the text-label prefix second, extracts the numeric suffix, applies
-'   strict digit-only parsing, and returns the validated picker-item index
-'
-' ERROR POLICY
-'   Does not raise errors. Unsupported or malformed label names return zero
-'
-' DEPENDENCIES
-'   DP_PICKER_ITEM_COUNT
-'
-' NOTES
-'   The background-label prefix must be tested before the text-label prefix
-'   because Lbl_MonthYearBg also starts with Lbl_MonthYear
-'
-'   Matching is normalized with UCase$ so behavior is independent from
-'   Option Compare
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const BG_PREFIX         As String = "LBL_MONTHYEARBG"       'Picker background label prefix
-    Const TEXT_PREFIX       As String = "LBL_MONTHYEAR"         'Picker text label prefix
-
-    Dim EffectiveName       As String                           'Normalized picker label name
-    Dim RawIndex            As String                           'Raw numeric suffix
-    Dim ParsedIndex         As Long                             'Parsed picker item index
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable fail-safe parsing
-        On Error GoTo SafeExit
-
-'------------------------------------------------------------------------------
-' NORMALIZE INPUT
-'------------------------------------------------------------------------------
-    'Normalize the supplied label name
-        EffectiveName = VBA.UCase$(VBA.Trim$(LabelName))
-    'Return zero for empty label names
-        If VBA.Len(EffectiveName) = 0 Then
-            UF_PickerPanel_ItemIndexFromLabelName = 0
-            Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE INDEX FROM BACKGROUND LABEL
-'------------------------------------------------------------------------------
-    'Resolve indexes from picker background labels first
-        If VBA.Left$(EffectiveName, VBA.Len(BG_PREFIX)) = BG_PREFIX Then
-            'Extract the raw numeric suffix
-                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(BG_PREFIX) + 1)
-            'Return zero when the suffix is empty
-                If VBA.Len(RawIndex) = 0 Then Exit Function
-            'Return zero when the suffix is not strictly numeric
-                If RawIndex Like "*[!0-9]*" Then Exit Function
-            'Parse the picker item index
-                ParsedIndex = VBA.CLng(RawIndex)
-            'Return zero when the index is outside the supported picker range
-                If ParsedIndex < 1 Or ParsedIndex > DP_PICKER_ITEM_COUNT Then Exit Function
-            'Return the validated picker item index
-                UF_PickerPanel_ItemIndexFromLabelName = ParsedIndex
-            'Exit after resolving the background label
-                Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE INDEX FROM TEXT LABEL
-'------------------------------------------------------------------------------
-    'Resolve indexes from picker text labels
-        If VBA.Left$(EffectiveName, VBA.Len(TEXT_PREFIX)) = TEXT_PREFIX Then
-            'Extract the raw numeric suffix
-                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(TEXT_PREFIX) + 1)
-            'Return zero when the suffix is empty
-                If VBA.Len(RawIndex) = 0 Then Exit Function
-            'Return zero when the suffix is not strictly numeric
-                If RawIndex Like "*[!0-9]*" Then Exit Function
-            'Parse the picker item index
-                ParsedIndex = VBA.CLng(RawIndex)
-            'Return zero when the index is outside the supported picker range
-                If ParsedIndex < 1 Or ParsedIndex > DP_PICKER_ITEM_COUNT Then Exit Function
-            'Return the validated picker item index
-                UF_PickerPanel_ItemIndexFromLabelName = ParsedIndex
-            'Exit after resolving the text label
-                Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN FALLBACK
-'------------------------------------------------------------------------------
-    'Return zero for unsupported picker label names
-        UF_PickerPanel_ItemIndexFromLabelName = 0
+    'Return the fresh font object
+        Set UF_SettingsCheckBoxFont_Create = NewFont
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit the function
+    'Exit before the error handler
         Exit Function
 
 '------------------------------------------------------------------------------
-' SAFE EXIT
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-SafeExit:
-    'Return zero for malformed or oversized numeric suffixes
-        UF_PickerPanel_ItemIndexFromLabelName = 0
+ErrorHandler:
+    'Suppress cleanup errors
+        On Error Resume Next
+    'Release any partially configured font object
+        Set NewFont = Nothing
+    'Restore normal error handling
+        On Error GoTo 0
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Settings CheckBox font creation failed: " & Err.Description
 
 End Function
 
-'------------------------------------------------------------------------------
-' NAVIGATION AND DISPLAY STATE
-'------------------------------------------------------------------------------
-
-Private Sub UF_Header_MoveMonth(ByVal MonthOffset As Long)
-
-'
-'------------------------------------------------------------------------------
-'                           MOVE HEADER MONTH
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Moves the displayed DatePicker month backward or forward
-'
-' WHY THIS EXISTS
-'   The header month arrows should allow direct navigation across months while
-'   keeping the header captions, keyboard date, overlay panels, and day grid
-'   synchronized
-'
-' INPUTS
-'   MonthOffset
-'     Number of months to move
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Validates the current display period, resolves the new display period,
-'   rejects non-renderable calendar boundaries, stores the new display state,
-'   resets transient overlay / hover state, hides overlay panels, initializes
-'   keyboard navigation to the first day of the new month, and refreshes the day
-'   grid
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if MonthOffset is unsupported, if the
-'   current display period is invalid, if the resulting display period cannot be
-'   rendered, or if the day grid cannot be refreshed
-'
-' DEPENDENCIES
-'   UF_PickerPanel_HoverReset
-'   UF_DayCell_HoverReset
-'   UF_Header_HoverReset
-'   UF_Footer_HoverReset
-'   UF_SettingsPanel_HoverReset
-'   UF_SettingsPanel_Hide
-'   UF_DayGrid_Populate
-'
-' NOTES
-'   DateAdd is used so month transitions across year boundaries are handled by
-'   VBA date arithmetic
-'
-'   January 100 and December 9999 are rejected because the fixed calendar grid
-'   cannot render the required adjacent-month dates outside the VBA Date
-'   supported range
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_Header_MoveMonth"
-    
-    Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
-    Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
-
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
-    Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
-    Dim NewDisplayDate          As Date                     'New first day of displayed month
-    Dim NewDisplayYear          As Long                     'New displayed year
-    Dim NewDisplayMonth         As Long                     'New displayed month
-    Dim HandlerStep             As String                   'Current handler step for diagnostics
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-    'Initialize diagnostic step
-        HandlerStep = "Initialize"
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate MonthOffset"
-
-    'Reject unsupported month movement
-        If MonthOffset <> -1 And MonthOffset <> 1 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "MonthOffset must be -1 or 1"
-        End If
-
-'------------------------------------------------------------------------------
-' VALIDATE CURRENT DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate current display period"
-
-    'Reject invalid current display year
-        If mDisplayYear < DP_MIN_YEAR Or mDisplayYear > DP_MAX_YEAR Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "mDisplayYear must be between " & VBA.CStr(DP_MIN_YEAR) & _
-                " and " & VBA.CStr(DP_MAX_YEAR)
-        End If
-    'Reject invalid current display month
-        If mDisplayMonth < 1 Or mDisplayMonth > 12 Then
-            Err.Raise vbObjectError + 515, PROC_NAME, "mDisplayMonth must be between 1 and 12"
-        End If
-    'Reject movement before the lower supported DatePicker boundary
-        If mDisplayYear = DP_MIN_YEAR And mDisplayMonth = 1 And MonthOffset < 0 Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "Displayed month cannot move before January " & VBA.CStr(DP_MIN_YEAR)
-        End If
-    'Reject movement after the upper supported DatePicker boundary
-        If mDisplayYear = DP_MAX_YEAR And mDisplayMonth = 12 And MonthOffset > 0 Then
-            Err.Raise vbObjectError + 517, PROC_NAME, _
-                "Displayed month cannot move after December " & VBA.CStr(DP_MAX_YEAR)
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE NEW DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve new display period"
-
-    'Resolve the new display date
-        NewDisplayDate = VBA.DateAdd("m", MonthOffset, _
-            VBA.DateSerial(mDisplayYear, mDisplayMonth, 1))
-    'Resolve the new display year
-        NewDisplayYear = VBA.Year(NewDisplayDate)
-    'Resolve the new display month
-        NewDisplayMonth = VBA.Month(NewDisplayDate)
-
-'------------------------------------------------------------------------------
-' VALIDATE NEW DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate new display period"
-
-    'Reject display years outside the supported DatePicker range
-        If NewDisplayYear < DP_MIN_YEAR Or NewDisplayYear > DP_MAX_YEAR Then
-            Err.Raise vbObjectError + 518, PROC_NAME, _
-                "New display year must be between " & VBA.CStr(DP_MIN_YEAR) & _
-                " and " & VBA.CStr(DP_MAX_YEAR)
-        End If
-    'Reject the lower VBA Date rendering boundary
-        If NewDisplayYear = VBA_DATE_MIN_YEAR And NewDisplayMonth = 1 Then
-            Err.Raise vbObjectError + 519, PROC_NAME, _
-                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-    'Reject the upper VBA Date rendering boundary
-        If NewDisplayYear = VBA_DATE_MAX_YEAR And NewDisplayMonth = 12 Then
-            Err.Raise vbObjectError + 520, PROC_NAME, _
-                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-
-'------------------------------------------------------------------------------
-' STORE DISPLAY STATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Store display state"
-
-    'Store the new display year
-        mDisplayYear = NewDisplayYear
-    'Store the new display month
-        mDisplayMonth = NewDisplayMonth
-    'Initialize keyboard date to the first day of the new display month
-        mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
-    'Mark keyboard navigation as initialized
-        mHasKeyboardDate = True
-
-'------------------------------------------------------------------------------
-' RESET TRANSIENT HOVER STATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Reset transient hover state"
-
-    'Clear picker-panel hover before hiding overlays
-        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
-    'Clear day-cell hover before repopulating the grid
-        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
-    'Clear header hover before refreshing captions
-        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
-    'Clear footer hover before hiding overlays
-        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
-    'Clear settings-panel hover before hiding overlays
-        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
-
-'------------------------------------------------------------------------------
-' HIDE PICKER PANEL
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Hide picker panel"
-
-    'Suppress lookup errors when the picker panel is not available
-        On Error Resume Next
-    'Retrieve the picker panel control when available
-        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Hide the picker panel when it exists and is a frame
-        If Not ExistingControl Is Nothing Then
-            If VBA.TypeName(ExistingControl) = "Frame" Then
-                Set Fra_PickerPanel = ExistingControl
-                Fra_PickerPanel.Visible = False
-            End If
-        End If
-    'Clear picker-panel mode after month navigation
-        mPickerPanelMode = 0
-    'Clear picker-panel hover state after month navigation
-        mHoveredPickerItemIndex = 0
-
-'------------------------------------------------------------------------------
-' HIDE SETTINGS PANEL
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Hide settings panel"
-
-    'Hide the settings panel after month navigation
-        UF_SettingsPanel_Hide
-
-'------------------------------------------------------------------------------
-' REFRESH CALENDAR
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Refresh day grid"
-
-    'Refresh the day grid
-        UF_DayGrid_Populate mDisplayYear, mDisplayMonth
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "Header month navigation failed: " & Err.Description
-
-End Sub
-Private Sub UF_Header_MoveYear(ByVal YearOffset As Long)
-
-'
-'------------------------------------------------------------------------------
-'                           MOVE HEADER YEAR
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Handles header year-arrow navigation
-'
-' WHY THIS EXISTS
-'   The year arrows scroll the visible year picker range when the year panel is
-'   visible, otherwise they move the displayed calendar year
-'
-' INPUTS
-'   YearOffset
-'     Direction of movement
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Scrolls the 12-year picker range when the year panel is visible in year mode.
-'   Otherwise validates the current display period, resolves the new display
-'   year, rejects non-renderable calendar boundaries, stores the new display
-'   state, hides overlay panels, initializes keyboard navigation to the first day
-'   of the displayed month, and refreshes the day grid
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if YearOffset is unsupported, if the
-'   current display period is invalid, if the resulting display period cannot be
-'   rendered, or if the panel / grid cannot be refreshed
-'
-' DEPENDENCIES
-'   UF_PickerPanel_HoverReset
-'   UF_DayCell_HoverReset
-'   UF_Header_HoverReset
-'   UF_Footer_HoverReset
-'   UF_SettingsPanel_HoverReset
-'   UF_SettingsPanel_Hide
-'   UF_PickerPanel_PopulateYears
-'   UF_DayGrid_Populate
-'
-' NOTES
-'   The year panel start is clamped to the valid 12-year display range
-'
-'   January 100 and December 9999 are rejected because the fixed calendar grid
-'   cannot render the required adjacent-month dates outside the VBA Date
-'   supported range
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_Header_MoveYear"
-    
-    Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
-    Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
-    Const PICKER_MODE_NONE      As Long = 0                 'No picker-panel mode
-    Const PICKER_MODE_YEARS     As Long = 2                 'Year picker-panel mode
-
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
-    Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
-    
-    Dim NewDisplayYear          As Long                     'New displayed year
-    Dim NewYearPanelStart       As Long                     'New first year shown in panel
-    Dim HandlerStep             As String                   'Current handler step for diagnostics
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-    'Initialize diagnostic step
-        HandlerStep = "Initialize"
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate YearOffset"
-
-    'Reject unsupported year movement
-        If YearOffset <> -1 And YearOffset <> 1 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "YearOffset must be -1 or 1"
-        End If
-
-'------------------------------------------------------------------------------
-' RETRIEVE PICKER PANEL
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve picker panel"
-
-    'Suppress lookup errors when the picker panel is not available
-        On Error Resume Next
-    'Retrieve the picker panel control when available
-        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Use the picker panel when it exists and is a frame
-        If Not ExistingControl Is Nothing Then
-            'Reject a name collision with a non-frame control
-                If VBA.TypeName(ExistingControl) <> "Frame" Then
-                    Err.Raise vbObjectError + 514, PROC_NAME, _
-                        "Control '" & DP_PICKER_PANEL_NAME & "' exists but is not an MSForms.Frame"
-                End If
-            'Store the picker panel reference
-                Set Fra_PickerPanel = ExistingControl
-        End If
-
-'------------------------------------------------------------------------------
-' SCROLL YEAR PANEL IF VISIBLE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Evaluate year-panel scrolling"
-
-    'Scroll the 12-year panel when it is visible in year-selection mode
-        If Not Fra_PickerPanel Is Nothing Then
-            If Fra_PickerPanel.Visible Then
-                If mPickerPanelMode = PICKER_MODE_YEARS Then
-                    'Track the current handler step
-                        HandlerStep = "Scroll year picker panel"
-                    'Clear active picker hover before repopulating the year panel
-                        UF_PickerPanel_HoverReset
-                    'Calculate the new first visible year
-                        NewYearPanelStart = mYearPanelStart + _
-                            (YearOffset * DP_PICKER_ITEM_COUNT)
-                    'Clamp the first visible year to the lower supported range
-                        If NewYearPanelStart < DP_MIN_YEAR Then
-                            NewYearPanelStart = DP_MIN_YEAR
-                        End If
-                    'Clamp the first visible year to the upper supported range
-                        If NewYearPanelStart > DP_YEAR_PANEL_MAX_START Then
-                            NewYearPanelStart = DP_YEAR_PANEL_MAX_START
-                        End If
-                    'Exit if the year-panel range did not change
-                        If NewYearPanelStart = mYearPanelStart Then Exit Sub
-                    'Store the new first visible year
-                        mYearPanelStart = NewYearPanelStart
-                    'Refresh the year picker panel
-                        UF_PickerPanel_PopulateYears
-                    'Exit after scrolling the panel
-                        Exit Sub
-                End If
-            End If
-        End If
-
-'------------------------------------------------------------------------------
-' VALIDATE CURRENT DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate current display period"
-
-    'Reject invalid current displayed year
-        If mDisplayYear < DP_MIN_YEAR Or mDisplayYear > DP_MAX_YEAR Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "mDisplayYear must be between " & VBA.CStr(DP_MIN_YEAR) & _
-                " and " & VBA.CStr(DP_MAX_YEAR)
-        End If
-    'Reject invalid current displayed month
-        If mDisplayMonth < 1 Or mDisplayMonth > 12 Then
-            Err.Raise vbObjectError + 516, PROC_NAME, "mDisplayMonth must be between 1 and 12"
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE NEW DISPLAY YEAR
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve new display year"
-
-    'Resolve the new displayed year
-        NewDisplayYear = mDisplayYear + YearOffset
-    'Reject years outside the supported DatePicker range
-        If NewDisplayYear < DP_MIN_YEAR Or NewDisplayYear > DP_MAX_YEAR Then
-            Err.Raise vbObjectError + 517, PROC_NAME, _
-                "Displayed year must remain between " & VBA.CStr(DP_MIN_YEAR) & _
-                " and " & VBA.CStr(DP_MAX_YEAR)
-        End If
-
-'------------------------------------------------------------------------------
-' VALIDATE NEW DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate new display period"
-
-    'Reject the lower VBA Date rendering boundary
-        If NewDisplayYear = VBA_DATE_MIN_YEAR And mDisplayMonth = 1 Then
-            Err.Raise vbObjectError + 518, PROC_NAME, _
-                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-    'Reject the upper VBA Date rendering boundary
-        If NewDisplayYear = VBA_DATE_MAX_YEAR And mDisplayMonth = 12 Then
-            Err.Raise vbObjectError + 519, PROC_NAME, _
-                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-
-'------------------------------------------------------------------------------
-' STORE DISPLAY STATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Store display state"
-
-    'Store the new displayed year
-        mDisplayYear = NewDisplayYear
-    'Initialize keyboard date to the first day of the current display month in the new year
-        mKeyboardDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
-    'Mark keyboard navigation as initialized
-        mHasKeyboardDate = True
-
-'------------------------------------------------------------------------------
-' RESET TRANSIENT HOVER STATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Reset transient hover state"
-
-    'Clear picker-panel hover before hiding overlays
-        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
-    'Clear day-cell hover before repopulating the grid
-        If mHoveredDayCellIndex <> 0 Then UF_DayCell_HoverReset
-    'Clear header hover before refreshing captions
-        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then UF_Header_HoverReset
-    'Clear footer hover before hiding overlays
-        If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
-    'Clear settings-panel hover before hiding overlays
-        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
-
-'------------------------------------------------------------------------------
-' HIDE PICKER PANEL
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Hide picker panel"
-
-    'Hide the reusable picker panel when available
-        If Not Fra_PickerPanel Is Nothing Then
-            Fra_PickerPanel.Visible = False
-        End If
-    'Clear picker-panel mode after normal year navigation
-        mPickerPanelMode = PICKER_MODE_NONE
-    'Clear picker-panel hover state after normal year navigation
-        mHoveredPickerItemIndex = 0
-
-'------------------------------------------------------------------------------
-' HIDE SETTINGS PANEL
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Hide settings panel"
-
-    'Hide the settings panel after year navigation
-        UF_SettingsPanel_Hide
-
-'------------------------------------------------------------------------------
-' REFRESH CALENDAR
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Refresh day grid"
-
-    'Refresh the day grid using the new displayed year
-        UF_DayGrid_Populate mDisplayYear, mDisplayMonth
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "Header year navigation failed: " & Err.Description
-
-End Sub
-Private Sub UF_DisplayPeriod_Initialize( _
-    Optional ByVal InitialDate As Date = 0)
-
-'
-'------------------------------------------------------------------------------
-'                           INITIALIZE DISPLAY PERIOD
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Initializes the DatePicker displayed month and year
-'
-' WHY THIS EXISTS
-'   Header labels, keyboard navigation, picker-panel state, and the day grid
-'   depend on mDisplayMonth and mDisplayYear being initialized before runtime UI
-'   controls are built or refreshed
-'
-' INPUTS
-'   InitialDate
-'     Initial date used to set the displayed month and year
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Uses the current system date when InitialDate is zero, normalizes the
-'   resolved date to a date-only value, validates the resulting display year and
-'   renderable calendar boundary, then stores mDisplayYear and mDisplayMonth
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the resolved display period is outside
-'   the supported DatePicker range or cannot render a complete calendar grid
-'
-' DEPENDENCIES
-'   VBA.Date
-'   VBA.DateValue
-'   DP_MIN_YEAR
-'   DP_MAX_YEAR
-'
-' NOTES
-'   A zero date is treated as no explicit initial date
-'
-'   January 100 and December 9999 are rejected because the fixed calendar grid
-'   cannot render the required adjacent-month dates outside the VBA Date
-'   supported range
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_DisplayPeriod_Initialize"
-    
-    Const VBA_DATE_MIN_YEAR     As Long = 100           'Minimum year supported by VBA Date
-    Const VBA_DATE_MAX_YEAR     As Long = 9999          'Maximum year supported by VBA Date
-
-    Dim EffectiveDate           As Date                 'Resolved initial display date
-    Dim EffectiveYear           As Long                 'Resolved display year
-    Dim EffectiveMonth          As Long                 'Resolved display month
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' RESOLVE INITIAL DATE
-'------------------------------------------------------------------------------
-    'Use the current system date when no initial date is supplied
-        If InitialDate = 0 Then
-            EffectiveDate = VBA.Date
-        Else
-            EffectiveDate = VBA.DateValue(InitialDate)
-        End If
-    'Resolve the effective display year
-        EffectiveYear = VBA.Year(EffectiveDate)
-    'Resolve the effective display month
-        EffectiveMonth = VBA.Month(EffectiveDate)
-
-'------------------------------------------------------------------------------
-' VALIDATE DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Reject years outside the supported display range
-        If EffectiveYear < DP_MIN_YEAR Or EffectiveYear > DP_MAX_YEAR Then
-            Err.Raise vbObjectError + 513, PROC_NAME, _
-                "InitialDate year must be between " & VBA.CStr(DP_MIN_YEAR) & _
-                " and " & VBA.CStr(DP_MAX_YEAR)
-        End If
-    'Reject the lower VBA Date rendering boundary
-        If EffectiveYear = VBA_DATE_MIN_YEAR And EffectiveMonth = 1 Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-    'Reject the upper VBA Date rendering boundary
-        If EffectiveYear = VBA_DATE_MAX_YEAR And EffectiveMonth = 12 Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-
-'------------------------------------------------------------------------------
-' STORE DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Store the displayed year
-        mDisplayYear = EffectiveYear
-    'Store the displayed month
-        mDisplayMonth = EffectiveMonth
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Display period initialization failed: " & Err.Description
-
-End Sub
-
-'------------------------------------------------------------------------------
-' KEYBOARD NAVIGATION STATE
-'------------------------------------------------------------------------------
-
-Private Sub UF_KeyboardDate_Initialize(ByVal InitialDate As Date)
-
-'
-'------------------------------------------------------------------------------
-'                           INITIALIZE KEYBOARD DATE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Initializes the DatePicker keyboard-navigation date
-'
-' WHY THIS EXISTS
-'   Keyboard navigation needs one internal date representing the currently
-'   highlighted day before the user confirms the selection
-'
-' INPUTS
-'   InitialDate
-'     Initial date resolved when the form opens
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Uses the current selected date when available, otherwise uses InitialDate.
-'   If InitialDate is zero, falls back to the current system date
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the keyboard date cannot be initialized
-'
-' DEPENDENCIES
-'   gDP_HasSelectedDate
-'   gDP_SelectedDate
-'
-' NOTES
-'   This routine does not write to Excel
-'
-'   The keyboard date is stored as a date-only value
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_KeyboardDate_Initialize"
-
-    Dim EffectiveDate       As Date 'Resolved keyboard navigation date
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' RESOLVE KEYBOARD DATE
-'------------------------------------------------------------------------------
-    'Use the selected date when one exists
-        If gDP_HasSelectedDate Then
-            'Resolve the selected date as the keyboard navigation date
-                EffectiveDate = VBA.DateValue(gDP_SelectedDate)
-        Else
-            'Use the current system date when no explicit initial date is supplied
-                If InitialDate = 0 Then
-                    EffectiveDate = VBA.Date
-                Else
-                    EffectiveDate = VBA.DateValue(InitialDate)
-                End If
-        End If
-
-'------------------------------------------------------------------------------
-' STORE KEYBOARD STATE
-'------------------------------------------------------------------------------
-    'Store the keyboard navigation date
-        mKeyboardDate = EffectiveDate
-    'Mark keyboard navigation as initialized
-        mHasKeyboardDate = True
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Keyboard date initialization failed: " & Err.Description
-
-End Sub
-Private Sub UF_KeyboardDate_MoveDays(ByVal DayOffset As Long)
-
-'
-'------------------------------------------------------------------------------
-'                           MOVE KEYBOARD DATE BY DAYS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Moves the keyboard-selected DatePicker date by a number of days
-'
-' WHY THIS EXISTS
-'   Arrow-key navigation moves within the calendar grid by day or by week
-'
-' INPUTS
-'   DayOffset
-'     Number of days to move
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Ensures the keyboard date is initialized, applies the requested day offset,
-'   and delegates display synchronization to UF_KeyboardDate_Set
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the movement cannot be applied
-'
-' DEPENDENCIES
-'   UF_DisplayPeriod_Initialize
-'   UF_KeyboardDate_Set
 '
-' NOTES
-'   This routine does not write to Excel
-'
-'   A zero DayOffset is treated as a safe no-op
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_KeyboardDate_MoveDays"
-
-    Dim EffectiveBaseDate   As Date     'Resolved starting keyboard date
-    Dim NewKeyboardDate     As Date     'Resolved moved keyboard date
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' EXIT IF NO MOVEMENT IS REQUESTED
-'------------------------------------------------------------------------------
-    'Exit when no date movement is requested
-        If DayOffset = 0 Then Exit Sub
-
-'------------------------------------------------------------------------------
-' ENSURE DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Initialize the display period when it is not yet usable
-        If mDisplayYear = 0 Or mDisplayMonth < 1 Or mDisplayMonth > 12 Then
-            UF_DisplayPeriod_Initialize VBA.Date
-        End If
-
-'------------------------------------------------------------------------------
-' ENSURE KEYBOARD DATE
-'------------------------------------------------------------------------------
-    'Initialize keyboard date to the first displayed day when missing
-        If Not mHasKeyboardDate Then
-            'Resolve the first day of the displayed month
-                EffectiveBaseDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
-            'Store the keyboard navigation date
-                mKeyboardDate = EffectiveBaseDate
-            'Mark keyboard navigation as initialized
-                mHasKeyboardDate = True
-        Else
-            'Use the current keyboard date as the movement base
-                EffectiveBaseDate = VBA.DateValue(mKeyboardDate)
-        End If
-
-'------------------------------------------------------------------------------
-' MOVE DATE
-'------------------------------------------------------------------------------
-    'Resolve the moved keyboard date
-        NewKeyboardDate = VBA.DateAdd("d", DayOffset, EffectiveBaseDate)
-    'Apply the moved keyboard date and refresh visible state
-        UF_KeyboardDate_Set NewKeyboardDate
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Keyboard day movement failed: " & Err.Description
-
-End Sub
-Private Sub UF_KeyboardDate_MoveMonths(ByVal MonthOffset As Long)
-
-'
-'------------------------------------------------------------------------------
-'                           MOVE KEYBOARD DATE BY MONTHS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Moves the keyboard-selected DatePicker date by a number of months
-'
-' WHY THIS EXISTS
-'   PageUp / PageDown keyboard navigation should move across months and years
-'
-' INPUTS
-'   MonthOffset
-'     Number of months to move
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Ensures the keyboard date is initialized, applies the requested month offset,
-'   and delegates display synchronization to UF_KeyboardDate_Set
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the movement cannot be applied
-'
-' DEPENDENCIES
-'   UF_DisplayPeriod_Initialize
-'   UF_KeyboardDate_Set
-'
-' NOTES
-'   This routine does not write to Excel
-'
-'   VBA DateAdd handles month-end adjustment automatically
-'
-'   A zero MonthOffset is treated as a safe no-op
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_KeyboardDate_MoveMonths"
-
-    Dim EffectiveBaseDate   As Date     'Resolved starting keyboard date
-    Dim NewKeyboardDate     As Date     'Resolved moved keyboard date
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' EXIT IF NO MOVEMENT IS REQUESTED
-'------------------------------------------------------------------------------
-    'Exit when no date movement is requested
-        If MonthOffset = 0 Then Exit Sub
-
-'------------------------------------------------------------------------------
-' ENSURE DISPLAY PERIOD
-'------------------------------------------------------------------------------
-    'Initialize the display period when it is not yet usable
-        If mDisplayYear = 0 Or mDisplayMonth < 1 Or mDisplayMonth > 12 Then
-            UF_DisplayPeriod_Initialize VBA.Date
-        End If
-
-'------------------------------------------------------------------------------
-' ENSURE KEYBOARD DATE
-'------------------------------------------------------------------------------
-    'Initialize keyboard date to the first displayed day when missing
-        If Not mHasKeyboardDate Then
-            'Resolve the first day of the displayed month
-                EffectiveBaseDate = VBA.DateSerial(mDisplayYear, mDisplayMonth, 1)
-            'Store the keyboard navigation date
-                mKeyboardDate = EffectiveBaseDate
-            'Mark keyboard navigation as initialized
-                mHasKeyboardDate = True
-        Else
-            'Use the current keyboard date as the movement base
-                EffectiveBaseDate = VBA.DateValue(mKeyboardDate)
-        End If
-
-'------------------------------------------------------------------------------
-' MOVE DATE
-'------------------------------------------------------------------------------
-    'Resolve the moved keyboard date
-        NewKeyboardDate = VBA.DateAdd("m", MonthOffset, EffectiveBaseDate)
-    'Apply the moved keyboard date and refresh visible state
-        UF_KeyboardDate_Set NewKeyboardDate
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Keyboard month movement failed: " & Err.Description
-
-End Sub
-Private Sub UF_KeyboardDate_Set(ByVal NewKeyboardDate As Date)
-
-'
-'------------------------------------------------------------------------------
-'                           SET KEYBOARD DATE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Sets the keyboard-selected DatePicker date and refreshes the minimum
-'   necessary visual state
-'
-' WHY THIS EXISTS
-'   Keyboard navigation can fire repeatedly. Rebuilding all day cells on every
-'   arrow-key movement is unnecessary when the new keyboard date remains inside
-'   the currently displayed month
-'
-' INPUTS
-'   NewKeyboardDate
-'     New date selected by keyboard navigation
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Captures the previous keyboard date, stores the new keyboard date, hides the
-'   picker panel when present, applies a full grid refresh when the new date
-'   moves to another displayed month, and otherwise refreshes only the previous
-'   and new visible day cells
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if NewKeyboardDate cannot be displayed or
-'   the visual state cannot be refreshed
-'
-' DEPENDENCIES
-'   UF_PickerPanel_HoverReset
-'   UF_DayCell_RefreshVisibleDate
-'   UF_DayGrid_Populate
-'
-' NOTES
-'   This routine preserves the full-refresh behavior when navigation crosses a
-'   month boundary
-'
-'   January 100 and December 9999 are rejected because the fixed calendar grid
-'   cannot render the required adjacent-month dates outside the VBA Date
-'   supported range
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_KeyboardDate_Set"
-    
-    Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
-    Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
-
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
-    Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
-    Dim PreviousDate            As Date                     'Previous keyboard-selected date
-    Dim HasPreviousDate         As Boolean                  'True when previous keyboard date exists
-    Dim NewDateOnly             As Date                     'New keyboard date without time
-    Dim NewDisplayYear          As Long                     'New keyboard-date year
-    Dim NewDisplayMonth         As Long                     'New keyboard-date month
-    Dim NeedsFullRefresh        As Boolean                  'True when the displayed month must change
-    Dim HandlerStep             As String                   'Current handler step for diagnostics
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-    'Initialize diagnostic step
-        HandlerStep = "Initialize"
-
-'------------------------------------------------------------------------------
-' CAPTURE PREVIOUS STATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Capture previous keyboard state"
-    'Capture the previous keyboard date when available
-        If mHasKeyboardDate Then
-            PreviousDate = VBA.DateValue(mKeyboardDate)
-            HasPreviousDate = True
-        End If
-
-'------------------------------------------------------------------------------
-' NORMALIZE NEW KEYBOARD DATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Normalize new keyboard date"
-
-    'Normalize the new keyboard date
-        NewDateOnly = VBA.DateValue(NewKeyboardDate)
-    'Resolve the new display year
-        NewDisplayYear = VBA.Year(NewDateOnly)
-    'Resolve the new display month
-        NewDisplayMonth = VBA.Month(NewDateOnly)
-
-'------------------------------------------------------------------------------
-' VALIDATE NEW KEYBOARD DATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate new keyboard date"
-
-    'Reject years outside the supported DatePicker range
-        If NewDisplayYear < DP_MIN_YEAR Or NewDisplayYear > DP_MAX_YEAR Then
-            Err.Raise vbObjectError + 513, PROC_NAME, _
-                "NewKeyboardDate year must be between " & VBA.CStr(DP_MIN_YEAR) & _
-                " and " & VBA.CStr(DP_MAX_YEAR)
-        End If
-    'Reject the lower VBA Date rendering boundary
-        If NewDisplayYear = VBA_DATE_MIN_YEAR And NewDisplayMonth = 1 Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "January " & VBA.CStr(VBA_DATE_MIN_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-    'Reject the upper VBA Date rendering boundary
-        If NewDisplayYear = VBA_DATE_MAX_YEAR And NewDisplayMonth = 12 Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "December " & VBA.CStr(VBA_DATE_MAX_YEAR) & _
-                " cannot render a complete DatePicker grid"
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE REFRESH STRATEGY
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve refresh strategy"
-
-    'Force a full refresh when the current display state is not usable
-        If mDisplayYear = 0 Or mDisplayMonth < 1 Or mDisplayMonth > 12 Then
-            NeedsFullRefresh = True
-        Else
-            'Resolve whether the keyboard date moved outside the displayed month
-                NeedsFullRefresh = _
-                    (NewDisplayYear <> mDisplayYear Or _
-                     NewDisplayMonth <> mDisplayMonth)
-        End If
-
 '------------------------------------------------------------------------------
-' STORE NEW KEYBOARD STATE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Store keyboard state"
-
-    'Store the new keyboard date
-        mKeyboardDate = NewDateOnly
-    'Mark keyboard navigation as initialized
-        mHasKeyboardDate = True
-
-'------------------------------------------------------------------------------
-' HIDE PICKER PANEL
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Hide picker panel"
-
-    'Clear active picker hover before hiding the picker panel
-        If mHoveredPickerItemIndex <> 0 Then UF_PickerPanel_HoverReset
-    'Suppress lookup errors when the picker panel is not available
-        On Error Resume Next
-    'Retrieve the picker panel control when available
-        Set ExistingControl = Me.Controls(DP_PICKER_PANEL_NAME)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Hide the picker panel when it exists and is a frame
-        If Not ExistingControl Is Nothing Then
-            If VBA.TypeName(ExistingControl) = "Frame" Then
-                Set Fra_PickerPanel = ExistingControl
-                Fra_PickerPanel.Visible = False
-            End If
-        End If
-    'Clear picker-panel mode after hiding the panel
-        mPickerPanelMode = 0
-    'Clear picker-panel hover state after hiding the panel
-        mHoveredPickerItemIndex = 0
-
-'------------------------------------------------------------------------------
-' APPLY FULL REFRESH WHEN MONTH CHANGES
-'------------------------------------------------------------------------------
-    'Apply a full grid refresh when the new keyboard date changes displayed month
-        If NeedsFullRefresh Then
-            'Track the current handler step
-                HandlerStep = "Apply full grid refresh"
-            'Store the displayed year
-                mDisplayYear = NewDisplayYear
-            'Store the displayed month
-                mDisplayMonth = NewDisplayMonth
-            'Refresh the full calendar grid
-                UF_DayGrid_Populate mDisplayYear, mDisplayMonth
-            'Exit after full refresh
-                Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY MINIMAL REFRESH WHEN MONTH IS UNCHANGED
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Apply minimal day-cell refresh"
-
-    'Refresh the previously highlighted visible day when it changed
-        If HasPreviousDate Then
-            If PreviousDate <> NewDateOnly Then
-                UF_DayCell_RefreshVisibleDate PreviousDate
-            End If
-        End If
-    'Refresh the newly highlighted visible day
-        UF_DayCell_RefreshVisibleDate NewDateOnly
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "Keyboard date update failed: " & Err.Description
-
-End Sub
-
-'------------------------------------------------------------------------------
-' HEADER HOVER
-'------------------------------------------------------------------------------
-
-Public Sub UF_Header_HoverApply(ByVal LabelName As String)
-
-'
-'------------------------------------------------------------------------------
-'                           APPLY HEADER CLICKABLE HOVER
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Applies hover formatting to one clickable DatePicker header label
-'
-' WHY THIS EXISTS
-'   Runtime-created header labels are clickable. The UI should give the user a
-'   visible cue when the mouse moves over them
-'
-' INPUTS
-'   LabelName
-'     Name of the header label currently under the mouse pointer
 '
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Resolves supported clickable header labels, resets active hover state from
-'   other DatePicker areas, exits when the same header label is already hovered,
-'   applies a subtle hover state to the requested header label, and stores the
-'   current header hover state
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if LabelName is empty or if a supported
-'   header label cannot be resolved or formatted
-'
-'   Unsupported header labels are treated as neutral hover-reset areas
-'
-' DEPENDENCIES
-'   UF_DayCell_HoverReset
-'   UF_Header_HoverReset
-'   UF_PickerPanel_HoverReset
-'   UF_Footer_HoverReset
-'   UF_SettingsPanel_HoverReset
-'
-' NOTES
-'   This routine avoids changing Font properties because header labels have
-'   different normal bold states
-'
-'   Label matching is normalized so behavior is independent from Option Compare
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "UF_DatePicker.UF_Header_HoverApply"
-
-    Dim RawLabelName            As String               'Trimmed label name supplied by caller
-    Dim NormalizedLabelName     As String               'Uppercase label name used for routing
-    Dim TargetLabelName         As String               'Canonical target label name
-    
-    Dim ExistingControl         As MSForms.Control      'Control resolved by name
-    Dim Lbl_Header              As MSForms.Label        'Hovered header label
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' NORMALIZE INPUT
-'------------------------------------------------------------------------------
-    'Normalize the supplied label name
-        RawLabelName = VBA.Trim$(LabelName)
-    'Reject an empty label name
-        If VBA.Len(RawLabelName) = 0 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "LabelName cannot be empty"
-        End If
-    'Normalize the label name for Option Compare independent routing
-        NormalizedLabelName = VBA.UCase$(RawLabelName)
-
-'------------------------------------------------------------------------------
-' RESOLVE TARGET HEADER LABEL
-'------------------------------------------------------------------------------
-    'Resolve supported clickable header labels
-        Select Case NormalizedLabelName
-            Case "LBL_HEADERMONTH"
-                TargetLabelName = "Lbl_HeaderMonth"
-            Case "LBL_HEADERYEAR"
-                TargetLabelName = "Lbl_HeaderYear"
-            Case "LBL_PREVMONTH"
-                TargetLabelName = "Lbl_PrevMonth"
-            Case "LBL_NEXTMONTH"
-                TargetLabelName = "Lbl_NextMonth"
-            Case "LBL_PREVYEAR"
-                TargetLabelName = "Lbl_PrevYear"
-            Case "LBL_NEXTYEAR"
-                TargetLabelName = "Lbl_NextYear"
-            Case "LBL_HEADERSETTINGS"
-                TargetLabelName = "Lbl_HeaderSettings"
-            Case Else
-                'Remove previous header hover state when moving over neutral header surfaces
-                    If VBA.Len(mHoveredHeaderLabelName) <> 0 Then
-                        UF_Header_HoverReset
-                    End If
-                'Exit because neutral header labels do not receive hover styling
-                    Exit Sub
-        End Select
-
-'------------------------------------------------------------------------------
-' RESET OTHER HOVER STATES
-'------------------------------------------------------------------------------
-    'Clear active day-cell hover when entering the header
-        If mHoveredDayCellIndex <> 0 Then
-            UF_DayCell_HoverReset
-        End If
-    'Clear active picker-panel hover when entering the header
-        If mHoveredPickerItemIndex <> 0 Then
-            UF_PickerPanel_HoverReset
-        End If
-    'Clear active footer hover when entering the header
-        If VBA.Len(mHoveredFooterActionName) <> 0 Then
-            UF_Footer_HoverReset
-        End If
-    'Clear active settings-panel hover when entering the header
-        If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then
-            UF_SettingsPanel_HoverReset
-        End If
-
-'------------------------------------------------------------------------------
-' EXIT IF ALREADY HOVERED
-'------------------------------------------------------------------------------
-    'Exit when the same header label is already highlighted
-        If VBA.StrComp(mHoveredHeaderLabelName, TargetLabelName, vbBinaryCompare) = 0 Then
-            Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' RESET CURRENT HEADER HOVER STATE
-'------------------------------------------------------------------------------
-    'Remove hover formatting from the previously highlighted header label
-        If VBA.Len(mHoveredHeaderLabelName) <> 0 Then
-            UF_Header_HoverReset
-        End If
-
-'------------------------------------------------------------------------------
-' RETRIEVE TARGET LABEL
-'------------------------------------------------------------------------------
-    'Suppress lookup errors while resolving the target header label
-        On Error Resume Next
-    'Retrieve the target header label
-        Set ExistingControl = Me.Controls(TargetLabelName)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Reject a missing target header label
-        If ExistingControl Is Nothing Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "Unable to resolve expected header label " & TargetLabelName
-        End If
-    'Reject a name collision with a non-label control
-        If VBA.TypeName(ExistingControl) <> "Label" Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "Control '" & TargetLabelName & "' exists but is not an MSForms.Label"
-        End If
-    'Use the resolved header label
-        Set Lbl_Header = ExistingControl
-
-'------------------------------------------------------------------------------
-' APPLY HOVER STATE
-'------------------------------------------------------------------------------
-    'Apply clickable hover visual formatting
-        With Lbl_Header
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_HEADER_HOVER_BACK_COLOR
-            .ForeColor = vbWhite
-            .BorderStyle = fmBorderStyleSingle
-            .BorderColor = vbWhite
-            .SpecialEffect = fmSpecialEffectFlat
-        End With
-    'Move the hovered header label to the front
-        Lbl_Header.ZOrder 0
-
-'------------------------------------------------------------------------------
-' STORE HOVER STATE
-'------------------------------------------------------------------------------
-    'Store the current hovered header label name
-        mHoveredHeaderLabelName = TargetLabelName
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Header hover application failed: " & Err.Description
-
-End Sub
-Private Sub UF_Header_HoverReset()
-
+'                     PUBLIC REFRESH AND CLOCK ENTRY POINTS
 '
 '------------------------------------------------------------------------------
-'                           RESET HEADER CLICKABLE HOVER
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Removes hover formatting from the currently highlighted clickable header
-'   label
-'
-' WHY THIS EXISTS
-'   Header hover formatting must be removed when the mouse leaves clickable
-'   header labels and moves back over another DatePicker surface
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Resolves the currently highlighted header label, restores its normal visual
-'   state when available, and clears the stored header hover state
 '
-' ERROR POLICY
-'   Best-effort UI cleanup. Suppresses reset errors because hover reset should
-'   never interrupt UserForm interaction
-'
-' DEPENDENCIES
-'   UserForm.Controls collection
-'
-' NOTES
-'   This routine restores only the visual properties changed by
-'   UF_Header_HoverApply
-'
-'   Stale or missing runtime labels are ignored because controls may have been
-'   rebuilt while a hover state was active
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurrentLabelName    As String               'Current hovered header label name
-    Dim Lbl_Header          As MSForms.Label        'Previously highlighted header label
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress hover-reset errors
-        On Error Resume Next
-    'Capture the current hovered header label
-        CurrentLabelName = VBA.Trim$(mHoveredHeaderLabelName)
-
-'------------------------------------------------------------------------------
-' EXIT IF NOTHING IS HOVERED
-'------------------------------------------------------------------------------
-    'Exit if no header label is currently highlighted
-        If VBA.Len(CurrentLabelName) = 0 Then GoTo Clean_Exit
-
-'------------------------------------------------------------------------------
-' RETRIEVE CURRENTLY HOVERED LABEL
-'------------------------------------------------------------------------------
-    'Retrieve the previously highlighted header label
-        Set Lbl_Header = Me.Controls(CurrentLabelName)
-
-'------------------------------------------------------------------------------
-' RESET VISUAL STATE
-'------------------------------------------------------------------------------
-    'Restore normal clickable-header formatting when available
-        If Not Lbl_Header Is Nothing Then
-            With Lbl_Header
-                .BackStyle = fmBackStyleTransparent
-                .BackColor = DP_HEADER_BACK_COLOR
-                .ForeColor = DP_HEADER_FORE_COLOR
-                .BorderStyle = fmBorderStyleNone
-                .BorderColor = DP_HEADER_BACK_COLOR
-                .SpecialEffect = fmSpecialEffectFlat
-            End With
-        End If
-
-'------------------------------------------------------------------------------
-' CLEAN EXIT
-'------------------------------------------------------------------------------
-Clean_Exit:
-    'Clear the current hovered header label name
-        mHoveredHeaderLabelName = vbNullString
-    'Clear suppressed reset errors
-        Err.Clear
-    'Restore normal error handling
-        On Error GoTo 0
-
-End Sub
-
-'------------------------------------------------------------------------------
-' PUBLIC REFRESH AND CLOCK ENTRY POINTS
-'------------------------------------------------------------------------------
 
 Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 
@@ -12972,6 +13352,7 @@ ErrorHandler:
             "Settings-dependent DatePicker refresh failed: " & Err.Description
 
 End Sub
+
 Public Sub UF_DP_UpdateLiveClock()
 
 '
@@ -13086,147 +13467,15 @@ FailSafe:
 End Sub
 
 
-'------------------------------------------------------------------------------
-' SHARED HELPERS
-'------------------------------------------------------------------------------
-
-Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As Long
-
 '
-'==============================================================================
-'                   GET DAY CELL INDEX FROM LABEL NAME
 '------------------------------------------------------------------------------
-' PURPOSE
-'   Resolves the day-cell index from a DatePicker day label name
 '
-' WHY THIS EXISTS
-'   Each calendar day cell is composed of two runtime labels:
-'     - Lbl_DayBg1 to Lbl_DayBg42
-'     - Lbl_Day1 to Lbl_Day42
+'                   LOW-LEVEL CREATE / LAYOUT / VALIDATION HELPERS
 '
-'   Hovering or clicking either label must resolve to the same day-cell index
+'------------------------------------------------------------------------------
 '
-' INPUTS
-'   LabelName
-'     Runtime day label name
-'
-' RETURNS
-'   Day-cell index from 1 to DP_DAY_LABEL_COUNT
-'
-'   Zero when the label name is blank, unsupported, malformed, or outside the
-'   supported day-cell range
-'
-' BEHAVIOR
-'   Normalizes the supplied label name, checks the background-label prefix first,
-'   checks the text-label prefix second, extracts the numeric suffix, applies
-'   strict digit-only parsing, and returns the validated day-cell index
-'
-' ERROR POLICY
-'   Does not raise errors. Unsupported or malformed label names return zero
-'
-' DEPENDENCIES
-'   DP_DAY_LABEL_COUNT
-'
-' NOTES
-'   The background-label prefix must be tested before the text-label prefix
-'   because Lbl_DayBg also starts with Lbl_Day
-'
-'   Matching is normalized with UCase$ so behavior is independent from
-'   Option Compare
-'
-' UPDATED
-'   2026-05-02
-'==============================================================================
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const BG_PREFIX         As String = "LBL_DAYBG"     'Day background label prefix
-    Const TEXT_PREFIX       As String = "LBL_DAY"       'Day text label prefix
 
-    Dim EffectiveName       As String                   'Normalized day label name
-    Dim RawIndex            As String                   'Raw numeric suffix
-    Dim ParsedIndex         As Long                     'Parsed day-cell index
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable fail-safe parsing
-        On Error GoTo SafeExit
-
-'------------------------------------------------------------------------------
-' NORMALIZE INPUT
-'------------------------------------------------------------------------------
-    'Normalize the supplied label name
-        EffectiveName = VBA.UCase$(VBA.Trim$(LabelName))
-    'Return zero for empty label names
-        If VBA.Len(EffectiveName) = 0 Then
-            UF_DayCell_GetIndexFromLabelName = 0
-            Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE INDEX FROM BACKGROUND LABEL
-'------------------------------------------------------------------------------
-    'Resolve indexes from day background labels first
-        If VBA.Left$(EffectiveName, VBA.Len(BG_PREFIX)) = BG_PREFIX Then
-            'Extract the raw numeric suffix
-                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(BG_PREFIX) + 1)
-            'Return zero when the suffix is empty
-                If VBA.Len(RawIndex) = 0 Then Exit Function
-            'Return zero when the suffix is not strictly numeric
-                If RawIndex Like "*[!0-9]*" Then Exit Function
-            'Parse the day-cell index
-                ParsedIndex = VBA.CLng(RawIndex)
-            'Return zero when the index is outside the supported day-cell range
-                If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
-            'Return the validated day-cell index
-                UF_DayCell_GetIndexFromLabelName = ParsedIndex
-            'Exit after resolving the background label
-                Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' RESOLVE INDEX FROM TEXT LABEL
-'------------------------------------------------------------------------------
-    'Resolve indexes from day text labels
-        If VBA.Left$(EffectiveName, VBA.Len(TEXT_PREFIX)) = TEXT_PREFIX Then
-            'Extract the raw numeric suffix
-                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(TEXT_PREFIX) + 1)
-            'Return zero when the suffix is empty
-                If VBA.Len(RawIndex) = 0 Then Exit Function
-            'Return zero when the suffix is not strictly numeric
-                If RawIndex Like "*[!0-9]*" Then Exit Function
-            'Parse the day-cell index
-                ParsedIndex = VBA.CLng(RawIndex)
-            'Return zero when the index is outside the supported day-cell range
-                If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
-            'Return the validated day-cell index
-                UF_DayCell_GetIndexFromLabelName = ParsedIndex
-            'Exit after resolving the text label
-                Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN FALLBACK
-'------------------------------------------------------------------------------
-    'Return zero for unsupported day label names
-        UF_DayCell_GetIndexFromLabelName = 0
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit the function
-        Exit Function
-
-'------------------------------------------------------------------------------
-' SAFE EXIT
-'------------------------------------------------------------------------------
-SafeExit:
-    'Return zero for malformed or oversized numeric suffixes
-        UF_DayCell_GetIndexFromLabelName = 0
-
-End Function
 Private Function UF_Ensure_Label(ByVal ControlName As String) As MSForms.Label
 
 '
@@ -13356,6 +13605,151 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "UserForm label ensure failed: " & Err.Description
 
 End Function
+
+Private Function UF_Ensure_FrameLabel( _
+    ByVal ParentFrame As MSForms.Frame, _
+    ByVal ControlName As String) As MSForms.Label
+
+'
+'------------------------------------------------------------------------------
+'                           ENSURE FRAME LABEL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns an existing MSForms.Label inside a frame or creates it if missing
+'
+' WHY THIS EXISTS
+'   The month/year picker panel, settings panel, footer groups, and other
+'   overlay surfaces use labels hosted inside MSForms.Frame controls. Those
+'   labels must be created in the frame's Controls collection, not directly on
+'   the UserForm
+'
+' INPUTS
+'   ParentFrame
+'     Frame that owns the label
+'
+'   ControlName
+'     Name of the label control to retrieve or create
+'
+' RETURNS
+'   The requested MSForms.Label control
+'
+' BEHAVIOR
+'   Normalizes the requested control name, reuses an existing MSForms.Label
+'   inside the supplied frame when available, or creates a new label when missing
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if ParentFrame is missing, ControlName is
+'   blank, an existing control with the same name is not a label, or the label
+'   cannot be created
+'
+' DEPENDENCIES
+'   MSForms.Frame
+'   MSForms.Label
+'
+' NOTES
+'   This routine creates controls inside the supplied frame
+'
+'   This routine does not format the label. Formatting remains the responsibility
+'   of the caller
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_FrameLabel"
+
+    Dim EffectiveName       As String               'Normalized control name
+    
+    Dim ExistingControl     As MSForms.Control      'Existing frame control
+    Dim Lbl                 As MSForms.Label        'Target label control
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject a missing parent frame
+        If ParentFrame Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "ParentFrame cannot be Nothing"
+        End If
+    'Normalize the requested control name
+        EffectiveName = VBA.Trim$(ControlName)
+    'Reject an empty control name
+        If VBA.Len(EffectiveName) = 0 Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "ControlName cannot be empty"
+        End If
+
+'------------------------------------------------------------------------------
+' LOOK FOR EXISTING CONTROL
+'------------------------------------------------------------------------------
+    'Suppress lookup errors when the control does not exist yet
+        On Error Resume Next
+    'Try to retrieve an existing control with the requested name
+        Set ExistingControl = ParentFrame.Controls(EffectiveName)
+    'Clear any suppressed lookup error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REUSE EXISTING LABEL
+'------------------------------------------------------------------------------
+    'Reuse the existing control when it is available
+        If Not ExistingControl Is Nothing Then
+            'Reject an existing non-label control with the same name
+                If VBA.TypeName(ExistingControl) <> "Label" Then
+                    Err.Raise vbObjectError + 515, PROC_NAME, _
+                        "Control '" & EffectiveName & "' already exists but is not an MSForms.Label"
+                End If
+            'Use the existing label
+                Set Lbl = ExistingControl
+            'Return the existing label
+                Set UF_Ensure_FrameLabel = Lbl
+            'Exit after returning the existing label
+                Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' CREATE LABEL IF MISSING
+'------------------------------------------------------------------------------
+    'Create the label inside the supplied frame
+        Set ExistingControl = ParentFrame.Controls.Add("Forms.Label.1", EffectiveName, True)
+    'Reject an unexpected created control type
+        If VBA.TypeName(ExistingControl) <> "Label" Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "Control '" & EffectiveName & "' was created but is not an MSForms.Label"
+        End If
+    'Use the created label
+        Set Lbl = ExistingControl
+
+'------------------------------------------------------------------------------
+' RETURN LABEL
+'------------------------------------------------------------------------------
+    'Return the created label
+        Set UF_Ensure_FrameLabel = Lbl
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Frame label ensure failed: " & Err.Description
+
+End Function
+
 Private Function UF_Ensure_FrameMultiPage( _
     ByVal ParentFrame As MSForms.Frame, _
     ByVal ControlName As String) As MSForms.MultiPage
@@ -13642,6 +14036,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Page label ensure failed: " & Err.Description
 
 End Function
+
 Private Function UF_Ensure_PageComboBox( _
     ByVal ParentPage As MSForms.Page, _
     ByVal ControlName As String) As MSForms.ComboBox
@@ -13786,6 +14181,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Page ComboBox ensure failed: " & Err.Description
 
 End Function
+
 Private Function UF_Ensure_PageCheckBox( _
     ByVal ParentPage As MSForms.Page, _
     ByVal ControlName As String) As MSForms.CheckBox
@@ -13930,149 +14326,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Page CheckBox ensure failed: " & Err.Description
 
 End Function
-Private Function UF_Ensure_FrameLabel( _
-    ByVal ParentFrame As MSForms.Frame, _
-    ByVal ControlName As String) As MSForms.Label
 
-'
-'------------------------------------------------------------------------------
-'                           ENSURE FRAME LABEL
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Returns an existing MSForms.Label inside a frame or creates it if missing
-'
-' WHY THIS EXISTS
-'   The month/year picker panel, settings panel, footer groups, and other
-'   overlay surfaces use labels hosted inside MSForms.Frame controls. Those
-'   labels must be created in the frame's Controls collection, not directly on
-'   the UserForm
-'
-' INPUTS
-'   ParentFrame
-'     Frame that owns the label
-'
-'   ControlName
-'     Name of the label control to retrieve or create
-'
-' RETURNS
-'   The requested MSForms.Label control
-'
-' BEHAVIOR
-'   Normalizes the requested control name, reuses an existing MSForms.Label
-'   inside the supplied frame when available, or creates a new label when missing
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if ParentFrame is missing, ControlName is
-'   blank, an existing control with the same name is not a label, or the label
-'   cannot be created
-'
-' DEPENDENCIES
-'   MSForms.Frame
-'   MSForms.Label
-'
-' NOTES
-'   This routine creates controls inside the supplied frame
-'
-'   This routine does not format the label. Formatting remains the responsibility
-'   of the caller
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_FrameLabel"
-
-    Dim EffectiveName       As String               'Normalized control name
-    
-    Dim ExistingControl     As MSForms.Control      'Existing frame control
-    Dim Lbl                 As MSForms.Label        'Target label control
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Reject a missing parent frame
-        If ParentFrame Is Nothing Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "ParentFrame cannot be Nothing"
-        End If
-    'Normalize the requested control name
-        EffectiveName = VBA.Trim$(ControlName)
-    'Reject an empty control name
-        If VBA.Len(EffectiveName) = 0 Then
-            Err.Raise vbObjectError + 514, PROC_NAME, "ControlName cannot be empty"
-        End If
-
-'------------------------------------------------------------------------------
-' LOOK FOR EXISTING CONTROL
-'------------------------------------------------------------------------------
-    'Suppress lookup errors when the control does not exist yet
-        On Error Resume Next
-    'Try to retrieve an existing control with the requested name
-        Set ExistingControl = ParentFrame.Controls(EffectiveName)
-    'Clear any suppressed lookup error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' REUSE EXISTING LABEL
-'------------------------------------------------------------------------------
-    'Reuse the existing control when it is available
-        If Not ExistingControl Is Nothing Then
-            'Reject an existing non-label control with the same name
-                If VBA.TypeName(ExistingControl) <> "Label" Then
-                    Err.Raise vbObjectError + 515, PROC_NAME, _
-                        "Control '" & EffectiveName & "' already exists but is not an MSForms.Label"
-                End If
-            'Use the existing label
-                Set Lbl = ExistingControl
-            'Return the existing label
-                Set UF_Ensure_FrameLabel = Lbl
-            'Exit after returning the existing label
-                Exit Function
-        End If
-
-'------------------------------------------------------------------------------
-' CREATE LABEL IF MISSING
-'------------------------------------------------------------------------------
-    'Create the label inside the supplied frame
-        Set ExistingControl = ParentFrame.Controls.Add("Forms.Label.1", EffectiveName, True)
-    'Reject an unexpected created control type
-        If VBA.TypeName(ExistingControl) <> "Label" Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "Control '" & EffectiveName & "' was created but is not an MSForms.Label"
-        End If
-    'Use the created label
-        Set Lbl = ExistingControl
-
-'------------------------------------------------------------------------------
-' RETURN LABEL
-'------------------------------------------------------------------------------
-    'Return the created label
-        Set UF_Ensure_FrameLabel = Lbl
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Function
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Frame label ensure failed: " & Err.Description
-
-End Function
 Private Function UF_CalendarGrid_GetWidth() As Single
 
 '
@@ -14136,6 +14390,7 @@ Private Function UF_CalendarGrid_GetWidth() As Single
         UF_CalendarGrid_GetWidth = GridWidth
 
 End Function
+
 Private Function UF_CalendarGrid_GetBottom() As Single
 
 '
@@ -14201,6 +14456,7 @@ Private Function UF_CalendarGrid_GetBottom() As Single
         UF_CalendarGrid_GetBottom = GridBottom
 
 End Function
+
 Private Sub UF_Validate_CalendarLayoutConstants(ByVal CallerName As String)
 
 '
@@ -14351,107 +14607,4 @@ Private Sub UF_Validate_CalendarLayoutConstants(ByVal CallerName As String)
         End If
 
 End Sub
-Private Function UF_WeekdayCaption_GetFixedEnglish(ByVal DayNumber As Long) As String
-
-'
-'------------------------------------------------------------------------------
-'                   GET FIXED ENGLISH DAY OF WEEK CAPTION
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Returns the fixed English weekday caption for a VBA weekday number
-'
-' WHY THIS EXISTS
-'   The DatePicker can operate in local-independent mode, where weekday captions
-'   should not depend on Windows, Office, or regional language settings
-'
-' INPUTS
-'   DayNumber
-'     VBA weekday number from vbSunday to vbSaturday
-'
-' RETURNS
-'   Fixed three-letter English weekday caption
-'
-' BEHAVIOR
-'   Maps the supplied VBA weekday number to a fixed English caption:
-'     - SUN
-'     - MON
-'     - TUE
-'     - WED
-'     - THU
-'     - FRI
-'     - SAT
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if DayNumber is outside vbSunday to
-'   vbSaturday
-'
-' DEPENDENCIES
-'   VBA weekday constants
-'
-' NOTES
-'   Returned captions are intentionally fixed in English
-'
-'   This function is used when local-dependent weekday names are disabled
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "UF_DatePicker.UF_WeekdayCaption_GetFixedEnglish"
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' VALIDATE INPUTS
-'------------------------------------------------------------------------------
-    'Reject invalid day numbers
-        If DayNumber < vbSunday Or DayNumber > vbSaturday Then
-            Err.Raise vbObjectError + 513, PROC_NAME, _
-                "DayNumber must be between vbSunday and vbSaturday"
-        End If
-
-'------------------------------------------------------------------------------
-' RETURN CAPTION
-'------------------------------------------------------------------------------
-    'Return the fixed English caption
-        Select Case DayNumber
-
-            Case vbSunday
-                UF_WeekdayCaption_GetFixedEnglish = "SUN"
-            Case vbMonday
-                UF_WeekdayCaption_GetFixedEnglish = "MON"
-            Case vbTuesday
-                UF_WeekdayCaption_GetFixedEnglish = "TUE"
-            Case vbWednesday
-                UF_WeekdayCaption_GetFixedEnglish = "WED"
-            Case vbThursday
-                UF_WeekdayCaption_GetFixedEnglish = "THU"
-            Case vbFriday
-                UF_WeekdayCaption_GetFixedEnglish = "FRI"
-            Case vbSaturday
-                UF_WeekdayCaption_GetFixedEnglish = "SAT"
-
-        End Select
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Function
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Fixed English weekday caption resolution failed: " & Err.Description
-
-End Function
 

@@ -1,5 +1,4 @@
 Attribute VB_Name = "M_DATEPICKER"
-
 Option Explicit
 
 '
@@ -184,6 +183,7 @@ Option Explicit
     Private Const DP_FORM_NAME                     As String = "UF_DatePicker"          'DatePicker UserForm name
 
     Private Const DP_SETTINGS_SECTION_DISPLAY      As String = "Display"                 'Display settings section
+    Private Const DP_SETTINGS_SECTION_BEHAVIOR     As String = "Behavior"                'Behavior settings section
     Private Const DP_SETTINGS_SECTION_FEATURES     As String = "Features"                'Feature settings section
     Private Const DP_SETTINGS_SECTION_ADVANCED     As String = "Advanced"                'Advanced settings section
 
@@ -196,6 +196,8 @@ Option Explicit
     Private Const DP_SETTING_SIZE_MODE             As String = "SizeMode"                'Size mode setting key
     Private Const DP_SETTING_SHOW_RIGHT_CLICK      As String = "ShowRightClick"          'Right-click setting key
     Private Const DP_SETTING_SHOW_GRID_ICON        As String = "ShowGridIcon"            'Grid-icon setting key
+    Private Const DP_SETTING_ENABLE_KEYBOARD       As String = "EnableKeyboardShortcut"  'Keyboard shortcut setting key
+    Private Const DP_KEYBOARD_SHORTCUT_KEY         As String = "^+d"                     'Ctrl + Shift + D
     Private Const DP_SETTING_USE_WINAPI            As String = "UseWinAPI"               'WinAPI setting key
     Private Const DP_SETTING_HOLIDAY_CALLBACK      As String = "HolidayCallback"         'Holiday callback setting key
 
@@ -241,6 +243,8 @@ Option Explicit
     Public Const DP_DEFAULT_CLOSE_AFTER_SELECTION  As Boolean = True                     'Default close-after-selection flag
     Public Const DP_DEFAULT_SHOW_RIGHT_CLICK       As Boolean = True                     'Default right-click feature flag
     Public Const DP_DEFAULT_SHOW_GRID_ICON         As Boolean = True                     'Default grid-icon feature flag
+    Public Const DP_DEFAULT_ENABLE_KEYBOARD        As Boolean = True                     'Default keyboard shortcut feature flag
+    Public Const DP_KEYBOARD_SHORTCUT_TEXT         As String = "Ctrl + Shift + D"        'Displayed keyboard shortcut
     Public Const DP_DEFAULT_HOLIDAY_CALLBACK       As String = vbNullString              'Default holiday callback name
 
 '------------------------------------------------------------------------------
@@ -282,11 +286,11 @@ Option Explicit
 '------------------------------------------------------------------------------
     Public gDP_Manager                  As cDatePickerManager   'DatePicker manager/controller
     Public gDP_WriteValue               As Date                 'Picked value written to Excel
+    
     Public gDP_ShowRightClick           As Boolean              'Show right-click menu entry
     Public gDP_ShowGridIcon             As Boolean              'Show in-grid icon
     Public gDP_GridIconShape            As Shape                'In-grid icon shape reference
     Public gDP_IconPath                 As String               'Optional icon file path
-
     Public gDP_FirstDayOfWeek           As Long                 'vbSunday or vbMonday
     Public gDP_UseLocalNames            As Boolean              'Use local day/month captions
     Public gDP_ClockMode                As DP_ClockMode         'Static or live clock
@@ -294,11 +298,10 @@ Option Explicit
     Public gDP_HighlightWeekends        As Boolean              'Highlight weekend days
     Public gDP_AllowOutsideMonthSel     As Boolean              'Allow outside-month day selection
     Public gDP_CloseAfterSelection      As Boolean              'Close picker after successful write-back
-    Public gDP_EnableRightClickMenu     As Boolean
-    Public gDP_ShowInGridIcon           As Boolean
     Public gDP_UseWinAPI                As Boolean              'Allow WinAPI features
+    Public gDP_EnableKeyboardShortcut   As Boolean              'Enable keyboard shortcut fallback
     Public gDP_HolidayCallbackName      As String               'Optional holiday callback name
-
+    
     Public gDP_InitialDate              As Date                 'Initial date for next form instance
     Public gDP_HasInitialDate           As Boolean              'True when initial date is available
     Public gDP_SelectedDate             As Date                 'Currently selected date
@@ -317,7 +320,8 @@ Option Explicit
 '------------------------------------------------------------------------------
     Private Const DP_GRID_ICON_TEMP_FILE_NAME       As String = "VBA_DatePicker_GridIcon_v1_64.png" 'Embedded icon temp-file name
     Private Const DP_GRID_ICON_TEMP_MIN_BYTES       As Long = 500                                   'Minimum valid embedded icon size
-'
+
+
 '------------------------------------------------------------------------------
 '
 '                                   SETTINGS
@@ -335,7 +339,8 @@ Public Sub M_Settings_Load()
 '
 ' WHY THIS EXISTS
 '   User preferences should persist across Excel sessions and should be available
-'   before the DatePicker form is initialized
+'   before the DatePicker form, manager, context menu, grid icon, or keyboard
+'   shortcut infrastructure is initialized
 '
 ' INPUTS
 '   None
@@ -344,57 +349,96 @@ Public Sub M_Settings_Load()
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads display, behavior, feature, and advanced DatePicker settings from the
-'   current user's registry hive, normalizes invalid values to defaults, and
+'   Loads Display, Behavior, Feature, and Advanced DatePicker settings from the
+'   current user's registry hive
+'
+'   Falls back to legacy Display-section keys for settings that were moved to
+'   the Behavior section in later builds
+'
+'   Parses all Boolean settings from stable storage values, normalizes invalid
+'   or unsupported values to defaults, prevents a dead access configuration, and
 '   saves the normalized state back to the registry
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if settings cannot be loaded or saved
+'   Raises a descriptive runtime error if settings cannot be loaded, normalized,
+'   or saved
 '
 ' DEPENDENCIES
 '   GetSetting
 '   M_Settings_Save
+'   M_Settings_TryParseFirstDayOfWeek
+'   M_Settings_TryParseBoolean
+'   M_Settings_TryParseLong
+'   M_Settings_IsValidClockMode
+'   M_Settings_IsValidSizeMode
+'   M_Settings_BooleanToStorageValue
+'   M_Platform_CanUseWinAPI
 '
 ' NOTES
 '   Boolean values are parsed from stable 1 / 0 strings and common textual forms
 '
+'   Behavior settings are read from the Behavior section first and from the
+'   legacy Display section second, so existing user preferences are preserved
+'   after upgrading from earlier DatePicker builds
+'
+'   Settings are saved after load so invalid, missing, legacy, or unsupported
+'   values are normalized in persistent storage
+'
+'   If right-click integration and in-grid icon integration are both disabled,
+'   keyboard shortcut access is forced on to avoid a configuration with no
+'   practical manual DatePicker entry point
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "M_Settings_Load"          'Current procedure name
+    Const PROC_NAME             As String = "M_Settings_Load"
 
-    Dim RawValue        As String       'Raw setting value
-    Dim ParsedLong      As Long         'Parsed numeric setting value
-    Dim ParsedBoolean   As Boolean      'Parsed Boolean setting value
+    Dim RawValue                As String           'Raw setting value read from storage
+    Dim ParsedLong              As Long             'Parsed numeric setting value
+    Dim ParsedBoolean           As Boolean          'Parsed Boolean setting value
+    Dim PlatformCanUseWinAPI    As Boolean          'True when WinAPI helpers are supported
+    Dim HandlerStep             As String           'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+    'Resolve platform support once for this load pass
+        PlatformCanUseWinAPI = M_Platform_CanUseWinAPI
 
 '------------------------------------------------------------------------------
 ' LOAD DISPLAY SETTINGS
 '------------------------------------------------------------------------------
-    'Read the first-day-of-week setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_FIRST_DAY_OF_WEEK, CStr(DP_DEFAULT_FIRST_DAY_OF_WEEK))
+    'Track the current handler step
+        HandlerStep = "Load first-day-of-week setting"
 
+    'Read the first-day-of-week setting
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_DISPLAY, _
+            DP_SETTING_FIRST_DAY_OF_WEEK, _
+            VBA.CStr(DP_DEFAULT_FIRST_DAY_OF_WEEK))
     'Store the parsed first-day setting or its default
         If M_Settings_TryParseFirstDayOfWeek(RawValue, ParsedLong) Then
             gDP_FirstDayOfWeek = ParsedLong
         Else
             gDP_FirstDayOfWeek = DP_DEFAULT_FIRST_DAY_OF_WEEK
         End If
-
+    'Track the current handler step
+        HandlerStep = "Load local-name setting"
     'Read the local-name setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_USE_LOCAL_NAMES, M_Settings_BooleanToStorageValue(DP_DEFAULT_USE_LOCAL_NAMES))
-
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_DISPLAY, _
+            DP_SETTING_USE_LOCAL_NAMES, _
+            M_Settings_BooleanToStorageValue(DP_DEFAULT_USE_LOCAL_NAMES))
     'Store the parsed local-name setting or its default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
             gDP_UseLocalNames = ParsedBoolean
@@ -402,21 +446,15 @@ Public Sub M_Settings_Load()
             gDP_UseLocalNames = DP_DEFAULT_USE_LOCAL_NAMES
         End If
 
-    'Read the outside-month setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_ALLOW_OUTSIDE_MONTH, M_Settings_BooleanToStorageValue(DP_DEFAULT_ALLOW_OUTSIDE_MONTH))
-
-    'Store the parsed outside-month setting or its default
-        If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
-            gDP_AllowOutsideMonthSel = ParsedBoolean
-        Else
-            gDP_AllowOutsideMonthSel = DP_DEFAULT_ALLOW_OUTSIDE_MONTH
-        End If
+    'Track the current handler step
+        HandlerStep = "Load weekend-highlight setting"
 
     'Read the weekend-highlight setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_HIGHLIGHT_WEEKENDS, M_Settings_BooleanToStorageValue(DP_DEFAULT_HIGHLIGHT_WEEKENDS))
-
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_DISPLAY, _
+            DP_SETTING_HIGHLIGHT_WEEKENDS, _
+            M_Settings_BooleanToStorageValue(DP_DEFAULT_HIGHLIGHT_WEEKENDS))
     'Store the parsed weekend-highlight setting or its default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
             gDP_HighlightWeekends = ParsedBoolean
@@ -427,10 +465,47 @@ Public Sub M_Settings_Load()
 '------------------------------------------------------------------------------
 ' LOAD BEHAVIOR SETTINGS
 '------------------------------------------------------------------------------
-    'Read the close-after-selection setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_CLOSE_AFTER_SELECTION, M_Settings_BooleanToStorageValue(DP_DEFAULT_CLOSE_AFTER_SELECTION))
+    'Track the current handler step
+        HandlerStep = "Load outside-month selection setting"
 
+    'Read the outside-month setting from the Behavior section
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_ALLOW_OUTSIDE_MONTH, _
+            VBA.vbNullString)
+    'Fall back to the legacy Display section when needed
+        If VBA.LenB(RawValue) = 0 Then
+            RawValue = GetSetting( _
+                DP_SETTINGS_APP_NAME, _
+                DP_SETTINGS_SECTION_DISPLAY, _
+                DP_SETTING_ALLOW_OUTSIDE_MONTH, _
+                M_Settings_BooleanToStorageValue(DP_DEFAULT_ALLOW_OUTSIDE_MONTH))
+        End If
+    'Store the parsed outside-month setting or its default
+        If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
+            gDP_AllowOutsideMonthSel = ParsedBoolean
+        Else
+            gDP_AllowOutsideMonthSel = DP_DEFAULT_ALLOW_OUTSIDE_MONTH
+        End If
+
+    'Track the current handler step
+        HandlerStep = "Load close-after-selection setting"
+        
+    'Read the close-after-selection setting from the Behavior section
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_CLOSE_AFTER_SELECTION, _
+            VBA.vbNullString)
+    'Fall back to the legacy Display section when needed
+        If VBA.LenB(RawValue) = 0 Then
+            RawValue = GetSetting( _
+                DP_SETTINGS_APP_NAME, _
+                DP_SETTINGS_SECTION_DISPLAY, _
+                DP_SETTING_CLOSE_AFTER_SELECTION, _
+                M_Settings_BooleanToStorageValue(DP_DEFAULT_CLOSE_AFTER_SELECTION))
+        End If
     'Store the parsed close-after-selection setting or its default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
             gDP_CloseAfterSelection = ParsedBoolean
@@ -438,10 +513,23 @@ Public Sub M_Settings_Load()
             gDP_CloseAfterSelection = DP_DEFAULT_CLOSE_AFTER_SELECTION
         End If
 
-    'Read the clock mode setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_CLOCK_MODE, CStr(CLng(DP_ClockMode_Static)))
+    'Track the current handler step
+        HandlerStep = "Load clock-mode setting"
 
+    'Read the clock mode setting from the Behavior section
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_CLOCK_MODE, _
+            VBA.vbNullString)
+    'Fall back to the legacy Display section when needed
+        If VBA.LenB(RawValue) = 0 Then
+            RawValue = GetSetting( _
+                DP_SETTINGS_APP_NAME, _
+                DP_SETTINGS_SECTION_DISPLAY, _
+                DP_SETTING_CLOCK_MODE, _
+                VBA.CStr(VBA.CLng(DP_ClockMode_Static)))
+        End If
     'Store the parsed clock mode or its default
         If M_Settings_TryParseLong(RawValue, ParsedLong) Then
             If M_Settings_IsValidClockMode(ParsedLong) Then
@@ -453,10 +541,24 @@ Public Sub M_Settings_Load()
             gDP_ClockMode = DP_ClockMode_Static
         End If
 
-    'Read the size mode setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_SIZE_MODE, CStr(CLng(DP_SizeMode_Normal)))
+    'Track the current handler step
+        HandlerStep = "Load size-mode setting"
 
+    'Read the size mode setting from the Behavior section
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_SIZE_MODE, _
+            VBA.vbNullString)
+
+    'Fall back to the legacy Display section when needed
+        If VBA.LenB(RawValue) = 0 Then
+            RawValue = GetSetting( _
+                DP_SETTINGS_APP_NAME, _
+                DP_SETTINGS_SECTION_DISPLAY, _
+                DP_SETTING_SIZE_MODE, _
+                VBA.CStr(VBA.CLng(DP_SizeMode_Normal)))
+        End If
     'Store the parsed size mode or its default
         If M_Settings_TryParseLong(RawValue, ParsedLong) Then
             If M_Settings_IsValidSizeMode(ParsedLong) Then
@@ -471,10 +573,15 @@ Public Sub M_Settings_Load()
 '------------------------------------------------------------------------------
 ' LOAD FEATURE SETTINGS
 '------------------------------------------------------------------------------
-    'Read the right-click setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_FEATURES, _
-            DP_SETTING_SHOW_RIGHT_CLICK, M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_RIGHT_CLICK))
+    'Track the current handler step
+        HandlerStep = "Load right-click integration setting"
 
+    'Read the right-click setting
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_FEATURES, _
+            DP_SETTING_SHOW_RIGHT_CLICK, _
+            M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_RIGHT_CLICK))
     'Store the parsed right-click setting or its default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
             gDP_ShowRightClick = ParsedBoolean
@@ -482,10 +589,15 @@ Public Sub M_Settings_Load()
             gDP_ShowRightClick = DP_DEFAULT_SHOW_RIGHT_CLICK
         End If
 
-    'Read the grid-icon setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_FEATURES, _
-            DP_SETTING_SHOW_GRID_ICON, M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_GRID_ICON))
+    'Track the current handler step
+        HandlerStep = "Load in-grid icon setting"
 
+    'Read the grid-icon setting
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_FEATURES, _
+            DP_SETTING_SHOW_GRID_ICON, _
+            M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_GRID_ICON))
     'Store the parsed grid-icon setting or its default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
             gDP_ShowGridIcon = ParsedBoolean
@@ -493,31 +605,73 @@ Public Sub M_Settings_Load()
             gDP_ShowGridIcon = DP_DEFAULT_SHOW_GRID_ICON
         End If
 
+    'Track the current handler step
+        HandlerStep = "Load keyboard shortcut setting"
+
+    'Read the keyboard shortcut setting
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_FEATURES, _
+            DP_SETTING_ENABLE_KEYBOARD, _
+            M_Settings_BooleanToStorageValue(DP_DEFAULT_ENABLE_KEYBOARD))
+    'Store the parsed keyboard shortcut setting or its default
+        If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
+            gDP_EnableKeyboardShortcut = ParsedBoolean
+        Else
+            gDP_EnableKeyboardShortcut = DP_DEFAULT_ENABLE_KEYBOARD
+        End If
+
 '------------------------------------------------------------------------------
 ' LOAD ADVANCED SETTINGS
 '------------------------------------------------------------------------------
-    'Read the WinAPI setting
-        RawValue = GetSetting(DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_ADVANCED, _
-            DP_SETTING_USE_WINAPI, M_Settings_BooleanToStorageValue(M_Platform_CanUseWinAPI))
+    'Track the current handler step
+        HandlerStep = "Load WinAPI setting"
 
+    'Read the WinAPI setting
+        RawValue = GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_ADVANCED, _
+            DP_SETTING_USE_WINAPI, _
+            M_Settings_BooleanToStorageValue(PlatformCanUseWinAPI))
     'Store the parsed WinAPI setting or its platform default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
-            gDP_UseWinAPI = ParsedBoolean
+            gDP_UseWinAPI = CBool(ParsedBoolean And PlatformCanUseWinAPI)
         Else
-            gDP_UseWinAPI = M_Platform_CanUseWinAPI
+            gDP_UseWinAPI = PlatformCanUseWinAPI
         End If
 
+    'Track the current handler step
+        HandlerStep = "Load holiday callback setting"
+
     'Read the holiday callback setting
-        gDP_HolidayCallbackName = Trim$(GetSetting(DP_SETTINGS_APP_NAME, _
-            DP_SETTINGS_SECTION_ADVANCED, DP_SETTING_HOLIDAY_CALLBACK, _
+        gDP_HolidayCallbackName = VBA.Trim$(GetSetting( _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_ADVANCED, _
+            DP_SETTING_HOLIDAY_CALLBACK, _
             DP_DEFAULT_HOLIDAY_CALLBACK))
+
+'------------------------------------------------------------------------------
+' NORMALIZE ACCESS SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize access settings"
+
+    'Force keyboard access when both contextual and visible entry points are disabled
+        If Not gDP_ShowRightClick Then
+            If Not gDP_ShowGridIcon Then
+                gDP_EnableKeyboardShortcut = True
+            End If
+        End If
 
 '------------------------------------------------------------------------------
 ' FINALIZE SETTINGS LOAD
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Finalize settings load"
     'Mark settings as loaded before saving normalized values
         mSettingsLoaded = True
-
+    'Track the current handler step
+        HandlerStep = "Save normalized settings"
     'Save normalized settings back to the registry
         M_Settings_Save
 
@@ -532,10 +686,11 @@ Public Sub M_Settings_Load()
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker settings load failed: " & Err.Description
 
 End Sub
-
 Public Sub M_Settings_Save()
 
 '
@@ -546,7 +701,9 @@ Public Sub M_Settings_Save()
 '   Saves current DatePicker settings for the current Windows user
 '
 ' WHY THIS EXISTS
-'   User preferences should persist between DatePicker sessions
+'   User preferences should persist between DatePicker sessions and should be
+'   stored in one canonical settings layout after load-time migration and
+'   normalization have been applied
 '
 ' INPUTS
 '   None
@@ -555,111 +712,264 @@ Public Sub M_Settings_Save()
 '   Nothing
 '
 ' BEHAVIOR
-'   Validates and persists current DatePicker settings
+'   Initializes default settings when no in-memory settings state is available,
+'   validates current DatePicker settings, normalizes settings that must remain
+'   safe or platform-compatible, and persists the canonical Display, Behavior,
+'   Feature, and Advanced registry sections
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if settings are invalid or cannot be saved
+'   Raises a descriptive runtime error if settings are invalid, cannot be
+'   normalized, or cannot be saved
 '
 ' DEPENDENCIES
 '   SaveSetting
+'   M_Settings_InitializeDefaults
+'   M_Settings_IsValidFirstDayOfWeek
+'   M_Settings_IsValidClockMode
+'   M_Settings_IsValidSizeMode
+'   M_Settings_BooleanToStorageValue
+'   M_Platform_CanUseWinAPI
 '
 ' NOTES
 '   Boolean values are saved as 1 / 0 for stable parsing
 '
+'   Behavior settings are persisted under the Behavior section. The load path
+'   still supports the previous Display-section location for migration purposes
+'
+'   If right-click menu and in-grid icon access are both disabled, keyboard
+'   shortcut access is forced on to avoid a configuration with no practical
+'   manual DatePicker entry point
+'
+'   WinAPI styling is saved as disabled when the current platform does not
+'   support WinAPI helpers
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "M_Settings_Save"     'Current procedure name
+    Const PROC_NAME             As String = "M_Settings_Save"
+    
+    Dim PlatformCanUseWinAPI    As Boolean      'True when WinAPI helpers are supported
+    Dim HandlerStep             As String       'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE DEFAULTS IF NEEDED
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Initialize defaults if needed"
+
     'Initialize default settings if settings have not yet been loaded
-        If Not mSettingsLoaded Then M_Settings_InitializeDefaults
+        If Not mSettingsLoaded Then
+            M_Settings_InitializeDefaults
+        End If
+
+'------------------------------------------------------------------------------
+' NORMALIZE PLATFORM SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize platform settings"
+
+    'Resolve platform support once for this save pass
+        PlatformCanUseWinAPI = M_Platform_CanUseWinAPI
+    'Disable WinAPI styling when the current platform does not support it
+        If Not PlatformCanUseWinAPI Then
+            gDP_UseWinAPI = False
+        End If
+
+'------------------------------------------------------------------------------
+' NORMALIZE ACCESS SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize access settings"
+
+    'Keep the keyboard shortcut enabled when all visible/contextual entry points are disabled
+        If Not gDP_ShowRightClick Then
+            If Not gDP_ShowGridIcon Then
+                gDP_EnableKeyboardShortcut = True
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' NORMALIZE TEXT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize text settings"
+
+    'Normalize the holiday callback name before persistence
+        gDP_HolidayCallbackName = VBA.Trim$(gDP_HolidayCallbackName)
 
 '------------------------------------------------------------------------------
 ' VALIDATE SETTINGS
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate first-day setting"
+
     'Reject unsupported first-day settings
         If Not M_Settings_IsValidFirstDayOfWeek(gDP_FirstDayOfWeek) Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "gDP_FirstDayOfWeek must be vbSunday or vbMonday."
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "gDP_FirstDayOfWeek must be vbSunday or vbMonday"
         End If
+        
+    'Track the current handler step
+        HandlerStep = "Validate clock mode"
 
     'Reject unsupported clock modes
         If Not M_Settings_IsValidClockMode(gDP_ClockMode) Then
-            Err.Raise vbObjectError + 514, PROC_NAME, "gDP_ClockMode is unsupported."
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "gDP_ClockMode is unsupported"
         End If
+
+    'Track the current handler step
+        HandlerStep = "Validate size mode"
 
     'Reject unsupported size modes
         If Not M_Settings_IsValidSizeMode(gDP_SizeMode) Then
-            Err.Raise vbObjectError + 515, PROC_NAME, "gDP_SizeMode is unsupported."
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "gDP_SizeMode is unsupported"
         End If
 
 '------------------------------------------------------------------------------
 ' SAVE DISPLAY SETTINGS
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Save first-day-of-week setting"
+
     'Save the first-day-of-week setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_FIRST_DAY_OF_WEEK, CStr(gDP_FirstDayOfWeek)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_DISPLAY, _
+            DP_SETTING_FIRST_DAY_OF_WEEK, _
+            VBA.CStr(gDP_FirstDayOfWeek)
+
+    'Track the current handler step
+        HandlerStep = "Save local-name setting"
 
     'Save the local-name setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_USE_LOCAL_NAMES, M_Settings_BooleanToStorageValue(gDP_UseLocalNames)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_DISPLAY, _
+            DP_SETTING_USE_LOCAL_NAMES, _
+            M_Settings_BooleanToStorageValue(gDP_UseLocalNames)
 
-    'Save the outside-month setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_ALLOW_OUTSIDE_MONTH, M_Settings_BooleanToStorageValue(gDP_AllowOutsideMonthSel)
+    'Track the current handler step
+        HandlerStep = "Save weekend-highlight setting"
 
     'Save the weekend-highlight setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_HIGHLIGHT_WEEKENDS, M_Settings_BooleanToStorageValue(gDP_HighlightWeekends)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_DISPLAY, _
+            DP_SETTING_HIGHLIGHT_WEEKENDS, _
+            M_Settings_BooleanToStorageValue(gDP_HighlightWeekends)
 
 '------------------------------------------------------------------------------
 ' SAVE BEHAVIOR SETTINGS
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Save outside-month selection setting"
+
+    'Save the outside-month setting
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_ALLOW_OUTSIDE_MONTH, _
+            M_Settings_BooleanToStorageValue(gDP_AllowOutsideMonthSel)
+
+    'Track the current handler step
+        HandlerStep = "Save close-after-selection setting"
+
     'Save the close-after-selection setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_CLOSE_AFTER_SELECTION, M_Settings_BooleanToStorageValue(gDP_CloseAfterSelection)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_CLOSE_AFTER_SELECTION, _
+            M_Settings_BooleanToStorageValue(gDP_CloseAfterSelection)
+
+    'Track the current handler step
+        HandlerStep = "Save clock-mode setting"
 
     'Save the clock mode setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_CLOCK_MODE, CStr(CLng(gDP_ClockMode))
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_CLOCK_MODE, _
+            VBA.CStr(VBA.CLng(gDP_ClockMode))
+
+    'Track the current handler step
+        HandlerStep = "Save size-mode setting"
 
     'Save the size mode setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_DISPLAY, _
-            DP_SETTING_SIZE_MODE, CStr(CLng(gDP_SizeMode))
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_BEHAVIOR, _
+            DP_SETTING_SIZE_MODE, _
+            VBA.CStr(VBA.CLng(gDP_SizeMode))
 
 '------------------------------------------------------------------------------
 ' SAVE FEATURE SETTINGS
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Save right-click integration setting"
+
     'Save the right-click setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_FEATURES, _
-            DP_SETTING_SHOW_RIGHT_CLICK, M_Settings_BooleanToStorageValue(gDP_ShowRightClick)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_FEATURES, _
+            DP_SETTING_SHOW_RIGHT_CLICK, _
+            M_Settings_BooleanToStorageValue(gDP_ShowRightClick)
+
+    'Track the current handler step
+        HandlerStep = "Save in-grid icon setting"
 
     'Save the grid-icon setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_FEATURES, _
-            DP_SETTING_SHOW_GRID_ICON, M_Settings_BooleanToStorageValue(gDP_ShowGridIcon)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_FEATURES, _
+            DP_SETTING_SHOW_GRID_ICON, _
+            M_Settings_BooleanToStorageValue(gDP_ShowGridIcon)
+
+    'Track the current handler step
+        HandlerStep = "Save keyboard shortcut setting"
+
+    'Save the keyboard shortcut setting
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_FEATURES, _
+            DP_SETTING_ENABLE_KEYBOARD, _
+            M_Settings_BooleanToStorageValue(gDP_EnableKeyboardShortcut)
 
 '------------------------------------------------------------------------------
 ' SAVE ADVANCED SETTINGS
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Save WinAPI setting"
+
     'Save the WinAPI setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_ADVANCED, _
-            DP_SETTING_USE_WINAPI, M_Settings_BooleanToStorageValue(gDP_UseWinAPI)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_ADVANCED, _
+            DP_SETTING_USE_WINAPI, _
+            M_Settings_BooleanToStorageValue(gDP_UseWinAPI)
+
+    'Track the current handler step
+        HandlerStep = "Save holiday callback setting"
 
     'Save the holiday callback setting
-        SaveSetting DP_SETTINGS_APP_NAME, DP_SETTINGS_SECTION_ADVANCED, _
-            DP_SETTING_HOLIDAY_CALLBACK, Trim$(gDP_HolidayCallbackName)
+        SaveSetting _
+            DP_SETTINGS_APP_NAME, _
+            DP_SETTINGS_SECTION_ADVANCED, _
+            DP_SETTING_HOLIDAY_CALLBACK, _
+            gDP_HolidayCallbackName
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -672,11 +982,11 @@ Public Sub M_Settings_Save()
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker settings save failed: " & Err.Description
 
 End Sub
-
-
 Private Sub M_Settings_InitializeDefaults()
 
 '
@@ -697,10 +1007,14 @@ Private Sub M_Settings_InitializeDefaults()
 '   Nothing
 '
 ' BEHAVIOR
-'   Assigns default values to all persisted settings
+'   Assigns default values to all persisted settings, applies safe platform
+'   defaults, and prevents a dead access configuration
 '
 ' ERROR POLICY
-'   Does not raise errors directly
+'   Best-effort initialization
+'
+'   If platform capability detection fails, WinAPI styling is initialized as
+'   disabled because native MSForms rendering is the safest fallback
 '
 ' DEPENDENCIES
 '   M_Platform_CanUseWinAPI
@@ -708,45 +1022,75 @@ Private Sub M_Settings_InitializeDefaults()
 ' NOTES
 '   This routine changes in-memory settings only
 '
+'   The keyboard shortcut is forced on if both right-click menu and in-grid icon
+'   access are disabled
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
-' INITIALIZE DEFAULTS
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim PlatformCanUseWinAPI    As Boolean      'True when WinAPI helpers are supported
+
+'------------------------------------------------------------------------------
+' INITIALIZE PLATFORM DEFAULTS
+'------------------------------------------------------------------------------
+    'Suppress platform-detection errors
+        On Error Resume Next
+    'Resolve whether WinAPI helpers can be used on the current platform
+        PlatformCanUseWinAPI = M_Platform_CanUseWinAPI
+    'Clear any suppressed platform-detection error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' INITIALIZE DISPLAY SETTINGS
 '------------------------------------------------------------------------------
     'Initialize the first-day setting
         gDP_FirstDayOfWeek = DP_DEFAULT_FIRST_DAY_OF_WEEK
-
     'Initialize the local-name setting
         gDP_UseLocalNames = DP_DEFAULT_USE_LOCAL_NAMES
-
-    'Initialize the outside-month setting
-        gDP_AllowOutsideMonthSel = DP_DEFAULT_ALLOW_OUTSIDE_MONTH
-
     'Initialize the weekend-highlight setting
         gDP_HighlightWeekends = DP_DEFAULT_HIGHLIGHT_WEEKENDS
 
+'------------------------------------------------------------------------------
+' INITIALIZE BEHAVIOR SETTINGS
+'------------------------------------------------------------------------------
+    'Initialize the outside-month setting
+        gDP_AllowOutsideMonthSel = DP_DEFAULT_ALLOW_OUTSIDE_MONTH
     'Initialize the close-after-selection setting
         gDP_CloseAfterSelection = DP_DEFAULT_CLOSE_AFTER_SELECTION
-
     'Initialize the clock mode
         gDP_ClockMode = DP_ClockMode_Static
-
     'Initialize the size mode
         gDP_SizeMode = DP_SizeMode_Normal
 
+'------------------------------------------------------------------------------
+' INITIALIZE FEATURE SETTINGS
+'------------------------------------------------------------------------------
     'Initialize the right-click feature setting
         gDP_ShowRightClick = DP_DEFAULT_SHOW_RIGHT_CLICK
-
     'Initialize the grid-icon feature setting
         gDP_ShowGridIcon = DP_DEFAULT_SHOW_GRID_ICON
+    'Initialize the keyboard shortcut feature setting
+        gDP_EnableKeyboardShortcut = DP_DEFAULT_ENABLE_KEYBOARD
+    'Force keyboard access when both visual/contextual entry points are disabled
+        If Not gDP_ShowRightClick Then
+            If Not gDP_ShowGridIcon Then
+                gDP_EnableKeyboardShortcut = True
+            End If
+        End If
 
-    'Initialize the WinAPI feature setting
-        gDP_UseWinAPI = M_Platform_CanUseWinAPI
-
+'------------------------------------------------------------------------------
+' INITIALIZE ADVANCED SETTINGS
+'------------------------------------------------------------------------------
+    'Initialize the WinAPI styling setting from the safe platform capability result
+        gDP_UseWinAPI = PlatformCanUseWinAPI
     'Initialize the holiday callback name
-        gDP_HolidayCallbackName = DP_DEFAULT_HOLIDAY_CALLBACK
+        gDP_HolidayCallbackName = VBA.Trim$(DP_DEFAULT_HOLIDAY_CALLBACK)
 
 '------------------------------------------------------------------------------
 ' FINALIZE
@@ -755,8 +1099,7 @@ Private Sub M_Settings_InitializeDefaults()
         mSettingsLoaded = True
 
 End Sub
-
-Private Sub M_Settings_EnsureLoaded()
+Public Sub M_Settings_EnsureLoaded()
 
 '
 '------------------------------------------------------------------------------
@@ -766,8 +1109,8 @@ Private Sub M_Settings_EnsureLoaded()
 '   Ensures DatePicker settings have been loaded before they are read or changed
 '
 ' WHY THIS EXISTS
-'   Public getters and setters should be safe to call before the caller has
-'   explicitly loaded settings
+'   Public callers, form lifecycle routines, demo sheets, and settings panels
+'   should be safe to call before settings have been explicitly loaded
 '
 ' INPUTS
 '   None
@@ -776,10 +1119,13 @@ Private Sub M_Settings_EnsureLoaded()
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings only if they have not already been loaded
+'   Exits immediately when settings are already loaded
+'
+'   Loads settings from the persisted settings store only when they have not
+'   already been initialized
 '
 ' ERROR POLICY
-'   Propagates errors from M_Settings_Load
+'   Raises a descriptive runtime error if settings cannot be loaded
 '
 ' DEPENDENCIES
 '   M_Settings_Load
@@ -787,15 +1133,48 @@ Private Sub M_Settings_EnsureLoaded()
 ' NOTES
 '   This helper avoids overwriting persisted settings with default values
 '
+'   The routine is Public because it is intentionally used by UF_DatePicker and
+'   other project modules
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
-' LOAD SETTINGS IF NEEDED
+' DECLARE
 '------------------------------------------------------------------------------
-    'Load settings if they have not been initialized
-        If Not mSettingsLoaded Then M_Settings_Load
+    Const PROC_NAME     As String = "M_Settings_EnsureLoaded"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' EXIT IF ALREADY LOADED
+'------------------------------------------------------------------------------
+    'Exit when settings have already been initialized
+        If mSettingsLoaded Then Exit Sub
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Load persisted settings into project state
+        M_Settings_Load
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Settings load check failed: " & Err.Description
 
 End Sub
 
@@ -820,28 +1199,47 @@ Public Sub M_Settings_SetFirstDayOfWeek(ByVal FirstDayOfWeek As Long)
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings if needed, updates the first-day setting, saves it, and
-'   refreshes the loaded DatePicker form if present
+'   Loads settings if needed, validates the requested first-day setting, exits
+'   immediately when the requested value is already active, updates the in-memory
+'   setting, persists it, and refreshes the loaded DatePicker form if present
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if FirstDayOfWeek is unsupported
+'   Raises a descriptive runtime error if FirstDayOfWeek is unsupported, if
+'   settings cannot be loaded, if settings cannot be saved, or if the loaded
+'   DatePicker form cannot be refreshed
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory value is restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
+'   M_Settings_IsValidFirstDayOfWeek
 '   M_Settings_Save
 '   M_FormBridge_RefreshSettings
 '
 ' NOTES
 '   Supported values are vbSunday and vbMonday
 '
+'   The form is refreshed only after a successful persistence step
+'
+'   If the form refresh fails after persistence succeeds, the saved preference is
+'   not rolled back because the user setting has already been committed
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_SetFirstDayOfWeek" 'Current procedure name
+    Const PROC_NAME            As String = "M_Settings_SetFirstDayOfWeek"
+
+    Dim OldFirstDay            As Long                  'Previous first-day setting
+    Dim SettingChanged         As Boolean               'True when the requested value differs
+    Dim SettingMutated         As Boolean               'True after in-memory state is changed
+    Dim SettingPersisted       As Boolean               'True after settings are saved successfully
+    Dim ErrorNumber            As Long                  'Captured error number
+    Dim ErrorDescription       As String                'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -854,7 +1252,8 @@ Public Sub M_Settings_SetFirstDayOfWeek(ByVal FirstDayOfWeek As Long)
 '------------------------------------------------------------------------------
     'Reject unsupported first-day settings
         If Not M_Settings_IsValidFirstDayOfWeek(FirstDayOfWeek) Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "FirstDayOfWeek must be vbSunday or vbMonday."
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "FirstDayOfWeek must be vbSunday or vbMonday"
         End If
 
 '------------------------------------------------------------------------------
@@ -864,13 +1263,34 @@ Public Sub M_Settings_SetFirstDayOfWeek(ByVal FirstDayOfWeek As Long)
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' SAVE SETTING
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Capture the current first-day setting
+        OldFirstDay = gDP_FirstDayOfWeek
+    'Resolve whether the requested setting is different
+        SettingChanged = (FirstDayOfWeek <> OldFirstDay)
+
+'------------------------------------------------------------------------------
+' EXIT IF UNCHANGED
+'------------------------------------------------------------------------------
+    'Exit when no setting change is required
+        If Not SettingChanged Then Exit Sub
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
 '------------------------------------------------------------------------------
     'Store the requested first-day setting
         gDP_FirstDayOfWeek = FirstDayOfWeek
+    'Mark the in-memory setting as mutated
+        SettingMutated = True
 
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
     'Persist the updated settings
         M_Settings_Save
+    'Mark the setting as persisted
+        SettingPersisted = True
 
 '------------------------------------------------------------------------------
 ' REFRESH FORM
@@ -888,22 +1308,34 @@ Public Sub M_Settings_SetFirstDayOfWeek(ByVal FirstDayOfWeek As Long)
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting when persistence failed after mutation
+        If SettingMutated And Not SettingPersisted Then
+            On Error Resume Next
+            gDP_FirstDayOfWeek = OldFirstDay
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "First-day-of-week update failed: " & ErrorDescription
 
 End Sub
-
 Public Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)
 
 '
 '------------------------------------------------------------------------------
-'                           SET FIRST DAY OF WEEK TEXT
+'                       SET FIRST DAY OF WEEK FROM TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Sets the first-day-of-week preference from worksheet-friendly text
+'   Sets the DatePicker first-day-of-week preference from worksheet-friendly text
 '
 ' WHY THIS EXISTS
-'   Settings sheets often store selections as text such as vbMonday and vbSunday
+'   Settings sheets, demo sheets, and configuration tables often store selections
+'   as text such as vbMonday, Monday, Mon, vbSunday, Sunday, or Sun rather than
+'   as VBA weekday constants
 '
 ' INPUTS
 '   FirstDayOfWeekText
@@ -913,28 +1345,36 @@ Public Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)
 '   Nothing
 '
 ' BEHAVIOR
-'   Parses text and delegates to M_Settings_SetFirstDayOfWeek
+'   Normalizes the supplied text, parses it into a supported first-day-of-week
+'   value, and delegates validation, persistence, rollback, and open-form refresh
+'   to M_Settings_SetFirstDayOfWeek
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if text cannot be parsed
+'   Raises a descriptive runtime error if FirstDayOfWeekText is blank, if it
+'   cannot be parsed, or if the delegated first-day setting update fails
 '
 ' DEPENDENCIES
 '   M_Settings_TryParseFirstDayOfWeek
 '   M_Settings_SetFirstDayOfWeek
 '
 ' NOTES
-'   Accepted values include vbSunday, Sunday, Sun, 1, vbMonday, Monday, Mon, 2
+'   Accepted values depend on M_Settings_TryParseFirstDayOfWeek and should include
+'   vbSunday, Sunday, Sun, 1, vbMonday, Monday, Mon, and 2
+'
+'   This routine intentionally delegates persistence and form refresh so there is
+'   only one canonical first-day update path
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "M_Settings_SetFirstDayOfWeekText" 'Current procedure name
+    Const PROC_NAME         As String = "M_Settings_SetFirstDayOfWeekText"
 
-    Dim ParsedValue         As Long     'Parsed first-day value
+    Dim EffectiveText       As String           'Normalized input text
+    Dim ParsedValue         As Long             'Parsed first-day value
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -943,17 +1383,29 @@ Public Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Normalize the supplied first-day text
+        EffectiveText = Trim$(FirstDayOfWeekText)
+    'Reject blank first-day text
+        If Len(EffectiveText) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "FirstDayOfWeekText cannot be blank"
+        End If
+
+'------------------------------------------------------------------------------
 ' PARSE INPUT
 '------------------------------------------------------------------------------
     'Parse the supplied first-day text
-        If Not M_Settings_TryParseFirstDayOfWeek(FirstDayOfWeekText, ParsedValue) Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "FirstDayOfWeekText must resolve to vbSunday or vbMonday."
+        If Not M_Settings_TryParseFirstDayOfWeek(EffectiveText, ParsedValue) Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "FirstDayOfWeekText must resolve to vbSunday or vbMonday"
         End If
 
 '------------------------------------------------------------------------------
 ' SAVE SETTING
 '------------------------------------------------------------------------------
-    'Save the parsed first-day setting
+    'Save the parsed first-day setting through the canonical setter
         M_Settings_SetFirstDayOfWeek ParsedValue
 
 '------------------------------------------------------------------------------
@@ -967,10 +1419,10 @@ Public Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise Err.Number, PROC_NAME, _
+            "First-day-of-week text update failed: " & Err.Description
 
 End Sub
-
 Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
 
 '
@@ -993,11 +1445,16 @@ Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings if needed, updates the setting, saves it, and refreshes the
-'   loaded DatePicker form if present
+'   Loads settings if needed, exits when the requested value is already active,
+'   updates the in-memory setting, persists the updated settings, and refreshes
+'   the loaded DatePicker form if present
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if saving or refresh fails
+'   Raises a descriptive runtime error if settings cannot be loaded, saved, or
+'   applied to the loaded DatePicker form
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory setting is restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
@@ -1005,17 +1462,26 @@ Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
 '   M_FormBridge_RefreshSettings
 '
 ' NOTES
-'   The variable name is preserved for compatibility, but it controls both day
-'   and month captions
+'   The argument name is preserved for compatibility, but this setting controls
+'   both day and month captions
+'
+'   The unchanged-value exit avoids unnecessary registry writes and unnecessary
+'   UserForm refresh work
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_SetUseLocalDayNames" 'Current procedure name
+    Const PROC_NAME         As String = "M_Settings_SetUseLocalDayNames"
+
+    Dim OldUseLocalNames    As Boolean          'Previous local-name setting
+    Dim SettingsMutated     As Boolean          'True after in-memory setting is changed
+    Dim SettingsPersisted   As Boolean          'True after settings are saved successfully
+    Dim ErrorNumber         As Long             'Captured error number
+    Dim ErrorDescription    As String           'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1030,13 +1496,32 @@ Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' SAVE SETTING
+' EXIT IF UNCHANGED
+'------------------------------------------------------------------------------
+    'Exit when the requested setting is already active
+        If gDP_UseLocalNames = UseLocalDayNames Then Exit Sub
+
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Capture the current local-name setting for rollback
+        OldUseLocalNames = gDP_UseLocalNames
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
 '------------------------------------------------------------------------------
     'Store the requested local-name setting
         gDP_UseLocalNames = UseLocalDayNames
+    'Mark settings as mutated
+        SettingsMutated = True
 
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
 '------------------------------------------------------------------------------
 ' REFRESH FORM
@@ -1054,11 +1539,21 @@ Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            On Error Resume Next
+            gDP_UseLocalNames = OldUseLocalNames
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "Use-local-names setting update failed: " & ErrorDescription
 
 End Sub
-
 Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Boolean)
 
 '
@@ -1081,11 +1576,16 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings if needed, updates the setting, saves it, and refreshes the
-'   loaded DatePicker form if present
+'   Loads settings if needed, exits when the requested value is already active,
+'   updates the in-memory setting, persists the updated settings, and refreshes
+'   the loaded DatePicker form if present
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if saving or refresh fails
+'   Raises a descriptive runtime error if settings cannot be loaded, saved, or
+'   applied to the loaded DatePicker form
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory setting is restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
@@ -1095,14 +1595,23 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 ' NOTES
 '   The form should call M_DatePolicy_CanSelectDate before accepting a day click
 '
+'   The unchanged-value exit avoids unnecessary registry writes and unnecessary
+'   UserForm refresh work
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_SetAllowOutsideMonthDays" 'Current procedure name
+    Const PROC_NAME         As String = "M_Settings_SetAllowOutsideMonthDays"
+
+    Dim OldAllowOutside     As Boolean      'Previous outside-month setting
+    Dim SettingsMutated     As Boolean      'True after in-memory setting is changed
+    Dim SettingsPersisted   As Boolean      'True after settings are saved successfully
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1117,13 +1626,32 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' SAVE SETTING
+' EXIT IF UNCHANGED
 '------------------------------------------------------------------------------
-    'Store the outside-month setting
-        gDP_AllowOutsideMonthSel = AllowOutsideMonthDays
+    'Exit when the requested setting is already active
+        If gDP_AllowOutsideMonthSel = AllowOutsideMonthDays Then Exit Sub
 
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Capture the current outside-month setting for rollback
+        OldAllowOutside = gDP_AllowOutsideMonthSel
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Store the requested outside-month setting
+        gDP_AllowOutsideMonthSel = AllowOutsideMonthDays
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
 '------------------------------------------------------------------------------
 ' REFRESH FORM
@@ -1141,11 +1669,21 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            On Error Resume Next
+            gDP_AllowOutsideMonthSel = OldAllowOutside
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "Allow-outside-month-days setting update failed: " & ErrorDescription
 
 End Sub
-
 Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 
 '
@@ -1169,11 +1707,16 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings if needed, updates the weekend-highlight setting, saves it,
-'   and refreshes the loaded DatePicker form if present
+'   Loads settings if needed, exits when the requested value is already active,
+'   updates the in-memory weekend-highlight setting, persists the updated
+'   settings, and refreshes the loaded DatePicker form if present
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if saving or refresh fails
+'   Raises a descriptive runtime error if settings cannot be loaded, saved, or
+'   applied to the loaded DatePicker form
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory setting is restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
@@ -1183,14 +1726,23 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 ' NOTES
 '   This setting controls weekend visual highlighting only
 '
+'   The unchanged-value exit avoids unnecessary registry writes and unnecessary
+'   UserForm refresh work
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_SetHighlightWeekends" 'Current procedure name
+    Const PROC_NAME         As String = "M_Settings_SetHighlightWeekends"
+
+    Dim OldHighlight        As Boolean      'Previous weekend-highlight setting
+    Dim SettingsMutated     As Boolean      'True after in-memory setting is changed
+    Dim SettingsPersisted   As Boolean      'True after settings are saved successfully
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1205,13 +1757,32 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' SAVE SETTING
+' EXIT IF UNCHANGED
 '------------------------------------------------------------------------------
-    'Store the weekend-highlight setting
-        gDP_HighlightWeekends = HighlightWeekends
+    'Exit when the requested setting is already active
+        If gDP_HighlightWeekends = HighlightWeekends Then Exit Sub
 
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Capture the current weekend-highlight setting for rollback
+        OldHighlight = gDP_HighlightWeekends
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Store the requested weekend-highlight setting
+        gDP_HighlightWeekends = HighlightWeekends
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
 '------------------------------------------------------------------------------
 ' REFRESH FORM
@@ -1229,11 +1800,21 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            On Error Resume Next
+            gDP_HighlightWeekends = OldHighlight
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "Weekend-highlight setting update failed: " & ErrorDescription
 
 End Sub
-
 Public Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolean)
 
 '
@@ -1256,11 +1837,15 @@ Public Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolea
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings if needed, updates the close-after-selection setting, and
-'   saves it
+'   Loads settings if needed, exits when the requested value is already active,
+'   updates the in-memory close-after-selection setting, and persists the
+'   updated settings
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if saving fails
+'   Raises a descriptive runtime error if settings cannot be loaded or saved
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory setting is restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
@@ -1269,14 +1854,23 @@ Public Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolea
 ' NOTES
 '   This setting controls form lifecycle after successful write-back only
 '
+'   It does not require a visual refresh of the loaded DatePicker form because
+'   the value is consumed at the next successful selection event
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_SetCloseAfterSelection" 'Current procedure name
+    Const PROC_NAME         As String = "M_Settings_SetCloseAfterSelection"
+
+    Dim OldCloseAfter       As Boolean      'Previous close-after-selection setting
+    Dim SettingsMutated     As Boolean      'True after in-memory setting is changed
+    Dim SettingsPersisted   As Boolean      'True after settings are saved successfully
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1291,13 +1885,32 @@ Public Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolea
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' SAVE SETTING
+' EXIT IF UNCHANGED
 '------------------------------------------------------------------------------
-    'Store the close-after-selection setting
-        gDP_CloseAfterSelection = CloseAfterSelection
+    'Exit when the requested setting is already active
+        If gDP_CloseAfterSelection = CloseAfterSelection Then Exit Sub
 
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Capture the current setting for rollback
+        OldCloseAfter = gDP_CloseAfterSelection
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Store the requested close-after-selection setting
+        gDP_CloseAfterSelection = CloseAfterSelection
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1309,841 +1922,1993 @@ Public Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolea
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            On Error Resume Next
+            gDP_CloseAfterSelection = OldCloseAfter
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "Close-after-selection setting update failed: " & ErrorDescription
 
 End Sub
-
 Public Sub M_Settings_SetClockMode(ByVal ClockMode As DP_ClockMode)
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS SET CLOCKMODE
+'                           SET CLOCK MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Sets and persists the DatePicker settings clockmode setting
+'   Sets and saves the DatePicker clock-mode preference
 '
 ' WHY THIS EXISTS
-'   DatePicker settings must be updateable through controlled public entry points so demo sheets, Ribbon callbacks, and host workbooks do not mutate public state inconsistently
+'   The DatePicker footer can display either a static time value or a live clock.
+'   Caller code, demo sheets, Ribbon callbacks, settings panels, and host
+'   workbooks need one controlled public entry point to update this setting
+'   consistently
 '
 ' INPUTS
-'   See procedure signature
+'   ClockMode
+'     Requested DatePicker clock mode
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded
-'   - Validates the supplied value when applicable
-'   - Updates the related in-memory setting
-'   - Persists the updated settings
-'   - Refreshes open DatePicker UI when applicable
+'   Validates the requested clock mode, ensures current settings are loaded,
+'   avoids unnecessary registry writes when the setting is unchanged, updates the
+'   in-memory clock-mode setting when required, persists the updated settings,
+'   and synchronizes the live-clock timer with the active mode
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if ClockMode is unsupported, settings
+'   cannot be loaded, settings cannot be saved, or the clock timer cannot be
+'   synchronized
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory clock mode is restored before the error is re-raised
 '
 ' DEPENDENCIES
+'   M_Settings_IsValidClockMode
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Timer_ApplyClockMode
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally applies the timer mode even when the requested
+'   value is already active, because the live-clock timer may need to be
+'   resynchronized after form lifecycle changes
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    Const PROC_NAME As String = "M_Settings_SetClockMode"          'Current procedure name
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_SetClockMode"
+
+    Dim OldClockMode        As DP_ClockMode     'Previous clock-mode setting
+    Dim SettingsMutated     As Boolean          'True after in-memory setting is changed
+    Dim SettingsPersisted   As Boolean          'True after settings are saved successfully
+    Dim ErrorNumber         As Long             'Captured error number
+    Dim ErrorDescription    As String           'Captured error description
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate clock mode"
 
     'Reject unsupported clock modes
         If Not M_Settings_IsValidClockMode(ClockMode) Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "ClockMode is unsupported."
+            Err.Raise vbObjectError + 513, PROC_NAME, "ClockMode is unsupported"
         End If
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
 
     'Ensure existing settings are loaded before changing one value
         M_Settings_EnsureLoaded
 
-    'Store the clock mode
+'------------------------------------------------------------------------------
+' EXIT IF SETTING IS UNCHANGED
+'------------------------------------------------------------------------------
+    'Synchronize the timer and exit when the requested clock mode is already active
+        If gDP_ClockMode = ClockMode Then
+            M_Timer_ApplyClockMode
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current setting"
+
+    'Capture the current clock mode for rollback
+        OldClockMode = gDP_ClockMode
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory setting"
+
+    'Store the requested clock mode
         gDP_ClockMode = ClockMode
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist setting"
 
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
-    'Start or stop the live clock timer according to the mode
+'------------------------------------------------------------------------------
+' APPLY TIMER SIDE EFFECT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply clock mode"
+
+    'Start or stop the live-clock timer according to the active mode
         M_Timer_ApplyClockMode
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            On Error Resume Next
+            gDP_ClockMode = OldClockMode
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Clock-mode setting update failed: " & ErrorDescription
 
+End Sub
 Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS SET SIZEMODE
+'                           SET SIZE MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Sets and persists the DatePicker settings sizemode setting
+'   Sets and saves the DatePicker size-mode preference
 '
 ' WHY THIS EXISTS
-'   DatePicker settings must be updateable through controlled public entry points so demo sheets, Ribbon callbacks, and host workbooks do not mutate public state inconsistently
+'   The DatePicker supports alternative layout modes, such as normal and compact
+'   display. Caller code, demo sheets, Ribbon callbacks, settings panels, and
+'   host workbooks need one controlled public entry point to update this setting
+'   consistently
 '
 ' INPUTS
-'   See procedure signature
+'   SizeMode
+'     Requested DatePicker size mode
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded
-'   - Validates the supplied value when applicable
-'   - Updates the related in-memory setting
-'   - Persists the updated settings
-'   - Refreshes open DatePicker UI when applicable
+'   Validates the requested size mode, ensures current settings are loaded,
+'   avoids unnecessary registry writes when the setting is unchanged, updates the
+'   in-memory size-mode setting when required, persists the updated settings, and
+'   refreshes the loaded DatePicker form when applicable
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if SizeMode is unsupported, settings
+'   cannot be loaded, settings cannot be saved, or the loaded DatePicker form
+'   cannot be refreshed
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory size mode is restored before the error is re-raised
 '
 ' DEPENDENCIES
+'   M_Settings_IsValidSizeMode
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_FormBridge_RefreshSettings
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Size mode is a structural UI setting. If the DatePicker form is already
+'   loaded, a simple caption refresh is not sufficient unless
+'   M_FormBridge_RefreshSettings also resizes, unloads, or rebuilds the form
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    Const PROC_NAME As String = "M_Settings_SetSizeMode"           'Current procedure name
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_SetSizeMode"
+
+    Dim OldSizeMode         As DP_SizeMode      'Previous size-mode setting
+    Dim SettingsMutated     As Boolean          'True after in-memory setting is changed
+    Dim SettingsPersisted   As Boolean          'True after settings are saved successfully
+    Dim ErrorNumber         As Long             'Captured error number
+    Dim ErrorDescription    As String           'Captured error description
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate size mode"
+
     'Reject unsupported size modes
         If Not M_Settings_IsValidSizeMode(SizeMode) Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "SizeMode is unsupported."
+            Err.Raise vbObjectError + 513, PROC_NAME, "SizeMode is unsupported"
         End If
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
 
     'Ensure existing settings are loaded before changing one value
         M_Settings_EnsureLoaded
 
-    'Store the size mode
+'------------------------------------------------------------------------------
+' EXIT IF SETTING IS UNCHANGED
+'------------------------------------------------------------------------------
+    'Exit when the requested size mode is already active
+        If gDP_SizeMode = SizeMode Then Exit Sub
+
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current setting"
+
+    'Capture the current size mode for rollback
+        OldSizeMode = gDP_SizeMode
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory setting"
+
+    'Store the requested size mode
         gDP_SizeMode = SizeMode
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist setting"
 
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
-    'Refresh settings-dependent captions if the form is loaded
+'------------------------------------------------------------------------------
+' REFRESH LOADED FORM
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh loaded DatePicker form"
+
+    'Refresh or rebuild the loaded DatePicker form when applicable
         M_FormBridge_RefreshSettings
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            On Error Resume Next
+            gDP_SizeMode = OldSizeMode
+            On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Size-mode setting update failed: " & ErrorDescription
 
+End Sub
 Public Sub M_Settings_SetHolidayCallback(ByVal HolidayCallbackName As String)
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS SET HOLIDAYCALLBACK
+'                           SET HOLIDAY CALLBACK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Sets and persists the DatePicker settings holidaycallback setting
+'   Sets and saves the DatePicker holiday-callback preference
 '
 ' WHY THIS EXISTS
-'   DatePicker settings must be updateable through controlled public entry points so demo sheets, Ribbon callbacks, and host workbooks do not mutate public state inconsistently
+'   The DatePicker can delegate holiday / non-business-day logic to a caller
+'   supplied VBA callback. Caller code, demo sheets, Ribbon callbacks, settings
+'   panels, and host workbooks need one controlled public entry point to update
+'   that callback name consistently
 '
 ' INPUTS
-'   See procedure signature
+'   HolidayCallbackName
+'     Name of the VBA callback used by the DatePicker holiday policy
+'
+'     Blank clears the callback and disables callback-based holiday logic
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded
-'   - Validates the supplied value when applicable
-'   - Updates the related in-memory setting
-'   - Persists the updated settings
-'   - Refreshes open DatePicker UI when applicable
+'   Ensures current settings are loaded, normalizes the supplied callback name,
+'   avoids unnecessary registry writes when the setting is unchanged, updates the
+'   in-memory callback name when required, persists the updated settings, and
+'   refreshes the loaded DatePicker form when applicable
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if settings cannot be loaded, settings
+'   cannot be saved, or the loaded DatePicker form cannot be refreshed
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory callback name is restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_FormBridge_RefreshSettings
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally does not execute or validate the callback by
+'   calling it. A callback may belong to a host workbook that is not currently in
+'   the expected runtime state
+'
+'   Callback execution and callback-signature validation belong in the date
+'   policy layer, not in the settings persistence layer
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    Const PROC_NAME As String = "M_Settings_SetHolidayCallback"    'Current procedure name
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Settings_SetHolidayCallback"
+
+    Dim NewCallbackName         As String       'Normalized requested callback name
+    Dim OldCallbackName         As String       'Previous callback name
+    Dim SettingsMutated         As Boolean      'True after in-memory setting is changed
+    Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize callback name"
+
+    'Normalize the supplied callback name
+        NewCallbackName = VBA.Trim$(HolidayCallbackName)
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
 
     'Ensure existing settings are loaded before changing one value
         M_Settings_EnsureLoaded
 
-    'Store the callback name
-        gDP_HolidayCallbackName = Trim$(HolidayCallbackName)
+'------------------------------------------------------------------------------
+' EXIT IF SETTING IS UNCHANGED
+'------------------------------------------------------------------------------
+    'Exit when the requested callback name is already active
+        If VBA.StrComp(gDP_HolidayCallbackName, NewCallbackName, vbBinaryCompare) = 0 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current setting"
+
+    'Capture the current callback name for rollback
+        OldCallbackName = gDP_HolidayCallbackName
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory setting"
+
+    'Store the normalized callback name
+        gDP_HolidayCallbackName = NewCallbackName
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist setting"
 
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
-    'Refresh settings-dependent captions if the form is loaded
+'------------------------------------------------------------------------------
+' REFRESH LOADED FORM
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh loaded DatePicker form"
+
+    'Refresh settings-dependent DatePicker state when the form is loaded
         M_FormBridge_RefreshSettings
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting if persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous callback name
+                gDP_HolidayCallbackName = OldCallbackName
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Holiday-callback setting update failed: " & ErrorDescription
 
+End Sub
 Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS SET SHOWRIGHTCLICK
+'                           SET SHOW RIGHT-CLICK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Sets and persists the DatePicker settings showrightclick setting
+'   Sets and saves whether the DatePicker is available from the Excel right-click
+'   context menu
 '
 ' WHY THIS EXISTS
-'   DatePicker settings must be updateable through controlled public entry points so demo sheets, Ribbon callbacks, and host workbooks do not mutate public state inconsistently
+'   Caller code, demo sheets, Ribbon callbacks, settings panels, and host
+'   workbooks need one controlled public entry point to update right-click menu
+'   integration without mutating public DatePicker state inconsistently
 '
 ' INPUTS
-'   See procedure signature
+'   ShowRightClick
+'     True to enable right-click menu integration
+'     False to disable right-click menu integration
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded
-'   - Validates the supplied value when applicable
-'   - Updates the related in-memory setting
-'   - Persists the updated settings
-'   - Refreshes open DatePicker UI when applicable
+'   Ensures current settings are loaded, applies the requested right-click menu
+'   setting, keeps keyboard shortcut access enabled when both visual entry
+'   points are disabled, persists the updated settings when needed, synchronizes
+'   the Excel right-click menu, and updates keyboard shortcut integration when it
+'   was changed as a fallback
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if settings cannot be loaded, settings
+'   cannot be saved, the right-click menu cannot be synchronized, or keyboard
+'   shortcut integration cannot be updated
+'
+'   If persistence fails after in-memory settings were changed, the previous
+'   in-memory settings are restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_ContextMenu_Update
+'   M_KeyboardShortcut_Update
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Disabling both right-click menu access and in-grid icon access would leave
+'   the user without a visible/manual DatePicker entry point unless the keyboard
+'   shortcut remains enabled
+'
+'   The right-click menu is synchronized even when the persisted setting is
+'   unchanged, because Excel context menus may be reset by Excel, another add-in,
+'   workbook activation, or application-level cleanup
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    Const PROC_NAME As String = "M_Settings_SetShowRightClick"     'Current procedure name
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Settings_SetShowRightClick"
+
+    Dim OldShowRightClick       As Boolean      'Previous right-click menu setting
+    Dim OldEnableKeyboard       As Boolean      'Previous keyboard shortcut setting
+    Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
+
+    Dim RightClickChanged       As Boolean      'True when right-click menu setting changed
+    Dim KeyboardChanged         As Boolean      'True when keyboard shortcut fallback changed
+    Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
+    Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
+
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
 
     'Ensure existing settings are loaded before changing one value
         M_Settings_EnsureLoaded
 
-    'Store the feature setting
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current settings"
+
+    'Capture the current right-click menu setting
+        OldShowRightClick = gDP_ShowRightClick
+    'Capture the current keyboard shortcut setting
+        OldEnableKeyboard = gDP_EnableKeyboardShortcut
+    'Initialize the resolved keyboard shortcut setting
+        NewEnableKeyboard = gDP_EnableKeyboardShortcut
+
+'------------------------------------------------------------------------------
+' PROTECT MANUAL ACCESS PATH
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve access fallback"
+
+    'Keep keyboard access enabled when both visible entry points are disabled
+        If Not ShowRightClick Then
+            If Not gDP_ShowGridIcon Then
+                If Not NewEnableKeyboard Then
+                    NewEnableKeyboard = True
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE CHANGE FLAGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve change flags"
+
+    'Resolve whether the right-click menu setting changed
+        RightClickChanged = (ShowRightClick <> OldShowRightClick)
+    'Resolve whether the keyboard shortcut setting changed
+        KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE ONLY WHEN SETTINGS ARE UNCHANGED
+'------------------------------------------------------------------------------
+    'Synchronize the right-click menu and exit when no persisted setting changed
+        If Not RightClickChanged Then
+            If Not KeyboardChanged Then
+                'Track the current handler step
+                    HandlerStep = "Synchronize right-click menu"
+                'Synchronize right-click menus with the current setting
+                    M_ContextMenu_Update
+                'Exit because no registry write is required
+                    Exit Sub
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory settings"
+
+    'Store the requested right-click menu setting
         gDP_ShowRightClick = ShowRightClick
+    'Store the resolved keyboard shortcut setting
+        gDP_EnableKeyboardShortcut = NewEnableKeyboard
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist settings"
 
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
-    'Synchronize right-click menus
+'------------------------------------------------------------------------------
+' SYNCHRONIZE RIGHT-CLICK MENU
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Synchronize right-click menu"
+
+    'Synchronize right-click menus with the saved setting
         M_ContextMenu_Update
 
+'------------------------------------------------------------------------------
+' SYNCHRONIZE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Synchronize keyboard shortcut"
+
+    'Synchronize keyboard shortcut integration only when the fallback changed
+        If KeyboardChanged Then
+            M_KeyboardShortcut_Update
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore previous in-memory settings when persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous right-click menu setting
+                gDP_ShowRightClick = OldShowRightClick
+            'Restore the previous keyboard shortcut setting
+                gDP_EnableKeyboardShortcut = OldEnableKeyboard
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Right-click menu setting update failed: " & ErrorDescription
 
+End Sub
 Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS SET SHOWGRIDICON
+'                           SET SHOW GRID ICON
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Sets and persists the DatePicker settings showgridicon setting
+'   Sets and saves whether the DatePicker in-grid worksheet icon is enabled
 '
 ' WHY THIS EXISTS
-'   DatePicker settings must be updateable through controlled public entry points so demo sheets, Ribbon callbacks, and host workbooks do not mutate public state inconsistently
+'   Caller code, demo sheets, Ribbon callbacks, settings panels, and host
+'   workbooks need one controlled public entry point to update worksheet icon
+'   integration without mutating public DatePicker state inconsistently
 '
 ' INPUTS
-'   See procedure signature
+'   ShowGridIcon
+'     True to enable in-grid icon integration
+'     False to disable in-grid icon integration
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded
-'   - Validates the supplied value when applicable
-'   - Updates the related in-memory setting
-'   - Persists the updated settings
-'   - Refreshes open DatePicker UI when applicable
+'   Ensures current settings are loaded, applies the requested in-grid icon
+'   setting, keeps keyboard shortcut access enabled when both visual entry
+'   points are disabled, persists the updated settings when needed, synchronizes
+'   keyboard shortcut integration when it was changed as a fallback, and removes
+'   any stale in-grid icon when the feature is disabled
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if settings cannot be loaded, settings
+'   cannot be saved, keyboard shortcut integration cannot be synchronized, or a
+'   stale in-grid icon cannot be removed
+'
+'   If persistence fails after in-memory settings were changed, the previous
+'   in-memory settings are restored before the error is re-raised
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_KeyboardShortcut_Update
+'   M_GridIcon_Remove
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Disabling both right-click menu access and in-grid icon access would leave
+'   the user without a visible/manual DatePicker entry point unless the keyboard
+'   shortcut remains enabled
+'
+'   The stale grid icon is removed even when the setting was already disabled,
+'   because worksheet shapes may survive prior failures, workbook activation, or
+'   partial UI cleanup
+'
+'   Enabling the in-grid icon is persisted immediately. Actual icon display is
+'   expected to occur through the manager selection / context refresh path
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    Const PROC_NAME As String = "M_Settings_SetShowGridIcon"       'Current procedure name
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Settings_SetShowGridIcon"
+
+    Dim OldShowGridIcon         As Boolean      'Previous in-grid icon setting
+    Dim OldEnableKeyboard       As Boolean      'Previous keyboard shortcut setting
+    Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
+
+    Dim GridIconChanged         As Boolean      'True when in-grid icon setting changed
+    Dim KeyboardChanged         As Boolean      'True when keyboard shortcut fallback changed
+    Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
+    Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
+
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
 
     'Ensure existing settings are loaded before changing one value
         M_Settings_EnsureLoaded
 
-    'Store the feature setting
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current settings"
+
+    'Capture the current in-grid icon setting
+        OldShowGridIcon = gDP_ShowGridIcon
+    'Capture the current keyboard shortcut setting
+        OldEnableKeyboard = gDP_EnableKeyboardShortcut
+    'Initialize the resolved keyboard shortcut setting
+        NewEnableKeyboard = gDP_EnableKeyboardShortcut
+
+'------------------------------------------------------------------------------
+' PROTECT MANUAL ACCESS PATH
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve access fallback"
+
+    'Keep keyboard access enabled when both visible entry points are disabled
+        If Not ShowGridIcon Then
+            If Not gDP_ShowRightClick Then
+                If Not NewEnableKeyboard Then
+                    NewEnableKeyboard = True
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE CHANGE FLAGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve change flags"
+
+    'Resolve whether the in-grid icon setting changed
+        GridIconChanged = (ShowGridIcon <> OldShowGridIcon)
+    'Resolve whether the keyboard shortcut setting changed
+        KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
+
+'------------------------------------------------------------------------------
+' CLEAN UP ONLY WHEN SETTINGS ARE UNCHANGED
+'------------------------------------------------------------------------------
+    'Remove stale grid icon and exit when no persisted setting changed
+        If Not GridIconChanged Then
+            If Not KeyboardChanged Then
+                'Remove any stale in-grid icon when the feature is disabled
+                    If Not ShowGridIcon Then M_GridIcon_Remove
+                'Exit because no registry write is required
+                    Exit Sub
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory settings"
+
+    'Store the requested in-grid icon setting
         gDP_ShowGridIcon = ShowGridIcon
+    'Store the resolved keyboard shortcut setting
+        gDP_EnableKeyboardShortcut = NewEnableKeyboard
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist settings"
 
     'Persist the updated settings
         M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
 
-    'Remove any stale icon when the feature is disabled
-        If Not gDP_ShowGridIcon Then
-            M_GridIcon_Remove
-        End If
+'------------------------------------------------------------------------------
+' SYNCHRONIZE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Synchronize keyboard shortcut"
 
+    'Synchronize keyboard shortcut integration only when the fallback changed
+        If KeyboardChanged Then M_KeyboardShortcut_Update
+
+'------------------------------------------------------------------------------
+' REMOVE STALE GRID ICON
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Remove stale grid icon"
+
+    'Remove any stale in-grid icon when the feature is disabled
+        If Not gDP_ShowGridIcon Then M_GridIcon_Remove
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore previous in-memory settings when persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous in-grid icon setting
+                gDP_ShowGridIcon = OldShowGridIcon
+            'Restore the previous keyboard shortcut setting
+                gDP_EnableKeyboardShortcut = OldEnableKeyboard
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "In-grid icon setting update failed: " & ErrorDescription
 
+End Sub
 Public Function M_Settings_GetFirstDayOfWeek() As Long
 
 '
 '------------------------------------------------------------------------------
-'                  SETTINGS GET FIRST DAY OF THE WEEK
+'                           GET FIRST DAY OF WEEK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings get firstdayofweek value
+'   Returns the current DatePicker first-day-of-week setting
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Current first-day-of-week setting:
+'     - vbSunday
+'     - vbMonday
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Ensures settings are loaded, validates the in-memory first-day setting, and
+'   returns the current value
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if settings cannot be loaded or if the
+'   loaded in-memory first-day setting is unsupported
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
+'   M_Settings_IsValidFirstDayOfWeek
+'   gDP_FirstDayOfWeek
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine does not read the registry directly
+'
+'   Registry loading, migration, normalization, and defaulting are handled by
+'   M_Settings_Load through M_Settings_EnsureLoaded
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    'Load settings if needed
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_Settings_GetFirstDayOfWeek"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
         M_Settings_EnsureLoaded
 
+'------------------------------------------------------------------------------
+' VALIDATE SETTING
+'------------------------------------------------------------------------------
+    'Reject unsupported first-day settings
+        If Not M_Settings_IsValidFirstDayOfWeek(gDP_FirstDayOfWeek) Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "gDP_FirstDayOfWeek must be vbSunday or vbMonday"
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
     'Return the current first-day setting
         M_Settings_GetFirstDayOfWeek = gDP_FirstDayOfWeek
-End Function
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "First-day-of-week setting retrieval failed: " & Err.Description
+
+End Function
 Public Function M_Settings_GetUseLocalDayNames() As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS GET USELOCALDAYNAMES
+'                           GET USE LOCAL DAY NAMES
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings get uselocaldaynames value
+'   Returns whether the DatePicker uses local day and month captions
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   True when the DatePicker uses local day and month names
+'
+'   False when the DatePicker uses fixed English day and month names
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Ensures settings are loaded and returns the current local-name setting
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if settings cannot be loaded
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
+'   gDP_UseLocalNames
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   The historical procedure name is preserved for compatibility
+'
+'   Although the name refers to day names, the setting also controls month
+'   captions where applicable
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    'Load settings if needed
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_Settings_GetUseLocalDayNames"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
         M_Settings_EnsureLoaded
 
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
     'Return the current local-name setting
         M_Settings_GetUseLocalDayNames = gDP_UseLocalNames
-End Function
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Use-local-day-names setting retrieval failed: " & Err.Description
+
+End Function
 Public Function M_Settings_GetFirstDayOfWeekText() As String
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS GET FIRSTDAYOFWEEKTEXT
+'                       GET FIRST DAY OF WEEK TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings get firstdayofweektext value
+'   Returns the current DatePicker first-day-of-week setting as text
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   External callers, demo sheets, settings panels, and host workbooks may need a
+'   worksheet-friendly textual representation of the first-day setting without
+'   reading mutable public module state directly
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Text representation of the current first-day-of-week setting
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Ensures settings are loaded, validates the in-memory first-day setting, and
+'   returns the corresponding text value
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if settings cannot be loaded, if the
+'   first-day setting is unsupported, or if the value cannot be converted to text
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
+'   M_Settings_IsValidFirstDayOfWeek
+'   M_Settings_FirstDayOfWeekToText
+'   gDP_FirstDayOfWeek
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine does not read the registry directly
+'
+'   Registry loading, migration, normalization, and defaulting are handled by
+'   M_Settings_Load through M_Settings_EnsureLoaded
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    'Load settings if needed
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_Settings_GetFirstDayOfWeekText"
+    
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
         M_Settings_EnsureLoaded
 
-    'Return the current first-day setting as text
-        M_Settings_GetFirstDayOfWeekText = M_Settings_FirstDayOfWeekToText(gDP_FirstDayOfWeek)
-End Function
+'------------------------------------------------------------------------------
+' VALIDATE SETTING
+'------------------------------------------------------------------------------
+    'Reject unsupported first-day settings
+        If Not M_Settings_IsValidFirstDayOfWeek(gDP_FirstDayOfWeek) Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "gDP_FirstDayOfWeek must be vbSunday or vbMonday"
+        End If
 
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current first-day setting as text
+        M_Settings_GetFirstDayOfWeekText = _
+            M_Settings_FirstDayOfWeekToText(gDP_FirstDayOfWeek)
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "First-day-of-week text retrieval failed: " & Err.Description
+
+End Function
 Public Function M_Settings_FirstDayOfWeekToText(ByVal FirstDayOfWeek As Long) As String
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS FIRSTDAYOFWEEKTOTEXT
+'                       CONVERT FIRST DAY OF WEEK TO TEXT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings firstdayofweektotext value
+'   Converts a supported DatePicker first-day-of-week value to stable text
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   Settings sheets, diagnostics, demos, and public accessors may need a stable
+'   textual representation of the first-day setting without relying on numeric
+'   VBA weekday constants
 '
 ' INPUTS
-'   See procedure signature
+'   FirstDayOfWeek
+'     First-day-of-week value to convert
 '
 ' RETURNS
-'   See procedure type
+'   "vbSunday" when FirstDayOfWeek is vbSunday
+'
+'   "vbMonday" when FirstDayOfWeek is vbMonday
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Maps supported first-day values to their canonical text representation
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if FirstDayOfWeek is unsupported
 '
 ' DEPENDENCIES
-'   M_Settings_EnsureLoaded
+'   VBA weekday constants
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure conversion helper
+'
+'   This routine does not load settings, save settings, read the registry, or
+'   mutate DatePicker state
+'
+'   Returned values are intentionally aligned with
+'   M_Settings_TryParseFirstDayOfWeek
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    'Reject unsupported first-day settings
-        If Not M_Settings_IsValidFirstDayOfWeek(FirstDayOfWeek) Then
-            Err.Raise vbObjectError + 513, "M_Settings_FirstDayOfWeekToText", _
-                "FirstDayOfWeek must be vbSunday or vbMonday."
-        End If
 
-    'Return the text representation
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_Settings_FirstDayOfWeekToText"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RETURN TEXT VALUE
+'------------------------------------------------------------------------------
+    'Return the canonical text value for supported first-day settings
         Select Case FirstDayOfWeek
             Case vbSunday
                 M_Settings_FirstDayOfWeekToText = "vbSunday"
             Case vbMonday
                 M_Settings_FirstDayOfWeekToText = "vbMonday"
+            Case Else
+                Err.Raise vbObjectError + 513, PROC_NAME, _
+                    "FirstDayOfWeek must be vbSunday or vbMonday"
         End Select
-End Function
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "First-day-of-week text conversion failed: " & Err.Description
+
+End Function
 Public Function M_Settings_IsValidFirstDayOfWeek(ByVal FirstDayOfWeek As Long) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS ISVALIDFIRSTDAYOFWEEK
+'                       VALIDATE FIRST DAY OF WEEK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings isvalidfirstdayofweek value
+'   Returns whether a supplied first-day-of-week value is supported by the
+'   DatePicker
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   The DatePicker intentionally supports only two first-day policies:
+'     - Sunday-start calendars
+'     - Monday-start calendars
+'
+'   Centralizing the validation keeps settings loading, saving, parsing, and
+'   public setter routines aligned to the same policy
 '
 ' INPUTS
-'   See procedure signature
+'   FirstDayOfWeek
+'     First-day-of-week value to validate
 '
 ' RETURNS
-'   See procedure type
+'   True when FirstDayOfWeek is vbSunday or vbMonday
+'
+'   False for all other values
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Compares the supplied value against the supported VBA weekday constants
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors
+'
+'   Unsupported values return False so callers can decide whether to default,
+'   reject, or raise a higher-level error
 '
 ' DEPENDENCIES
-'   M_Settings_EnsureLoaded
+'   VBA weekday constants
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure validation helper
+'
+'   This routine does not load settings, save settings, read the registry, or
+'   mutate DatePicker state
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN VALIDATION RESULT
 '------------------------------------------------------------------------------
     'Return whether the first-day value is supported
-        M_Settings_IsValidFirstDayOfWeek = _
-            (FirstDayOfWeek = vbSunday Or FirstDayOfWeek = vbMonday)
-End Function
+        Select Case FirstDayOfWeek
+            Case vbSunday, vbMonday
+                M_Settings_IsValidFirstDayOfWeek = True
+            Case Else
+                M_Settings_IsValidFirstDayOfWeek = False
+        End Select
 
+End Function
 Private Function M_Settings_IsValidClockMode(ByVal ClockMode As Long) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS ISVALIDCLOCKMODE
+'                           VALIDATE CLOCK MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings isvalidclockmode value
+'   Returns whether a supplied DatePicker clock mode is supported
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   The DatePicker supports a controlled set of footer-clock behaviors:
+'     - static time caption
+'     - live time caption
+'
+'   Centralizing the validation keeps settings loading, saving, parsing, and
+'   public setter routines aligned to the same clock-mode policy
 '
 ' INPUTS
-'   See procedure signature
+'   ClockMode
+'     Clock-mode value to validate
 '
 ' RETURNS
-'   See procedure type
+'   True when ClockMode is DP_ClockMode_Static or DP_ClockMode_Live
+'
+'   False for all other values
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Compares the supplied value against the supported DatePicker clock-mode
+'   constants
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors
+'
+'   Unsupported values return False so callers can decide whether to default,
+'   reject, or raise a higher-level error
 '
 ' DEPENDENCIES
-'   M_Settings_EnsureLoaded
+'   DP_ClockMode_Static
+'   DP_ClockMode_Live
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure validation helper
+'
+'   This routine does not load settings, save settings, read the registry, start
+'   timers, stop timers, or mutate DatePicker state
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN VALIDATION RESULT
 '------------------------------------------------------------------------------
     'Return whether the clock mode is supported
-        M_Settings_IsValidClockMode = _
-            (ClockMode = DP_ClockMode_Static Or ClockMode = DP_ClockMode_Live)
-End Function
+        Select Case ClockMode
+            Case DP_ClockMode_Static, DP_ClockMode_Live
+                M_Settings_IsValidClockMode = True
+            Case Else
+                M_Settings_IsValidClockMode = False
+        End Select
 
+End Function
 Private Function M_Settings_IsValidSizeMode(ByVal SizeMode As Long) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS ISVALIDSIZEMODE
+'                           VALIDATE SIZE MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns the DatePicker settings isvalidsizemode value
+'   Returns whether a supplied DatePicker size mode is supported
 '
 ' WHY THIS EXISTS
-'   A controlled accessor keeps external callers away from directly relying on mutable module state where possible
+'   The DatePicker supports a controlled set of layout modes:
+'     - normal layout
+'     - compact layout
+'
+'   Centralizing the validation keeps settings loading, saving, parsing, and
+'   public setter routines aligned to the same size-mode policy
 '
 ' INPUTS
-'   See procedure signature
+'   SizeMode
+'     Size-mode value to validate
 '
 ' RETURNS
-'   See procedure type
+'   True when SizeMode is DP_SizeMode_Normal or DP_SizeMode_Compact
+'
+'   False for all other values
 '
 ' BEHAVIOR
-'   - Ensures settings are loaded when needed
-'   - Returns the requested setting or validation result
+'   Compares the supplied value against the supported DatePicker size-mode
+'   constants
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors
+'
+'   Unsupported values return False so callers can decide whether to default,
+'   reject, or raise a higher-level error
 '
 ' DEPENDENCIES
-'   M_Settings_EnsureLoaded
+'   DP_SizeMode_Normal
+'   DP_SizeMode_Compact
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure validation helper
+'
+'   This routine does not load settings, save settings, read the registry,
+'   resize the form, rebuild controls, or mutate DatePicker state
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN VALIDATION RESULT
 '------------------------------------------------------------------------------
     'Return whether the size mode is supported
-        M_Settings_IsValidSizeMode = _
-            (SizeMode = DP_SizeMode_Normal Or SizeMode = DP_SizeMode_Compact)
-End Function
+        Select Case SizeMode
+            Case DP_SizeMode_Normal, DP_SizeMode_Compact
+                M_Settings_IsValidSizeMode = True
+            Case Else
+                M_Settings_IsValidSizeMode = False
+        End Select
 
+End Function
 Private Function M_Settings_TryParseBoolean( _
     ByVal RawValue As String, _
     ByRef ParsedValue As Boolean) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS TRYPARSEBOOLEAN
+'                           TRY PARSE BOOLEAN SETTING
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Attempts to parse a persisted DatePicker setting value
+'   Attempts to parse a persisted Boolean DatePicker setting value
 '
 ' WHY THIS EXISTS
-'   Persisted registry values are strings and must be parsed defensively before being trusted
+'   Persisted registry values are strings and must be normalized before being
+'   trusted as Boolean settings
+'
+'   A dedicated parser keeps settings load logic clean, defensive, and aligned
+'   to one common interpretation of stored Boolean values
 '
 ' INPUTS
-'   See procedure signature
+'   RawValue
+'     Raw string value read from persisted settings
+'
+'   ParsedValue
+'     Output Boolean value populated when parsing succeeds
 '
 ' RETURNS
-'   See procedure type
+'   True when RawValue is recognized as a supported Boolean representation
+'
+'   False when RawValue is blank, unsupported, or cannot be parsed safely
 '
 ' BEHAVIOR
-'   - Normalizes the raw setting value
-'   - Returns True when parsing succeeds
-'   - Returns False when parsing fails
+'   Normalizes RawValue, recognizes canonical persisted values and common
+'   textual Boolean forms, assigns ParsedValue deterministically, and returns the
+'   parse result
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors
+'
+'   Any unexpected parsing failure returns False and resets ParsedValue to False
 '
 ' DEPENDENCIES
 '   None
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure parsing helper
+'
+'   This routine does not load settings, save settings, read the registry, or
+'   mutate DatePicker state
+'
+'   Canonical persisted Boolean values should remain 1 and 0
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
-    Dim NormalizedValue As String                                     'Normalized setting value
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NormalizedValue     As String   'Normalized setting value
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe parsing
+        On Error GoTo ParseFail
+    'Initialize the parsed value to a deterministic failure state
+        ParsedValue = False
+    'Initialize the function result to parsing failure
+        M_Settings_TryParseBoolean = False
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
     'Normalize the raw setting value
-        NormalizedValue = UCase$(Trim$(RawValue))
+        NormalizedValue = VBA.UCase$(VBA.Trim$(RawValue))
+    'Return False for blank values
+        If VBA.LenB(NormalizedValue) = 0 Then Exit Function
 
-    'Parse supported Boolean values
+'------------------------------------------------------------------------------
+' PARSE BOOLEAN VALUE
+'------------------------------------------------------------------------------
+    'Parse the normalized Boolean value
         Select Case NormalizedValue
-            Case "1", "-1", "TRUE", "YES", "Y", "ON", "SI", "S", "VERO"
-                ParsedValue = True
-                M_Settings_TryParseBoolean = True
-            Case "0", "FALSE", "NO", "N", "OFF", "FALSO"
-                ParsedValue = False
-                M_Settings_TryParseBoolean = True
-            Case Else
-                M_Settings_TryParseBoolean = False
-        End Select
-End Function
+            Case "1", "-1", "TRUE", "T", "YES", "Y", "ON"
+                'Store the parsed Boolean value
+                    ParsedValue = True
+                'Return successful parsing
+                    M_Settings_TryParseBoolean = True
 
+            Case "0", "FALSE", "F", "NO", "N", "OFF"
+                'Store the parsed Boolean value
+                    ParsedValue = False
+                'Return successful parsing
+                    M_Settings_TryParseBoolean = True
+
+            Case Else
+                'Reset the parsed value to a deterministic failure state
+                    ParsedValue = False
+                'Return parsing failure
+                    M_Settings_TryParseBoolean = False
+        End Select
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the fail-safe handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' PARSE FAIL
+'------------------------------------------------------------------------------
+ParseFail:
+    'Suppress secondary cleanup errors
+        On Error Resume Next
+    'Reset the parsed value to a deterministic failure state
+        ParsedValue = False
+    'Return parsing failure
+        M_Settings_TryParseBoolean = False
+    'Clear the parsing error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Function
 Private Function M_Settings_TryParseFirstDayOfWeek( _
     ByVal RawValue As String, _
     ByRef ParsedValue As Long) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS TRYPARSEFIRSTDAYOFWEEK
+'                       TRY PARSE FIRST DAY OF WEEK SETTING
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Attempts to parse a persisted DatePicker setting value
+'   Attempts to parse a persisted first-day-of-week DatePicker setting value
 '
 ' WHY THIS EXISTS
-'   Persisted registry values are strings and must be parsed defensively before being trusted
+'   Persisted registry values are strings and must be normalized before being
+'   trusted as DatePicker settings
+'
+'   A dedicated parser keeps settings load logic clean, defensive, and aligned
+'   to one common interpretation of supported first-day values
 '
 ' INPUTS
-'   See procedure signature
+'   RawValue
+'     Raw string value read from persisted settings
+'
+'   ParsedValue
+'     Output first-day-of-week value populated when parsing succeeds
 '
 ' RETURNS
-'   See procedure type
+'   True when RawValue resolves to vbSunday or vbMonday
+'
+'   False when RawValue is blank, unsupported, or cannot be parsed safely
 '
 ' BEHAVIOR
-'   - Normalizes the raw setting value
-'   - Returns True when parsing succeeds
-'   - Returns False when parsing fails
+'   Normalizes RawValue, recognizes canonical persisted values, VBA-style
+'   constant names, English weekday names, and common Italian weekday names,
+'   assigns ParsedValue deterministically, and returns the parse result
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors
+'
+'   Any unexpected parsing failure returns False and resets ParsedValue to zero
 '
 ' DEPENDENCIES
-'   None
+'   VBA weekday constants
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure parsing helper
+'
+'   This routine does not load settings, save settings, read the registry, or
+'   mutate DatePicker state
+'
+'   Canonical persisted first-day values should remain 1 and 2
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
-    Dim NormalizedValue As String                                     'Normalized first-day setting
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NormalizedValue     As String   'Normalized first-day setting value
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe parsing
+        On Error GoTo ParseFail
+    'Initialize the parsed value to a deterministic failure state
+        ParsedValue = 0
+    'Initialize the function result to parsing failure
+        M_Settings_TryParseFirstDayOfWeek = False
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
     'Normalize the raw first-day value
-        NormalizedValue = UCase$(Trim$(RawValue))
+        NormalizedValue = VBA.UCase$(VBA.Trim$(RawValue))
+    'Return False for blank values
+        If VBA.LenB(NormalizedValue) = 0 Then Exit Function
 
-    'Parse supported first-day values
+'------------------------------------------------------------------------------
+' PARSE FIRST-DAY VALUE
+'------------------------------------------------------------------------------
+    'Parse the normalized first-day value
         Select Case NormalizedValue
             Case "1", "VBSUNDAY", "SUNDAY", "SUN"
-                ParsedValue = vbSunday
-                M_Settings_TryParseFirstDayOfWeek = True
-            Case "2", "VBMONDAY", "MONDAY", "MON"
-                ParsedValue = vbMonday
-                M_Settings_TryParseFirstDayOfWeek = True
-            Case Else
-                M_Settings_TryParseFirstDayOfWeek = False
-        End Select
-End Function
+                'Store the parsed first-day value
+                    ParsedValue = vbSunday
+                'Return successful parsing
+                    M_Settings_TryParseFirstDayOfWeek = True
 
+            Case "2", "VBMONDAY", "MONDAY", "MON"
+                'Store the parsed first-day value
+                    ParsedValue = vbMonday
+                'Return successful parsing
+                    M_Settings_TryParseFirstDayOfWeek = True
+
+            Case Else
+                'Reset the parsed value to a deterministic failure state
+                    ParsedValue = 0
+                'Return parsing failure
+                    M_Settings_TryParseFirstDayOfWeek = False
+        End Select
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the fail-safe handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' PARSE FAIL
+'------------------------------------------------------------------------------
+ParseFail:
+    'Suppress secondary cleanup errors
+        On Error Resume Next
+    'Reset the parsed value to a deterministic failure state
+        ParsedValue = 0
+    'Return parsing failure
+        M_Settings_TryParseFirstDayOfWeek = False
+    'Clear the parsing error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Function
 Private Function M_Settings_TryParseLong( _
     ByVal RawValue As String, _
     ByRef ParsedValue As Long) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           SETTINGS TRYPARSELONG
+'                           TRY PARSE LONG SETTING
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Attempts to parse a persisted DatePicker setting value
+'   Attempts to parse a persisted Long DatePicker setting value
 '
 ' WHY THIS EXISTS
-'   Persisted registry values are strings and must be parsed defensively before being trusted
+'   Persisted registry values are strings and must be normalized before being
+'   trusted as numeric DatePicker settings
+'
+'   A dedicated strict parser avoids accepting ambiguous numeric formats such as
+'   decimals, currency values, scientific notation, hexadecimal notation, or
+'   locale-dependent numeric strings
 '
 ' INPUTS
-'   See procedure signature
+'   RawValue
+'     Raw string value read from persisted settings
+'
+'   ParsedValue
+'     Output Long value populated when parsing succeeds
 '
 ' RETURNS
-'   See procedure type
+'   True when RawValue is a strict base-10 integer inside the VBA Long range
+'
+'   False when RawValue is blank, unsupported, out of range, or cannot be parsed
+'   safely
 '
 ' BEHAVIOR
-'   - Normalizes the raw setting value
-'   - Returns True when parsing succeeds
-'   - Returns False when parsing fails
+'   Trims RawValue, accepts an optional leading sign, rejects non-digit content,
+'   validates the Long range while parsing, assigns ParsedValue deterministically,
+'   and returns the parse result
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors
+'
+'   Any unexpected parsing failure returns False and resets ParsedValue to zero
 '
 ' DEPENDENCIES
 '   None
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This is a pure parsing helper
+'
+'   This routine does not load settings, save settings, read the registry, or
+'   mutate DatePicker state
+'
+'   This routine intentionally does not use IsNumeric because IsNumeric accepts
+'   formats that are not appropriate for persisted integer settings
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
-    Dim NormalizedValue As String                                     'Normalized numeric value
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const LONG_MAX_VALUE         As Double = 2147483647#    'Maximum VBA Long value
+    Const LONG_MIN_ABS_VALUE     As Double = 2147483648#    'Absolute minimum VBA Long value
 
-    'Set safe default
+    Dim NormalizedValue          As String                  'Trimmed raw numeric value
+    Dim NumericText              As String                  'Numeric portion without sign
+    Dim FirstCharacter           As String                  'First character of the normalized value
+    Dim CurrentCharacter         As String                  'Current parsed digit
+    Dim CharacterIndex           As Long                    'Character loop index
+    Dim SignMultiplier           As Long                    'Parsed sign multiplier
+    Dim AccumulatedValue         As Double                  'Accumulated absolute numeric value
+    Dim SignedValue              As Double                  'Signed numeric value before Long conversion
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe parsing
+        On Error GoTo ParseFail
+    'Initialize the parsed value to a deterministic failure state
+        ParsedValue = 0
+    'Initialize the function result to parsing failure
         M_Settings_TryParseLong = False
 
-    'Suppress parse failures
-        On Error GoTo ParseFail
-
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
     'Normalize the raw numeric value
-        NormalizedValue = Trim$(RawValue)
+        NormalizedValue = VBA.Trim$(RawValue)
+    'Return False for blank values
+        If VBA.LenB(NormalizedValue) = 0 Then
+            Exit Function
+        End If
 
-    'Exit when the value is blank
-        If Len(NormalizedValue) = 0 Then Exit Function
+'------------------------------------------------------------------------------
+' RESOLVE SIGN
+'------------------------------------------------------------------------------
+    'Initialize the sign multiplier
+        SignMultiplier = 1
+    'Read the first character
+        FirstCharacter = VBA.Left$(NormalizedValue, 1)
+    'Handle an explicit positive sign
+        If FirstCharacter = "+" Then
+            NumericText = VBA.Mid$(NormalizedValue, 2)
+    'Handle an explicit negative sign
+        ElseIf FirstCharacter = "-" Then
+            SignMultiplier = -1
+            NumericText = VBA.Mid$(NormalizedValue, 2)
+    'Use the full value when no explicit sign is supplied
+        Else
+            NumericText = NormalizedValue
+        End If
+    'Return False when only a sign was supplied
+        If VBA.LenB(NumericText) = 0 Then Exit Function
 
-    'Exit when the value is not numeric
-        If Not IsNumeric(NormalizedValue) Then Exit Function
+'------------------------------------------------------------------------------
+' VALIDATE DIGITS
+'------------------------------------------------------------------------------
+    'Reject any non-digit character
+        If NumericText Like "*[!0-9]*" Then Exit Function
 
-    'Reject decimal-looking values for integer settings
-        If InStr(1, NormalizedValue, ".", vbBinaryCompare) > 0 Then Exit Function
-        If InStr(1, NormalizedValue, ",", vbBinaryCompare) > 0 Then Exit Function
+'------------------------------------------------------------------------------
+' PARSE NUMERIC VALUE
+'------------------------------------------------------------------------------
+    'Loop through the numeric characters
+        For CharacterIndex = 1 To VBA.Len(NumericText)
+            'Read the current digit
+                CurrentCharacter = VBA.Mid$(NumericText, CharacterIndex, 1)
+            'Accumulate the absolute numeric value
+                AccumulatedValue = (AccumulatedValue * 10#) + VBA.CDbl(CurrentCharacter)
+            'Reject positive values outside the Long range
+                If SignMultiplier = 1 Then
+                    If AccumulatedValue > LONG_MAX_VALUE Then Exit Function
+                End If
+            'Reject negative values outside the Long range
+                If SignMultiplier = -1 Then
+                    If AccumulatedValue > LONG_MIN_ABS_VALUE Then Exit Function
+                End If
+        Next CharacterIndex
 
-    'Parse the value as Long
-        ParsedValue = CLng(NormalizedValue)
-
-    'Return success
+'------------------------------------------------------------------------------
+' CONVERT TO LONG
+'------------------------------------------------------------------------------
+    'Apply the parsed sign
+        SignedValue = AccumulatedValue * SignMultiplier
+    'Store the parsed Long value
+        ParsedValue = VBA.CLng(SignedValue)
+    'Return successful parsing
         M_Settings_TryParseLong = True
 
-    'Exit after successful parse
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the fail-safe handler
         Exit Function
 
+'------------------------------------------------------------------------------
+' PARSE FAIL
+'------------------------------------------------------------------------------
 ParseFail:
-    'Return safe default
+    'Suppress secondary cleanup errors
+        On Error Resume Next
+    'Reset the parsed value to a deterministic failure state
+        ParsedValue = 0
+    'Return parsing failure
         M_Settings_TryParseLong = False
-End Function
+    'Clear the parsing error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
+End Function
 Private Function M_Settings_BooleanToStorageValue(ByVal Value As Boolean) As String
-    'Return the settings representation
+
+'
+'------------------------------------------------------------------------------
+'                       CONVERT BOOLEAN TO STORAGE VALUE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Converts a Boolean DatePicker setting to its canonical persisted string value
+'
+' WHY THIS EXISTS
+'   VBA represents True internally as -1, but persisted settings should use a
+'   stable and language-independent representation
+'
+'   Saving Boolean settings as 1 / 0 keeps registry values compact, predictable,
+'   and aligned with M_Settings_TryParseBoolean
+'
+' INPUTS
+'   Value
+'     Boolean value to convert
+'
+' RETURNS
+'   "1" when Value is True
+'
+'   "0" when Value is False
+'
+' BEHAVIOR
+'   Maps the supplied Boolean value to the DatePicker canonical storage format
+'
+' ERROR POLICY
+'   Does not raise errors
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   This is a pure conversion helper
+'
+'   This routine does not load settings, save settings, read the registry, or
+'   mutate DatePicker state
+'
+'   Do not replace this with CStr(Value) or CStr(CLng(Value)), because VBA would
+'   persist True as "True" or "-1" instead of the canonical "1"
+'
+' UPDATED
+'   2026-05-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN STORAGE VALUE
+'------------------------------------------------------------------------------
+    'Return the canonical storage value for True
         If Value Then
             M_Settings_BooleanToStorageValue = "1"
+    'Return the canonical storage value for False
         Else
             M_Settings_BooleanToStorageValue = "0"
         End If
+
 End Function
 
 
-'
-'------------------------------------------------------------------------------
-'
-'                                  FORM BRIDGE
-'
-'------------------------------------------------------------------------------
 
 Public Sub M_Picker_EnsureManager()
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                          ENSURE DATEPICKER MANAGER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Ensures the global DatePicker manager object is instantiated
+'   Ensures the global DatePicker manager object is instantiated and hooked
 '
 ' WHY THIS EXISTS
-'   The manager hooks Excel application events and coordinates context-sensitive
-'   DatePicker UI behavior
+'   The DatePicker manager owns the Excel Application event hooks used to
+'   coordinate context-sensitive DatePicker behavior
+'
+'   After VBA reset, project import, workbook reload, or partial teardown, the
+'   global manager reference may be missing or may exist without a valid
+'   Application event hook
 '
 ' INPUTS
 '   None
@@ -2152,28 +3917,184 @@ Public Sub M_Picker_EnsureManager()
 '   Nothing
 '
 ' BEHAVIOR
-'   Creates gDP_Manager only when it is currently Nothing
+'   Ensures persisted settings are loaded, creates the manager when missing, and
+'   recreates it when the existing manager is not hooked
 '
 ' ERROR POLICY
-'   Propagates manager instantiation errors
+'   Raises a descriptive runtime error if settings cannot be loaded or if the
+'   manager cannot be instantiated / re-instantiated
 '
 ' DEPENDENCIES
+'   M_Settings_EnsureLoaded
 '   cDatePickerManager
+'   gDP_Manager
 '
 ' NOTES
-'   This is a lazy loader for the manager/controller object
+'   This routine is the canonical manager / controller bootstrapper
+'
+'   The Is_Hooked check prevents a stale manager object from silently disabling
+'   selection-change behavior
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Picker_EnsureManager"
+
+    Dim ManagerNeedsCreate      As Boolean          'True when manager must be created
+    Dim ManagerNeedsRecreate    As Boolean          'True when manager exists but is not hooked
+    Dim ErrorNumber             As Long             'Captured error number
+    Dim ErrorDescription        As String           'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure persisted DatePicker settings are available before manager startup
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RESOLVE MANAGER STATE
+'------------------------------------------------------------------------------
+    'Detect missing manager
+        ManagerNeedsCreate = (gDP_Manager Is Nothing)
+    'Check hook state only when a manager already exists
+        If Not ManagerNeedsCreate Then
+            ManagerNeedsRecreate = Not gDP_Manager.Is_Hooked
+        End If
+
+'------------------------------------------------------------------------------
+' RECREATE STALE MANAGER IF NEEDED
+'------------------------------------------------------------------------------
+    'Release stale manager when the Application event hook is not active
+        If ManagerNeedsRecreate Then
+            Set gDP_Manager = Nothing
+            ManagerNeedsCreate = True
+        End If
 
 '------------------------------------------------------------------------------
 ' ENSURE MANAGER
 '------------------------------------------------------------------------------
-    'Instantiate the manager when missing
-        If gDP_Manager Is Nothing Then
+    'Instantiate the manager when missing or after stale-manager release
+        If ManagerNeedsCreate Then
             Set gDP_Manager = New cDatePickerManager
         End If
+
+'------------------------------------------------------------------------------
+' VALIDATE MANAGER
+'------------------------------------------------------------------------------
+    'Reject failed manager creation
+        If gDP_Manager Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "DatePicker manager was not created"
+        End If
+    'Reject manager creation without Application event hook
+        If Not gDP_Manager.Is_Hooked Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "DatePicker manager was created but Application events are not hooked"
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "DatePicker manager initialization failed: " & ErrorDescription
+
+End Sub
+'
+
+Public Sub DP_Start()
+
+'
+'==============================================================================
+'                           START DATEPICKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Starts the DatePicker manager and immediately refreshes the current UI state
+'
+' WHY THIS EXISTS
+'   The manager is event-driven. After workbook open, VBA reset, code import, or
+'   add-in reload, the manager must be explicitly bootstrapped before Excel
+'   selection-change events can move or remove the in-grid icon
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures the manager is alive and hooked, then evaluates the current ActiveCell
+'   so stale icons are cleaned and the correct in-grid icon state is shown
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if startup fails
+'
+' DEPENDENCIES
+'   M_Picker_EnsureManager
+'   gDP_Manager.Handle_SelectionChange
+'
+' NOTES
+'   Call this from Workbook_Open, Auto_Open, add-in startup, or manually after
+'   importing the project into a workbook
+'
+' UPDATED
+'   2026-05-03
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "DP_Start"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' ENSURE MANAGER
+'------------------------------------------------------------------------------
+    'Ensure the DatePicker manager exists and Application events are hooked
+        M_Picker_EnsureManager
+
+'------------------------------------------------------------------------------
+' REFRESH CURRENT UI
+'------------------------------------------------------------------------------
+    'Force one initial current-context refresh
+        gDP_Manager.Handle_SelectionChange
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive startup error
+        Err.Raise Err.Number, PROC_NAME, "DatePicker startup failed: " & Err.Description
 
 End Sub
 
@@ -2189,10 +4110,13 @@ Public Sub DP_Show()
 '
 ' WHY THIS EXISTS
 '   The DatePicker should open on the date already present in ActiveCell when
-'   ActiveCell contains a valid date. Otherwise, it should open on today's date
+'   ActiveCell contains a valid date
 '
-'   When the form is shown from the in-grid icon, the UserForm should also be
-'   positioned close to the current mouse position
+'   Otherwise, it should open on today's date
+'
+'   The form is explicitly loaded and positioned before it is shown so the first
+'   visible paint occurs close to the mouse instead of flashing briefly in the
+'   top-left corner of the screen
 '
 ' INPUTS
 '   None
@@ -2201,97 +4125,107 @@ Public Sub DP_Show()
 '   Nothing
 '
 ' BEHAVIOR
-'   - Loads persisted DatePicker settings
-'   - Resolves the initial display date from ActiveCell
-'   - Stores the initial-date bridge state consumed by UF_DatePicker
-'   - Stores selected-date state only when ActiveCell contains a valid date
-'   - Unloads any existing DatePicker instance so UserForm_Initialize runs again
-'   - Shows UF_DatePicker modelessly
-'   - Resolves the loaded form instance
-'   - Moves the loaded form close to the current mouse position
+'   Ensures DatePicker infrastructure is available, resolves the initial display
+'   date from ActiveCell when possible, unloads any existing DatePicker instance,
+'   stores bridge state for the next form instance, loads UF_DatePicker, positions
+'   the loaded form close to the mouse, shows it modelessly, and applies one
+'   final post-show positioning correction
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the DatePicker cannot be shown or
-'   positioned
+'   Raises a descriptive runtime error if the DatePicker cannot be prepared,
+'   loaded, resolved, or shown
+'
+'   Mouse positioning is best-effort and does not prevent the picker from opening
 '
 ' DEPENDENCIES
-'   M_Settings_Load
+'   M_Picker_EnsureManager
 '   M_FormBridge_UnloadLoadedPicker
 '   M_FormBridge_GetLoadedForm
-'   UF_DatePicker
 '   M_Window_MoveFormToMouse
+'   UF_DatePicker
 '
 ' NOTES
-'   The form is positioned after Show because M_Window_MoveFormToMouse relies on the
-'   native UserForm window handle, which is more reliable after the form has been
-'   created
+'   Load UF_DatePicker is intentional
+'
+'   Loading the form before Show runs UserForm_Initialize while the form is still
+'   hidden. This allows the form to be positioned before the first visible paint
+'
+'   The post-show positioning call is retained as a safety correction for host
+'   environments where the native UserForm window position is finalized only
+'   after Show
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "DP_Show"                    'Current procedure name
+    Const PROC_NAME                 As String = "DP_Show"    'Current procedure name
 
-    Dim CellValue              As Variant                               'ActiveCell value snapshot
-    Dim InitialDate            As Date                                  'Resolved initial display date
-    Dim HasCellDate            As Boolean                               'True when ActiveCell contains a date
-    Dim LoadedForm             As Object                                'Loaded DatePicker form instance
+    Const FORM_MOUSE_OFFSET_XPX     As Long = 10             'Mouse-position X offset in pixels
+    Const FORM_MOUSE_OFFSET_YPX     As Long = 0              'Mouse-position Y offset in pixels
+    Const FORM_CENTER_ON_MOUSE      As Boolean = False       'True to center form on mouse
+
+    Dim CellValue                   As Variant               'ActiveCell value snapshot
+    Dim InitialDate                 As Date                  'Resolved initial display date
+    Dim HasCellDate                 As Boolean               'True when ActiveCell contains a usable date
+    Dim HasActiveCellValue          As Boolean               'True when ActiveCell value was read successfully
+    Dim LoadedForm                  As Object                'Loaded DatePicker form instance
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
-    'Load DatePicker settings before opening the form
-        M_Settings_Load
-
+    'Ensure DatePicker settings and manager infrastructure are available
+        M_Picker_EnsureManager
     'Default the initial date to today
         InitialDate = VBA.Date
-
     'Default selected-date availability to False
         HasCellDate = False
+    'Default ActiveCell value availability to False
+        HasActiveCellValue = False
+
+'------------------------------------------------------------------------------
+' READ ACTIVE CELL VALUE
+'------------------------------------------------------------------------------
+    'Suppress ActiveCell access errors
+        On Error Resume Next
+    'Read ActiveCell value safely
+        CellValue = Application.ActiveCell.Value
+    'Store whether ActiveCell value was read successfully
+        HasActiveCellValue = (Err.Number = 0)
+    'Clear any suppressed ActiveCell access error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' RESOLVE INITIAL DATE FROM ACTIVE CELL
 '------------------------------------------------------------------------------
-    'Suppress ActiveCell access errors
-        On Error Resume Next
-
-    'Read ActiveCell value safely
-        CellValue = Application.ActiveCell.Value
-
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Use ActiveCell date only when the value is not an Excel error
-        If Not IsError(CellValue) Then
-            If VBA.IsDate(CellValue) Then
-                InitialDate = VBA.DateValue(CDate(CellValue))
-                HasCellDate = True
-            End If
+    'Use ActiveCell only when a value was read successfully
+        If HasActiveCellValue Then
+            'Ignore Excel error values
+                If Not IsError(CellValue) Then
+                    'Evaluate only date-like values
+                        If VBA.IsDate(CellValue) Then
+                            'Suppress conversion errors for unusual date-like values
+                                On Error Resume Next
+                            'Resolve the ActiveCell date without time
+                                InitialDate = VBA.DateValue(VBA.CDate(CellValue))
+                            'Store whether the conversion succeeded
+                                HasCellDate = (Err.Number = 0)
+                            'Clear any suppressed conversion error
+                                Err.Clear
+                            'Restore controlled error handling
+                                On Error GoTo ErrorHandler
+                        End If
+                End If
         End If
 
-'------------------------------------------------------------------------------
-' STORE FORM BRIDGE STATE
-'------------------------------------------------------------------------------
-    'Store the initial date for the next UF_DatePicker instance
-        gDP_InitialDate = InitialDate
-
-    'Mark the initial date as available
-        gDP_HasInitialDate = True
-
-    'Store selected-date state when ActiveCell contains a valid date
-        If HasCellDate Then
-            gDP_SelectedDate = InitialDate
-            gDP_HasSelectedDate = True
-        Else
-            gDP_SelectedDate = 0
-            gDP_HasSelectedDate = False
-        End If
+    'Restore the default initial date when no valid ActiveCell date was resolved
+        If Not HasCellDate Then InitialDate = VBA.Date
 
 '------------------------------------------------------------------------------
 ' RESET EXISTING FORM INSTANCE
@@ -2300,21 +4234,77 @@ Public Sub DP_Show()
         M_FormBridge_UnloadLoadedPicker
 
 '------------------------------------------------------------------------------
-' SHOW FORM
+' STORE FORM BRIDGE STATE
 '------------------------------------------------------------------------------
-    'Show the DatePicker form modelessly
-        UF_DatePicker.Show vbModeless
+    'Store the initial date for the next UF_DatePicker instance
+        gDP_InitialDate = InitialDate
+    'Mark the initial date as available
+        gDP_HasInitialDate = True
+    'Store selected-date state when ActiveCell contains a valid date
+        If HasCellDate Then
+            'Store the selected date
+                gDP_SelectedDate = InitialDate
+            'Mark the selected date as available
+                gDP_HasSelectedDate = True
+        Else
+            'Clear the selected date
+                gDP_SelectedDate = 0
+            'Mark the selected date as unavailable
+                gDP_HasSelectedDate = False
+        End If
 
 '------------------------------------------------------------------------------
-' POSITION LOADED FORM
+' LOAD FORM INSTANCE
 '------------------------------------------------------------------------------
+    'Load the DatePicker form while it is still hidden
+        Load UF_DatePicker
     'Resolve the loaded DatePicker form instance
         Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
-
-    'Move the loaded form top-left corner to the current mouse position
-        If Not LoadedForm Is Nothing Then
-            M_Window_MoveFormToMouse LoadedForm, 0, 0, False
+    'Fallback to the default instance if the bridge did not resolve it
+        If LoadedForm Is Nothing Then Set LoadedForm = UF_DatePicker
+    'Reject unresolved DatePicker form instance
+        If LoadedForm Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "Unable to resolve loaded DatePicker form instance"
         End If
+
+'------------------------------------------------------------------------------
+' PRE-POSITION HIDDEN FORM
+'------------------------------------------------------------------------------
+    'Suppress best-effort pre-show positioning errors
+        On Error Resume Next
+    'Move the hidden loaded form close to the current mouse position before first paint
+        M_Window_MoveFormToMouse _
+            LoadedForm, _
+            FORM_MOUSE_OFFSET_XPX, _
+            FORM_MOUSE_OFFSET_YPX, _
+            FORM_CENTER_ON_MOUSE
+    'Clear any suppressed positioning error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' SHOW FORM
+'------------------------------------------------------------------------------
+    'Show the loaded DatePicker form modelessly
+        LoadedForm.Show vbModeless
+
+'------------------------------------------------------------------------------
+' FINAL POSITION CORRECTION
+'------------------------------------------------------------------------------
+    'Suppress best-effort post-show positioning errors
+        On Error Resume Next
+    'Apply one final position correction after the native UserForm window is visible
+        M_Window_MoveFormToMouse _
+            LoadedForm, _
+            FORM_MOUSE_OFFSET_XPX, _
+            FORM_MOUSE_OFFSET_YPX, _
+            FORM_CENTER_ON_MOUSE
+    'Clear any suppressed positioning error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -2327,22 +4317,24 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise Err.Number, PROC_NAME, "DatePicker show failed: " & Err.Description
 
 End Sub
-
 Public Sub DP_Click()
 
 '
 '------------------------------------------------------------------------------
-'                           DATEPICKER CLICK ENTRY POINT
+'                       DATEPICKER CLICK ENTRY POINT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Public callback entry point for right-click menu and grid-icon actions
+'   Public macro callback entry point for DatePicker launch actions
 '
 ' WHY THIS EXISTS
-'   Excel UI elements such as CommandBars and Shapes need a public macro entry
-'   point to launch the DatePicker
+'   Excel UI elements such as CommandBars, worksheet shapes, and in-grid icons
+'   require a public Sub that can be assigned as an action macro
+'
+'   Keeping this routine as a thin wrapper avoids duplicating DatePicker launch
+'   logic across UI integration points
 '
 ' INPUTS
 '   None
@@ -2351,29 +4343,246 @@ Public Sub DP_Click()
 '   Nothing
 '
 ' BEHAVIOR
-'   Delegates to DP_Show
+'   Delegates to the canonical ActiveCell-based DatePicker open routine
 '
 ' ERROR POLICY
-'   Propagates errors from DP_Show
+'   Raises a descriptive runtime error if the DatePicker cannot be opened
+'
+' DEPENDENCIES
+'   DP_OpenForActiveCell
+'
+' NOTES
+'   This routine intentionally remains Public so Excel UI surfaces can call it
+'
+'   Do not add business logic here. Keep DatePicker launch behavior centralized
+'   in DP_OpenForActiveCell
+'
+' UPDATED
+'   2026-05-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "DP_Click"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' OPEN DATEPICKER
+'------------------------------------------------------------------------------
+    'Open the DatePicker for the current ActiveCell
+        DP_OpenForActiveCell
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "DatePicker click entry point failed: " _
+            & Err.Description
+
+End Sub
+Public Sub DP_OpenForActiveCell()
+
+'
+'------------------------------------------------------------------------------
+'                       OPEN DATEPICKER FOR ACTIVE CELL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Opens the DatePicker for the current ActiveCell
+'
+' WHY THIS EXISTS
+'   The DatePicker needs a stable manual entry point that remains available even
+'   when optional UI integrations such as the in-grid icon and right-click menu
+'   are disabled
+'
+'   Public callback surfaces such as keyboard shortcuts, Ribbon buttons, QAT
+'   buttons, worksheet buttons, and assigned shape macros should delegate to one
+'   canonical DatePicker launch path instead of duplicating launch logic
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to the standard DatePicker show routine, which resolves ActiveCell
+'   context, prepares bridge state, loads the form, positions it, and shows it
+'   modelessly
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the DatePicker cannot be opened
 '
 ' DEPENDENCIES
 '   DP_Show
 '
 ' NOTES
-'   This routine intentionally remains public
+'   This routine intentionally remains Public
+'
+'   Keep this routine as a thin wrapper. Do not add ActiveCell parsing, settings
+'   loading, form positioning, or write-back logic here
+'
+'   This routine is intended for Application.OnKey, RibbonX, QAT, worksheet
+'   button callbacks, and assigned Shape.OnAction macros
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
-' SHOW DATEPICKER
+' DECLARE
 '------------------------------------------------------------------------------
-    'Show the DatePicker form
+    Const PROC_NAME     As String = "DP_OpenForActiveCell"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' OPEN PICKER
+'------------------------------------------------------------------------------
+    'Show the DatePicker for the current ActiveCell
         DP_Show
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "DatePicker open-for-active-cell failed: " & Err.Description
 
 End Sub
 
+Public Sub DP_RepairRuntime()
+
+'
+'==============================================================================
+'                           REPAIR DATEPICKER RUNTIME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Repairs the interactive DatePicker runtime after interrupted macros, VBA
+'   reset, disabled Excel events, stale manager state, or stale grid icons
+'
+' WHY THIS EXISTS
+'   The DatePicker in-grid icon is event-driven. If Application.EnableEvents is
+'   False, Excel will not raise SheetSelectionChange and the icon cannot move,
+'   disappear, or refresh when the active cell changes
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Re-enables Excel events, purges stale grid icons, recreates the manager, and
+'   refreshes the current active-cell context
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the repair cannot be completed
+'
+' DEPENDENCIES
+'   Application.EnableEvents
+'   M_GridIcon_PurgeAll
+'   M_Picker_EnsureManager
+'   gDP_Manager
+'
+' NOTES
+'   This routine is intended for interactive repair, startup, testing, and demo
+'   scenarios
+'
+'   It intentionally forces Application.EnableEvents = True because the
+'   DatePicker cannot operate interactively while Excel events are disabled
+'
+'   Do not call this inside a business macro that deliberately suppresses Excel
+'   events unless that macro is ready for events to be re-enabled
+'
+' UPDATED
+'   2026-05-03
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "DP_RepairRuntime"
+
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RE-ENABLE EXCEL EVENTS
+'------------------------------------------------------------------------------
+    'Re-enable Excel events required by the DatePicker manager
+        Application.EnableEvents = True
+
+'------------------------------------------------------------------------------
+' CLEAR STALE GRID ICONS
+'------------------------------------------------------------------------------
+    'Purge stale worksheet icon artifacts
+        M_GridIcon_PurgeAll
+
+'------------------------------------------------------------------------------
+' RECREATE MANAGER
+'------------------------------------------------------------------------------
+    'Release the current manager reference
+        Set gDP_Manager = Nothing
+    'Recreate and hook the DatePicker manager
+        M_Picker_EnsureManager
+
+'------------------------------------------------------------------------------
+' REFRESH CURRENT CONTEXT
+'------------------------------------------------------------------------------
+    'Refresh the DatePicker UI for the current active-cell context
+        If Not gDP_Manager Is Nothing Then
+            gDP_Manager.Handle_SelectionChange
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Raise a descriptive repair error
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "DatePicker runtime repair failed: " & ErrorDescription
+
+End Sub
 Public Sub DP_Close()
 
 '
@@ -2384,8 +4593,11 @@ Public Sub DP_Close()
 '   Closes the DatePicker form when it is loaded and stops transient UI activity
 '
 ' WHY THIS EXISTS
-'   The DatePicker should tear down timers and modeless form state in a
-'   controlled way when dismissed or refreshed
+'   The DatePicker uses a modeless UserForm and optional live-clock timer
+'
+'   Closing the picker should therefore stop timer activity, unload the current
+'   form instance when available, and clear transient bridge state without
+'   raising unnecessary cleanup errors to the user
 '
 ' INPUTS
 '   None
@@ -2394,53 +4606,85 @@ Public Sub DP_Close()
 '   Nothing
 '
 ' BEHAVIOR
-'   Stops the live clock timer and unloads UF_DatePicker only when it is loaded
+'   Stops the live clock timer, resolves the loaded DatePicker form without
+'   forcing a default-instance load, hides and unloads the form when present,
+'   clears initial-date bridge state, and releases the local form reference
 '
 ' ERROR POLICY
-'   Best-effort cleanup. Does not intentionally raise outward
+'   Best-effort cleanup
+'
+'   Suppresses cleanup errors because closing the picker should never interrupt
+'   the user workflow
 '
 ' DEPENDENCIES
 '   M_Timer_Stop
 '   M_FormBridge_GetLoadedForm
+'   DP_FORM_NAME
 '
 ' NOTES
-'   This routine avoids direct default-instance references until a loaded form is
-'   explicitly found
+'   This routine intentionally avoids direct default-instance references until a
+'   loaded form has been explicitly resolved
+'
+'   Selected-date state is not cleared here because it is owned by the selection
+'   / write-back flow and is refreshed when the picker is opened again
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim LoadedForm             As Object                                'Loaded DatePicker form instance
+    Dim LoadedForm      As Object        'Loaded DatePicker form instance
 
 '------------------------------------------------------------------------------
-' CLEANUP
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Suppress cleanup errors
         On Error Resume Next
 
+'------------------------------------------------------------------------------
+' STOP TIMER
+'------------------------------------------------------------------------------
     'Stop any active live clock timer
         M_Timer_Stop
 
-    'Retrieve the loaded DatePicker form instance
+'------------------------------------------------------------------------------
+' UNLOAD FORM
+'------------------------------------------------------------------------------
+    'Retrieve the loaded DatePicker form instance without forcing default-instance creation
         Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
-
-    'Unload the loaded form if present
+    'Hide and unload the loaded form when present
         If Not LoadedForm Is Nothing Then
-            Unload LoadedForm
+            'Hide the form before unloading to reduce visible teardown artifacts
+                LoadedForm.Visible = False
+            'Unload the loaded form instance
+                Unload LoadedForm
         End If
 
-    'Clear initial-date bridge state
+'------------------------------------------------------------------------------
+' CLEAR TRANSIENT BRIDGE STATE
+'------------------------------------------------------------------------------
+    'Clear the initial-date bridge value
+        gDP_InitialDate = 0
+    'Clear initial-date bridge availability
         gDP_HasInitialDate = False
 
+'------------------------------------------------------------------------------
+' RELEASE LOCAL REFERENCES
+'------------------------------------------------------------------------------
+    'Release the local loaded-form reference
+        Set LoadedForm = Nothing
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed cleanup error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
-
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 
 '
@@ -2498,12 +4742,7 @@ Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Bo
 
 End Function
 
-'
-'------------------------------------------------------------------------------
-'
-'                                  WRITE-BACK
-'
-'------------------------------------------------------------------------------
+
 
 Public Sub M_Picker_SelectDate( _
     ByVal SelectedDate As Date, _
@@ -2511,16 +4750,19 @@ Public Sub M_Picker_SelectDate( _
 
 '
 '------------------------------------------------------------------------------
-'                           SELECT DATE
+'                              SELECT DATE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Stores the selected DatePicker date, writes it to the Excel target, and then
-'   closes or refreshes the picker according to the configured lifecycle setting
+'   Stores the selected DatePicker date, writes it to the current Excel target,
+'   and applies the configured DatePicker lifecycle behavior
 '
 ' WHY THIS EXISTS
 '   Day-label click handling in UF_DatePicker should delegate write-back to the
-'   companion module so single-cell, multi-cell, and table-column behavior stays
-'   centralized
+'   companion module so single-cell, multi-cell, and table-column write-back
+'   behavior remains centralized
+'
+'   The selected-date state should represent a date that was successfully written
+'   to Excel, not merely a date that was clicked in the UI
 '
 ' INPUTS
 '   SelectedDate
@@ -2534,14 +4776,24 @@ Public Sub M_Picker_SelectDate( _
 '   Nothing
 '
 ' BEHAVIOR
-'   Writes a date-only value to the current Excel target and then:
-'     - closes the form when gDP_CloseAfterSelection is True
-'     - refreshes the open form when gDP_CloseAfterSelection is False
+'   Ensures settings are loaded, captures the previous transient selection state,
+'   normalizes the selected date to a date-only value, prepares the write-back
+'   value, writes it to the current Excel target, stores the selected-date state
+'   only after successful write-back, and then closes or refreshes the picker
+'   according to gDP_CloseAfterSelection
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if write-back fails
+'   Raises a descriptive runtime error if the selected date is invalid, if
+'   settings cannot be loaded, or if write-back fails
+'
+'   Restores the previous selected-date and write-value state if write-back fails
+'
+'   Post-write-back form close / refresh is best-effort so a successful Excel
+'   write-back is not converted into a user-facing error by a visual refresh
+'   issue
 '
 ' DEPENDENCIES
+'   M_Settings_EnsureLoaded
 '   M_WriteBack_Apply
 '   DP_Close
 '   M_FormBridge_AfterSuccessfulSelection
@@ -2549,14 +4801,25 @@ Public Sub M_Picker_SelectDate( _
 ' NOTES
 '   Calendar day selection is intentionally date-only
 '
+'   SelectedDate is normalized once and the normalized value is reused for
+'   write-back, selected-state storage, and optional open-form refresh
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Picker_SelectDate"             'Current procedure name
+    Const PROC_NAME         As String = "M_Picker_SelectDate"
+
+    Dim SelectedDateOnly    As Date         'Selected date without time
+    Dim OldSelectedDate     As Date         'Previous selected date
+    Dim OldHasSelectedDate  As Boolean      'Previous selected-date availability
+    Dim OldWriteValue       As Variant      'Previous transient write value
+    Dim StateCaptured       As Boolean      'True when rollback state is available
+    Dim ErrorNumber         As Long         'Captured runtime error number
+    Dim ErrorDescription    As String       'Captured runtime error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2565,35 +4828,174 @@ Public Sub M_Picker_SelectDate( _
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' STORE SELECTED DATE
+' LOAD SETTINGS
 '------------------------------------------------------------------------------
-    'Store the selected date without time
-        gDP_SelectedDate = VBA.DateValue(SelectedDate)
-
-    'Mark the selected date as available
-        gDP_HasSelectedDate = True
+    'Ensure DatePicker settings are available before lifecycle behavior is evaluated
+        M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' BUILD WRITE VALUE
+' CAPTURE PREVIOUS STATE
+'------------------------------------------------------------------------------
+    'Capture the previous selected date
+        OldSelectedDate = gDP_SelectedDate
+    'Capture previous selected-date availability
+        OldHasSelectedDate = gDP_HasSelectedDate
+    'Capture the previous transient write value
+        OldWriteValue = gDP_WriteValue
+    'Mark rollback state as available
+        StateCaptured = True
+
+'------------------------------------------------------------------------------
+' NORMALIZE SELECTED DATE
+'------------------------------------------------------------------------------
+    'Normalize the selected date to a date-only value
+        SelectedDateOnly = VBA.DateValue(SelectedDate)
+
+'------------------------------------------------------------------------------
+' VALIDATE SELECTED DATE
+'------------------------------------------------------------------------------
+    'Reject an empty date value
+        If SelectedDateOnly = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "SelectedDate cannot be zero"
+        End If
+
+'------------------------------------------------------------------------------
+' PREPARE WRITE VALUE
 '------------------------------------------------------------------------------
     'Store the date-only value to write
-        gDP_WriteValue = VBA.DateValue(SelectedDate)
+        gDP_WriteValue = SelectedDateOnly
 
 '------------------------------------------------------------------------------
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
-    'Write the selected value to the current Excel target
+    'Write the selected date to the current Excel target
         M_WriteBack_Apply Date_Picker, NoTableGrow
+
+'------------------------------------------------------------------------------
+' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
+'------------------------------------------------------------------------------
+    'Store the selected date only after write-back succeeds
+        gDP_SelectedDate = SelectedDateOnly
+    'Mark the selected date as available
+        gDP_HasSelectedDate = True
 
 '------------------------------------------------------------------------------
 ' CLOSE OR REFRESH FORM
 '------------------------------------------------------------------------------
+    'Suppress post-write-back visual lifecycle errors
+        On Error Resume Next
     'Close the DatePicker after successful selection when configured
         If gDP_CloseAfterSelection Then
-            DP_Close
+            'Close the DatePicker form
+                DP_Close
         Else
-            M_FormBridge_AfterSuccessfulSelection SelectedDate
+            'Refresh the open DatePicker form after successful selection
+                M_FormBridge_AfterSuccessfulSelection SelectedDateOnly
         End If
+    'Clear any suppressed visual lifecycle error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore previous transient state when available
+        If StateCaptured Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous selected date
+                gDP_SelectedDate = OldSelectedDate
+            'Restore previous selected-date availability
+                gDP_HasSelectedDate = OldHasSelectedDate
+            'Restore the previous transient write value
+                gDP_WriteValue = OldWriteValue
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, "DatePicker date selection failed: " & ErrorDescription
+
+End Sub
+Public Sub DP_Today()
+
+'
+'------------------------------------------------------------------------------
+'                               WRITE TODAY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the current system date to the current Excel target
+'
+' WHY THIS EXISTS
+'   Footer labels, Ribbon callbacks, context-menu actions, keyboard shortcuts, or
+'   public macro callers may need a direct Today command without requiring the
+'   user to select a day from the calendar grid
+'
+'   Today should follow the same write-back, selected-state, rollback, and
+'   close-or-refresh lifecycle used by normal day-cell selection
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the current system date once and delegates the date-only write-back
+'   to M_Picker_SelectDate
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the Today command cannot be completed
+'
+' DEPENDENCIES
+'   M_Picker_SelectDate
+'
+' NOTES
+'   This command always writes a date-only value
+'
+'   Write-back state management is intentionally centralized in
+'   M_Picker_SelectDate so Today, calendar-day clicks, and other date-only
+'   selection paths remain behaviorally consistent
+'
+' UPDATED
+'   2026-05-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "DP_Today"
+
+    Dim TodayDate       As Date     'Current system date without time
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RESOLVE TODAY
+'------------------------------------------------------------------------------
+    'Store the current system date once for consistent write-back and refresh state
+        TodayDate = VBA.Date
+
+'------------------------------------------------------------------------------
+' WRITE TODAY
+'------------------------------------------------------------------------------
+    'Delegate date-only write-back to the canonical DatePicker selection routine
+        M_Picker_SelectDate TodayDate, False
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -2606,84 +5008,26 @@ Public Sub M_Picker_SelectDate( _
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise Err.Number, PROC_NAME, "DatePicker Today command failed: " & Err.Description
 
 End Sub
-
-Public Sub DP_Today()
-
-'
-'------------------------------------------------------------------------------
-'                           WRITE TODAY
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Writes the current system date to the current Excel selection
-'
-' WHY THIS EXISTS
-'   Footer, Ribbon, menu, or macro callers may need a direct Today command
-'   without selecting a calendar day
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Writes VBA.Date according to normal DatePicker write-back rules, then closes
-'   or refreshes the form according to gDP_CloseAfterSelection
-'
-' ERROR POLICY
-'   Propagates write-back errors from M_WriteBack_Apply
-'
-' DEPENDENCIES
-'   M_WriteBack_Apply
-'   DP_Close
-'   M_FormBridge_AfterSuccessfulSelection
-'
-' NOTES
-'   This command always writes a date-only value
-'
-' UPDATED
-'   2026-04-28
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' STORE DATE
-'------------------------------------------------------------------------------
-    'Store the current system date
-        gDP_WriteValue = VBA.Date
-
-'------------------------------------------------------------------------------
-' WRITE TO EXCEL
-'------------------------------------------------------------------------------
-    'Apply the date to the current selection
-        M_WriteBack_Apply Date_Picker, False
-
-'------------------------------------------------------------------------------
-' CLOSE OR REFRESH FORM
-'------------------------------------------------------------------------------
-    'Close or refresh the DatePicker according to the configured lifecycle mode
-        If gDP_CloseAfterSelection Then
-            DP_Close
-        Else
-            M_FormBridge_AfterSuccessfulSelection VBA.Date
-        End If
-
-End Sub
-
 Public Sub DP_Now()
 
 '
 '------------------------------------------------------------------------------
-'                           WRITE NOW
+'                               WRITE NOW
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Writes the current system date-time to the current Excel selection
+'   Writes the current system date-time to the current Excel target
 '
 ' WHY THIS EXISTS
-'   Footer, Ribbon, menu, or macro callers may need a direct Now command without
-'   selecting a calendar day
+'   Footer labels, Ribbon callbacks, context-menu actions, keyboard shortcuts, or
+'   public macro callers may need a direct Now command without requiring the user
+'   to select a day from the calendar grid
+'
+'   Now is intentionally different from normal calendar-day selection because it
+'   writes a date-time value while the DatePicker selected-day visual state uses
+'   only the date portion
 '
 ' INPUTS
 '   None
@@ -2692,118 +5036,277 @@ Public Sub DP_Now()
 '   Nothing
 '
 ' BEHAVIOR
-'   Writes VBA.Now according to normal DatePicker write-back rules, then closes
-'   or refreshes the form according to gDP_CloseAfterSelection
+'   Ensures settings are loaded, captures the current system timestamp once,
+'   stores the timestamp as the write-back value, writes it to the current Excel
+'   target, commits the selected-date state only after successful write-back, and
+'   then closes or refreshes the picker according to gDP_CloseAfterSelection
 '
 ' ERROR POLICY
-'   Propagates write-back errors from M_WriteBack_Apply
+'   Raises a descriptive runtime error if the Now command cannot be completed
+'
+'   Restores the previous selected-date and write-value state if write-back fails
+'
+'   Post-write-back form close / refresh is best-effort so a successful Excel
+'   write-back is not converted into a user-facing error by a visual refresh
+'   issue
 '
 ' DEPENDENCIES
+'   M_Settings_EnsureLoaded
 '   M_WriteBack_Apply
 '   DP_Close
 '   M_FormBridge_AfterSuccessfulSelection
 '
 ' NOTES
-'   This command always writes a date-time value
+'   This command writes a date-time value
+'
+'   Selected-date highlighting uses only the date portion of the timestamp
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
-' STORE DATE-TIME
+' DECLARE
 '------------------------------------------------------------------------------
-    'Store the current system date-time
-        gDP_WriteValue = VBA.Now
+    Const PROC_NAME         As String = "DP_Now"
+
+    Dim NowValue            As Date                 'Current system date-time
+    Dim NowDate             As Date                 'Date-only part of current timestamp
+    Dim OldSelectedDate     As Date                 'Previous selected date
+    Dim OldHasSelectedDate  As Boolean              'Previous selected-date availability
+    Dim OldWriteValue       As Variant              'Previous transient write value
+    Dim StateCaptured       As Boolean              'True when rollback state is available
+    Dim ErrorNumber         As Long                 'Captured runtime error number
+    Dim ErrorDescription    As String               'Captured runtime error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure DatePicker settings are available before lifecycle behavior is evaluated
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' CAPTURE PREVIOUS STATE
+'------------------------------------------------------------------------------
+    'Capture the previous selected date
+        OldSelectedDate = gDP_SelectedDate
+    'Capture previous selected-date availability
+        OldHasSelectedDate = gDP_HasSelectedDate
+    'Capture the previous transient write value
+        OldWriteValue = gDP_WriteValue
+    'Mark rollback state as available
+        StateCaptured = True
+
+'------------------------------------------------------------------------------
+' RESOLVE CURRENT TIMESTAMP
+'------------------------------------------------------------------------------
+    'Store the current system timestamp once for consistent write-back and refresh state
+        NowValue = VBA.Now
+    'Resolve the date-only part of the current timestamp
+        NowDate = VBA.DateValue(NowValue)
+
+'------------------------------------------------------------------------------
+' PREPARE WRITE VALUE
+'------------------------------------------------------------------------------
+    'Store the current system timestamp as the write-back value
+        gDP_WriteValue = NowValue
 
 '------------------------------------------------------------------------------
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
-    'Apply the date-time to the current selection
+    'Apply the date-time value to the current Excel target
         M_WriteBack_Apply Date_Picker, False
+
+'------------------------------------------------------------------------------
+' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
+'------------------------------------------------------------------------------
+    'Store the date-only part as the active selected date
+        gDP_SelectedDate = NowDate
+    'Mark selected-date state as available
+        gDP_HasSelectedDate = True
 
 '------------------------------------------------------------------------------
 ' CLOSE OR REFRESH FORM
 '------------------------------------------------------------------------------
-    'Close or refresh the DatePicker according to the configured lifecycle mode
+    'Suppress post-write-back visual lifecycle errors
+        On Error Resume Next
+    'Close the DatePicker after successful write-back when configured
         If gDP_CloseAfterSelection Then
-            DP_Close
+            'Close the DatePicker form
+                DP_Close
         Else
-            M_FormBridge_AfterSuccessfulSelection VBA.Date
+            'Refresh the open DatePicker form using the date-only part
+                M_FormBridge_AfterSuccessfulSelection NowDate
         End If
+    'Clear any suppressed visual lifecycle error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore previous transient state when available
+        If StateCaptured Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous selected date
+                gDP_SelectedDate = OldSelectedDate
+            'Restore previous selected-date availability
+                gDP_HasSelectedDate = OldHasSelectedDate
+            'Restore the previous transient write value
+                gDP_WriteValue = OldWriteValue
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, "DatePicker Now command failed: " & ErrorDescription
 
 End Sub
-
 Public Sub M_WriteBack_Apply( _
     ByVal iType As DP_WriteAction, _
     Optional ByVal NoTableGrow As Boolean = False)
 
 '
 '------------------------------------------------------------------------------
-'                           DO ACTION
+'                           APPLY WRITE-BACK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Applies a DatePicker action to the current Excel selection
+'   Applies a DatePicker write-back action to the current Excel selection
 '
 ' WHY THIS EXISTS
-'   UI click handlers and entry points need a shared routine that suppresses
-'   worksheet events during write-back and restores them deterministically
+'   UI click handlers, footer actions, keyboard shortcuts, context-menu actions,
+'   and public entry points need one shared routine that writes DatePicker values
+'   to Excel while suppressing worksheet events safely
 '
 ' INPUTS
 '   iType
-'     Action to apply
+'     DatePicker write action to apply
 '
 '   NoTableGrow
 '     True to keep a single table-cell target as a single cell
+'
+'     False to allow single table-cell selections to expand to the full table
+'     data column when applicable
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Temporarily disables Excel events, dispatches target shaping and write-back,
-'   then restores the previous event state
+'   Validates the requested write action, captures the current Excel event state,
+'   disables events during write-back, delegates target resolution and write-back
+'   to M_WriteBack_ResolveAndApplyTarget, and restores the previous Excel event
+'   state before exiting
 '
 ' ERROR POLICY
-'   Restores Application.EnableEvents and re-raises the original error
+'   Restores Application.EnableEvents when the previous state was captured
+'
+'   Re-raises the original write-back error after cleanup
+'
+'   Raises a cleanup error only when event restoration fails and no original
+'   write-back error exists
 '
 ' DEPENDENCIES
 '   M_WriteBack_ResolveAndApplyTarget
+'   Application.EnableEvents
 '
 ' NOTES
-'   This routine does not change calculation or screen updating
+'   This routine intentionally does not change calculation mode
+'
+'   This routine intentionally does not change screen updating
+'
+'   Unsupported write actions are rejected explicitly instead of silently doing
+'   nothing
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_WriteBack_Apply"                   'Current procedure name
+    Const PROC_NAME             As String = "M_WriteBack_Apply"
 
-    Dim PreviousEvents         As Boolean                               'Prior Application.EnableEvents state
-    Dim SavedErrNumber         As Long                                  'Captured error number
-    Dim SavedErrSource         As String                                'Captured error source
-    Dim SavedErrDescription    As String                                'Captured error description
+    Dim PreviousEvents          As Boolean      'Prior Application.EnableEvents state
+    Dim EventsStateCaptured     As Boolean      'True when PreviousEvents is available
+
+    Dim SavedErrNumber          As Long         'Captured original error number
+    Dim SavedErrSource          As String       'Captured original error source
+    Dim SavedErrDescription     As String       'Captured original error description
+
+    Dim CleanupErrNumber        As Long         'Captured cleanup error number
+    Dim CleanupErrDescription   As String       'Captured cleanup error description
+
+    Dim HandlerStep             As String       'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Enable structured cleanup on failure
-        On Error GoTo CleanFail
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE WRITE ACTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate write action"
+
+    'Validate the requested write action
+        Select Case iType
+            Case DP_WriteAction.Date_Picker
+                'Supported DatePicker write action
+            Case Else
+                'Reject unsupported write actions
+                    Err.Raise vbObjectError + 513, PROC_NAME, _
+                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
+        End Select
+
+'------------------------------------------------------------------------------
+' CAPTURE EXCEL EVENT STATE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture Excel event state"
 
     'Capture the current Excel events state
         PreviousEvents = Application.EnableEvents
+    'Mark the Excel event state as captured
+        EventsStateCaptured = True
 
 '------------------------------------------------------------------------------
 ' SUPPRESS EVENTS
 '------------------------------------------------------------------------------
-    'Disable events during write-back
-        Application.EnableEvents = False
+    'Track the current handler step
+        HandlerStep = "Suppress Excel events"
+
+    'Disable events only when they are currently enabled
+        If PreviousEvents Then Application.EnableEvents = False
 
 '------------------------------------------------------------------------------
-' DISPATCH ACTION
+' DISPATCH WRITE-BACK
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve and apply write-back target"
+
     'Apply the requested action to the current selection
         M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow
 
@@ -2813,212 +5316,452 @@ Public Sub M_WriteBack_Apply( _
 CleanExit:
     'Protect cleanup from masking the original error
         On Error Resume Next
-
-    'Restore the previous Excel events state
-        Application.EnableEvents = PreviousEvents
-
+    'Restore the previous Excel event state when it was captured
+        If EventsStateCaptured Then Application.EnableEvents = PreviousEvents
+    'Capture cleanup failure when no original error exists
+        If Err.Number <> 0 Then
+            CleanupErrNumber = Err.Number
+            CleanupErrDescription = Err.Description
+            Err.Clear
+        End If
     'Restore normal error handling
         On Error GoTo 0
-
-    'Re-raise the original error when needed
+    'Re-raise the original write-back error when needed
         If SavedErrNumber <> 0 Then
-            Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
+            'Append cleanup diagnostics when cleanup also failed
+                If CleanupErrNumber <> 0 Then
+                    SavedErrDescription = SavedErrDescription & _
+                        " Cleanup also failed while restoring Application.EnableEvents: " & _
+                        CleanupErrDescription
+                End If
+            'Raise the original error after best-effort cleanup
+                Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
         End If
-
+    'Raise cleanup failure when there was no original write-back error
+        If CleanupErrNumber <> 0 Then
+            Err.Raise CleanupErrNumber, PROC_NAME, _
+                "DatePicker write-back cleanup failed while restoring Application.EnableEvents: " & _
+                CleanupErrDescription
+        End If
     'Exit the procedure
         Exit Sub
 
 '------------------------------------------------------------------------------
-' FAIL-SAFE
+' ERROR HANDLER
 '------------------------------------------------------------------------------
-CleanFail:
+ErrorHandler:
     'Capture the original error number
         SavedErrNumber = Err.Number
-
     'Capture the original error source
-        If Len(Err.Source) > 0 Then
-            SavedErrSource = Err.Source
-        Else
-            SavedErrSource = PROC_NAME
-        End If
-
+        SavedErrSource = PROC_NAME & " | Step=" & HandlerStep
     'Capture the original error description
-        SavedErrDescription = Err.Description
-
+        SavedErrDescription = "DatePicker write-back failed: " & Err.Description
     'Resume through cleanup
         Resume CleanExit
 
 End Sub
-
 Private Sub M_WriteBack_ResolveAndApplyTarget( _
     ByVal iType As DP_WriteAction, _
     Optional ByVal NoTableGrow As Boolean = False)
 
 '
 '------------------------------------------------------------------------------
-'                           M_WriteBack_ResolveAndApplyTarget
+'                       RESOLVE AND APPLY WRITE-BACK TARGET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker M_WriteBack_ResolveAndApplyTarget routine
+'   Resolves the current Excel write-back target and applies the requested
+'   DatePicker write action
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep UserForm rendering, Excel integration, and write-back behavior consistent
+'   DatePicker UI handlers should not write directly to Excel
+'
+'   This routine centralizes target shaping so single-cell, multi-cell,
+'   discontiguous-range, and table-column write-back behavior remains consistent
+'   across calendar clicks, Today, Now, keyboard shortcuts, context-menu actions,
+'   and public macro entry points
 '
 ' INPUTS
-'   See procedure signature
+'   iType
+'     DatePicker write action to apply
+'
+'   NoTableGrow
+'     True to keep a single selected table cell as a single-cell target
+'
+'     False to expand a single selected table data-body cell to the full table
+'     data column
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Validates the requested write action, resolves the current Excel selection,
+'   rejects non-range selections, optionally expands a single table data-body
+'   cell to its full ListObject data column, and writes to each target area
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if the write action is unsupported, if
+'   the current Excel selection is not a Range, if table target expansion fails,
+'   or if range population fails
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   M_WriteBack_PopulateRange
+'   Application.Selection
+'   Excel.Range
+'   Excel.ListObject
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine does not suppress Application events
+'
+'   Application.EnableEvents is managed by M_WriteBack_Apply
+'
+'   This routine intentionally raises on non-Range selections so callers do not
+'   treat a no-op as a successful write-back
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
-    Dim Target                 As Range                                 'Resolved target range
-    Dim Block                  As Range                                 'Single target area
-    Dim TargetTable            As ListObject                            'Worksheet table being inspected
-    Dim ColumnIndex            As Long                                  'Resolved table column index
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_WriteBack_ResolveAndApplyTarget"
 
-    'Proceed only when the current selection is a Range
-        If TypeName(Selection) <> "Range" Then
-            Exit Sub
+    Dim SelectedObject      As Object           'Current Excel selection object
+    Dim Target              As Range            'Resolved target range
+    Dim Block               As Range            'Single target area
+    Dim TargetTable         As ListObject       'Worksheet table being inspected
+    Dim ColumnIndex         As Long             'Resolved table column index
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE WRITE ACTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate write action"
+
+    'Validate the requested write action
+        Select Case iType
+            Case Date_Picker
+                'Supported DatePicker write action
+            Case Else
+                'Reject unsupported write actions
+                    Err.Raise vbObjectError + 513, PROC_NAME, _
+                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
+        End Select
+
+'------------------------------------------------------------------------------
+' RESOLVE CURRENT SELECTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve current Excel selection"
+
+    'Suppress selection access errors temporarily
+        On Error Resume Next
+    'Capture the current Excel selection object
+        Set SelectedObject = Application.Selection
+    'Clear any suppressed selection access error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+    'Reject missing selection objects
+        If SelectedObject Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "Current Excel selection is not available"
         End If
+    'Reject non-range selections
+        If VBA.TypeName(SelectedObject) <> "Range" Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Current Excel selection must be a Range. Current selection type is '" & _
+                VBA.TypeName(SelectedObject) & "'"
+        End If
+    'Use the current selection as the initial write-back target
+        Set Target = SelectedObject
 
-    'Store the current selection as initial target
-        Set Target = Selection
+'------------------------------------------------------------------------------
+' EXPAND SINGLE TABLE CELL WHEN ALLOWED
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve optional table-column expansion"
 
     'Consider table expansion only for one selected cell when allowed
-        If Target.Cells.CountLarge = 1 And Not NoTableGrow Then
-
-            'Loop through tables on the target worksheet
-                For Each TargetTable In Target.Worksheet.ListObjects
-
-                    'Continue only when the table has a data body
-                        If Not TargetTable.DataBodyRange Is Nothing Then
-
-                            'Expand only when the selected cell is inside the data body
-                                If Not Intersect(Target, TargetTable.DataBodyRange) Is Nothing Then
-
-                                    'Resolve the table column index
-                                        ColumnIndex = Target.Column - TargetTable.DataBodyRange.Column + 1
-
-                                    'Expand to the table data column when valid
-                                        If ColumnIndex >= 1 And ColumnIndex <= TargetTable.ListColumns.Count Then
-                                            Set Target = TargetTable.ListColumns(ColumnIndex).DataBodyRange
-                                        End If
-
-                                    'Stop after resolving the owning table
-                                        Exit For
-
-                                End If
-
-                        End If
-
-                Next TargetTable
-
+        If Target.Cells.CountLarge = 1 Then
+            If Not NoTableGrow Then
+                'Loop through worksheet tables
+                    For Each TargetTable In Target.Worksheet.ListObjects
+                        'Continue only when the table has a data body
+                            If Not TargetTable.DataBodyRange Is Nothing Then
+                                'Expand only when the selected cell is inside the table data body
+                                    If Not Application.Intersect(Target, TargetTable.DataBodyRange) Is Nothing Then
+                                        'Resolve the selected table column index
+                                            ColumnIndex = Target.Column - TargetTable.DataBodyRange.Column + 1
+                                        'Expand to the table data column when the column index is valid
+                                            If ColumnIndex >= 1 Then
+                                                If ColumnIndex <= TargetTable.ListColumns.Count Then
+                                                    Set Target = TargetTable.ListColumns(ColumnIndex).DataBodyRange
+                                                End If
+                                            End If
+                                        'Stop after resolving the owning table
+                                            Exit For
+                                    End If
+                            End If
+                    Next TargetTable
+            End If
         End If
 
-    'Loop through each discontiguous area
-        For Each Block In Target.Areas
+'------------------------------------------------------------------------------
+' VALIDATE RESOLVED TARGET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate resolved write-back target"
 
+    'Reject a missing resolved target
+        If Target Is Nothing Then
+            Err.Raise vbObjectError + 516, PROC_NAME, "Unable to resolve DatePicker write-back target"
+        End If
+    'Reject empty resolved targets
+        If Target.Cells.CountLarge = 0 Then
+            Err.Raise vbObjectError + 517, PROC_NAME, "Resolved DatePicker write-back target is empty"
+        End If
+
+'------------------------------------------------------------------------------
+' POPULATE TARGET AREAS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Populate target areas"
+
+    'Loop through each discontiguous target area
+        For Each Block In Target.Areas
             'Populate this target area
                 M_WriteBack_PopulateRange Block, iType
-
         Next Block
-End Sub
 
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set Block = Nothing
+    'Release object references
+        Set TargetTable = Nothing
+    'Release object references
+        Set Target = Nothing
+    'Release object references
+        Set SelectedObject = Nothing
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker write-back target resolution failed: " & Err.Description
+
+End Sub
 Public Sub M_WriteBack_PopulateRange( _
     ByVal oRange As Range, _
     ByVal iType As DP_WriteAction)
 
 '
 '------------------------------------------------------------------------------
-'                       M_WriteBack_PopulateRange
+'                           POPULATE RANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker M_WriteBack_PopulateRange routine
+'   Writes the current DatePicker value to every cell in a resolved Excel range
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep
-'   UserForm rendering, Excel integration, and write-back behavior consistent
+'   DatePicker write-back can target:
+'     - one cell
+'     - multiple selected cells
+'     - discontiguous areas
+'     - a resolved table data column
+'
+'   This routine centralizes the final cell-level population logic so write-back
+'   behavior remains consistent across calendar-day selection, Today, Now,
+'   keyboard shortcuts, context-menu actions, and public macro entry points
 '
 ' INPUTS
-'   See procedure signature
+'   oRange
+'     Resolved Excel target range to populate
+'
+'   iType
+'     DatePicker write action used to resolve the value to write
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Validates the target range and write action, resolves the DatePicker write
+'   value, writes the value cell by cell through M_WriteBack_TryWriteCell, counts
+'   protected locked cells and other failures, reports partial protected-cell
+'   skips once, logs partial non-lock failures to the Immediate Window, and
+'   raises an error when no cell was successfully written
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if the target range is missing, the write
+'   action is unsupported, the write value cannot be resolved, or no cell can be
+'   written successfully
+'
+'   Protected locked cells may be skipped when at least one target cell is
+'   written successfully
+'
+'   Other cell-level failures may be suppressed by M_WriteBack_TryWriteCell when
+'   at least one target cell is written successfully, but they are logged for
+'   diagnostics
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   M_WriteBack_GetPickedValue
+'   M_WriteBack_TryWriteCell
+'   DP_MSGBOX_TITLE
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally writes cell by cell instead of assigning the whole
+'   range in one operation
+'
+'   Cell-by-cell write-back is slower for very large ranges but safer for
+'   protected sheets, locked cells, validation failures, and partially writable
+'   selections
+'
+'   This routine assumes M_WriteBack_TryWriteCell increments LockedCount and
+'   FailedCount only when a cell is not written
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
-    Dim Cell                   As Range                                 'Current target cell
-    Dim LockedCount            As Long                                  'Protected locked cells skipped
-    Dim FailedCount            As Long                                  'Other write failures suppressed
-    Dim WriteValue             As Variant                               'Resolved write value
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_WriteBack_PopulateRange"
+    
+    Dim Cell            As Range            'Current target cell
+    Dim LockedCount     As Long             'Protected locked cells skipped
+    Dim FailedCount     As Long             'Other write failures suppressed
+    Dim AttemptedCount  As Double           'Total target cells attempted
+    Dim WrittenCount    As Double           'Total target cells successfully written
+    Dim WriteValue      As Variant          'Resolved write value
+    Dim HandlerStep     As String           'Current handler step for diagnostics
 
-    'Exit when no range is supplied
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE TARGET RANGE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate target range"
+
+    'Reject missing target ranges
         If oRange Is Nothing Then
-            Exit Sub
+            Err.Raise vbObjectError + 513, PROC_NAME, "Target range cannot be Nothing"
+        End If
+    'Capture the number of target cells
+        AttemptedCount = oRange.Cells.CountLarge
+    'Reject empty target ranges
+        If AttemptedCount <= 0 Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "Target range does not contain writable cells"
         End If
 
-    'Resolve the value to write
+'------------------------------------------------------------------------------
+' RESOLVE WRITE VALUE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve write value"
+
+    'Resolve the value to write from the requested DatePicker action
         Select Case iType
-            Case DP_WriteAction.Date_Picker
-                WriteValue = M_WriteBack_GetPickedValue
+            Case Date_Picker
+                'Resolve the current DatePicker write value
+                    WriteValue = M_WriteBack_GetPickedValue
             Case Else
-                Exit Sub
+                'Reject unsupported write actions
+                    Err.Raise vbObjectError + 515, PROC_NAME, _
+                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
         End Select
+
+'------------------------------------------------------------------------------
+' POPULATE TARGET CELLS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Populate target cells"
 
     'Loop through each target cell
         For Each Cell In oRange.Cells
-
-            'Attempt to write the value
-                Call M_WriteBack_TryWriteCell(Cell, WriteValue, LockedCount, FailedCount)
-
+            'Attempt to write the resolved value to the current cell
+                M_WriteBack_TryWriteCell Cell, WriteValue, LockedCount, FailedCount
         Next Cell
 
-    'Show one summary message for protected locked cells
+'------------------------------------------------------------------------------
+' RESOLVE WRITE RESULT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve write result"
+
+    'Calculate the number of successfully written cells
+        WrittenCount = AttemptedCount - LockedCount - FailedCount
+    'Reject write-back attempts that did not write any cell
+        If WrittenCount <= 0 Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "DatePicker write-back did not write any cell. Target cells: " & _
+                VBA.CStr(AttemptedCount) & "; protected locked cells skipped: " & _
+                VBA.CStr(LockedCount) & "; other failures: " & VBA.CStr(FailedCount)
+        End If
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL PROTECTED-CELL SKIPS
+'------------------------------------------------------------------------------
+    'Show one summary message for protected locked cells that were skipped
         If LockedCount > 0 Then
-            MsgBox CStr(LockedCount) & " protected locked cell(s) were skipped.", _
+            MsgBox VBA.CStr(LockedCount) & " protected locked cell(s) were skipped.", _
                 vbInformation Or vbOKOnly, DP_MSGBOX_TITLE
         End If
 
-    'Write non-lock failures to the Immediate Window
+'------------------------------------------------------------------------------
+' LOG PARTIAL NON-LOCK FAILURES
+'------------------------------------------------------------------------------
+    'Write non-lock failures to the Immediate Window for diagnostics
         If FailedCount > 0 Then
-            Debug.Print "M_DATEPICKER.M_WriteBack_PopulateRange: " & _
-                CStr(FailedCount) & " cell write failure(s) were suppressed."
+            Debug.Print PROC_NAME & ": " & VBA.CStr(FailedCount) & _
+                " cell write failure(s) were suppressed."
         End If
-End Sub
 
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set Cell = Nothing
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Release object references
+        Set Cell = Nothing
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker range population failed: " & Err.Description
+
+End Sub
 Private Function M_WriteBack_TryWriteCell( _
     ByVal TargetCell As Range, _
     ByVal WriteValue As Variant, _
@@ -3027,112 +5770,286 @@ Private Function M_WriteBack_TryWriteCell( _
 
 '
 '------------------------------------------------------------------------------
-'                           TRYWRITECELLVALUE
+'                           TRY WRITE CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker trywritecellvalue routine
+'   Attempts to write one DatePicker value to one Excel cell
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep UserForm rendering, Excel integration, and write-back behavior consistent
+'   Range write-back can involve many target cells
+'
+'   A single protected, locked, invalid, or otherwise failing cell should not
+'   necessarily stop the whole DatePicker write-back when other cells remain
+'   writable
+'
+'   This routine centralizes safe per-cell write behavior and reports the result
+'   through a Boolean return value plus failure counters
 '
 ' INPUTS
-'   See procedure signature
+'   TargetCell
+'     Single Excel cell to populate
+'
+'   WriteValue
+'     DatePicker value to write
+'
+'   LockedCount
+'     Counter incremented when a protected locked cell is skipped
+'
+'   FailedCount
+'     Counter incremented when another cell-level write failure occurs
 '
 ' RETURNS
-'   See procedure type
+'   True when the value was successfully written to TargetCell
+'
+'   False when TargetCell was missing, invalid, protected locked, or could not be
+'   written
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Validates the target cell, skips protected locked cells, writes the supplied
+'   value to writable cells, returns True only after a successful write, and logs
+'   suppressed write failures to the Immediate Window
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort per-cell write
+'
+'   Does not raise outward. Cell-level failures are counted and suppressed so the
+'   caller can complete the range write-back and decide whether the aggregate
+'   result is acceptable
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   Excel.Range
+'   Excel.Worksheet.ProtectContents
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally uses Range.Value rather than Range.Value2 so VBA
+'   Date and DateTime variants are written through Excel's normal date handling
+'
+'   Application.EnableEvents is managed by M_WriteBack_Apply, not by this routine
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_WriteBack_TryWriteCell"
+
+    Dim TargetAddress   As String       'Diagnostic target address
+    Dim TargetSheetName As String       'Diagnostic worksheet name
+    Dim ErrorNumber     As Long         'Captured runtime error number
+    Dim ErrorText       As String       'Captured runtime error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Set safe default result
         M_WriteBack_TryWriteCell = False
-
     'Enable per-cell fail-safe handling
         On Error GoTo WriteFail
 
-    'Exit when no target cell is supplied
-        If TargetCell Is Nothing Then Exit Function
+'------------------------------------------------------------------------------
+' VALIDATE TARGET CELL
+'------------------------------------------------------------------------------
+    'Count and exit when no target cell is supplied
+        If TargetCell Is Nothing Then
+            FailedCount = FailedCount + 1
+            Debug.Print PROC_NAME & ": skipped missing target cell"
+            Exit Function
+        End If
+    'Count and exit when a non-single-cell range is supplied unexpectedly
+        If TargetCell.Cells.CountLarge <> 1 Then
+            FailedCount = FailedCount + 1
+            Debug.Print PROC_NAME & ": skipped non-single-cell target"
+            Exit Function
+        End If
 
+'------------------------------------------------------------------------------
+' CAPTURE DIAGNOSTIC CONTEXT
+'------------------------------------------------------------------------------
+    'Capture the target worksheet name for diagnostics
+        TargetSheetName = TargetCell.Worksheet.Name
+    'Capture the target cell address for diagnostics
+        TargetAddress = TargetCell.Address(False, False)
+
+'------------------------------------------------------------------------------
+' SKIP PROTECTED LOCKED CELLS
+'------------------------------------------------------------------------------
     'Skip locked cells on protected sheets
-        If TargetCell.Locked Then
-            If TargetCell.Worksheet.ProtectContents Then
+        If TargetCell.Worksheet.ProtectContents Then
+            If TargetCell.Locked Then
                 LockedCount = LockedCount + 1
                 Exit Function
             End If
         End If
 
-    'Write the value to the target cell
+'------------------------------------------------------------------------------
+' WRITE CELL VALUE
+'------------------------------------------------------------------------------
+    'Write the resolved DatePicker value to the target cell
         TargetCell.Value = WriteValue
 
-    'Return success
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+    'Return success only after the value has been written
         M_WriteBack_TryWriteCell = True
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit after successful write
         Exit Function
 
+'------------------------------------------------------------------------------
+' WRITE FAIL
+'------------------------------------------------------------------------------
 WriteFail:
-    'Count and suppress the write failure
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorText = Err.Description
+    'Suppress diagnostic failures
+        On Error Resume Next
+    'Increment the non-lock failure counter
         FailedCount = FailedCount + 1
-
+    'Refresh diagnostic context if it was not captured before the failure
+        If Len(TargetAddress) = 0 Then
+            If Not TargetCell Is Nothing Then
+                TargetAddress = TargetCell.Address(False, False)
+            End If
+        End If
+    'Refresh diagnostic context if it was not captured before the failure
+        If Len(TargetSheetName) = 0 Then
+            If Not TargetCell Is Nothing Then
+                TargetSheetName = TargetCell.Worksheet.Name
+            End If
+        End If
     'Write diagnostics to the Immediate Window
-        Debug.Print "M_DATEPICKER.M_WriteBack_TryWriteCell: suppressed error " & _
-            Err.Number & " - " & Err.Description
-End Function
+        Debug.Print PROC_NAME & ": suppressed error " & VBA.CStr(ErrorNumber) & _
+            " while writing " & TargetSheetName & "!" & TargetAddress & _
+            " - " & ErrorText
+    'Return safe failure result
+        M_WriteBack_TryWriteCell = False
+    'Restore normal error handling
+        On Error GoTo 0
 
+End Function
 Private Function M_WriteBack_GetPickedValue() As Date
 
 '
 '------------------------------------------------------------------------------
-'                           M_WriteBack_GetPickedValue
+'                           GET PICKED WRITE VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker M_WriteBack_GetPickedValue routine
+'   Returns the current DatePicker value prepared for Excel write-back
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep UserForm rendering, Excel integration, and write-back behavior consistent
+'   DatePicker write-back routines should retrieve the value to write through one
+'   controlled helper instead of reading transient module state directly
+'
+'   This provides one validation point before the value is written to Excel
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   DatePicker write value as a VBA Date
+'
+'   The returned value may contain a time component when the caller prepared a
+'   date-time value, such as through DP_Now
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Validates that gDP_WriteValue contains a usable date or date-time value,
+'   converts it to a VBA Date, validates the supported DatePicker year range,
+'   and returns the validated value
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error if the DatePicker write value is empty,
+'   Null, an Excel error value, non-date, or outside the supported DatePicker
+'   year range
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   gDP_WriteValue
+'   DP_MIN_YEAR
+'   DP_MAX_YEAR
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally uses CDate rather than DateValue so date-time
+'   values retain their time component
+'
+'   Calendar day selection and Today prepare date-only values upstream
+'
+'   Now prepares a date-time value upstream
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
-    'Return the current picked value
-        M_WriteBack_GetPickedValue = gDP_WriteValue
-End Function
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_WriteBack_GetPickedValue"
+    
+    Dim PickedValue     As Date     'Resolved DatePicker write value
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE TRANSIENT WRITE VALUE
+'------------------------------------------------------------------------------
+    'Reject Null write values
+        If IsNull(gDP_WriteValue) Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "DatePicker write value cannot be Null"
+        End If
+    'Reject Excel error values
+        If IsError(gDP_WriteValue) Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "DatePicker write value cannot be an Excel error value"
+        End If
+    'Reject empty write values
+        If IsEmpty(gDP_WriteValue) Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "DatePicker write value has not been initialized"
+        End If
+    'Reject non-date write values
+        If Not VBA.IsDate(gDP_WriteValue) Then
+            Err.Raise vbObjectError + 516, PROC_NAME, _
+                "DatePicker write value must be a date or date-time value"
+        End If
+
+'------------------------------------------------------------------------------
+' CONVERT WRITE VALUE
+'------------------------------------------------------------------------------
+    'Convert the transient write value to a VBA Date while preserving time
+        PickedValue = VBA.CDate(gDP_WriteValue)
+
+'------------------------------------------------------------------------------
+' RETURN VALUE
+'------------------------------------------------------------------------------
+    'Return the validated DatePicker write value
+        M_WriteBack_GetPickedValue = PickedValue
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "DatePicker write value resolution failed: " & Err.Description
+
+End Function
 Public Function M_DatePolicy_CanSelectDate( _
     ByVal CandidateDate As Date, _
     ByVal DisplayYear As Long, _
@@ -3140,121 +6057,283 @@ Public Function M_DatePolicy_CanSelectDate( _
 
 '
 '------------------------------------------------------------------------------
-'                           CANSELECTDATE
+'                           CAN SELECT DATE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker canselectdate routine
+'   Returns whether a candidate calendar date can be selected in the DatePicker
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep UserForm rendering, Excel integration, and write-back behavior consistent
+'   The UserForm should not decide selection policy directly
+'
+'   Date selection rules belong in the companion module so calendar rendering,
+'   hover behavior, keyboard selection, and click handling all use the same
+'   policy
 '
 ' INPUTS
-'   See procedure signature
+'   CandidateDate
+'     Date being evaluated for selection
+'
+'   DisplayYear
+'     Year currently displayed by the DatePicker grid
+'
+'   DisplayMonth
+'     Month currently displayed by the DatePicker grid
 '
 ' RETURNS
-'   See procedure type
+'   True when the candidate date can be selected
+'
+'   False when the display period is invalid or when outside-month selection is
+'   disabled and the candidate date does not belong to the displayed month
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Validates the displayed year and month, normalizes the candidate date to a
+'   date-only value, allows all valid candidate dates when outside-month
+'   selection is enabled, and otherwise allows only dates belonging to the
+'   displayed month and year
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Fail-closed policy routine
+'
+'   Returns False for invalid display state or unexpected runtime errors
+'
+'   Does not raise outward because this routine is used by high-frequency UI
+'   paths such as grid rendering, hover handling, and keyboard navigation
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   gDP_AllowOutsideMonthSel
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally does not call M_Settings_EnsureLoaded
+'
+'   Settings are loaded by public entry points and UserForm initialization before
+'   this routine is used in normal runtime paths
+'
+'   CandidateDate is normalized with DateValue so date-time values are evaluated
+'   by their date component only
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const MIN_SUPPORTED_YEAR    As Long = 100       'Minimum supported DatePicker year
+    Const MAX_SUPPORTED_YEAR    As Long = 9999      'Maximum supported DatePicker year
+
+    Dim CandidateDateOnly       As Date             'Candidate date without time
+    Dim CandidateYear           As Long             'Candidate date year
+    Dim CandidateMonth          As Long             'Candidate date month
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set safe default result
+        M_DatePolicy_CanSelectDate = False
+    'Enable fail-closed error handling
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' VALIDATE DISPLAY PERIOD
+'------------------------------------------------------------------------------
     'Reject invalid display years
-        If DisplayYear < 100 Or DisplayYear > 9999 Then
-            M_DatePolicy_CanSelectDate = False
+        If DisplayYear < MIN_SUPPORTED_YEAR Or DisplayYear > MAX_SUPPORTED_YEAR Then
             Exit Function
         End If
-
     'Reject invalid display months
-        If DisplayMonth < 1 Or DisplayMonth > 12 Then
-            M_DatePolicy_CanSelectDate = False
+        If DisplayMonth < 1 Or DisplayMonth > 12 Then Exit Function
+
+
+'------------------------------------------------------------------------------
+' NORMALIZE CANDIDATE DATE
+'------------------------------------------------------------------------------
+    'Normalize the candidate date to its date-only component
+        CandidateDateOnly = VBA.DateValue(CandidateDate)
+    'Resolve the candidate year once
+        CandidateYear = VBA.Year(CandidateDateOnly)
+    'Resolve the candidate month once
+        CandidateMonth = VBA.Month(CandidateDateOnly)
+
+'------------------------------------------------------------------------------
+' VALIDATE CANDIDATE DATE
+'------------------------------------------------------------------------------
+    'Reject candidate dates outside the supported DatePicker year range
+        If CandidateYear < MIN_SUPPORTED_YEAR Or CandidateYear > MAX_SUPPORTED_YEAR Then
             Exit Function
         End If
 
-    'Allow all dates when outside-month days are enabled
+'------------------------------------------------------------------------------
+' APPLY OUTSIDE-MONTH POLICY
+'------------------------------------------------------------------------------
+    'Allow valid candidate dates when outside-month selection is enabled
         If gDP_AllowOutsideMonthSel Then
             M_DatePolicy_CanSelectDate = True
             Exit Function
         End If
 
+'------------------------------------------------------------------------------
+' APPLY DISPLAYED-MONTH POLICY
+'------------------------------------------------------------------------------
     'Allow only dates belonging to the displayed month and year
         M_DatePolicy_CanSelectDate = _
-            (VBA.Year(CandidateDate) = DisplayYear And VBA.Month(CandidateDate) = DisplayMonth)
-End Function
+            (CandidateYear = DisplayYear And CandidateMonth = DisplayMonth)
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after policy evaluation
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Return safe default on unexpected policy errors
+        M_DatePolicy_CanSelectDate = False
+
+End Function
 Public Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           ISHOLIDAYDATE
+'                           IS HOLIDAY DATE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker isholidaydate routine
+'   Returns whether a candidate date is classified as a holiday by the optional
+'   DatePicker holiday callback
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep UserForm rendering, Excel integration, and write-back behavior consistent
+'   Holiday logic is workbook-specific
+'
+'   The DatePicker companion module should provide one controlled policy point
+'   that can call a user-defined callback without hard-coding holiday calendars
+'   into the UserForm rendering layer
 '
 ' INPUTS
-'   See procedure signature
+'   CandidateDate
+'     Date to evaluate
 '
 ' RETURNS
-'   See procedure type
+'   True when the configured callback explicitly returns True
+'
+'   False when no callback is configured, when the callback fails, when the
+'   callback does not return a Boolean, or when the candidate date is outside
+'   the supported DatePicker range
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Trims the configured callback name, exits safely when no callback exists,
+'   normalizes CandidateDate to a date-only value, validates the supported year
+'   range, invokes the callback through Application.Run, and accepts only a
+'   Boolean callback result
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Fail-open policy routine
+'
+'   Does not raise outward because this routine may be used by high-frequency UI
+'   rendering and selection-policy paths
+'
+'   Unexpected callback errors are suppressed and interpreted as not holiday
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   Application.Run
+'   gDP_HolidayCallbackName
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   The holiday callback should accept one Date argument and return Boolean
+'
+'   The callback receives the date-only component of CandidateDate
+'
+'   Non-Boolean callback results are ignored deliberately to keep the callback
+'   contract strict and predictable
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-03
 '------------------------------------------------------------------------------
 
-    Dim CallbackResult As Variant                                     'Callback return value
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const MIN_SUPPORTED_YEAR    As Long = 100       'Minimum supported DatePicker year
+    Const MAX_SUPPORTED_YEAR    As Long = 9999      'Maximum supported DatePicker year
 
-    'Set safe default
+    Dim CallbackName            As String           'Configured holiday callback name
+    Dim CandidateDateOnly       As Date             'Candidate date without time
+    Dim CandidateYear           As Long             'Candidate date year
+    Dim CallbackResult          As Variant          'Callback return value
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set safe default result
         M_HolidayPolicy_IsHolidayDate = False
+    'Enable fail-open error handling
+        On Error GoTo SafeExit
 
-    'Exit if no callback is configured
-        If Len(Trim$(gDP_HolidayCallbackName)) = 0 Then Exit Function
+'------------------------------------------------------------------------------
+' RESOLVE CALLBACK NAME
+'------------------------------------------------------------------------------
+    'Normalize the configured callback name
+        CallbackName = VBA.Trim$(gDP_HolidayCallbackName)
+    'Exit when no callback is configured
+        If VBA.Len(CallbackName) = 0 Then Exit Function
 
-    'Suppress callback failures
+'------------------------------------------------------------------------------
+' NORMALIZE CANDIDATE DATE
+'------------------------------------------------------------------------------
+    'Normalize the candidate date to its date-only component
+        CandidateDateOnly = VBA.DateValue(CandidateDate)
+    'Resolve the candidate year once
+        CandidateYear = VBA.Year(CandidateDateOnly)
+
+'------------------------------------------------------------------------------
+' VALIDATE CANDIDATE DATE
+'------------------------------------------------------------------------------
+    'Reject dates before the supported DatePicker year range
+        If CandidateYear < MIN_SUPPORTED_YEAR Then Exit Function
+    'Reject dates after the supported DatePicker year range
+        If CandidateYear > MAX_SUPPORTED_YEAR Then Exit Function
+
+'------------------------------------------------------------------------------
+' RUN HOLIDAY CALLBACK
+'------------------------------------------------------------------------------
+    'Run the configured holiday callback with the normalized candidate date
+        CallbackResult = Application.Run(CallbackName, CandidateDateOnly)
+
+'------------------------------------------------------------------------------
+' INTERPRET CALLBACK RESULT
+'------------------------------------------------------------------------------
+    'Ignore Excel error callback results
+        If VBA.IsError(CallbackResult) Then Exit Function
+    'Ignore Null callback results
+        If VBA.IsNull(CallbackResult) Then Exit Function
+    'Return the callback result only when it is explicitly Boolean
+        If VBA.VarType(CallbackResult) = vbBoolean Then
+            M_HolidayPolicy_IsHolidayDate = VBA.CBool(CallbackResult)
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after holiday-policy evaluation
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Suppress callback or policy failures
         On Error Resume Next
 
-    'Run the custom holiday callback
-        CallbackResult = Application.Run(gDP_HolidayCallbackName, CandidateDate)
+    'Return safe default
+        M_HolidayPolicy_IsHolidayDate = False
 
-    'Return callback result when it is Boolean
-        If VarType(CallbackResult) = vbBoolean Then
-            M_HolidayPolicy_IsHolidayDate = CBool(CallbackResult)
-        End If
+    'Clear any pending error
+        Err.Clear
 
     'Restore normal error handling
         On Error GoTo 0
+
 End Function
-
-
 '
 '------------------------------------------------------------------------------
 '
@@ -3318,6 +6397,7 @@ Public Function M_Caption_GetMonth( _
     'Return the normalized caption
         M_Caption_GetMonth = UCase$(Trim$(MonthCaption))
 End Function
+
 
 Public Function M_Caption_GetDate( _
     ByVal DateValue As Date, _
@@ -4160,8 +7240,8 @@ Public Sub M_Window_MoveFormToMouse( _
     'Exit if no form was supplied
         If Frm Is Nothing Then Exit Sub
 
-    'Exit if WinAPI features should not be used
-        If Not M_Platform_ShouldUseWinAPI Then Exit Sub
+    'Exit only when native WinAPI calls are unavailable
+        If Not M_Platform_CanUseWinAPI Then Exit Sub
 
     'Exit if the cursor position cannot be read
         If GetCursorPos(CursorPoint) = 0 Then Exit Sub
@@ -4619,9 +7699,217 @@ End Function
 '
 '------------------------------------------------------------------------------
 '
+'                              KEYBOARD SHORTCUT
+'
+'------------------------------------------------------------------------------
+'
+
+Public Sub M_KeyboardShortcut_Update()
+
+'
+'------------------------------------------------------------------------------
+'                         UPDATE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Registers or removes the DatePicker keyboard shortcut according to settings
+'
+' WHY THIS EXISTS
+'   The keyboard shortcut is the safe fallback entry point when optional visual
+'   integrations such as the in-grid icon and right-click menu are disabled
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Loads settings if needed, registers Ctrl + Shift + D when enabled, and
+'   restores the key to Excel when disabled
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if shortcut synchronization fails
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_KeyboardShortcut_Register
+'   M_KeyboardShortcut_Remove
+'   gDP_EnableKeyboardShortcut
+'
+' NOTES
+'   Application.OnKey is application-wide for the current Excel session, so it
+'   must be removed during teardown
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_KeyboardShortcut_Update"     'Current procedure name
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Ensure settings are available before reading the feature flag
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE SHORTCUT
+'------------------------------------------------------------------------------
+    'Register or remove the keyboard shortcut according to the setting
+        If gDP_EnableKeyboardShortcut Then
+            M_KeyboardShortcut_Register
+        Else
+            M_KeyboardShortcut_Remove
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, Err.Description
+
+End Sub
+
+Public Sub M_KeyboardShortcut_Register()
+
+'
+'------------------------------------------------------------------------------
+'                         REGISTER KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Registers the DatePicker keyboard shortcut for the current Excel session
+'
+' WHY THIS EXISTS
+'   Application.OnKey requires an explicit public macro callback and the
+'   assignment is not persisted by Excel across sessions
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Assigns Ctrl + Shift + D to DP_OpenForActiveCell
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the shortcut cannot be registered
+'
+' DEPENDENCIES
+'   Application.OnKey
+'   M_GetQualifiedMacroName
+'   DP_OpenForActiveCell
+'
+' NOTES
+'   The callback is workbook-qualified so the shortcut resolves to this project
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_KeyboardShortcut_Register"   'Current procedure name
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REGISTER SHORTCUT
+'------------------------------------------------------------------------------
+    'Assign Ctrl + Shift + D to the DatePicker public launcher
+        Application.OnKey DP_KEYBOARD_SHORTCUT_KEY, M_GetQualifiedMacroName("DP_OpenForActiveCell")
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, Err.Description
+
+End Sub
+
+Public Sub M_KeyboardShortcut_Remove()
+
+'
+'------------------------------------------------------------------------------
+'                         REMOVE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores the DatePicker keyboard shortcut to Excel
+'
+' WHY THIS EXISTS
+'   Application.OnKey assignments are application-wide. If the workbook or add-in
+'   is closed, the shortcut must not remain bound to a macro that may no longer
+'   exist
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores Ctrl + Shift + D to Excel's default handling
+'
+' ERROR POLICY
+'   Best-effort cleanup. Does not raise outward
+'
+' DEPENDENCIES
+'   Application.OnKey
+'
+' NOTES
+'   Calling Application.OnKey with only the key argument restores normal behavior
+'
+' UPDATED
+'   2026-05-02
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REMOVE SHORTCUT
+'------------------------------------------------------------------------------
+    'Suppress cleanup errors
+        On Error Resume Next
+
+    'Restore the key to Excel
+        Application.OnKey DP_KEYBOARD_SHORTCUT_KEY
+
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
+
+'
+'------------------------------------------------------------------------------
+'
 '                                  GRID ICON
 '
 '------------------------------------------------------------------------------
+'
 
 Public Sub M_GridIcon_SetPath(ByVal IconPath As String)
 
@@ -4629,6 +7917,299 @@ Public Sub M_GridIcon_SetPath(ByVal IconPath As String)
         gDP_IconPath = Trim$(IconPath)
 End Sub
 
+Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
+
+'
+'==============================================================================
+'                         SHOW OR MOVE GRID ICON
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Shows the DatePicker in-grid icon by reusing the existing worksheet shape
+'   whenever possible
+'
+' WHY THIS EXISTS
+'   SelectionChange can fire very frequently. Deleting and recreating the
+'   worksheet icon on every eligible cell selection creates visible latency
+'   because Excel must rebuild and repaint the drawing-layer shape
+'
+' INPUTS
+'   TargetCell
+'     Optional single-cell anchor. ActiveCell is used when omitted
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the target cell, exits and removes the icon when the grid-icon
+'   feature is disabled, reuses a valid existing icon on the target worksheet,
+'   deletes a tracked icon from a previous worksheet when necessary, and creates
+'   the icon only when no reusable target-sheet shape exists
+'
+' ERROR POLICY
+'   Best-effort UI routine. Suppresses failures, falls back to the cold-path
+'   creation routine where possible, and writes diagnostics to the Immediate
+'   Window when the fallback path is used
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_GridIcon_Remove
+'   M_GridIcon_Create
+'   M_GetQualifiedMacroName
+'   DP_GRID_ICON_NAME
+'   gDP_ShowGridIcon
+'   gDP_GridIconShape
+'
+' NOTES
+'   This is the preferred high-frequency SelectionChange path
+'
+'   M_GridIcon_Create remains the cold-path creation routine
+'
+'   The manager refresh path must call this routine, not M_GridIcon_Create
+'   directly, otherwise the reuse / move optimization is bypassed
+'
+' UPDATED
+'   2026-05-03
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_GridIcon_ShowOrMove"      'Current procedure name
+    Const ICON_SIZE             As Double = 24#                          'Icon width and height
+    Const ICON_GAP              As Double = 5#                           'Gap between target cell and icon
+
+    Dim AnchorCell              As Excel.Range                           'Resolved anchor cell
+    Dim TargetSheet             As Excel.Worksheet                       'Worksheet receiving the icon
+    Dim CandidateShape          As Excel.Shape                           'Existing reusable icon candidate
+    Dim IconLeft                As Double                                'Icon left position
+    Dim IconTop                 As Double                                'Icon top position
+    Dim HasReusableIcon         As Boolean                               'True when an existing shape can be moved
+    Dim ErrorNumber             As Long                                  'Captured error number
+    Dim ErrorDescription        As String                                'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable fail-safe error handling
+        On Error GoTo FailSafe
+
+    'Load settings before reading the grid-icon feature flag
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' FEATURE GATE
+'------------------------------------------------------------------------------
+    'Remove any stale icon and exit when the feature is disabled
+        If Not gDP_ShowGridIcon Then
+            M_GridIcon_Remove
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE ANCHOR CELL
+'------------------------------------------------------------------------------
+    'Use the supplied target cell when provided
+        If Not TargetCell Is Nothing Then
+            Set AnchorCell = TargetCell
+
+    'Otherwise use ActiveCell safely
+        Else
+            On Error Resume Next
+            Set AnchorCell = Application.ActiveCell
+            Err.Clear
+            On Error GoTo FailSafe
+
+        End If
+
+    'Remove stale icon and exit when no anchor cell is available
+        If AnchorCell Is Nothing Then
+            M_GridIcon_Remove
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' NORMALIZE MERGED CELL TARGETS
+'------------------------------------------------------------------------------
+    'Normalize merged cells before rejecting multi-cell merged ranges
+        If AnchorCell.MergeCells Then
+            Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
+        End If
+
+    'Remove stale icon and exit when the target is still not a single cell
+        If AnchorCell.Cells.CountLarge <> 1 Then
+            M_GridIcon_Remove
+            Exit Sub
+        End If
+
+    'Store the target worksheet
+        Set TargetSheet = AnchorCell.Worksheet
+
+    'Remove stale icon and exit when no worksheet is available
+        If TargetSheet Is Nothing Then
+            M_GridIcon_Remove
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' CALCULATE ICON POSITION
+'------------------------------------------------------------------------------
+    'Position the icon to the right of the anchor cell
+        IconLeft = AnchorCell.Left + AnchorCell.Width + ICON_GAP
+
+    'Vertically center the icon against the anchor cell
+        IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
+
+'------------------------------------------------------------------------------
+' RESOLVE TRACKED ICON
+'------------------------------------------------------------------------------
+    'Suppress stale shape-reference failures
+        On Error Resume Next
+
+    'Start from the tracked icon reference
+        Set CandidateShape = gDP_GridIconShape
+
+    'Clear invalid tracked references
+        If Err.Number <> 0 Then
+            Err.Clear
+            Set CandidateShape = Nothing
+            Set gDP_GridIconShape = Nothing
+        End If
+
+    'Restore fail-safe error handling
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' HANDLE TRACKED ICON FROM ANOTHER WORKSHEET
+'------------------------------------------------------------------------------
+    'Validate the tracked icon parent when a candidate exists
+        If Not CandidateShape Is Nothing Then
+
+            'Suppress stale shape-parent failures
+                On Error Resume Next
+
+            'Reuse only when the tracked icon already belongs to the target sheet
+                HasReusableIcon = (CandidateShape.Parent Is TargetSheet)
+
+            'Delete a valid tracked icon that belongs to a previous worksheet
+                If Err.Number = 0 Then
+                    If Not HasReusableIcon Then
+                        CandidateShape.Delete
+                        Set CandidateShape = Nothing
+                        Set gDP_GridIconShape = Nothing
+                    End If
+                End If
+
+            'Clear stale candidate references
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    Set CandidateShape = Nothing
+                    Set gDP_GridIconShape = Nothing
+                    HasReusableIcon = False
+                End If
+
+            'Restore fail-safe error handling
+                On Error GoTo FailSafe
+
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE SAME-SHEET FALLBACK ICON
+'------------------------------------------------------------------------------
+    'Try to reuse a same-named shape on the target worksheet
+        If CandidateShape Is Nothing Then
+
+            'Suppress missing-shape failures
+                On Error Resume Next
+
+            'Resolve the existing same-named shape from the target worksheet
+                Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+
+            'Use the same-named shape when it exists
+                HasReusableIcon = Not (CandidateShape Is Nothing)
+
+            'Clear missing-shape errors
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    Set CandidateShape = Nothing
+                    HasReusableIcon = False
+                End If
+
+            'Restore fail-safe error handling
+                On Error GoTo FailSafe
+
+        End If
+
+'------------------------------------------------------------------------------
+' MOVE EXISTING ICON
+'------------------------------------------------------------------------------
+    'Move and show the existing icon when it can be reused
+        If HasReusableIcon Then
+
+            With CandidateShape
+                .Left = IconLeft
+                .Top = IconTop
+                .Width = ICON_SIZE
+                .Height = ICON_SIZE
+                .Placement = xlMove
+                .AlternativeText = "DatePicker Grid Entry Point"
+                .OnAction = M_GetQualifiedMacroName("DP_Click")
+                .Visible = msoTrue
+                .ZOrder msoBringToFront
+            End With
+
+            'Store the reusable icon reference
+                Set gDP_GridIconShape = CandidateShape
+
+            'Exit after moving the icon
+                Exit Sub
+
+        End If
+
+'------------------------------------------------------------------------------
+' CREATE ICON ONLY WHEN NEEDED
+'------------------------------------------------------------------------------
+    'Create the icon only when no reusable shape exists
+        M_GridIcon_Create AnchorCell
+
+'------------------------------------------------------------------------------
+' NORMAL EXIT
+'------------------------------------------------------------------------------
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
+FailSafe:
+    'Capture the error number
+        ErrorNumber = Err.Number
+
+    'Capture the error description
+        ErrorDescription = Err.Description
+
+    'Suppress fallback failures
+        On Error Resume Next
+
+    'Clear invalid tracked references
+        Set gDP_GridIconShape = Nothing
+
+    'Fall back to cold-path creation when an anchor cell is available
+        If Not AnchorCell Is Nothing Then
+            M_GridIcon_Create AnchorCell
+        End If
+
+    'Write diagnostics without interrupting worksheet interaction
+        Debug.Print PROC_NAME & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+
+    'Clear any suppressed fallback error
+        Err.Clear
+
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
 Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
 
 '
@@ -6026,106 +9607,106 @@ FailSafe:
         Set M_FormBridge_GetLoadedForm = Nothing
 End Function
 
-Public Sub M_FormBridge_RefreshFromActiveCell()
+Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 
 '
-'------------------------------------------------------------------------------
-'                           REFRESH FORM FROM ACTIVE CELL
+'==============================================================================
+'                           FORM BRIDGE REFRESH FROM CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Refreshes the loaded DatePicker form from the current ActiveCell
+'   Refreshes the visible DatePicker form from an explicit worksheet cell
 '
 ' WHY THIS EXISTS
-'   When close-after-selection is disabled, the DatePicker can remain open while
-'   the user selects another worksheet cell. The form must then reflect the new
-'   cell context instead of closing or keeping stale selected-date state
+'   The manager already resolves the authoritative target cell. The form bridge
+'   must therefore refresh from that same cell instead of independently reading
+'   Excel.Application.ActiveCell
 '
 ' INPUTS
-'   None
+'   TargetCell
+'     Explicit worksheet cell to use as the DatePicker context
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   - reads ActiveCell safely
-'   - if ActiveCell contains a date, stores it as the selected date
-'   - otherwise clears the selected-date state
-'   - refreshes the loaded DatePicker form when present
+'   Refreshes the existing visible DatePicker form from the supplied cell
 '
 ' ERROR POLICY
-'   Safe-default behavior for ActiveCell access
-'
-'   Raises a descriptive runtime error only if the loaded form refresh fails
+'   Best-effort. Does not raise outward
 '
 ' DEPENDENCIES
-'   Application.ActiveCell
-'   M_FormBridge_GetLoadedForm
-'   UF_DatePicker.UF_DP_RefreshFromExternalSelection
+'   Existing M_FormBridge form-refresh implementation
 '
 ' NOTES
-'   This routine avoids direct default-instance references
+'   This routine is the correct entry point for cDatePickerManager
 '
-'   It is intended to be called by cDatePickerManager when the user changes
-'   worksheet selection while the DatePicker remains open
+'   Do not read Excel.Application.ActiveCell inside this routine
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-03
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_FormBridge_RefreshFromCell"
 
-    Const PROC_NAME As String = "M_FormBridge_RefreshFromActiveCell"       'Current procedure name
-    Dim LoadedForm As Object                                           'Loaded DatePicker form instance
-    Dim CellValue As Variant                                           'ActiveCell value snapshot
-    Dim ResolvedDate As Date                                           'Resolved ActiveCell date
-    Dim HasDate As Boolean                                             'True when ActiveCell contains a date
+    Dim ErrorNumber             As Long             'Captured error number
+    Dim ErrorDescription        As String           'Captured error description
 
-    'Enable controlled error handling
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Protect caller from bridge failures
         On Error GoTo ErrorHandler
 
-    'Default the resolved date to today
-        ResolvedDate = VBA.Date
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Exit if no target cell was supplied
+        If TargetCell Is Nothing Then Exit Sub
 
-    'Suppress ActiveCell access errors
-        On Error Resume Next
+'------------------------------------------------------------------------------
+' REFRESH FORM
+'------------------------------------------------------------------------------
+    'Move the existing implementation of M_FormBridge_RefreshFromCell here
+    'and replace every ActiveCell reference with TargetCell
+        '
+        ' Example of the intended internal policy:
+        '
+        '   - use TargetCell.Worksheet as the write-back worksheet
+        '   - use TargetCell.Address as the write-back address
+        '   - use TargetCell.Value / Value2 as the current cell value
+        '   - use TargetCell.NumberFormat as the display/date-format context
+        '   - refresh the already loaded DatePicker form from that explicit cell
+        '
+        ' Do not call Excel.Application.ActiveCell here
 
-    'Read the current ActiveCell value
-        CellValue = Application.ActiveCell.Value
-
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-    'Resolve an ActiveCell date only when the value is usable
-        If Not IsError(CellValue) Then
-            If VBA.IsDate(CellValue) Then
-                ResolvedDate = VBA.DateValue(CDate(CellValue))
-                HasDate = True
-            End If
-        End If
-
-    'Store selected-date state from ActiveCell
-        If HasDate Then
-            gDP_SelectedDate = ResolvedDate
-            gDP_HasSelectedDate = True
-        Else
-            gDP_SelectedDate = 0
-            gDP_HasSelectedDate = False
-        End If
-
-    'Retrieve the loaded DatePicker form instance
-        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
-
-    'Refresh the loaded form from the external worksheet selection
-        If Not LoadedForm Is Nothing Then
-            LoadedForm.UF_DP_RefreshFromExternalSelection ResolvedDate, HasDate
-        End If
-
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+    'Capture the error number
+        ErrorNumber = Err.Number
 
+    'Capture the error description
+        ErrorDescription = Err.Description
+
+    'Write bridge diagnostics without interrupting caller flow
+        Debug.Print PROC_NAME & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+
+    'Clear the suppressed bridge error
+        Err.Clear
+
+End Sub
 Private Sub M_FormBridge_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 
 '
@@ -6386,5 +9967,7 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
             "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!" & Trim$(ProcedureName)
 
 End Function
+
+
 
 
