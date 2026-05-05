@@ -9831,66 +9831,243 @@ End Sub
 Private Sub M_FormBridge_UnloadLoadedPicker()
 
 '
-'------------------------------------------------------------------------------
-'                           FORM UNLOADLOADEDDATEPICKER
+'==============================================================================
+'                       FORM BRIDGE UNLOAD LOADED PICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Coordinates the loaded DatePicker UserForm from the companion module
+'   Unloads any already-loaded DatePicker UserForm instance before DP_Show loads
+'   a fresh instance
 '
 ' WHY THIS EXISTS
-'   The companion module owns write-back and settings while the UserForm owns rendering, so loaded-form access must avoid instantiating the default form accidentally
+'   DP_Show relies on UserForm_Initialize to rebuild the runtime UI and consume
+'   the pending initial-date bridge state. If a previous DatePicker instance is
+'   already loaded, it should be removed before the new instance is loaded
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Scans loaded UserForms
-'   - Calls the required public form method when available
-'   - Falls back safely when the form is not loaded
+'   Scans the loaded VBA.UserForms collection, collects matching DatePicker form
+'   instances, stops the DatePicker timer only when a picker instance exists, and
+'   unloads matching forms on a best-effort basis
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort cleanup. Does not raise outward
 '
 ' DEPENDENCIES
 '   VBA.UserForms
-'   UF_DatePicker
+'   DP_FORM_NAME
+'   M_Timer_Stop
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine deliberately avoids direct references to UF_DatePicker to avoid
+'   accidentally loading the default form instance
+'
+'   The scan and the unload phases are separated because unloading a form changes
+'   the VBA.UserForms collection
+'
+'   DP_Show must not fail just because an old transient form instance cannot be
+'   unloaded cleanly
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-04
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_FormBridge_UnloadLoadedPicker"
 
-    Dim Index As Long                                                  'Loaded UserForms reverse-loop index
-    Dim LoadedForm As Object                                           'Loaded UserForm instance
+    Dim CurForm                 As Object       'Current loaded UserForm instance
+    Dim LoadedForm              As Object       'DatePicker form selected for unload
+    Dim FormsToUnload           As Collection   'Matching DatePicker forms to unload
+    Dim Index                   As Long         'Collection reverse-loop index
+    Dim FormTypeName            As String       'Loaded form class name
+    Dim FormRuntimeName         As String       'Loaded form runtime name
+    Dim StepName                As String       'Current diagnostic step
+    Dim StepErrNumber           As Long         'Captured non-fatal cleanup error number
+    Dim StepErrDescription      As String       'Captured non-fatal cleanup error description
 
-    'Suppress cleanup errors
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Protect DP_Show from all unload helper failures
+        On Error GoTo FailSafe
+
+    'Create the collection used to decouple scan and unload phases
+        Set FormsToUnload = New Collection
+
+'------------------------------------------------------------------------------
+' SCAN LOADED USERFORMS
+'------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Scan loaded UserForms"
+
+    'Loop through currently loaded UserForms without unloading during enumeration
+        For Each CurForm In VBA.UserForms
+
+            'Reset form metadata
+                FormTypeName = vbNullString
+                FormRuntimeName = vbNullString
+
+            'Suppress metadata-read errors for unusual transient form states
+                On Error Resume Next
+
+            'Capture the loaded form class name
+                FormTypeName = VBA.TypeName(CurForm)
+
+            'Capture the loaded form runtime name
+                FormRuntimeName = VBA.CStr(CurForm.Name)
+
+            'Capture metadata-read failure if any
+                StepErrNumber = Err.Number
+                StepErrDescription = Err.Description
+
+            'Clear any suppressed metadata error
+                Err.Clear
+
+            'Restore fail-safe handling
+                On Error GoTo FailSafe
+
+            'Write metadata diagnostics only when a read failed
+                If StepErrNumber <> 0 Then
+                    Debug.Print PROC_NAME & _
+                        " | Step=" & StepName & _
+                        " | Error=" & VBA.CStr(StepErrNumber) & _
+                        " | " & StepErrDescription
+                End If
+
+            'Collect matching DatePicker forms by class name or runtime name
+                If VBA.StrComp(FormTypeName, DP_FORM_NAME, vbTextCompare) = 0 Or _
+                   VBA.StrComp(FormRuntimeName, DP_FORM_NAME, vbTextCompare) = 0 Then
+                    FormsToUnload.Add CurForm
+                End If
+
+        Next CurForm
+
+'------------------------------------------------------------------------------
+' EXIT WHEN NO PICKER IS LOADED
+'------------------------------------------------------------------------------
+    'Exit cleanly when there is no loaded DatePicker form
+        If FormsToUnload.Count = 0 Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' STOP TIMER
+'------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Stop timer"
+
+    'Suppress timer-stop errors because Application.OnTime cancellation can fail
         On Error Resume Next
 
-    'Stop any active timer before unloading the form
+    'Stop any active DatePicker timer before unloading the form
         M_Timer_Stop
 
-    'Loop backwards because unloading changes the UserForms collection
-        For Index = VBA.UserForms.Count - 1 To 0 Step -1
+    'Capture timer-stop failure if any
+        StepErrNumber = Err.Number
+        StepErrDescription = Err.Description
 
-            'Get the loaded form instance
-                Set LoadedForm = VBA.UserForms.Item(Index)
+    'Clear any suppressed timer-stop error
+        Err.Clear
 
-            'Unload the DatePicker form when found
-                If TypeName(LoadedForm) = DP_FORM_NAME Then
-                    Unload LoadedForm
+    'Restore fail-safe handling
+        On Error GoTo FailSafe
+
+    'Write timer-stop diagnostics only when stop failed
+        If StepErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=" & StepName & _
+                " | Error=" & VBA.CStr(StepErrNumber) & _
+                " | " & StepErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' UNLOAD MATCHING FORMS
+'------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Unload DatePicker forms"
+
+    'Unload collected DatePicker forms in reverse order
+        For Index = FormsToUnload.Count To 1 Step -1
+
+            'Resolve the collected form reference
+                Set LoadedForm = FormsToUnload.Item(Index)
+
+            'Suppress individual unload errors
+                On Error Resume Next
+
+            'Hide the form first to reduce visual flicker
+                LoadedForm.Hide
+
+            'Clear any non-fatal hide error
+                Err.Clear
+
+            'Unload the DatePicker form
+                Unload LoadedForm
+
+            'Capture unload failure if any
+                StepErrNumber = Err.Number
+                StepErrDescription = Err.Description
+
+            'Clear any suppressed unload error
+                Err.Clear
+
+            'Restore fail-safe handling
+                On Error GoTo FailSafe
+
+            'Write unload diagnostics only when unload failed
+                If StepErrNumber <> 0 Then
+                    Debug.Print PROC_NAME & _
+                        " | Step=" & StepName & _
+                        " | Index=" & VBA.CStr(Index) & _
+                        " | Error=" & VBA.CStr(StepErrNumber) & _
+                        " | " & StepErrDescription
                 End If
+
+            'Release the loop form reference
+                Set LoadedForm = Nothing
 
         Next Index
 
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release the current form reference
+        Set CurForm = Nothing
+
+    'Release the loaded form reference
+        Set LoadedForm = Nothing
+
+    'Release the collection reference
+        Set FormsToUnload = Nothing
+
+    'Clear any suppressed cleanup error
+        Err.Clear
+
     'Restore normal error handling
         On Error GoTo 0
-End Sub
 
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
+FailSafe:
+    'Write unload-helper diagnostics without interrupting DP_Show
+        Debug.Print PROC_NAME & _
+            " | Step=" & StepName & _
+            " | Error=" & VBA.CStr(Err.Number) & _
+            " | " & Err.Description
+
+    'Continue through clean exit
+        Resume CleanExit
+
+End Sub
 '
 '------------------------------------------------------------------------------
 '
