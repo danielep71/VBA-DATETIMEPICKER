@@ -1,4 +1,5 @@
 Attribute VB_Name = "M_DATEPICKER"
+
 Option Explicit
 
 '
@@ -53,7 +54,7 @@ Option Explicit
 '   legacy names for backward compatibility
 '
 ' UPDATED
-'   2026-04-28
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -189,7 +190,7 @@ Option Explicit
 
     Private Const DP_SETTING_FIRST_DAY_OF_WEEK     As String = "FirstDayOfWeek"          'First-day setting key
     Private Const DP_SETTING_USE_LOCAL_NAMES       As String = "UseLocalNames"           'Local names setting key
-    Private Const DP_SETTING_ALLOW_OUTSIDE_MONTH   As String = "AllowOutsideMonth"       'Outside-month setting key
+    Private Const DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION   As String = "AllowOutsideMonth"       'Outside-month setting key
     Private Const DP_SETTING_HIGHLIGHT_WEEKENDS    As String = "HighlightWeekends"       'Highlight weekends setting key
     Private Const DP_SETTING_CLOSE_AFTER_SELECTION As String = "CloseAfterSelection"     'Close-after-selection setting key
     Private Const DP_SETTING_CLOCK_MODE            As String = "ClockMode"               'Clock mode setting key
@@ -197,9 +198,10 @@ Option Explicit
     Private Const DP_SETTING_SHOW_RIGHT_CLICK      As String = "ShowRightClick"          'Right-click setting key
     Private Const DP_SETTING_SHOW_GRID_ICON        As String = "ShowGridIcon"            'Grid-icon setting key
     Private Const DP_SETTING_ENABLE_KEYBOARD       As String = "EnableKeyboardShortcut"  'Keyboard shortcut setting key
-    Private Const DP_KEYBOARD_SHORTCUT_KEY         As String = "^+d"                     'Ctrl + Shift + D
     Private Const DP_SETTING_USE_WINAPI            As String = "UseWinAPI"               'WinAPI setting key
     Private Const DP_SETTING_HOLIDAY_CALLBACK      As String = "HolidayCallback"         'Holiday callback setting key
+    
+    Private Const DP_KEYBOARD_SHORTCUT_KEY         As String = "^+d"                     'Ctrl + Shift + D
 
     Private Const DP_CONTEXT_MENU_TAG              As String = "VBA_DATETIMEPICKER"      'Legacy context-menu tag
     Private Const DP_CONTEXT_MENU_CAPTION          As String = "Date Picker"             'Context-menu caption
@@ -222,11 +224,10 @@ Option Explicit
     Private Const DP_GRID_ICON_FONT_SIZE           As Single = 10                        'Grid icon font size
     Private Const DP_GRID_ICON_FORE_COLOR          As Long = vbWhite                     'Grid icon foreground color
 
-    #If VBA7 Then
-        Private Const WS_CAPTION                   As LongPtr = &HC00000                 'Window caption style flag
-    #Else
-        Private Const WS_CAPTION                   As Long = &HC00000                    'Window caption style flag
-    #End If
+    Private Const WS_CAPTION                       As Long = &HC00000                    'Window caption style flag
+    
+    Private Const DP_MIN_YEAR                      As Long = 100                         'Minimum supported DatePicker year
+    Private Const DP_MAX_YEAR                      As Long = 9999                        'Maximum supported DatePicker year
 
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
@@ -238,7 +239,7 @@ Option Explicit
 
     Public Const DP_DEFAULT_FIRST_DAY_OF_WEEK      As Long = vbMonday                    'Default first day of week
     Public Const DP_DEFAULT_USE_LOCAL_NAMES        As Boolean = True                     'Default local names flag
-    Public Const DP_DEFAULT_ALLOW_OUTSIDE_MONTH    As Boolean = True                     'Default outside-month selection flag
+    Public Const DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION    As Boolean = True           'Default outside-month selection flag
     Public Const DP_DEFAULT_HIGHLIGHT_WEEKENDS     As Boolean = True                     'Default weekend highlight flag
     Public Const DP_DEFAULT_CLOSE_AFTER_SELECTION  As Boolean = True                     'Default close-after-selection flag
     Public Const DP_DEFAULT_SHOW_RIGHT_CLICK       As Boolean = True                     'Default right-click feature flag
@@ -268,7 +269,7 @@ Option Explicit
 ' PUBLIC ENUMS
 '------------------------------------------------------------------------------
     Public Enum DP_WriteAction
-        Date_Picker = 0
+        DP_WriteAction_DatePicker = 0
     End Enum
     
     Public Enum DP_ClockMode
@@ -290,15 +291,15 @@ Option Explicit
     Public gDP_ShowRightClick           As Boolean              'Show right-click menu entry
     Public gDP_ShowGridIcon             As Boolean              'Show in-grid icon
     Public gDP_GridIconShape            As Shape                'In-grid icon shape reference
-    Public gDP_IconPath                 As String               'Optional icon file path
     Public gDP_FirstDayOfWeek           As Long                 'vbSunday or vbMonday
     Public gDP_UseLocalNames            As Boolean              'Use local day/month captions
     Public gDP_ClockMode                As DP_ClockMode         'Static or live clock
     Public gDP_SizeMode                 As DP_SizeMode          'Normal or compact layout
     Public gDP_HighlightWeekends        As Boolean              'Highlight weekend days
-    Public gDP_AllowOutsideMonthSel     As Boolean              'Allow outside-month day selection
+    Public gDP_AllowOutsideMonthSelection As Boolean            'Allow outside-month day selection
+    
     Public gDP_CloseAfterSelection      As Boolean              'Close picker after successful write-back
-    Public gDP_UseWinAPI                As Boolean              'Allow WinAPI features
+    Public gDP_UseWinAPI                As Boolean              'Allow optional WinAPI-dependent native behavior
     Public gDP_EnableKeyboardShortcut   As Boolean              'Enable keyboard shortcut fallback
     Public gDP_HolidayCallbackName      As String               'Optional holiday callback name
     
@@ -410,6 +411,7 @@ Public Sub M_Settings_Load()
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+    
     'Resolve platform support once for this load pass
         PlatformCanUseWinAPI = M_Platform_CanUseWinAPI
 
@@ -431,6 +433,7 @@ Public Sub M_Settings_Load()
         Else
             gDP_FirstDayOfWeek = DP_DEFAULT_FIRST_DAY_OF_WEEK
         End If
+    
     'Track the current handler step
         HandlerStep = "Load local-name setting"
     'Read the local-name setting
@@ -472,21 +475,21 @@ Public Sub M_Settings_Load()
         RawValue = GetSetting( _
             DP_SETTINGS_APP_NAME, _
             DP_SETTINGS_SECTION_BEHAVIOR, _
-            DP_SETTING_ALLOW_OUTSIDE_MONTH, _
+            DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
                 DP_SETTINGS_APP_NAME, _
                 DP_SETTINGS_SECTION_DISPLAY, _
-                DP_SETTING_ALLOW_OUTSIDE_MONTH, _
-                M_Settings_BooleanToStorageValue(DP_DEFAULT_ALLOW_OUTSIDE_MONTH))
+                DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
+                M_Settings_BooleanToStorageValue(DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION))
         End If
     'Store the parsed outside-month setting or its default
         If M_Settings_TryParseBoolean(RawValue, ParsedBoolean) Then
-            gDP_AllowOutsideMonthSel = ParsedBoolean
+            gDP_AllowOutsideMonthSelection = ParsedBoolean
         Else
-            gDP_AllowOutsideMonthSel = DP_DEFAULT_ALLOW_OUTSIDE_MONTH
+            gDP_AllowOutsideMonthSelection = DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION
         End If
 
     'Track the current handler step
@@ -668,6 +671,7 @@ Public Sub M_Settings_Load()
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Finalize settings load"
+    
     'Mark settings as loaded before saving normalized values
         mSettingsLoaded = True
     'Track the current handler step
@@ -882,8 +886,8 @@ Public Sub M_Settings_Save()
         SaveSetting _
             DP_SETTINGS_APP_NAME, _
             DP_SETTINGS_SECTION_BEHAVIOR, _
-            DP_SETTING_ALLOW_OUTSIDE_MONTH, _
-            M_Settings_BooleanToStorageValue(gDP_AllowOutsideMonthSel)
+            DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
+            M_Settings_BooleanToStorageValue(gDP_AllowOutsideMonthSelection)
 
     'Track the current handler step
         HandlerStep = "Save close-after-selection setting"
@@ -1060,7 +1064,7 @@ Private Sub M_Settings_InitializeDefaults()
 ' INITIALIZE BEHAVIOR SETTINGS
 '------------------------------------------------------------------------------
     'Initialize the outside-month setting
-        gDP_AllowOutsideMonthSel = DP_DEFAULT_ALLOW_OUTSIDE_MONTH
+        gDP_AllowOutsideMonthSelection = DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION
     'Initialize the close-after-selection setting
         gDP_CloseAfterSelection = DP_DEFAULT_CLOSE_AFTER_SELECTION
     'Initialize the clock mode
@@ -1323,6 +1327,7 @@ ErrorHandler:
             "First-day-of-week update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)
 
 '
@@ -1423,6 +1428,7 @@ ErrorHandler:
             "First-day-of-week text update failed: " & Err.Description
 
 End Sub
+
 Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
 
 '
@@ -1554,6 +1560,7 @@ ErrorHandler:
             "Use-local-names setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Boolean)
 
 '
@@ -1629,19 +1636,19 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 ' EXIT IF UNCHANGED
 '------------------------------------------------------------------------------
     'Exit when the requested setting is already active
-        If gDP_AllowOutsideMonthSel = AllowOutsideMonthDays Then Exit Sub
+        If gDP_AllowOutsideMonthSelection = AllowOutsideMonthDays Then Exit Sub
 
 '------------------------------------------------------------------------------
 ' CAPTURE CURRENT SETTING
 '------------------------------------------------------------------------------
     'Capture the current outside-month setting for rollback
-        OldAllowOutside = gDP_AllowOutsideMonthSel
+        OldAllowOutside = gDP_AllowOutsideMonthSelection
 
 '------------------------------------------------------------------------------
 ' UPDATE IN-MEMORY SETTING
 '------------------------------------------------------------------------------
     'Store the requested outside-month setting
-        gDP_AllowOutsideMonthSel = AllowOutsideMonthDays
+        gDP_AllowOutsideMonthSelection = AllowOutsideMonthDays
     'Mark settings as mutated
         SettingsMutated = True
 
@@ -1676,7 +1683,7 @@ ErrorHandler:
     'Restore the previous in-memory setting if persistence failed after mutation
         If SettingsMutated And Not SettingsPersisted Then
             On Error Resume Next
-            gDP_AllowOutsideMonthSel = OldAllowOutside
+            gDP_AllowOutsideMonthSelection = OldAllowOutside
             On Error GoTo 0
         End If
     'Raise a descriptive error to the caller
@@ -1684,10 +1691,11 @@ ErrorHandler:
             "Allow-outside-month-days setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           SET HIGHLIGHT WEEKENDS
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1698,22 +1706,28 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 '   Some users prefer weekends to be visually differentiated, while others prefer
 '   a neutral calendar grid
 '
+'   Caller code, demo sheets, Ribbon callbacks, settings panels, and host
+'   workbooks need one controlled public entry point to update this setting
+'   consistently
+'
 ' INPUTS
 '   HighlightWeekends
 '     True to highlight weekend days
-'     False to display weekends with normal day-label font weight
+'     False to display weekends with normal day-cell styling
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Loads settings if needed, exits when the requested value is already active,
-'   updates the in-memory weekend-highlight setting, persists the updated
-'   settings, and refreshes the loaded DatePicker form if present
+'   Ensures current settings are loaded
+'   Exits when the requested value is already active
+'   Updates the in-memory weekend-highlight setting
+'   Persists the updated settings
+'   Delegates loaded-form synchronization to M_FormBridge_RefreshSettings
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, saved, or
-'   applied to the loaded DatePicker form
+'   synchronized with the loaded DatePicker form
 '
 '   If persistence fails after the in-memory setting was changed, the previous
 '   in-memory setting is restored before the error is re-raised
@@ -1722,21 +1736,35 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
 '   M_FormBridge_RefreshSettings
+'   UF_DatePicker.UF_DP_RefreshSettings
 '
 ' NOTES
-'   This setting controls weekend visual highlighting only
+'   This routine owns validation, persistence, and rollback only
 '
-'   The unchanged-value exit avoids unnecessary registry writes and unnecessary
-'   UserForm refresh work
+'   This routine does not directly repaint calendar cells, rebuild the day grid,
+'   or apply weekend styling to the loaded UserForm
+'
+'   Loaded-form synchronization is delegated through M_FormBridge_RefreshSettings
+'
+'   The actual weekend-highlight repaint must be implemented inside
+'   UF_DatePicker.UF_DP_RefreshSettings
+'
+'   UF_DP_RefreshSettings must therefore apply any required visual refresh for
+'   gDP_HighlightWeekends, including repainting or rebuilding day labels as
+'   appropriate
+'
+'   If UF_DP_RefreshSettings only refreshes captions, then changing
+'   HighlightWeekends while the form is already loaded will be persisted
+'   correctly but may not be visually reflected until the form is reopened
 '
 ' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "M_Settings_SetHighlightWeekends"
+    Const PROC_NAME         As String = "M_Settings_SetHighlightWeekends" 'Current procedure name
 
     Dim OldHighlight        As Boolean      'Previous weekend-highlight setting
     Dim SettingsMutated     As Boolean      'True after in-memory setting is changed
@@ -1785,9 +1813,9 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
         SettingsPersisted = True
 
 '------------------------------------------------------------------------------
-' REFRESH FORM
+' SYNCHRONIZE LOADED FORM
 '------------------------------------------------------------------------------
-    'Refresh settings-dependent captions and grid if the form is loaded
+    'Delegate loaded-form synchronization to the form bridge
         M_FormBridge_RefreshSettings
 
 '------------------------------------------------------------------------------
@@ -1815,6 +1843,7 @@ ErrorHandler:
             "Weekend-highlight setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolean)
 
 '
@@ -1937,6 +1966,7 @@ ErrorHandler:
             "Close-after-selection setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetClockMode(ByVal ClockMode As DP_ClockMode)
 
 '
@@ -2103,10 +2133,11 @@ ErrorHandler:
             "Clock-mode setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           SET SIZE MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2114,8 +2145,10 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '
 ' WHY THIS EXISTS
 '   The DatePicker supports alternative layout modes, such as normal and compact
-'   display. Caller code, demo sheets, Ribbon callbacks, settings panels, and
-'   host workbooks need one controlled public entry point to update this setting
+'   display
+'
+'   Caller code, demo sheets, Ribbon callbacks, settings panels, and host
+'   workbooks need one controlled public entry point to update this setting
 '   consistently
 '
 ' INPUTS
@@ -2126,15 +2159,17 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '   Nothing
 '
 ' BEHAVIOR
-'   Validates the requested size mode, ensures current settings are loaded,
-'   avoids unnecessary registry writes when the setting is unchanged, updates the
-'   in-memory size-mode setting when required, persists the updated settings, and
-'   refreshes the loaded DatePicker form when applicable
+'   Validates the requested size mode
+'   Ensures current settings are loaded
+'   Avoids unnecessary registry writes when the setting is unchanged
+'   Updates the in-memory size-mode setting when required
+'   Persists the updated settings
+'   Delegates loaded-form synchronization to M_FormBridge_RefreshSettings
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if SizeMode is unsupported, settings
 '   cannot be loaded, settings cannot be saved, or the loaded DatePicker form
-'   cannot be refreshed
+'   cannot be synchronized
 '
 '   If persistence fails after the in-memory setting was changed, the previous
 '   in-memory size mode is restored before the error is re-raised
@@ -2144,15 +2179,30 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
 '   M_FormBridge_RefreshSettings
+'   UF_DatePicker.UF_DP_RefreshSettings
 '
 ' NOTES
-'   Size mode is a structural UI setting. If the DatePicker form is already
-'   loaded, a simple caption refresh is not sufficient unless
-'   M_FormBridge_RefreshSettings also resizes, unloads, or rebuilds the form
+'   This routine owns validation, persistence, and rollback only
+'
+'   This routine does not directly resize, unload, rebuild, or repaint the
+'   DatePicker UserForm
+'
+'   Loaded-form synchronization is delegated through M_FormBridge_RefreshSettings
+'
+'   The actual size-mode application must be implemented inside
+'   UF_DatePicker.UF_DP_RefreshSettings
+'
+'   UF_DP_RefreshSettings must therefore apply any required layout changes for
+'   gDP_SizeMode, including resizing, rebuilding, hiding, showing, or repainting
+'   controls as appropriate
+'
+'   If UF_DP_RefreshSettings only refreshes captions, then changing SizeMode
+'   while the form is already loaded will be persisted correctly but may not be
+'   visually reflected until the form is reopened
 '
 ' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2171,7 +2221,6 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
     'Initialize diagnostic step
         HandlerStep = "Initialize"
 
@@ -2180,7 +2229,6 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Validate size mode"
-
     'Reject unsupported size modes
         If Not M_Settings_IsValidSizeMode(SizeMode) Then
             Err.Raise vbObjectError + 513, PROC_NAME, "SizeMode is unsupported"
@@ -2191,7 +2239,6 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Ensure settings loaded"
-
     'Ensure existing settings are loaded before changing one value
         M_Settings_EnsureLoaded
 
@@ -2206,7 +2253,6 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Capture current setting"
-
     'Capture the current size mode for rollback
         OldSizeMode = gDP_SizeMode
 
@@ -2215,7 +2261,6 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Update in-memory setting"
-
     'Store the requested size mode
         gDP_SizeMode = SizeMode
     'Mark settings as mutated
@@ -2226,19 +2271,17 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Persist setting"
-
     'Persist the updated settings
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
 
 '------------------------------------------------------------------------------
-' REFRESH LOADED FORM
+' SYNCHRONIZE LOADED FORM
 '------------------------------------------------------------------------------
     'Track the current handler step
-        HandlerStep = "Refresh loaded DatePicker form"
-
-    'Refresh or rebuild the loaded DatePicker form when applicable
+        HandlerStep = "Synchronize loaded DatePicker form"
+    'Delegate loaded-form synchronization to the form bridge
         M_FormBridge_RefreshSettings
 
 '------------------------------------------------------------------------------
@@ -2436,6 +2479,7 @@ ErrorHandler:
             "Holiday-callback setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 
 '
@@ -2658,6 +2702,7 @@ ErrorHandler:
             "Right-click menu setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 
 '
@@ -2878,6 +2923,7 @@ ErrorHandler:
             "In-grid icon setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Function M_Settings_GetFirstDayOfWeek() As Long
 
 '
@@ -2970,6 +3016,7 @@ ErrorHandler:
             "First-day-of-week setting retrieval failed: " & Err.Description
 
 End Function
+
 Public Function M_Settings_GetUseLocalDayNames() As Boolean
 
 '
@@ -3050,6 +3097,7 @@ ErrorHandler:
             "Use-local-day-names setting retrieval failed: " & Err.Description
 
 End Function
+
 Public Function M_Settings_GetFirstDayOfWeekText() As String
 
 '
@@ -3142,6 +3190,7 @@ ErrorHandler:
             "First-day-of-week text retrieval failed: " & Err.Description
 
 End Function
+
 Public Function M_Settings_FirstDayOfWeekToText(ByVal FirstDayOfWeek As Long) As String
 
 '
@@ -3227,6 +3276,7 @@ ErrorHandler:
             "First-day-of-week text conversion failed: " & Err.Description
 
 End Function
+
 Public Function M_Settings_IsValidFirstDayOfWeek(ByVal FirstDayOfWeek As Long) As Boolean
 
 '
@@ -3288,6 +3338,7 @@ Public Function M_Settings_IsValidFirstDayOfWeek(ByVal FirstDayOfWeek As Long) A
         End Select
 
 End Function
+
 Private Function M_Settings_IsValidClockMode(ByVal ClockMode As Long) As Boolean
 
 '
@@ -3350,6 +3401,7 @@ Private Function M_Settings_IsValidClockMode(ByVal ClockMode As Long) As Boolean
         End Select
 
 End Function
+
 Private Function M_Settings_IsValidSizeMode(ByVal SizeMode As Long) As Boolean
 
 '
@@ -3412,6 +3464,7 @@ Private Function M_Settings_IsValidSizeMode(ByVal SizeMode As Long) As Boolean
         End Select
 
 End Function
+
 Private Function M_Settings_TryParseBoolean( _
     ByVal RawValue As String, _
     ByRef ParsedValue As Boolean) As Boolean
@@ -3536,6 +3589,7 @@ ParseFail:
         On Error GoTo 0
 
 End Function
+
 Private Function M_Settings_TryParseFirstDayOfWeek( _
     ByVal RawValue As String, _
     ByRef ParsedValue As Long) As Boolean
@@ -3563,17 +3617,15 @@ Private Function M_Settings_TryParseFirstDayOfWeek( _
 '
 ' RETURNS
 '   True when RawValue resolves to vbSunday or vbMonday
-'
 '   False when RawValue is blank, unsupported, or cannot be parsed safely
 '
 ' BEHAVIOR
 '   Normalizes RawValue, recognizes canonical persisted values, VBA-style
-'   constant names, English weekday names, and common Italian weekday names,
-'   assigns ParsedValue deterministically, and returns the parse result
+'   constant names, English weekday names, assigns ParsedValue deterministically,
+'   and returns the parse result
 '
 ' ERROR POLICY
 '   Does not raise errors
-'
 '   Any unexpected parsing failure returns False and resets ParsedValue to zero
 '
 ' DEPENDENCIES
@@ -3660,6 +3712,7 @@ ParseFail:
         On Error GoTo 0
 
 End Function
+
 Private Function M_Settings_TryParseLong( _
     ByVal RawValue As String, _
     ByRef ParsedValue As Long) As Boolean
@@ -3831,6 +3884,7 @@ ParseFail:
         On Error GoTo 0
 
 End Function
+
 Private Function M_Settings_BooleanToStorageValue(ByVal Value As Boolean) As String
 
 '
@@ -3891,12 +3945,10 @@ Private Function M_Settings_BooleanToStorageValue(ByVal Value As Boolean) As Str
 
 End Function
 
-
-
 Public Sub M_Picker_EnsureManager()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                          ENSURE DATEPICKER MANAGER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3922,7 +3974,7 @@ Public Sub M_Picker_EnsureManager()
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded or if the
-'   manager cannot be instantiated / re-instantiated
+'   manager cannot be instantiated or re-instantiated
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
@@ -3930,24 +3982,24 @@ Public Sub M_Picker_EnsureManager()
 '   gDP_Manager
 '
 ' NOTES
-'   This routine is the canonical manager / controller bootstrapper
+'   This routine is the canonical manager bootstrapper
 '
 '   The Is_Hooked check prevents a stale manager object from silently disabling
-'   selection-change behavior
+'   Application event handling
 '
 ' UPDATED
-'   2026-05-03
-'==============================================================================
+'   2026-05-04
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "M_Picker_EnsureManager"
 
-    Dim ManagerNeedsCreate      As Boolean          'True when manager must be created
-    Dim ManagerNeedsRecreate    As Boolean          'True when manager exists but is not hooked
-    Dim ErrorNumber             As Long             'Captured error number
-    Dim ErrorDescription        As String           'Captured error description
+    Dim ManagerNeedsCreate      As Boolean      'True when manager must be created
+    Dim ManagerNeedsRecreate    As Boolean      'True when manager exists but is not hooked
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -4012,14 +4064,15 @@ Public Sub M_Picker_EnsureManager()
 ErrorHandler:
     'Capture the original error number
         ErrorNumber = Err.Number
+
     'Capture the original error description
         ErrorDescription = Err.Description
+
     'Raise a descriptive error to the caller
         Err.Raise ErrorNumber, PROC_NAME, _
             "DatePicker manager initialization failed: " & ErrorDescription
 
 End Sub
-'
 
 Public Sub DP_Start()
 
@@ -4028,12 +4081,17 @@ Public Sub DP_Start()
 '                           START DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Starts the DatePicker manager and immediately refreshes the current UI state
+'   Starts the DatePicker manager and synchronizes the interactive Excel UI
+'   integration points
 '
 ' WHY THIS EXISTS
 '   The manager is event-driven. After workbook open, VBA reset, code import, or
 '   add-in reload, the manager must be explicitly bootstrapped before Excel
-'   selection-change events can move or remove the in-grid icon
+'   Application events can move or remove the in-grid icon
+'
+'   Startup must also synchronize right-click menu and keyboard shortcut
+'   integration so all configured DatePicker entry points are available in the
+'   current Excel session
 '
 ' INPUTS
 '   None
@@ -4042,44 +4100,79 @@ Public Sub DP_Start()
 '   Nothing
 '
 ' BEHAVIOR
-'   Ensures the manager is alive and hooked, then evaluates the current ActiveCell
-'   so stale icons are cleaned and the correct in-grid icon state is shown
+'   Ensures the manager is alive and hooked
+'   Synchronizes the Excel right-click menu according to settings
+'   Synchronizes the keyboard shortcut according to settings
+'   Evaluates the current ActiveCell so stale icons are cleaned and the correct
+'   in-grid icon state is shown
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if startup fails
 '
 ' DEPENDENCIES
 '   M_Picker_EnsureManager
+'   M_ContextMenu_Update
+'   M_KeyboardShortcut_Update
 '   gDP_Manager.Handle_SelectionChange
 '
 ' NOTES
 '   Call this from Workbook_Open, Auto_Open, add-in startup, or manually after
 '   importing the project into a workbook
 '
+'   M_ContextMenu_Update and M_KeyboardShortcut_Update are intentionally called
+'   here because those integrations are session/UI state, not only persisted
+'   settings state
+'
 ' UPDATED
-'   2026-05-03
+'   2026-05-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "DP_Start"
+    Const PROC_NAME            As String = "DP_Start" 'Current procedure name
+
+    Dim HandlerStep            As String       'Current handler step for diagnostics
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
 ' ENSURE MANAGER
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure manager"
     'Ensure the DatePicker manager exists and Application events are hooked
         M_Picker_EnsureManager
 
 '------------------------------------------------------------------------------
+' SYNCHRONIZE RIGHT-CLICK MENU
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Synchronize right-click menu"
+    'Synchronize the DatePicker right-click menu with current settings
+        M_ContextMenu_Update
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Synchronize keyboard shortcut"
+    'Synchronize the DatePicker keyboard shortcut with current settings
+        M_KeyboardShortcut_Update
+
+'------------------------------------------------------------------------------
 ' REFRESH CURRENT UI
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh current selection context"
     'Force one initial current-context refresh
         gDP_Manager.Handle_SelectionChange
 
@@ -4093,11 +4186,16 @@ Public Sub DP_Start()
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
     'Raise a descriptive startup error
-        Err.Raise Err.Number, PROC_NAME, "DatePicker startup failed: " & Err.Description
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker startup failed: " & ErrorDescription
 
 End Sub
-
 Public Sub DP_Show()
 
 '
@@ -4147,15 +4245,12 @@ Public Sub DP_Show()
 ' NOTES
 '   Load UF_DatePicker is intentional
 '
-'   Loading the form before Show runs UserForm_Initialize while the form is still
-'   hidden. This allows the form to be positioned before the first visible paint
-'
-'   The post-show positioning call is retained as a safety correction for host
-'   environments where the native UserForm window position is finalized only
-'   after Show
+'   The StepName diagnostic is intentionally retained because UserForm loading
+'   can fail inside nested Initialize routines and otherwise surface only as a
+'   generic DP_Show failure
 '
 ' UPDATED
-'   2026-05-03
+'   2026-05-04
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -4172,12 +4267,18 @@ Public Sub DP_Show()
     Dim HasCellDate                 As Boolean               'True when ActiveCell contains a usable date
     Dim HasActiveCellValue          As Boolean               'True when ActiveCell value was read successfully
     Dim LoadedForm                  As Object                'Loaded DatePicker form instance
+    Dim StepName                    As String                'Current diagnostic step
+    Dim ErrorNumber                 As Long                  'Captured error number
+    Dim ErrorSource                 As String                'Captured error source
+    Dim ErrorDescription            As String                'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Track the current step
+        StepName = "Ensure manager"
     'Ensure DatePicker settings and manager infrastructure are available
         M_Picker_EnsureManager
     'Default the initial date to today
@@ -4190,10 +4291,12 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ' READ ACTIVE CELL VALUE
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Read ActiveCell value"
     'Suppress ActiveCell access errors
         On Error Resume Next
     'Read ActiveCell value safely
-        CellValue = Application.ActiveCell.Value
+        CellValue = Excel.Application.ActiveCell.Value
     'Store whether ActiveCell value was read successfully
         HasActiveCellValue = (Err.Number = 0)
     'Clear any suppressed ActiveCell access error
@@ -4204,10 +4307,12 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ' RESOLVE INITIAL DATE FROM ACTIVE CELL
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Resolve initial date"
     'Use ActiveCell only when a value was read successfully
         If HasActiveCellValue Then
             'Ignore Excel error values
-                If Not IsError(CellValue) Then
+                If Not VBA.IsError(CellValue) Then
                     'Evaluate only date-like values
                         If VBA.IsDate(CellValue) Then
                             'Suppress conversion errors for unusual date-like values
@@ -4223,19 +4328,22 @@ Public Sub DP_Show()
                         End If
                 End If
         End If
-
     'Restore the default initial date when no valid ActiveCell date was resolved
         If Not HasCellDate Then InitialDate = VBA.Date
 
 '------------------------------------------------------------------------------
 ' RESET EXISTING FORM INSTANCE
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Unload existing DatePicker"
     'Unload any existing DatePicker instance so Initialize runs again
         M_FormBridge_UnloadLoadedPicker
 
 '------------------------------------------------------------------------------
 ' STORE FORM BRIDGE STATE
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Store bridge state"
     'Store the initial date for the next UF_DatePicker instance
         gDP_InitialDate = InitialDate
     'Mark the initial date as available
@@ -4256,8 +4364,12 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ' LOAD FORM INSTANCE
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Load UF_DatePicker"
     'Load the DatePicker form while it is still hidden
         Load UF_DatePicker
+    'Track the current step
+        StepName = "Resolve loaded DatePicker form"
     'Resolve the loaded DatePicker form instance
         Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
     'Fallback to the default instance if the bridge did not resolve it
@@ -4271,6 +4383,8 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ' PRE-POSITION HIDDEN FORM
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Pre-position hidden form"
     'Suppress best-effort pre-show positioning errors
         On Error Resume Next
     'Move the hidden loaded form close to the current mouse position before first paint
@@ -4287,12 +4401,16 @@ Public Sub DP_Show()
 '------------------------------------------------------------------------------
 ' SHOW FORM
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Show modeless form"
     'Show the loaded DatePicker form modelessly
         LoadedForm.Show vbModeless
 
 '------------------------------------------------------------------------------
 ' FINAL POSITION CORRECTION
 '------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Final position correction"
     'Suppress best-effort post-show positioning errors
         On Error Resume Next
     'Apply one final position correction after the native UserForm window is visible
@@ -4316,10 +4434,28 @@ Public Sub DP_Show()
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error source
+        ErrorSource = Err.Source
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Write a detailed diagnostic before re-raising
+        Debug.Print PROC_NAME & _
+            " | Step=" & StepName & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | Source=" & ErrorSource & _
+            " | " & ErrorDescription
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "DatePicker show failed: " & Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "DatePicker show failed" & _
+            " | Step=" & StepName & _
+            " | Source=" & ErrorSource & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
 
 End Sub
+
 Public Sub DP_Click()
 
 '
@@ -4393,6 +4529,7 @@ ErrorHandler:
             & Err.Description
 
 End Sub
+
 Public Sub DP_OpenForActiveCell()
 
 '
@@ -4583,6 +4720,7 @@ ErrorHandler:
             "DatePicker runtime repair failed: " & ErrorDescription
 
 End Sub
+
 Public Sub DP_Close()
 
 '
@@ -4685,6 +4823,7 @@ Public Sub DP_Close()
         On Error GoTo 0
 
 End Sub
+
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 
 '
@@ -4741,8 +4880,6 @@ Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Bo
         gDP_HasInitialDate = False
 
 End Function
-
-
 
 Public Sub M_Picker_SelectDate( _
     ByVal SelectedDate As Date, _
@@ -4869,7 +5006,7 @@ Public Sub M_Picker_SelectDate( _
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
     'Write the selected date to the current Excel target
-        M_WriteBack_Apply Date_Picker, NoTableGrow
+        M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -4928,6 +5065,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, "DatePicker date selection failed: " & ErrorDescription
 
 End Sub
+
 Public Sub DP_Today()
 
 '
@@ -5121,7 +5259,7 @@ Public Sub DP_Now()
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
     'Apply the date-time value to the current Excel target
-        M_WriteBack_Apply Date_Picker, False
+        M_WriteBack_Apply DP_WriteAction_DatePicker, False
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -5185,7 +5323,7 @@ Public Sub M_WriteBack_Apply( _
     Optional ByVal NoTableGrow As Boolean = False)
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           APPLY WRITE-BACK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -5210,10 +5348,12 @@ Public Sub M_WriteBack_Apply( _
 '   Nothing
 '
 ' BEHAVIOR
-'   Validates the requested write action, captures the current Excel event state,
-'   disables events during write-back, delegates target resolution and write-back
-'   to M_WriteBack_ResolveAndApplyTarget, and restores the previous Excel event
-'   state before exiting
+'   Validates the requested write action
+'   Validates that the prepared DatePicker write value is not the zero-date
+'   Captures the current Excel event state
+'   Disables events during write-back
+'   Delegates target resolution and write-back to M_WriteBack_ResolveAndApplyTarget
+'   Restores the previous Excel event state before exiting
 '
 ' ERROR POLICY
 '   Restores Application.EnableEvents when the previous state was captured
@@ -5224,10 +5364,16 @@ Public Sub M_WriteBack_Apply( _
 '   write-back error exists
 '
 ' DEPENDENCIES
+'   gDP_WriteValue
 '   M_WriteBack_ResolveAndApplyTarget
 '   Application.EnableEvents
 '
 ' NOTES
+'   gDP_WriteValue is declared as Date, not Variant
+'
+'   Because a Date variable cannot be Null, Empty, or an Excel error value, this
+'   routine treats zero-date as the uninitialized write-value sentinel
+'
 '   This routine intentionally does not change calculation mode
 '
 '   This routine intentionally does not change screen updating
@@ -5236,13 +5382,13 @@ Public Sub M_WriteBack_Apply( _
 '   nothing
 '
 ' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_WriteBack_Apply"
+    Const PROC_NAME             As String = "M_WriteBack_Apply" 'Current procedure name
 
     Dim PreviousEvents          As Boolean      'Prior Application.EnableEvents state
     Dim EventsStateCaptured     As Boolean      'True when PreviousEvents is available
@@ -5261,7 +5407,6 @@ Public Sub M_WriteBack_Apply( _
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
     'Initialize diagnostic step
         HandlerStep = "Initialize"
 
@@ -5270,10 +5415,9 @@ Public Sub M_WriteBack_Apply( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Validate write action"
-
     'Validate the requested write action
         Select Case iType
-            Case DP_WriteAction.Date_Picker
+            Case DP_WriteAction_DatePicker
                 'Supported DatePicker write action
             Case Else
                 'Reject unsupported write actions
@@ -5282,13 +5426,23 @@ Public Sub M_WriteBack_Apply( _
         End Select
 
 '------------------------------------------------------------------------------
+' VALIDATE PREPARED WRITE VALUE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate prepared write value"
+    'Reject the zero-date sentinel because gDP_WriteValue is a Date, not a Variant
+        If gDP_WriteValue = 0 Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "DatePicker write value has not been initialized."
+        End If
+
+'------------------------------------------------------------------------------
 ' CAPTURE EXCEL EVENT STATE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Capture Excel event state"
-
     'Capture the current Excel events state
-        PreviousEvents = Application.EnableEvents
+        PreviousEvents = Excel.Application.EnableEvents
     'Mark the Excel event state as captured
         EventsStateCaptured = True
 
@@ -5297,16 +5451,16 @@ Public Sub M_WriteBack_Apply( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Suppress Excel events"
-
     'Disable events only when they are currently enabled
-        If PreviousEvents Then Application.EnableEvents = False
+        If PreviousEvents Then
+            Excel.Application.EnableEvents = False
+        End If
 
 '------------------------------------------------------------------------------
 ' DISPATCH WRITE-BACK
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve and apply write-back target"
-
     'Apply the requested action to the current selection
         M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow
 
@@ -5317,8 +5471,10 @@ CleanExit:
     'Protect cleanup from masking the original error
         On Error Resume Next
     'Restore the previous Excel event state when it was captured
-        If EventsStateCaptured Then Application.EnableEvents = PreviousEvents
-    'Capture cleanup failure when no original error exists
+        If EventsStateCaptured Then
+            Excel.Application.EnableEvents = PreviousEvents
+        End If
+    'Capture cleanup failure
         If Err.Number <> 0 Then
             CleanupErrNumber = Err.Number
             CleanupErrDescription = Err.Description
@@ -5450,7 +5606,7 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 
     'Validate the requested write action
         Select Case iType
-            Case Date_Picker
+            Case DP_WriteAction_DatePicker
                 'Supported DatePicker write action
             Case Else
                 'Reject unsupported write actions
@@ -5686,7 +5842,7 @@ Public Sub M_WriteBack_PopulateRange( _
 
     'Resolve the value to write from the requested DatePicker action
         Select Case iType
-            Case Date_Picker
+            Case DP_WriteAction_DatePicker
                 'Resolve the current DatePicker write value
                     WriteValue = M_WriteBack_GetPickedValue
             Case Else
@@ -5938,7 +6094,7 @@ End Function
 Private Function M_WriteBack_GetPickedValue() As Date
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           GET PICKED WRITE VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -5960,14 +6116,14 @@ Private Function M_WriteBack_GetPickedValue() As Date
 '   date-time value, such as through DP_Now
 '
 ' BEHAVIOR
-'   Validates that gDP_WriteValue contains a usable date or date-time value,
-'   converts it to a VBA Date, validates the supported DatePicker year range,
-'   and returns the validated value
+'   Validates that gDP_WriteValue has been initialized
+'   Preserves any time component already stored in gDP_WriteValue
+'   Validates the supported DatePicker year range
+'   Returns the validated DatePicker write value
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the DatePicker write value is empty,
-'   Null, an Excel error value, non-date, or outside the supported DatePicker
-'   year range
+'   Raises a descriptive runtime error if the DatePicker write value is the
+'   zero-date sentinel or outside the supported DatePicker year range
 '
 ' DEPENDENCIES
 '   gDP_WriteValue
@@ -5975,23 +6131,30 @@ Private Function M_WriteBack_GetPickedValue() As Date
 '   DP_MAX_YEAR
 '
 ' NOTES
-'   This routine intentionally uses CDate rather than DateValue so date-time
-'   values retain their time component
+'   gDP_WriteValue is declared as Date, not Variant
+'
+'   Therefore this routine does not test for Null, Empty, Excel error values, or
+'   non-date values because those states cannot exist in a Date variable
+'
+'   The zero-date value is treated as the uninitialized write-value sentinel
 '
 '   Calendar day selection and Today prepare date-only values upstream
 '
 '   Now prepares a date-time value upstream
 '
 ' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "M_WriteBack_GetPickedValue"
-    
-    Dim PickedValue     As Date     'Resolved DatePicker write value
+    Const PROC_NAME            As String = "M_WriteBack_GetPickedValue" 'Current procedure name
+
+    Dim PickedValue            As Date         'Resolved DatePicker write value
+    Dim PickedYear             As Long         'Resolved DatePicker write year
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6000,34 +6163,37 @@ Private Function M_WriteBack_GetPickedValue() As Date
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' VALIDATE TRANSIENT WRITE VALUE
+' RESOLVE WRITE VALUE
 '------------------------------------------------------------------------------
-    'Reject Null write values
-        If IsNull(gDP_WriteValue) Then
+    'Read the prepared DatePicker write value
+        PickedValue = gDP_WriteValue
+
+'------------------------------------------------------------------------------
+' VALIDATE INITIALIZATION STATE
+'------------------------------------------------------------------------------
+    'Reject the zero-date sentinel
+        If PickedValue = 0 Then
             Err.Raise vbObjectError + 513, PROC_NAME, _
-                "DatePicker write value cannot be Null"
-        End If
-    'Reject Excel error values
-        If IsError(gDP_WriteValue) Then
-            Err.Raise vbObjectError + 514, PROC_NAME, _
-                "DatePicker write value cannot be an Excel error value"
-        End If
-    'Reject empty write values
-        If IsEmpty(gDP_WriteValue) Then
-            Err.Raise vbObjectError + 515, PROC_NAME, _
-                "DatePicker write value has not been initialized"
-        End If
-    'Reject non-date write values
-        If Not VBA.IsDate(gDP_WriteValue) Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "DatePicker write value must be a date or date-time value"
+                "DatePicker write value has not been initialized."
         End If
 
 '------------------------------------------------------------------------------
-' CONVERT WRITE VALUE
+' VALIDATE SUPPORTED YEAR RANGE
 '------------------------------------------------------------------------------
-    'Convert the transient write value to a VBA Date while preserving time
-        PickedValue = VBA.CDate(gDP_WriteValue)
+    'Resolve the write-value year
+        PickedYear = VBA.Year(PickedValue)
+    'Reject dates before the supported DatePicker year range
+        If PickedYear < DP_MIN_YEAR Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "DatePicker write value year is before the supported minimum year: " & _
+                VBA.CStr(DP_MIN_YEAR)
+        End If
+    'Reject dates after the supported DatePicker year range
+        If PickedYear > DP_MAX_YEAR Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "DatePicker write value year is after the supported maximum year: " & _
+                VBA.CStr(DP_MAX_YEAR)
+        End If
 
 '------------------------------------------------------------------------------
 ' RETURN VALUE
@@ -6045,11 +6211,18 @@ Private Function M_WriteBack_GetPickedValue() As Date
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+
+    'Capture the error description
+        ErrorDescription = Err.Description
+
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, _
-            "DatePicker write value resolution failed: " & Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "DatePicker write value resolution failed: " & ErrorDescription
 
 End Function
+
 Public Function M_DatePolicy_CanSelectDate( _
     ByVal CandidateDate As Date, _
     ByVal DisplayYear As Long, _
@@ -6100,7 +6273,7 @@ Public Function M_DatePolicy_CanSelectDate( _
 '   paths such as grid rendering, hover handling, and keyboard navigation
 '
 ' DEPENDENCIES
-'   gDP_AllowOutsideMonthSel
+'   gDP_AllowOutsideMonthSelection
 '
 ' NOTES
 '   This routine intentionally does not call M_Settings_EnsureLoaded
@@ -6166,7 +6339,7 @@ Public Function M_DatePolicy_CanSelectDate( _
 ' APPLY OUTSIDE-MONTH POLICY
 '------------------------------------------------------------------------------
     'Allow valid candidate dates when outside-month selection is enabled
-        If gDP_AllowOutsideMonthSel Then
+        If gDP_AllowOutsideMonthSelection Then
             M_DatePolicy_CanSelectDate = True
             Exit Function
         End If
@@ -6323,23 +6496,22 @@ Public Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Bo
 SafeExit:
     'Suppress callback or policy failures
         On Error Resume Next
-
     'Return safe default
         M_HolidayPolicy_IsHolidayDate = False
-
     'Clear any pending error
         Err.Clear
-
     'Restore normal error handling
         On Error GoTo 0
 
 End Function
+
 '
 '------------------------------------------------------------------------------
 '
 '                                  TEXT HELPERS
 '
 '------------------------------------------------------------------------------
+'
 
 Public Function M_Caption_GetMonth( _
     ByVal MonthNumber As Long, _
@@ -6347,55 +6519,86 @@ Public Function M_Caption_GetMonth( _
 
 '
 '------------------------------------------------------------------------------
-'                           GET MONTHCAPTION
+'                           GET MONTH CAPTION
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns a DatePicker caption value
+'   Returns the display caption for a month number
 '
 ' WHY THIS EXISTS
-'   Caption generation should remain centralized so local-name and fixed-English display modes stay consistent
+'   DatePicker month captions are used in several UI locations. Centralizing the
+'   logic keeps local-name mode and fixed-English mode consistent across the
+'   form, picker panels, and regression tests
 '
 ' INPUTS
-'   See procedure signature
+'   MonthNumber
+'     Month number to convert
+'     Must be between 1 and 12
+'
+'   UseLocalNames
+'     True to use the local VBA month name
+'     False to use the fixed-English DatePicker caption
 '
 ' RETURNS
-'   See procedure type
+'   Uppercase trimmed month caption
 '
 ' BEHAVIOR
-'   - Validates inputs
-'   - Builds the requested caption
-'   - Returns the normalized display text
+'   Validates the month number, resolves the caption using either local VBA
+'   month names or the fixed-English helper, then returns a normalized uppercase
+'   caption
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises vbObjectError + 513 when MonthNumber is outside the supported range
+'
+'   Other unexpected failures are allowed to propagate naturally so the caller
+'   receives the original VBA runtime error
 '
 ' DEPENDENCIES
-'   VBA date formatting functions
+'   VBA.MonthName
+'   M_Caption_GetEnglishMonthFull
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Fixed-English mode is delegated to M_Caption_GetEnglishMonthFull so English
+'   month naming remains controlled by the DatePicker companion-module API
+'
+'   Local-name mode uses VBA.MonthName and is therefore driven by the host
+'   Office / Windows locale
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    Const PROC_NAME As String = "M_Caption_GetMonth"                 'Current procedure name
-    Dim MonthCaption As String                                         'Resolved month caption
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Caption_GetMonth"
 
-    'Reject invalid month numbers
+    Dim MonthCaption        As String       'Resolved month caption
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject month numbers outside the supported calendar range
         If MonthNumber < 1 Or MonthNumber > 12 Then
             Err.Raise vbObjectError + 513, PROC_NAME, "MonthNumber must be between 1 and 12."
         End If
 
-    'Resolve the month caption according to the local-name setting
+'------------------------------------------------------------------------------
+' RESOLVE MONTH CAPTION
+'------------------------------------------------------------------------------
+    'Resolve the month caption using local host names when requested
         If UseLocalNames Then
-            MonthCaption = MonthName(MonthNumber, False)
+            MonthCaption = VBA.MonthName(MonthNumber, False)
+    'Otherwise resolve the month caption using the fixed-English helper
         Else
             MonthCaption = M_Caption_GetEnglishMonthFull(MonthNumber)
         End If
 
-    'Return the normalized caption
-        M_Caption_GetMonth = UCase$(Trim$(MonthCaption))
+'------------------------------------------------------------------------------
+' RETURN VALUE
+'------------------------------------------------------------------------------
+    'Return the normalized display caption
+        M_Caption_GetMonth = VBA.UCase$(VBA.Trim$(MonthCaption))
+
 End Function
 
 
@@ -6405,170 +6608,259 @@ Public Function M_Caption_GetDate( _
 
 '
 '------------------------------------------------------------------------------
-'                           GET DATECAPTION
+'                           GET DATE CAPTION
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns a DatePicker caption value
+'   Returns the display caption for a DatePicker date value
 '
 ' WHY THIS EXISTS
-'   Caption generation should remain centralized so local-name and fixed-English display modes stay consistent
+'   DatePicker date captions are used in several UI locations. Centralizing the
+'   logic keeps local-name mode and fixed-English mode consistent across the
+'   form, picker panels, and regression tests
 '
 ' INPUTS
-'   See procedure signature
+'   DateValue
+'     Date value to convert into display text
+'
+'   UseLocalNames
+'     True to use the local abbreviated month name
+'     False to use the fixed-English DatePicker abbreviated month caption
 '
 ' RETURNS
-'   See procedure type
+'   Date caption in dd-MMM-yyyy style
 '
 ' BEHAVIOR
-'   - Validates inputs
-'   - Builds the requested caption
-'   - Returns the normalized display text
+'   Builds the day, month, and year components from DateValue, resolves the month
+'   component using either local VBA formatting or the fixed-English helper, and
+'   returns the final normalized caption
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises unexpected failures back to the caller with this procedure name as
+'   the error source
 '
 ' DEPENDENCIES
-'   VBA date formatting functions
+'   VBA.Format$
+'   VBA.Month
+'   M_Caption_GetEnglishMonthShort
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Local-name mode uses VBA.Format$(DateValue, "mmm") and is therefore driven
+'   by the host Office / Windows locale
+'
+'   Fixed-English mode is delegated to M_Caption_GetEnglishMonthShort so English
+'   month naming remains controlled by the DatePicker companion-module API
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    Const PROC_NAME As String = "M_Caption_GetDate"                  'Current procedure name
-    Dim DayText As String                                              'Day component
-    Dim MonthText As String                                            'Month component
-    Dim YearText As String                                             'Year component
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Caption_GetDate"
 
+    Dim DayText                 As String        'Day component
+    Dim MonthText               As String        'Month component
+    Dim YearText                As String        'Year component
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
-    'Build the day component
-        DayText = Format$(DateValue, "dd")
+'------------------------------------------------------------------------------
+' BUILD DAY COMPONENT
+'------------------------------------------------------------------------------
+    'Build the two-digit day component
+        DayText = VBA.Format$(DateValue, "dd")
 
-    'Build the month component
+'------------------------------------------------------------------------------
+' BUILD MONTH COMPONENT
+'------------------------------------------------------------------------------
+    'Build the local abbreviated month component when requested
         If UseLocalNames Then
-            MonthText = UCase$(Format$(DateValue, "mmm"))
+            MonthText = VBA.UCase$(VBA.Format$(DateValue, "mmm"))
+    'Otherwise build the fixed-English abbreviated month component
         Else
             MonthText = M_Caption_GetEnglishMonthShort(VBA.Month(DateValue))
         End If
 
-    'Build the year component
-        YearText = Format$(DateValue, "yyyy")
+'------------------------------------------------------------------------------
+' BUILD YEAR COMPONENT
+'------------------------------------------------------------------------------
+    'Build the four-digit year component
+        YearText = VBA.Format$(DateValue, "yyyy")
 
-    'Return the final caption
+'------------------------------------------------------------------------------
+' RETURN VALUE
+'------------------------------------------------------------------------------
+    'Return the final date caption
         M_Caption_GetDate = DayText & "-" & MonthText & "-" & YearText
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Function
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
+
 End Function
 
 Public Function M_Caption_GetEnglishMonthShort(ByVal MonthNumber As Long) As String
 
 '
 '------------------------------------------------------------------------------
-'                           GET ENGLISHMONTHSHORTCAPTION
+'                           GET ENGLISH MONTH SHORT CAPTION
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns a DatePicker caption value
+'   Returns the fixed-English abbreviated month caption for a month number
 '
 ' WHY THIS EXISTS
-'   Caption generation should remain centralized so local-name and fixed-English display modes stay consistent
+'   DatePicker month captions are used in several UI locations. Centralizing the
+'   fixed-English caption map keeps display behavior consistent across the form,
+'   picker panels, caption helpers, and regression tests
 '
 ' INPUTS
-'   See procedure signature
+'   MonthNumber
+'     Month number to convert
+'     Must be between 1 and 12
 '
 ' RETURNS
-'   See procedure type
+'   Fixed-English uppercase three-letter month caption
 '
 ' BEHAVIOR
-'   - Validates inputs
-'   - Builds the requested caption
-'   - Returns the normalized display text
+'   Validates the month number and returns the corresponding fixed-English short
+'   month caption
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises vbObjectError + 513 when MonthNumber is outside the supported range
 '
 ' DEPENDENCIES
-'   VBA date formatting functions
+'   None
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This helper deliberately does not use VBA.Format$ or VBA.MonthName because
+'   fixed-English mode must be independent from the host Office / Windows locale
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
-    'Reject invalid month numbers
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Caption_GetEnglishMonthShort"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject month numbers outside the supported calendar range
         If MonthNumber < 1 Or MonthNumber > 12 Then
-            Err.Raise vbObjectError + 513, "M_Caption_GetEnglishMonthShort", _
-                "MonthNumber must be between 1 and 12."
+            Err.Raise vbObjectError + 513, PROC_NAME, "MonthNumber must be between 1 and 12."
         End If
 
-    'Return the fixed English short month caption
+'------------------------------------------------------------------------------
+' RETURN FIXED-ENGLISH SHORT MONTH CAPTION
+'------------------------------------------------------------------------------
+    'Return the fixed-English short caption for the requested month
         Select Case MonthNumber
-            Case 1: M_Caption_GetEnglishMonthShort = "JAN"
-            Case 2: M_Caption_GetEnglishMonthShort = "FEB"
-            Case 3: M_Caption_GetEnglishMonthShort = "MAR"
-            Case 4: M_Caption_GetEnglishMonthShort = "APR"
-            Case 5: M_Caption_GetEnglishMonthShort = "MAY"
-            Case 6: M_Caption_GetEnglishMonthShort = "JUN"
-            Case 7: M_Caption_GetEnglishMonthShort = "JUL"
-            Case 8: M_Caption_GetEnglishMonthShort = "AUG"
-            Case 9: M_Caption_GetEnglishMonthShort = "SEP"
-            Case 10: M_Caption_GetEnglishMonthShort = "OCT"
-            Case 11: M_Caption_GetEnglishMonthShort = "NOV"
-            Case 12: M_Caption_GetEnglishMonthShort = "DEC"
+            Case 1
+                M_Caption_GetEnglishMonthShort = "JAN"
+            Case 2
+                M_Caption_GetEnglishMonthShort = "FEB"
+            Case 3
+                M_Caption_GetEnglishMonthShort = "MAR"
+            Case 4
+                M_Caption_GetEnglishMonthShort = "APR"
+            Case 5
+                M_Caption_GetEnglishMonthShort = "MAY"
+            Case 6
+                M_Caption_GetEnglishMonthShort = "JUN"
+            Case 7
+                M_Caption_GetEnglishMonthShort = "JUL"
+            Case 8
+                M_Caption_GetEnglishMonthShort = "AUG"
+            Case 9
+                M_Caption_GetEnglishMonthShort = "SEP"
+            Case 10
+                M_Caption_GetEnglishMonthShort = "OCT"
+            Case 11
+                M_Caption_GetEnglishMonthShort = "NOV"
+            Case 12
+                M_Caption_GetEnglishMonthShort = "DEC"
         End Select
-End Function
 
+End Function
 Public Function M_Caption_GetEnglishMonthFull(ByVal MonthNumber As Long) As String
 
 '
 '------------------------------------------------------------------------------
-'                           GET ENGLISHMONTHCAPTION
+'                           GET ENGLISH MONTH FULL CAPTION
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns a DatePicker caption value
+'   Returns the fixed-English full month caption for a month number
 '
 ' WHY THIS EXISTS
-'   Caption generation should remain centralized so local-name and fixed-English display modes stay consistent
+'   DatePicker month captions are used in several UI locations. Centralizing the
+'   fixed-English caption map keeps display behavior consistent across the form,
+'   picker panels, caption helpers, and regression tests
 '
 ' INPUTS
-'   See procedure signature
+'   MonthNumber
+'     Month number to convert
+'     Must be between 1 and 12
 '
 ' RETURNS
-'   See procedure type
+'   Fixed-English uppercase full month caption
 '
 ' BEHAVIOR
-'   - Validates inputs
-'   - Builds the requested caption
-'   - Returns the normalized display text
+'   Validates the month number and returns the corresponding fixed-English full
+'   month caption
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises vbObjectError + 513 when MonthNumber is outside the supported range
 '
 ' DEPENDENCIES
-'   VBA date formatting functions
+'   None
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This helper deliberately does not use VBA.Format$ or VBA.MonthName because
+'   fixed-English mode must be independent from the host Office / Windows locale
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
-    'Reject invalid month numbers
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Caption_GetEnglishMonthFull"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject month numbers outside the supported calendar range
         If MonthNumber < 1 Or MonthNumber > 12 Then
-            Err.Raise vbObjectError + 513, "M_Caption_GetEnglishMonthFull", _
-                "MonthNumber must be between 1 and 12."
+            Err.Raise vbObjectError + 513, PROC_NAME, "MonthNumber must be between 1 and 12."
         End If
 
-    'Return the fixed English full month caption
+'------------------------------------------------------------------------------
+' RETURN FIXED-ENGLISH FULL MONTH CAPTION
+'------------------------------------------------------------------------------
+    'Return the fixed-English full caption for the requested month
         Select Case MonthNumber
             Case 1: M_Caption_GetEnglishMonthFull = "JANUARY"
             Case 2: M_Caption_GetEnglishMonthFull = "FEBRUARY"
@@ -6583,7 +6875,10 @@ Public Function M_Caption_GetEnglishMonthFull(ByVal MonthNumber As Long) As Stri
             Case 11: M_Caption_GetEnglishMonthFull = "NOVEMBER"
             Case 12: M_Caption_GetEnglishMonthFull = "DECEMBER"
         End Select
+
 End Function
+
+
 
 '
 '------------------------------------------------------------------------------
@@ -6595,467 +6890,796 @@ End Function
 Public Sub M_Timer_ApplyClockMode()
 
 '
-'------------------------------------------------------------------------------
-'                           TIMER APPLYCLOCKMODE
+'==============================================================================
+'                           TIMER APPLY CLOCK MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages the DatePicker live footer clock timer
+'   Applies the current DatePicker clock mode to the loaded picker form
 '
 ' WHY THIS EXISTS
-'   Application.OnTime is one-shot and requires controlled start, stop, tick, and cleanup behavior
+'   Application.OnTime is one-shot. The DatePicker therefore needs one controlled
+'   routine that stops any existing clock timer, refreshes the loaded form clock
+'   once, and restarts the timer only when live-clock mode is enabled
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Updates the loaded form clock when applicable
-'   - Schedules or cancels the next timer tick
-'   - Stops safely when the form is no longer loaded
+'   Ensures settings are loaded
+'   Stops any existing DatePicker timer
+'   Resolves the already-loaded DatePicker form through the shared form bridge
+'   Refreshes the loaded DatePicker form clock when a form is available
+'   Starts the next timer tick only when gDP_ClockMode is DP_ClockMode_Live
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Stops the DatePicker timer on unexpected failure and re-raises the original
+'   error with this procedure name as the source
 '
 ' DEPENDENCIES
-'   Application.OnTime
-'   VBA.UserForms
+'   M_Settings_EnsureLoaded
+'   M_FormBridge_GetLoadedForm
+'   M_Timer_Stop
+'   M_Timer_Start
+'   DP_FORM_NAME
+'   gDP_ClockMode
+'   DP_ClockMode_Live
+'   UF_DatePicker.UF_DP_UpdateLiveClock
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine deliberately avoids direct UF_DatePicker default-instance
+'   references
+'
+'   Loaded-form lookup is delegated to M_FormBridge_GetLoadedForm so timer,
+'   refresh, and unload routines use the same loaded-form matching policy
+'
+'   M_FormBridge_GetLoadedForm checks both TypeName and runtime Name, prefers a
+'   visible matching instance, and falls back to a hidden matching instance
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_Timer_ApplyClockMode" 'Current procedure name
 
-    Const PROC_NAME As String = "M_Timer_ApplyClockMode"             'Current procedure name
-    Dim LoadedForm As Object                                           'Loaded UserForm instance
+    Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
+    Dim StopErrNumber          As Long         'Captured timer-stop error number
+    Dim StopErrDescription     As String       'Captured timer-stop error description
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
-    'Ensure settings are loaded before reading gDP_ClockMode
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the clock-mode flag
         M_Settings_EnsureLoaded
 
+'------------------------------------------------------------------------------
+' STOP EXISTING TIMER
+'------------------------------------------------------------------------------
     'Stop any existing DatePicker timer before applying the current mode
         M_Timer_Stop
 
-    'Loop through loaded UserForms
-        For Each LoadedForm In VBA.UserForms
-            'Update the loaded DatePicker clock once
-                If TypeName(LoadedForm) = DP_FORM_NAME Then
-                    LoadedForm.UF_DP_UpdateLiveClock
-                    Exit For
-                End If
-        Next LoadedForm
+'------------------------------------------------------------------------------
+' RESOLVE LOADED FORM
+'------------------------------------------------------------------------------
+    'Resolve the already-loaded DatePicker form instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
 
-    'Start the live timer only when live clock mode is enabled
-        If gDP_ClockMode = DP_ClockMode_Live Then
-            M_Timer_Start
+'------------------------------------------------------------------------------
+' REFRESH LOADED FORM CLOCK
+'------------------------------------------------------------------------------
+    'Update the loaded DatePicker clock once when the picker is loaded
+        If Not LoadedForm Is Nothing Then
+            LoadedForm.UF_DP_UpdateLiveClock
         End If
 
+'------------------------------------------------------------------------------
+' START LIVE TIMER WHEN ENABLED
+'------------------------------------------------------------------------------
+    'Start the live timer only when live clock mode is enabled
+        If gDP_ClockMode = DP_ClockMode_Live Then M_Timer_Start
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release the loaded form reference
+        Set LoadedForm = Nothing
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Suppress timer-stop errors while preserving the original failure
+        On Error Resume Next
     'Stop the timer after an unexpected clock-mode error
         M_Timer_Stop
+    'Capture timer-stop error number
+        StopErrNumber = Err.Number
+    'Capture timer-stop error description
+        StopErrDescription = Err.Description
+    'Clear any suppressed timer-stop error
+        Err.Clear
+    'Release the loaded form reference
+        Set LoadedForm = Nothing
+    'Write timer-stop diagnostics only when cleanup failed
+        If StopErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=M_Timer_Stop" & _
+                " | Error=" & VBA.CStr(StopErrNumber) & _
+                " | " & StopErrDescription
+        End If
+    'Restore normal error handling
+        On Error GoTo 0
+    'Re-raise the original error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
 End Sub
-
 Public Sub M_Timer_Start()
 
 '
 '------------------------------------------------------------------------------
-'                           STARTTIMER
+'                           START TIMER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages the DatePicker live footer clock timer
+'   Starts the DatePicker live footer clock timer
 '
 ' WHY THIS EXISTS
-'   Application.OnTime is one-shot and requires controlled start, stop, tick, and cleanup behavior
+'   Application.OnTime is one-shot. The DatePicker therefore needs a controlled
+'   start routine that builds the workbook-qualified tick procedure name,
+'   records the next scheduled tick, and schedules the next timer callback
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Updates the loaded form clock when applicable
-'   - Schedules or cancels the next timer tick
-'   - Stops safely when the form is no longer loaded
+'   Exits when the timer is already running, resolves the workbook-qualified
+'   timer tick procedure name, marks the timer as running, calculates the next
+'   tick time, and schedules the next Application.OnTime callback
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Clears timer state after a scheduling failure and re-raises the original
+'   error with this procedure name as the source
 '
 ' DEPENDENCIES
 '   Application.OnTime
-'   VBA.UserForms
+'   M_GetQualifiedMacroName
+'   M_Timer_Tick
+'   mDP_TimerIsRunning
+'   mDP_TimerProcedureName
+'   mDP_NextTickTime
+'   DP_TIMER_SECONDS
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine does not update the visible clock directly
+'
+'   Clock refresh is handled by M_Timer_Tick and by M_Timer_ApplyClockMode
+'
+'   The procedure name is workbook-qualified so OnTime can find the callback
+'   reliably when multiple workbooks or add-ins are open
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    Const PROC_NAME As String = "M_Timer_Start"                        'Current procedure name
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Timer_Start"
 
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
+'------------------------------------------------------------------------------
+' EXIT IF ALREADY RUNNING
+'------------------------------------------------------------------------------
     'Exit if the timer is already running
-        If mDP_TimerIsRunning Then
-            Exit Sub
-        End If
+        If mDP_TimerIsRunning Then Exit Sub
 
+'------------------------------------------------------------------------------
+' RESOLVE TIMER PROCEDURE
+'------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
         mDP_TimerProcedureName = M_GetQualifiedMacroName("M_Timer_Tick")
 
-    'Mark the timer as running
+'------------------------------------------------------------------------------
+' MARK TIMER RUNNING
+'------------------------------------------------------------------------------
+    'Mark the timer as running before scheduling the OnTime callback
         mDP_TimerIsRunning = True
 
+'------------------------------------------------------------------------------
+' CALCULATE NEXT TICK
+'------------------------------------------------------------------------------
     'Calculate the next timer tick
         mDP_NextTickTime = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
 
+'------------------------------------------------------------------------------
+' SCHEDULE NEXT TICK
+'------------------------------------------------------------------------------
     'Schedule the next timer tick
         Application.OnTime _
             EarliestTime:=mDP_NextTickTime, _
             Procedure:=mDP_TimerProcedureName, _
             Schedule:=True
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
-    'Clear timer state after scheduling failure
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Clear timer running state after scheduling failure
         mDP_TimerIsRunning = False
-
     'Clear next tick time after scheduling failure
         mDP_NextTickTime = 0
-
     'Clear timer procedure name after scheduling failure
         mDP_TimerProcedureName = vbNullString
+    'Re-raise the original error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
 End Sub
-
 Public Sub M_Timer_Stop()
 
 '
 '------------------------------------------------------------------------------
-'                           STOPTIMER
+'                           STOP TIMER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages the DatePicker live footer clock timer
+'   Stops the DatePicker live footer clock timer
 '
 ' WHY THIS EXISTS
-'   Application.OnTime is one-shot and requires controlled start, stop, tick, and cleanup behavior
+'   Application.OnTime is one-shot and cancellation requires the same scheduled
+'   time and procedure name used when the callback was registered
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Updates the loaded form clock when applicable
-'   - Schedules or cancels the next timer tick
-'   - Stops safely when the form is no longer loaded
+'   Rebuilds the qualified timer procedure name when needed, attempts to cancel
+'   the next scheduled timer tick when a timer is active, and always clears the
+'   internal timer state
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort cleanup. Cancellation errors are suppressed because OnTime
+'   cancellation can fail when the callback already fired, Excel is shutting
+'   down, the project was reset, or the procedure name cannot be resolved
 '
 ' DEPENDENCIES
 '   Application.OnTime
-'   VBA.UserForms
+'   M_GetQualifiedMacroName
+'   M_Timer_Tick
+'   mDP_TimerIsRunning
+'   mDP_TimerProcedureName
+'   mDP_NextTickTime
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally does not raise outward
+'
+'   Timer state is cleared even when the OnTime cancellation attempt fails
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    'Suppress cancellation errors
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Timer_Stop"
+
+    Dim CancelErrNumber         As Long          'Captured cancellation error number
+    Dim CancelErrDescription    As String        'Captured cancellation error description
+    Dim NameErrNumber           As Long          'Captured procedure-name error number
+    Dim NameErrDescription      As String        'Captured procedure-name error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress timer-stop errors because this is a best-effort cleanup routine
         On Error Resume Next
 
+'------------------------------------------------------------------------------
+' RESOLVE TIMER PROCEDURE NAME
+'------------------------------------------------------------------------------
     'Build the timer procedure name if it is missing
-        If Len(mDP_TimerProcedureName) = 0 Then
+        If VBA.Len(mDP_TimerProcedureName) = 0 Then
             mDP_TimerProcedureName = M_GetQualifiedMacroName("M_Timer_Tick")
+            NameErrNumber = Err.Number
+            NameErrDescription = Err.Description
+            Err.Clear
         End If
 
-    'Cancel the next scheduled timer tick when active
+'------------------------------------------------------------------------------
+' CANCEL SCHEDULED TICK
+'------------------------------------------------------------------------------
+    'Cancel the next scheduled timer tick when active and cancellable
         If mDP_TimerIsRunning Then
             If mDP_NextTickTime <> 0 Then
-                Application.OnTime _
-                    EarliestTime:=mDP_NextTickTime, _
-                    Procedure:=mDP_TimerProcedureName, _
-                    Schedule:=False
+                If VBA.Len(mDP_TimerProcedureName) > 0 Then
+                    Application.OnTime _
+                        EarliestTime:=mDP_NextTickTime, _
+                        Procedure:=mDP_TimerProcedureName, _
+                        Schedule:=False
+                    CancelErrNumber = Err.Number
+                    CancelErrDescription = Err.Description
+                    Err.Clear
+                End If
             End If
         End If
 
-    'Clear timer state
+'------------------------------------------------------------------------------
+' CLEAR TIMER STATE
+'------------------------------------------------------------------------------
+    'Clear timer running state
         mDP_TimerIsRunning = False
-
     'Clear next tick time
         mDP_NextTickTime = 0
-
     'Clear timer procedure name
         mDP_TimerProcedureName = vbNullString
 
+'------------------------------------------------------------------------------
+' DIAGNOSTICS
+'------------------------------------------------------------------------------
+    'Write procedure-name diagnostics only when resolution failed
+        If NameErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=ResolveTimerProcedure" & _
+                " | Error=" & VBA.CStr(NameErrNumber) & _
+                " | " & NameErrDescription
+        End If
+    'Write cancellation diagnostics only when cancellation failed
+        If CancelErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=CancelOnTime" & _
+                " | Error=" & VBA.CStr(CancelErrNumber) & _
+                " | " & CancelErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE ERROR HANDLING
+'------------------------------------------------------------------------------
+    'Clear any suppressed timer-stop error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
-End Sub
 
+End Sub
 Public Sub M_Timer_Tick()
 
 '
-'------------------------------------------------------------------------------
-'                           TIMERTICK
+'==============================================================================
+'                           TIMER TICK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages the DatePicker live footer clock timer
+'   Handles one DatePicker live footer clock timer callback
 '
 ' WHY THIS EXISTS
-'   Application.OnTime is one-shot and requires controlled start, stop, tick, and cleanup behavior
+'   Application.OnTime is one-shot. Each timer callback must update the loaded
+'   DatePicker form when available and explicitly schedule the next callback
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Updates the loaded form clock when applicable
-'   - Schedules or cancels the next timer tick
-'   - Stops safely when the form is no longer loaded
+'   Exits when the timer is no longer marked as running
+'   Resolves the already-loaded DatePicker form through the shared form bridge
+'   Updates the loaded DatePicker form clock when a form is available
+'   Stops the timer when no DatePicker form is loaded
+'   Rebuilds the workbook-qualified timer procedure name
+'   Records the next scheduled tick time
+'   Schedules the next Application.OnTime callback
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Fail-safe
+'   Stops the timer after any unexpected callback failure
+'   Writes diagnostics to the Immediate Window
 '
 ' DEPENDENCIES
 '   Application.OnTime
-'   VBA.UserForms
+'   M_FormBridge_GetLoadedForm
+'   M_GetQualifiedMacroName
+'   M_Timer_Stop
+'   UF_DatePicker.UF_DP_UpdateLiveClock
+'   DP_FORM_NAME
+'   DP_TIMER_SECONDS
+'   mDP_TimerIsRunning
+'   mDP_TimerProcedureName
+'   mDP_NextTickTime
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine must remain Public because Application.OnTime calls it by name
+'
+'   This routine deliberately avoids direct UF_DatePicker default-instance
+'   references
+'
+'   Loaded-form lookup is delegated to M_FormBridge_GetLoadedForm so timer,
+'   refresh, and unload routines use the same loaded-form matching policy
+'
+'   Application.OnTime is one-shot, so successful ticks must schedule the next
+'   tick explicitly
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_Timer_Tick" 'Current procedure name
 
-    Dim LoadedForm As Object                                           'Loaded UserForm instance
-    Dim FormWasFound As Boolean                                        'True if DatePicker form is loaded
+    Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
+    Dim StopErrNumber          As Long         'Captured timer-stop error number
+    Dim StopErrDescription     As String       'Captured timer-stop error description
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable fail-safe error handling
         On Error GoTo FailSafe
 
+'------------------------------------------------------------------------------
+' EXIT IF TIMER IS NOT RUNNING
+'------------------------------------------------------------------------------
     'Exit if the timer is no longer running
-        If Not mDP_TimerIsRunning Then
-            Exit Sub
-        End If
+        If Not mDP_TimerIsRunning Then Exit Sub
 
-    'Loop through loaded UserForms
-        For Each LoadedForm In VBA.UserForms
-            'Update the loaded DatePicker form when found
-                If TypeName(LoadedForm) = DP_FORM_NAME Then
-                    LoadedForm.UF_DP_UpdateLiveClock
-                    FormWasFound = True
-                    Exit For
-                End If
-        Next LoadedForm
+'------------------------------------------------------------------------------
+' RESOLVE LOADED FORM
+'------------------------------------------------------------------------------
+    'Resolve the already-loaded DatePicker form instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
 
+'------------------------------------------------------------------------------
+' STOP TIMER WHEN FORM IS NOT LOADED
+'------------------------------------------------------------------------------
     'Stop the timer if the DatePicker form is no longer loaded
-        If Not FormWasFound Then
+        If LoadedForm Is Nothing Then
             M_Timer_Stop
-            Exit Sub
+            GoTo ExitProcedure
         End If
 
+'------------------------------------------------------------------------------
+' REFRESH LOADED FORM CLOCK
+'------------------------------------------------------------------------------
+    'Update the loaded DatePicker form clock
+        LoadedForm.UF_DP_UpdateLiveClock
+
+'------------------------------------------------------------------------------
+' RESOLVE TIMER PROCEDURE
+'------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
         mDP_TimerProcedureName = M_GetQualifiedMacroName("M_Timer_Tick")
 
+'------------------------------------------------------------------------------
+' CALCULATE NEXT TICK
+'------------------------------------------------------------------------------
     'Calculate the next timer tick
         mDP_NextTickTime = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
 
+'------------------------------------------------------------------------------
+' SCHEDULE NEXT TICK
+'------------------------------------------------------------------------------
     'Schedule the next timer tick
-        Application.OnTime _
+        Excel.Application.OnTime _
             EarliestTime:=mDP_NextTickTime, _
             Procedure:=mDP_TimerProcedureName, _
             Schedule:=True
 
-    'Exit after successful scheduling
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release the loaded form reference
+        Set LoadedForm = Nothing
+    'Exit after successful handling
         Exit Sub
 
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
 FailSafe:
+    'Capture the original error number before cleanup can alter Err
+        ErrorNumber = Err.Number
+    'Capture the original error description before cleanup can alter Err
+        ErrorDescription = Err.Description
+    'Suppress timer-stop errors while preserving the original callback failure
+        On Error Resume Next
     'Stop the timer after an unexpected callback error
         M_Timer_Stop
+    'Capture timer-stop error number
+        StopErrNumber = Err.Number
+    'Capture timer-stop error description
+        StopErrDescription = Err.Description
+    'Clear any suppressed timer-stop error
+        Err.Clear
+    'Release the loaded form reference
+        Set LoadedForm = Nothing
+    'Write timer-stop diagnostics only when cleanup failed
+        If StopErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=M_Timer_Stop" & _
+                " | Error=" & VBA.CStr(StopErrNumber) & _
+                " | " & StopErrDescription
+        End If
+    'Write callback diagnostics to the Immediate Window
+        Debug.Print PROC_NAME & _
+            " | Step=TimerCallback" & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Restore normal error handling
+        On Error GoTo 0
 
-    'Write diagnostics to the Immediate Window
-        Debug.Print "M_DATEPICKER.M_Timer_Tick: timer stopped after error " & _
-            Err.Number & " - " & Err.Description
 End Sub
-
 '
 '------------------------------------------------------------------------------
 '
 '                                WINAPI HELPERS
 '
 '------------------------------------------------------------------------------
+'
+
 
 Public Function M_Platform_CanUseWinAPI() As Boolean
 
 '
-'------------------------------------------------------------------------------
-'                           PLATFORM CANUSEWINAPI
+'==============================================================================
+'                           PLATFORM CAN USE WINAPI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides Mac-safe WinAPI support for DatePicker form behavior
+'   Returns whether the current platform can use Windows API calls
 '
 ' WHY THIS EXISTS
-'   Borderless styling and mouse-based positioning require native Windows APIs but must degrade safely on Mac and when disabled
+'   Settings normalization and platform-safe startup logic need to know whether
+'   WinAPI calls are technically available before applying user configuration
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   True when the project is running on Windows
+'   False when the project is running on Mac
 '
 ' BEHAVIOR
-'   - Exits safely when WinAPI is unavailable
-'   - Uses native handles and screen coordinates where required
-'   - Suppresses best-effort UI positioning/styling errors
+'   Uses conditional compilation to return a platform-safe Boolean without
+'   calling any native API
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors directly
 '
 ' DEPENDENCIES
-'   Windows User32 APIs
+'   VBA conditional compilation constant Mac
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine answers platform capability only
+'
+'   It deliberately does not inspect gDP_UseWinAPI
+'
+'   Runtime policy belongs in M_Platform_ShouldUseWinAPI
 '
 ' UPDATED
-'   2026-04-29
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
+
 #If Mac Then
-    'Return False on Mac
+    'Return False when running on Mac
         M_Platform_CanUseWinAPI = False
 #Else
-    'Return True on Windows
+    'Return True when running on Windows
         M_Platform_CanUseWinAPI = True
 #End If
-End Function
 
+End Function
 Public Function M_Platform_ShouldUseWinAPI() As Boolean
 
 '
-'------------------------------------------------------------------------------
-'                           PLATFORM SHOULDUSEWINAPI
+'==============================================================================
+'                           PLATFORM SHOULD USE WINAPI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides Mac-safe WinAPI support for DatePicker form behavior
+'   Returns whether DatePicker WinAPI-dependent behavior should be enabled
 '
 ' WHY THIS EXISTS
-'   Borderless styling and mouse-based positioning require native Windows APIs but must degrade safely on Mac and when disabled
+'   Native DatePicker behavior must be controlled by both:
+'     - platform capability
+'     - user / project configuration
+'
+'   This helper provides the single effective runtime policy for optional
+'   WinAPI-dependent behavior
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   True when WinAPI is available on the current platform and enabled by setting
+'   False otherwise
 '
 ' BEHAVIOR
-'   - Exits safely when WinAPI is unavailable
-'   - Uses native handles and screen coordinates where required
-'   - Suppresses best-effort UI positioning/styling errors
+'   Returns True only when both conditions are satisfied:
+'     - the current platform can use WinAPI
+'     - gDP_UseWinAPI is True
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Does not raise errors directly
 '
 ' DEPENDENCIES
-'   Windows User32 APIs
+'   M_Platform_CanUseWinAPI
+'   gDP_UseWinAPI
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Do not call M_Settings_EnsureLoaded from this helper
+'
+'   Settings load / save routines already use M_Platform_CanUseWinAPI to avoid
+'   circular policy dependencies while normalizing gDP_UseWinAPI
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
-    'Return whether WinAPI features should be used
-        M_Platform_ShouldUseWinAPI = _
-            (M_Platform_CanUseWinAPI And gDP_UseWinAPI)
+' RETURN POLICY DECISION
+'------------------------------------------------------------------------------
+    'Return whether optional WinAPI-dependent behavior should be used
+        M_Platform_ShouldUseWinAPI = (M_Platform_CanUseWinAPI And gDP_UseWinAPI)
+
 End Function
 
 Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 
 '
 '------------------------------------------------------------------------------
-'                           TITLEBAR REMOVE
+'                           WINDOW REMOVE TITLE BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides Mac-safe WinAPI support for DatePicker form behavior
+'   Removes the native title bar from a DatePicker UserForm on Windows
 '
 ' WHY THIS EXISTS
-'   Borderless styling and mouse-based positioning require native Windows APIs but must degrade safely on Mac and when disabled
+'   The DatePicker can use a borderless visual style. Removing the native
+'   UserForm title bar requires Windows API calls and must therefore degrade
+'   safely on Mac or when WinAPI behavior is disabled by settings
 '
 ' INPUTS
-'   See procedure signature
+'   Frm
+'     UserForm instance whose native title bar should be removed
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Exits safely when WinAPI is unavailable
-'   - Uses native handles and screen coordinates where required
-'   - Suppresses best-effort UI positioning/styling errors
+'   Exits safely on Mac, when no form is supplied, when WinAPI usage is disabled,
+'   or when the form window handle cannot be resolved. On Windows, removes the
+'   WS_CAPTION style bit, refreshes the non-client frame, and redraws the menu
+'   bar / frame area
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort UI styling. Unexpected WinAPI or form-handle errors are
+'   suppressed and written to the Immediate Window for diagnostics
 '
 ' DEPENDENCIES
-'   Windows User32 APIs
+'   M_Platform_ShouldUseWinAPI
+'   M_Window_GetUserFormHwnd
+'   GetWindowLongPtr / GetWindowLong
+'   SetWindowLongPtr / SetWindowLong
+'   SetWindowPos
+'   DrawMenuBar
+'   GWL_STYLE
+'   WS_CAPTION
+'   SWP_NOMOVE
+'   SWP_NOSIZE
+'   SWP_NOZORDER
+'   SWP_NOACTIVATE
+'   SWP_FRAMECHANGED
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally does nothing on Mac
+'
+'   This routine assumes all WinAPI declarations are conditionally compiled
+'   elsewhere in the module
+'
+'   The routine does not raise outward because title-bar removal is visual polish,
+'   not a functional requirement for date selection
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
+
 #If Mac Then
+
+'------------------------------------------------------------------------------
+' MAC SAFE EXIT
+'------------------------------------------------------------------------------
     'Do nothing on Mac
         Exit Sub
+
 #Else
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Window_RemoveTitleBar"
+
     #If VBA7 Then
-        Dim hWndForm As LongPtr                                       'UserForm window handle
-        Dim WindowStyle As LongPtr                                    'Window style bits
+        Dim hWndForm            As LongPtr       'UserForm window handle
+        Dim WindowStyle         As LongPtr       'Window style bits
     #Else
-        Dim hWndForm As Long                                          'UserForm window handle
-        Dim WindowStyle As Long                                       'Window style bits
+        Dim hWndForm            As Long          'UserForm window handle
+        Dim WindowStyle         As Long          'Window style bits
     #End If
 
-    Dim WindowFlags As Long                                           'SetWindowPos flags
+    Dim WindowFlags             As Long          'SetWindowPos flags
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
 
-    'Suppress borderless styling errors
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress borderless styling errors through the local cleanup path
         On Error GoTo CleanExit
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
     'Exit if no form was supplied
         If Frm Is Nothing Then Exit Sub
 
+'------------------------------------------------------------------------------
+' CHECK WINAPI POLICY
+'------------------------------------------------------------------------------
     'Exit if WinAPI features should not be used
         If Not M_Platform_ShouldUseWinAPI Then Exit Sub
 
+'------------------------------------------------------------------------------
+' RESOLVE FORM HANDLE
+'------------------------------------------------------------------------------
     'Resolve the form window handle
         hWndForm = M_Window_GetUserFormHwnd(Frm)
-
     'Exit if the form window handle is unavailable
         If hWndForm = 0 Then Exit Sub
 
+'------------------------------------------------------------------------------
+' READ WINDOW STYLE
+'------------------------------------------------------------------------------
     #If VBA7 Then
         'Read current window style
             WindowStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
@@ -7063,13 +7687,18 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         'Read current window style
             WindowStyle = GetWindowLong(hWndForm, GWL_STYLE)
     #End If
-
     'Exit if the style cannot be read
         If WindowStyle = 0 Then Exit Sub
 
+'------------------------------------------------------------------------------
+' REMOVE TITLE BAR STYLE
+'------------------------------------------------------------------------------
     'Remove the caption style bit
         WindowStyle = (WindowStyle And Not WS_CAPTION)
 
+'------------------------------------------------------------------------------
+' WRITE WINDOW STYLE
+'------------------------------------------------------------------------------
     #If VBA7 Then
         'Write the updated window style
             Call SetWindowLongPtr(hWndForm, GWL_STYLE, WindowStyle)
@@ -7078,6 +7707,9 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
             Call SetWindowLong(hWndForm, GWL_STYLE, WindowStyle)
     #End If
 
+'------------------------------------------------------------------------------
+' REFRESH NON-CLIENT FRAME
+'------------------------------------------------------------------------------
     'Build non-client refresh flags
         WindowFlags = SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or _
             SWP_NOACTIVATE Or SWP_FRAMECHANGED
@@ -7088,85 +7720,172 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
     'Redraw menu bar and non-client elements
         Call DrawMenuBar(hWndForm)
 
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
 CleanExit:
-    'Best-effort routine
-#End If
-End Sub
+    'Capture any suppressed error number
+        ErrorNumber = Err.Number
+    'Capture any suppressed error description
+        ErrorDescription = Err.Description
+    'Write diagnostics only when borderless styling failed
+        If ErrorNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Error=" & VBA.CStr(ErrorNumber) & _
+                " | " & ErrorDescription
+        End If
+    'Clear any suppressed styling error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
+#End If
+
+End Sub
 #If VBA7 Then
 Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As LongPtr
 #Else
 Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As Long
 #End If
+
 '
 '------------------------------------------------------------------------------
-'                           GETUSERFORMHWND
+'                           WINDOW GET USERFORM HWND
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Executes the DatePicker getuserformhwnd routine
+'   Resolves the native window handle for a loaded UserForm
 '
 ' WHY THIS EXISTS
-'   This DatePicker operation is centralized in the companion module to keep UserForm rendering, Excel integration, and write-back behavior consistent
+'   Some DatePicker visual and positioning operations require the native Windows
+'   window handle of the UserForm. This lookup must remain centralized so all
+'   WinAPI-dependent behavior uses the same Mac-safe and fail-safe handle policy
 '
 ' INPUTS
-'   See procedure signature
+'   Frm
+'     UserForm instance whose native window handle should be resolved
 '
 ' RETURNS
-'   See procedure type
+'   Native UserForm window handle on Windows
+'   Zero when running on Mac, when WinAPI behavior is disabled by setting, when
+'   no form is supplied, when the caption is blank, when the handle cannot be
+'   found, or when lookup fails
 '
 ' BEHAVIOR
-'   - Validates required inputs
-'   - Applies the requested DatePicker operation
-'   - Exits through the documented error policy
+'   Returns zero on Mac. On Windows, validates the supplied form, reads its
+'   caption, then attempts to find the UserForm window using the common
+'   ThunderDFrame class and the alternate ThunderXFrame class
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Safe default. Returns zero on lookup failure and writes diagnostics to the
+'   Immediate Window
 '
 ' DEPENDENCIES
-'   DatePicker companion module state
+'   FindWindow
+'   ThunderDFrame UserForm window class
+'   ThunderXFrame UserForm window class
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine deliberately avoids raising outward because native handle lookup
+'   is required only for optional WinAPI-dependent UI behavior
+'
+'   The lookup is caption-based because MSForms UserForms do not expose their
+'   native window handle directly through the object model
+'
+'   If multiple loaded UserForms share the same caption, Windows may return the
+'   first matching window. DatePicker captions should therefore remain unique
+'   while WinAPI behavior is enabled
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
+
 #If Mac Then
+
+'------------------------------------------------------------------------------
+' MAC SAFE DEFAULT
+'------------------------------------------------------------------------------
     'Return zero on Mac
         M_Window_GetUserFormHwnd = 0
+
 #Else
-    Dim FormCaption As String                                         'Current form caption
 
-    'Set safe default
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Window_GetUserFormHwnd"
+
+    Dim FormCaption             As String        'Current form caption
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Return the safe default unless lookup succeeds
         M_Window_GetUserFormHwnd = 0
-
-    'Suppress handle lookup errors
+    'Suppress handle lookup errors through the local fail-safe path
         On Error GoTo FailSafe
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
     'Exit if no form was supplied
         If Frm Is Nothing Then Exit Function
 
+'------------------------------------------------------------------------------
+' CHECK WINAPI POLICY
+'------------------------------------------------------------------------------
+    'Exit when optional WinAPI-dependent behavior is disabled
+
+'------------------------------------------------------------------------------
+' READ FORM CAPTION
+'------------------------------------------------------------------------------
     'Read the current form caption
-        FormCaption = CStr(Frm.Caption)
-
+        FormCaption = VBA.CStr(Frm.Caption)
     'Exit if the caption is blank
-        If LenB(FormCaption) = 0 Then Exit Function
+        If VBA.LenB(FormCaption) = 0 Then Exit Function
 
-    'Try the most common UserForm window class
+'------------------------------------------------------------------------------
+' TRY PRIMARY USERFORM WINDOW CLASS
+'------------------------------------------------------------------------------
+    'Try the most common MSForms UserForm window class
         M_Window_GetUserFormHwnd = FindWindow("ThunderDFrame", FormCaption)
 
-    'Try the alternate UserForm window class
+'------------------------------------------------------------------------------
+' TRY ALTERNATE USERFORM WINDOW CLASS
+'------------------------------------------------------------------------------
+    'Try the alternate MSForms UserForm window class
         If M_Window_GetUserFormHwnd = 0 Then
             M_Window_GetUserFormHwnd = FindWindow("ThunderXFrame", FormCaption)
         End If
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit after lookup
         Exit Function
 
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
 FailSafe:
-    'Return safe default
+    'Capture the lookup error number
+        ErrorNumber = Err.Number
+    'Capture the lookup error description
+        ErrorDescription = Err.Description
+    'Return the safe default
         M_Window_GetUserFormHwnd = 0
+    'Write diagnostics only when lookup failed with an error
+        If ErrorNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Error=" & VBA.CStr(ErrorNumber) & _
+                " | " & ErrorDescription
+        End If
+    'Clear the suppressed lookup error
+        Err.Clear
+
 #End If
+
 End Function
 
 Public Sub M_Window_MoveFormToMouse( _
@@ -7177,155 +7896,275 @@ Public Sub M_Window_MoveFormToMouse( _
 
 '
 '------------------------------------------------------------------------------
-'                           MOVEFORMTOMOUSE
+'                           WINDOW MOVE FORM TO MOUSE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides Mac-safe WinAPI support for DatePicker form behavior
+'   Moves a DatePicker UserForm near the current mouse position on Windows
 '
 ' WHY THIS EXISTS
-'   Borderless styling and mouse-based positioning require native Windows APIs but must degrade safely on Mac and when disabled
+'   The DatePicker may be shown as a compact modeless popup. Mouse-based
+'   positioning keeps the form close to the user's interaction point while
+'   clamping the window inside the active monitor work area
 '
 ' INPUTS
-'   See procedure signature
+'   Frm
+'     UserForm instance to move
+'
+'   OffsetXPx
+'     Horizontal offset in pixels from the mouse position
+'
+'   OffsetYPx
+'     Vertical offset in pixels from the mouse position
+'
+'   CenterOnMouse
+'     True to center the form on the mouse position before applying offsets
+'     False to use the mouse position as the top-left anchor before offsets
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Exits safely when WinAPI is unavailable
-'   - Uses native handles and screen coordinates where required
-'   - Suppresses best-effort UI positioning/styling errors
+'   Exits safely on Mac, when no form is supplied, when WinAPI is unavailable,
+'   when the mouse position cannot be read, when the form handle cannot be
+'   resolved, when the form rectangle cannot be read, or when the monitor work
+'   area cannot be resolved
+'
+'   On Windows, calculates the desired form position from the mouse position,
+'   applies the requested offsets, clamps the result to the nearest monitor work
+'   area, and moves the form without resizing, changing z-order, or activating it
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort positioning. Unexpected WinAPI, monitor, or form-positioning
+'   errors are suppressed and written to the Immediate Window for diagnostics
 '
 ' DEPENDENCIES
-'   Windows User32 APIs
+'   M_Platform_ShouldUseWinAPI
+'   M_Window_GetUserFormHwnd
+'   GetCursorPos
+'   GetWindowRect
+'   MonitorFromRect
+'   GetMonitorInfo
+'   SetWindowPos
+'   POINTAPI
+'   RECT
+'   MONITORINFO
+'   MONITOR_DEFAULTTONEAREST
+'   SWP_NOSIZE
+'   SWP_NOZORDER
+'   SWP_NOACTIVATE
+'   SWP_SHOWWINDOW
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally does nothing on Mac
+'
+'   This routine uses M_Platform_ShouldUseWinAPI so the user setting disables
+'   mouse-positioning WinAPI calls as well as borderless styling
+'
+'   Positioning is pixel-based because WinAPI cursor, window, and monitor APIs
+'   operate in screen pixels
+'
+'   The nearest monitor work area is used so the picker remains visible in
+'   multi-monitor setups
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 #If Mac Then
+
+'------------------------------------------------------------------------------
+' MAC SAFE EXIT
+'------------------------------------------------------------------------------
     'Do nothing on Mac
         Exit Sub
+
 #Else
-    Dim CursorPoint As POINTAPI                                       'Mouse cursor position
-    Dim CursorRect As RECT                                            'One-pixel cursor rectangle
-    Dim FormRect As RECT                                              'Current form window rectangle
-    Dim MonitorData As MONITORINFO                                    'Nearest monitor information
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Window_MoveFormToMouse"
+
+    Dim CursorPoint             As POINTAPI      'Mouse cursor position
+    Dim CursorRect              As RECT          'One-pixel cursor rectangle
+    Dim FormRect                As RECT          'Current form window rectangle
+    Dim MonitorInfoData         As MONITORINFO   'Nearest monitor information
 
     #If VBA7 Then
-        Dim hWndForm As LongPtr                                       'UserForm window handle
-        Dim hMonitor As LongPtr                                       'Nearest monitor handle
+        Dim hWndForm            As LongPtr       'UserForm window handle
+        Dim hMonitor            As LongPtr       'Nearest monitor handle
     #Else
-        Dim hWndForm As Long                                          'UserForm window handle
-        Dim hMonitor As Long                                          'Nearest monitor handle
+        Dim hWndForm            As Long          'UserForm window handle
+        Dim hMonitor            As Long          'Nearest monitor handle
     #End If
 
-    Dim FormWidthPx As Long                                           'Form width in pixels
-    Dim FormHeightPx As Long                                          'Form height in pixels
-    Dim WorkWidthPx As Long                                           'Monitor work-area width in pixels
-    Dim WorkHeightPx As Long                                          'Monitor work-area height in pixels
-    Dim TargetX As Long                                               'Target X position in pixels
-    Dim TargetY As Long                                               'Target Y position in pixels
-    Dim MoveFlags As Long                                             'SetWindowPos movement flags
+    Dim FormWidthPx             As Long          'Form width in pixels
+    Dim FormHeightPx            As Long          'Form height in pixels
+    Dim WorkWidthPx             As Long          'Monitor work-area width in pixels
+    Dim WorkHeightPx            As Long          'Monitor work-area height in pixels
+    Dim TargetX                 As Long          'Target X position in pixels
+    Dim TargetY                 As Long          'Target Y position in pixels
+    Dim MoveFlags               As Long          'SetWindowPos movement flags
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
 
-    'Suppress positioning errors
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress positioning errors through the local cleanup path
         On Error GoTo CleanExit
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
     'Exit if no form was supplied
         If Frm Is Nothing Then Exit Sub
 
-    'Exit only when native WinAPI calls are unavailable
-        If Not M_Platform_CanUseWinAPI Then Exit Sub
+'------------------------------------------------------------------------------
+' CHECK WINAPI POLICY
+'------------------------------------------------------------------------------
+    'Exit when optional WinAPI-dependent behavior is disabled
+        If Not M_Platform_ShouldUseWinAPI Then Exit Sub
 
+'------------------------------------------------------------------------------
+' READ MOUSE POSITION
+'------------------------------------------------------------------------------
     'Exit if the cursor position cannot be read
         If GetCursorPos(CursorPoint) = 0 Then Exit Sub
 
+'------------------------------------------------------------------------------
+' RESOLVE FORM HANDLE
+'------------------------------------------------------------------------------
     'Resolve the native UserForm window handle
         hWndForm = M_Window_GetUserFormHwnd(Frm)
-
     'Exit if the form window handle is unavailable
         If hWndForm = 0 Then Exit Sub
 
+'------------------------------------------------------------------------------
+' READ FORM RECTANGLE
+'------------------------------------------------------------------------------
     'Exit if the form window rectangle cannot be read
         If GetWindowRect(hWndForm, FormRect) = 0 Then Exit Sub
 
-    'Calculate the form width and height in pixels
+'------------------------------------------------------------------------------
+' CALCULATE FORM SIZE
+'------------------------------------------------------------------------------
+    'Calculate the form width in pixels
         FormWidthPx = FormRect.Right - FormRect.Left
+    'Calculate the form height in pixels
         FormHeightPx = FormRect.Bottom - FormRect.Top
-
     'Exit if resolved form size is invalid
         If FormWidthPx <= 0 Or FormHeightPx <= 0 Then Exit Sub
 
-    'Build a one-pixel rectangle around the cursor
+'------------------------------------------------------------------------------
+' BUILD CURSOR RECTANGLE
+'------------------------------------------------------------------------------
+    'Set cursor rectangle left edge
         CursorRect.Left = CursorPoint.X
+    'Set cursor rectangle top edge
         CursorRect.Top = CursorPoint.Y
+    'Set cursor rectangle right edge
         CursorRect.Right = CursorPoint.X + 1
+    'Set cursor rectangle bottom edge
         CursorRect.Bottom = CursorPoint.Y + 1
 
+'------------------------------------------------------------------------------
+' RESOLVE NEAREST MONITOR
+'------------------------------------------------------------------------------
     'Resolve the nearest monitor handle
         hMonitor = MonitorFromRect(CursorRect, MONITOR_DEFAULTTONEAREST)
-
     'Exit if the monitor handle is unavailable
         If hMonitor = 0 Then Exit Sub
 
+'------------------------------------------------------------------------------
+' READ MONITOR WORK AREA
+'------------------------------------------------------------------------------
     'Initialize the monitor-info structure size
-        MonitorData.cbSize = LenB(MonitorData)
-
+        MonitorInfoData.cbSize = Len(MonitorInfoData)
     'Exit if monitor information cannot be read
-        If GetMonitorInfo(hMonitor, MonitorData) = 0 Then Exit Sub
+        If GetMonitorInfo(hMonitor, MonitorInfoData) = 0 Then Exit Sub
 
-    'Calculate the monitor work-area width and height
-        WorkWidthPx = MonitorData.rcWork.Right - MonitorData.rcWork.Left
-        WorkHeightPx = MonitorData.rcWork.Bottom - MonitorData.rcWork.Top
-
+'------------------------------------------------------------------------------
+' CALCULATE WORK AREA SIZE
+'------------------------------------------------------------------------------
+    'Calculate the monitor work-area width
+        WorkWidthPx = MonitorInfoData.rcWork.Right - MonitorInfoData.rcWork.Left
+    'Calculate the monitor work-area height
+        WorkHeightPx = MonitorInfoData.rcWork.Bottom - MonitorInfoData.rcWork.Top
     'Exit if monitor work area is invalid
         If WorkWidthPx <= 0 Or WorkHeightPx <= 0 Then Exit Sub
 
+'------------------------------------------------------------------------------
+' CALCULATE TARGET POSITION
+'------------------------------------------------------------------------------
     'Use the mouse position as the default top-left anchor
         TargetX = CursorPoint.X + OffsetXPx
+    'Use the mouse position as the default top-left anchor
         TargetY = CursorPoint.Y + OffsetYPx
-
     'Center the form on the mouse when requested
         If CenterOnMouse Then
             TargetX = CursorPoint.X - (FormWidthPx \ 2) + OffsetXPx
             TargetY = CursorPoint.Y - (FormHeightPx \ 2) + OffsetYPx
         End If
 
-    'Clamp the X position to the current monitor work area
+'------------------------------------------------------------------------------
+' CLAMP TARGET X POSITION
+'------------------------------------------------------------------------------
+    'Anchor X to the work-area left edge when the form is wider than the work area
         If FormWidthPx >= WorkWidthPx Then
-            TargetX = MonitorData.rcWork.Left
-        ElseIf TargetX < MonitorData.rcWork.Left Then
-            TargetX = MonitorData.rcWork.Left
-        ElseIf TargetX + FormWidthPx > MonitorData.rcWork.Right Then
-            TargetX = MonitorData.rcWork.Right - FormWidthPx
+            TargetX = MonitorInfoData.rcWork.Left
+    'Clamp X to the work-area left edge
+        ElseIf TargetX < MonitorInfoData.rcWork.Left Then
+            TargetX = MonitorInfoData.rcWork.Left
+    'Clamp X to the work-area right edge
+        ElseIf TargetX + FormWidthPx > MonitorInfoData.rcWork.Right Then
+            TargetX = MonitorInfoData.rcWork.Right - FormWidthPx
         End If
 
-    'Clamp the Y position to the current monitor work area
+'------------------------------------------------------------------------------
+' CLAMP TARGET Y POSITION
+'------------------------------------------------------------------------------
+    'Anchor Y to the work-area top edge when the form is taller than the work area
         If FormHeightPx >= WorkHeightPx Then
-            TargetY = MonitorData.rcWork.Top
-        ElseIf TargetY < MonitorData.rcWork.Top Then
-            TargetY = MonitorData.rcWork.Top
-        ElseIf TargetY + FormHeightPx > MonitorData.rcWork.Bottom Then
-            TargetY = MonitorData.rcWork.Bottom - FormHeightPx
+            TargetY = MonitorInfoData.rcWork.Top
+    'Clamp Y to the work-area top edge
+        ElseIf TargetY < MonitorInfoData.rcWork.Top Then
+            TargetY = MonitorInfoData.rcWork.Top
+    'Clamp Y to the work-area bottom edge
+        ElseIf TargetY + FormHeightPx > MonitorInfoData.rcWork.Bottom Then
+            TargetY = MonitorInfoData.rcWork.Bottom - FormHeightPx
         End If
 
+'------------------------------------------------------------------------------
+' MOVE FORM
+'------------------------------------------------------------------------------
     'Build movement flags
         MoveFlags = SWP_NOSIZE Or SWP_NOZORDER Or SWP_NOACTIVATE Or SWP_SHOWWINDOW
-
     'Move the form without resizing, changing z-order, or activating it
         Call SetWindowPos(hWndForm, 0, TargetX, TargetY, 0, 0, MoveFlags)
 
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
 CleanExit:
-    'Best-effort routine
-#End If
-End Sub
+    'Capture any suppressed error number
+        ErrorNumber = Err.Number
+    'Capture any suppressed error description
+        ErrorDescription = Err.Description
+    'Write diagnostics only when mouse positioning failed
+        If ErrorNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Error=" & VBA.CStr(ErrorNumber) & _
+                " | " & ErrorDescription
+        End If
+    'Clear any suppressed positioning error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
+#End If
+
+End Sub
 
 '
 '------------------------------------------------------------------------------
@@ -7333,251 +8172,420 @@ End Sub
 '                              RIGHT-CLICK MENU
 '
 '------------------------------------------------------------------------------
+'
+
 
 Public Sub M_ContextMenu_Update()
 
 '
 '------------------------------------------------------------------------------
-'                           RIGHTCLICKMENU UPDATE
+'                           RIGHT-CLICK MENU UPDATE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Synchronizes DatePicker right-click menu integration with the current setting
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   Context-menu entries should be added, detected, and removed consistently
+'   using the DatePicker stable tag. Centralizing the update policy keeps menu
+'   state aligned with persisted settings and avoids duplicate or stale command
+'   bar controls
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Ensures settings are loaded, then adds DatePicker right-click entries when
+'   gDP_ShowRightClick is True and removes them when gDP_ShowRightClick is False
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises unexpected failures back to the caller with this procedure name as
+'   the error source
 '
 ' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_ContextMenu_Add
+'   M_ContextMenu_Remove
+'   gDP_ShowRightClick
 '   Application.CommandBars
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine owns the high-level policy decision only
+'
+'   The detailed add / remove mechanics remain delegated to M_ContextMenu_Add
+'   and M_ContextMenu_Remove
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    Const PROC_NAME As String = "M_ContextMenu_Update"            'Current procedure name
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_Update"
 
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
-    'Ensure settings are loaded before reading feature flags
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the right-click feature flag
         M_Settings_EnsureLoaded
 
-    'Add or remove right-click entries according to the setting
+'------------------------------------------------------------------------------
+' APPLY CONTEXT-MENU POLICY
+'------------------------------------------------------------------------------
+    'Add right-click entries when the feature is enabled
         If gDP_ShowRightClick Then
             M_ContextMenu_Add
+    'Otherwise remove DatePicker right-click entries
         Else
             M_ContextMenu_Remove
         End If
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
+
 End Sub
 
 Public Sub M_ContextMenu_Add()
 
 '
 '------------------------------------------------------------------------------
-'                           ADDRIGHTCLICK
+'                           ADD RIGHT-CLICK MENU
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Adds DatePicker entries to the supported Excel right-click menus
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   DatePicker right-click integration targets more than one Excel context menu.
+'   Centralizing the add operation keeps the supported command-bar list
+'   consistent and avoids duplicating menu wiring logic across the project
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Adds the DatePicker right-click entry to:
+'     - the standard cell context menu
+'     - the table / list range context menu
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Allows unexpected failures from the delegated add routine to propagate
+'   naturally to the caller
 '
 ' DEPENDENCIES
+'   M_ContextMenu_GetCommandBar
+'   M_ContextMenu_AddToCommandBar
 '   Application.CommandBars
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Duplicate-control prevention should remain inside
+'   M_ContextMenu_AddToCommandBar because that routine owns the command-bar
+'   mutation logic and stable-tag checks
+'
+'   This routine owns only the list of supported right-click command bars
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    'Add to the standard cell context menu
-        M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar("Cell")
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const CELL_COMMAND_BAR_NAME         As String = "Cell"
+    Const LIST_RANGE_COMMAND_BAR_NAME   As String = "List Range Popup"
 
-    'Add to the table/list range context menu
-        M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar("List Range Popup")
+'------------------------------------------------------------------------------
+' ADD STANDARD CELL CONTEXT MENU ENTRY
+'------------------------------------------------------------------------------
+    'Add to the standard cell context menu
+        M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar(CELL_COMMAND_BAR_NAME)
+
+'------------------------------------------------------------------------------
+' ADD TABLE / LIST RANGE CONTEXT MENU ENTRY
+'------------------------------------------------------------------------------
+    'Add to the table / list range context menu
+        M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar(LIST_RANGE_COMMAND_BAR_NAME)
+
 End Sub
 
 Public Sub M_ContextMenu_Remove()
 
 '
 '------------------------------------------------------------------------------
-'                           REMOVERIGHTCLICK
+'                           REMOVE RIGHT-CLICK MENU
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Removes DatePicker entries from the supported Excel right-click menus
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   DatePicker right-click integration targets more than one Excel context menu.
+'   Centralizing the remove operation keeps the supported command-bar list
+'   consistent and avoids leaving stale DatePicker controls after settings
+'   changes, workbook close, add-in unload, or manual reset
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Removes the DatePicker right-click entry from:
+'     - the standard cell context menu
+'     - the table / list range context menu
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Allows unexpected failures from the delegated remove routine to propagate
+'   naturally to the caller
 '
 ' DEPENDENCIES
+'   M_ContextMenu_GetCommandBar
+'   M_ContextMenu_RemoveFromCommandBar
 '   Application.CommandBars
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Stable-tag based deletion should remain inside
+'   M_ContextMenu_RemoveFromCommandBar because that routine owns the command-bar
+'   mutation logic and DatePicker control identification policy
+'
+'   This routine owns only the list of supported right-click command bars
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    'Remove from the standard cell context menu
-        M_ContextMenu_RemoveFromCommandBar M_ContextMenu_GetCommandBar("Cell")
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const CELL_COMMAND_BAR_NAME         As String = "Cell"
+    Const LIST_RANGE_COMMAND_BAR_NAME   As String = "List Range Popup"
 
-    'Remove from the table/list range context menu
-        M_ContextMenu_RemoveFromCommandBar M_ContextMenu_GetCommandBar("List Range Popup")
+'------------------------------------------------------------------------------
+' REMOVE STANDARD CELL CONTEXT MENU ENTRY
+'------------------------------------------------------------------------------
+    'Remove from the standard cell context menu
+        M_ContextMenu_RemoveFromCommandBar M_ContextMenu_GetCommandBar(CELL_COMMAND_BAR_NAME)
+
+'------------------------------------------------------------------------------
+' REMOVE TABLE / LIST RANGE CONTEXT MENU ENTRY
+'------------------------------------------------------------------------------
+    'Remove from the table / list range context menu
+        M_ContextMenu_RemoveFromCommandBar M_ContextMenu_GetCommandBar(LIST_RANGE_COMMAND_BAR_NAME)
+
 End Sub
 
 Private Function M_ContextMenu_GetCommandBar(ByVal CommandBarName As String) As CommandBar
 
 '
 '------------------------------------------------------------------------------
-'                           GETCOMMANDBAR
+'                           GET COMMAND BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Safely resolves an Excel command bar by name
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   DatePicker right-click integration depends on Excel context menus. Command
+'   bars may be unavailable, renamed, hidden, unsupported in a given host state,
+'   or inaccessible in some Excel configurations, so lookup must fail safely
 '
 ' INPUTS
-'   See procedure signature
+'   CommandBarName
+'     Name of the Excel command bar to retrieve
 '
 ' RETURNS
-'   See procedure type
+'   Matching CommandBar object when available
+'   Nothing when the command bar cannot be resolved
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Attempts to retrieve Application.CommandBars(CommandBarName) and returns a
+'   safe Nothing reference when lookup fails
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Safe default. Command-bar lookup errors are suppressed and reported to the
+'   Immediate Window for diagnostics
 '
 ' DEPENDENCIES
 '   Application.CommandBars
+'   CommandBar
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine does not create command bars
+'
+'   This routine deliberately does not raise outward because missing context
+'   menus should not break DatePicker startup, settings synchronization, or
+'   teardown
+'
+'   Add / remove routines must tolerate a Nothing command-bar reference
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_GetCommandBar"
+
+    Dim LookupErrNumber         As Long          'Captured command-bar lookup error number
+    Dim LookupErrDescription    As String        'Captured command-bar lookup error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Set safe default
         Set M_ContextMenu_GetCommandBar = Nothing
-
     'Suppress command-bar lookup errors
         On Error Resume Next
 
+'------------------------------------------------------------------------------
+' RETRIEVE COMMAND BAR
+'------------------------------------------------------------------------------
     'Retrieve the requested command bar
         Set M_ContextMenu_GetCommandBar = Application.CommandBars(CommandBarName)
-
+    'Capture command-bar lookup error number
+        LookupErrNumber = Err.Number
+    'Capture command-bar lookup error description
+        LookupErrDescription = Err.Description
+    'Clear any suppressed lookup error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' DIAGNOSTICS
+'------------------------------------------------------------------------------
+    'Write diagnostics only when command-bar lookup failed with an error
+        If LookupErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | CommandBarName=" & CommandBarName & _
+                " | Error=" & VBA.CStr(LookupErrNumber) & _
+                " | " & LookupErrDescription
+        End If
+
 End Function
 
 Private Sub M_ContextMenu_AddToCommandBar(ByVal TargetCommandBar As CommandBar)
 
 '
 '------------------------------------------------------------------------------
-'                           ADDTOCOMMANDBAR
+'                           ADD TO COMMAND BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Adds the DatePicker command to one Excel command bar
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   DatePicker right-click integration can target multiple Excel context menus.
+'   The actual command-bar mutation must remain centralized so duplicate
+'   detection, stable tagging, button placement, and button configuration stay
+'   consistent across all supported menus
 '
 ' INPUTS
-'   See procedure signature
+'   TargetCommandBar
+'     CommandBar object that should receive the DatePicker entry
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Exits when no command bar is supplied, exits when the DatePicker control is
+'   already present, otherwise adds a temporary command-bar button and configures
+'   its action, icon, caption, tag, and grouping
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises unexpected command-bar mutation failures back to the caller with this
+'   procedure name as the error source
 '
 ' DEPENDENCIES
-'   Application.CommandBars
+'   M_ContextMenu_ContainsDatePicker
+'   M_GetQualifiedMacroName
+'   CommandBar.Controls.Add
+'   CommandBarButton
+'   msoControlButton
+'   DP_CONTEXT_MENU_BEFORE
+'   DP_CONTEXT_MENU_FACEID
+'   DP_CONTEXT_MENU_CAPTION
+'   DP_CONTEXT_MENU_TAG
+'   DP_Click
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Duplicate prevention is based on M_ContextMenu_ContainsDatePicker
+'
+'   The control is added as Temporary so Excel does not persist it permanently
+'   into the command-bar customization layer
+'
+'   The stable tag is the authoritative identifier used later for cleanup
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    Dim ButtonControl As CommandBarButton                              'Created command-bar button
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_AddToCommandBar"
 
+    Dim ButtonControl           As CommandBarButton     'Created command-bar button
+    Dim ErrorNumber             As Long                 'Captured error number
+    Dim ErrorDescription        As String               'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
     'Exit when no command bar is supplied
         If TargetCommandBar Is Nothing Then Exit Sub
 
+'------------------------------------------------------------------------------
+' AVOID DUPLICATE CONTROL
+'------------------------------------------------------------------------------
     'Exit when the DatePicker control is already present
         If M_ContextMenu_ContainsDatePicker(TargetCommandBar) Then Exit Sub
 
+'------------------------------------------------------------------------------
+' ADD BUTTON
+'------------------------------------------------------------------------------
     'Add the DatePicker button
         Set ButtonControl = TargetCommandBar.Controls.Add( _
             Type:=msoControlButton, _
             Before:=DP_CONTEXT_MENU_BEFORE, _
             Temporary:=True)
 
+'------------------------------------------------------------------------------
+' CONFIGURE BUTTON
+'------------------------------------------------------------------------------
     'Configure the DatePicker button
         With ButtonControl
             .OnAction = M_GetQualifiedMacroName("DP_Click")
@@ -7586,114 +8594,337 @@ Private Sub M_ContextMenu_AddToCommandBar(ByVal TargetCommandBar As CommandBar)
             .Tag = DP_CONTEXT_MENU_TAG
             .BeginGroup = True
         End With
-End Sub
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release the command-bar button reference
+        Set ButtonControl = Nothing
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Release the command-bar button reference
+        Set ButtonControl = Nothing
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
+
+End Sub
 Private Sub M_ContextMenu_RemoveFromCommandBar(ByVal TargetCommandBar As CommandBar)
 
 '
-'------------------------------------------------------------------------------
-'                           REMOVEFROMCOMMANDBAR
+'==============================================================================
+'                           REMOVE FROM COMMAND BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Removes DatePicker controls from one Excel command bar
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   DatePicker right-click menu entries are transient Excel UI controls. They
+'   must be removable by stable tag so menu cleanup remains reliable after
+'   settings changes, workbook close, add-in unload, or runtime repair
 '
 ' INPUTS
-'   See procedure signature
+'   TargetCommandBar
+'     CommandBar object to clean
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Exits when no command bar is supplied
+'   Reads the command-bar control count defensively
+'   Exits safely when command-bar controls cannot be inspected
+'   Scans the command-bar controls backwards
+'   Deletes every control whose Tag matches DP_CONTEXT_MENU_TAG
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort cleanup
+'
+'   Missing, protected, stale, or otherwise non-readable command-bar controls
+'   are skipped and logged to the Immediate Window
+'
+'   Missing, protected, stale, or otherwise non-removable command-bar controls
+'   are skipped and logged to the Immediate Window
+'
+'   Does not raise outward
 '
 ' DEPENDENCIES
-'   Application.CommandBars
+'   CommandBar
+'   CommandBarControl
+'   DP_CONTEXT_MENU_TAG
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   The backward scan is intentional because controls are deleted while the
+'   collection is being traversed
+'
+'   Matching by Tag is preferred over matching by Caption because captions may
+'   change with localization or UI wording
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_RemoveFromCommandBar" 'Current procedure name
 
-    Dim Index As Long                                                  'CommandBar control index
+    Dim Index                   As Long       'CommandBar control index
+    Dim ControlCount            As Long       'CommandBar control count
+    Dim ControlTag              As String     'Current control tag
+    Dim CountErrNumber          As Long       'Captured controls-count error number
+    Dim CountErrDescription     As String     'Captured controls-count error description
+    Dim DeleteErrNumber         As Long       'Captured delete error number
+    Dim DeleteErrDescription    As String     'Captured delete error description
+    Dim ReadErrNumber           As Long       'Captured tag-read error number
+    Dim ReadErrDescription      As String     'Captured tag-read error description
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress cleanup errors because this is a best-effort cleanup routine
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
     'Exit when no command bar is supplied
-        If TargetCommandBar Is Nothing Then Exit Sub
+        If TargetCommandBar Is Nothing Then GoTo ExitProcedure
 
-    'Loop backward through controls
-        For Index = TargetCommandBar.Controls.Count To 1 Step -1
+'------------------------------------------------------------------------------
+' READ CONTROL COUNT
+'------------------------------------------------------------------------------
+    'Clear any pending error before reading the controls count
+        Err.Clear
+    'Read the command-bar controls count defensively
+        ControlCount = TargetCommandBar.Controls.Count
+    'Capture controls-count error number
+        CountErrNumber = Err.Number
+    'Capture controls-count error description
+        CountErrDescription = Err.Description
+    'Clear any suppressed controls-count error
+        Err.Clear
+    'Exit safely when the controls collection cannot be inspected
+        If CountErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=ReadControlsCount" & _
+                " | Error=" & VBA.CStr(CountErrNumber) & _
+                " | " & CountErrDescription
+            GoTo ExitProcedure
+        End If
 
-            'Delete DatePicker controls by tag
-                If TargetCommandBar.Controls(Index).Tag = DP_CONTEXT_MENU_TAG Then
-                    TargetCommandBar.Controls(Index).Delete
+'------------------------------------------------------------------------------
+' REMOVE DATEPICKER CONTROLS
+'------------------------------------------------------------------------------
+    'Loop backward through controls so deletion does not disturb pending indexes
+        For Index = ControlCount To 1 Step -1
+            'Reset the current control tag
+                ControlTag = vbNullString
+            'Reset tag-read diagnostics
+                ReadErrNumber = 0
+            'Reset tag-read diagnostic description
+                ReadErrDescription = vbNullString
+            'Clear any pending error before reading the tag
+                Err.Clear
+            'Read the current control tag
+                ControlTag = VBA.CStr(TargetCommandBar.Controls(Index).Tag)
+            'Capture tag-read error number
+                ReadErrNumber = Err.Number
+            'Capture tag-read error description
+                ReadErrDescription = Err.Description
+            'Clear any suppressed tag-read error
+                Err.Clear
+            'Write diagnostics only when tag read failed
+                If ReadErrNumber <> 0 Then
+                    Debug.Print PROC_NAME & _
+                        " | Step=ReadTag" & _
+                        " | Index=" & VBA.CStr(Index) & _
+                        " | Error=" & VBA.CStr(ReadErrNumber) & _
+                        " | " & ReadErrDescription
                 End If
-
+            'Delete DatePicker controls by stable tag
+                If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
+                    'Reset delete diagnostics
+                        DeleteErrNumber = 0
+                    'Reset delete diagnostic description
+                        DeleteErrDescription = vbNullString
+                    'Clear any pending error before deleting the control
+                        Err.Clear
+                    'Delete the matching DatePicker control
+                        TargetCommandBar.Controls(Index).Delete
+                    'Capture delete error number
+                        DeleteErrNumber = Err.Number
+                    'Capture delete error description
+                        DeleteErrDescription = Err.Description
+                    'Clear any suppressed delete error
+                        Err.Clear
+                    'Write diagnostics only when deletion failed
+                        If DeleteErrNumber <> 0 Then
+                            Debug.Print PROC_NAME & _
+                                " | Step=DeleteControl" & _
+                                " | Index=" & VBA.CStr(Index) & _
+                                " | Error=" & VBA.CStr(DeleteErrNumber) & _
+                                " | " & DeleteErrDescription
+                        End If
+                End If
         Next Index
-End Sub
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed cleanup error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
 Private Function M_ContextMenu_ContainsDatePicker(ByVal TargetCommandBar As CommandBar) As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           ISONCOMMANDBAR
+'                           CONTAINS DATEPICKER CONTROL
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages DatePicker right-click menu integration
+'   Returns whether one Excel command bar already contains a DatePicker control
 '
 ' WHY THIS EXISTS
-'   Context-menu entries should be added, detected, and removed consistently using a stable tag
+'   DatePicker right-click menu integration must avoid duplicate controls when
+'   menus are refreshed, settings are reapplied, workbooks are activated, or the
+'   runtime is repaired
 '
 ' INPUTS
-'   See procedure signature
+'   TargetCommandBar
+'     CommandBar object to inspect
 '
 ' RETURNS
-'   See procedure type
+'   True when a control tagged with DP_CONTEXT_MENU_TAG is found
+'   False when no matching control is found or the command bar cannot be scanned
 '
 ' BEHAVIOR
-'   - Retrieves target command bars safely
-'   - Adds missing DatePicker controls
-'   - Removes DatePicker controls by tag
+'   Exits safely when no command bar is supplied, scans each command-bar control,
+'   reads the control Tag defensively, and returns True as soon as the stable
+'   DatePicker tag is found
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Safe-default predicate
+'
+'   Unexpected command-bar or control-inspection errors return False and are
+'   written to the Immediate Window for diagnostics
 '
 ' DEPENDENCIES
-'   Application.CommandBars
+'   CommandBar
+'   CommandBarControl
+'   DP_CONTEXT_MENU_TAG
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   Matching by Tag is preferred over matching by Caption because captions may
+'   change with localization or UI wording
+'
+'   This function does not mutate the command bar
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
 '------------------------------------------------------------------------------
 
-    Dim ControlItem As CommandBarControl                               'CommandBar control being inspected
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_ContainsDatePicker"
 
+    Dim ControlItem             As CommandBarControl     'CommandBar control being inspected
+    Dim ControlTag              As String                'Current control tag
+    Dim ReadErrNumber           As Long                  'Captured tag-read error number
+    Dim ReadErrDescription      As String                'Captured tag-read error description
+    Dim ErrorNumber             As Long                  'Captured runtime error number
+    Dim ErrorDescription        As String                'Captured runtime error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Set safe default
         M_ContextMenu_ContainsDatePicker = False
+    'Enable safe-default error handling
+        On Error GoTo ErrorHandler
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
     'Exit when no command bar is supplied
         If TargetCommandBar Is Nothing Then Exit Function
 
-    'Loop through controls
+'------------------------------------------------------------------------------
+' SCAN COMMAND-BAR CONTROLS
+'------------------------------------------------------------------------------
+    'Loop through command-bar controls
         For Each ControlItem In TargetCommandBar.Controls
-
-            'Return True when the DatePicker tag is found
-                If ControlItem.Tag = DP_CONTEXT_MENU_TAG Then
+            'Reset current control tag
+                ControlTag = vbNullString
+            'Reset tag-read diagnostics
+                ReadErrNumber = 0
+            'Reset tag-read diagnostic description
+                ReadErrDescription = vbNullString
+            'Suppress tag-read errors for unusual command-bar controls
+                On Error Resume Next
+            'Read the current control tag
+                ControlTag = VBA.CStr(ControlItem.Tag)
+            'Capture tag-read error number
+                ReadErrNumber = Err.Number
+            'Capture tag-read error description
+                ReadErrDescription = Err.Description
+            'Clear any suppressed tag-read error
+                Err.Clear
+            'Restore safe-default error handling
+                On Error GoTo ErrorHandler
+            'Write diagnostics only when tag read failed
+                If ReadErrNumber <> 0 Then
+                    Debug.Print PROC_NAME & _
+                        " | Step=ReadTag" & _
+                        " | Error=" & VBA.CStr(ReadErrNumber) & _
+                        " | " & ReadErrDescription
+                End If
+            'Return True when the DatePicker stable tag is found
+                If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
                     M_ContextMenu_ContainsDatePicker = True
                     Exit Function
                 End If
-
         Next ControlItem
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release object reference
+        Set ControlItem = Nothing
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Release object reference
+        Set ControlItem = Nothing
+    'Return the safe default
+        M_ContextMenu_ContainsDatePicker = False
+    'Write diagnostics without interrupting context-menu synchronization
+        Debug.Print PROC_NAME & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Clear the suppressed predicate error
+        Err.Clear
+
 End Function
 
 '
@@ -7740,30 +8971,49 @@ Public Sub M_KeyboardShortcut_Update()
 '   Application.OnKey is application-wide for the current Excel session, so it
 '   must be removed during teardown
 '
+'   This routine owns only the setting-driven synchronization policy
+'
+'   The actual Application.OnKey assignment and removal remain delegated to the
+'   dedicated register / remove routines
+'
 ' UPDATED
-'   2026-05-02
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_KeyboardShortcut_Update"     'Current procedure name
+    Const PROC_NAME             As String = "M_KeyboardShortcut_Update"
+
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
-    'Ensure settings are available before reading the feature flag
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
+    'Ensure settings are available before reading the keyboard shortcut flag
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE SHORTCUT
 '------------------------------------------------------------------------------
-    'Register or remove the keyboard shortcut according to the setting
+    'Track the current handler step
+        HandlerStep = "Synchronize keyboard shortcut"
+    'Register the keyboard shortcut when the feature is enabled
         If gDP_EnableKeyboardShortcut Then
             M_KeyboardShortcut_Register
+    'Otherwise restore the key to Excel default handling
         Else
             M_KeyboardShortcut_Remove
         End If
@@ -7778,10 +9028,17 @@ Public Sub M_KeyboardShortcut_Update()
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Keyboard shortcut synchronization failed: " & ErrorDescription
 
 End Sub
+
 
 Public Sub M_KeyboardShortcut_Register()
 
@@ -7803,7 +9060,8 @@ Public Sub M_KeyboardShortcut_Register()
 '   Nothing
 '
 ' BEHAVIOR
-'   Assigns Ctrl + Shift + D to DP_OpenForActiveCell
+'   Assigns Ctrl + Shift + D to the workbook-qualified DP_OpenForActiveCell
+'   callback
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the shortcut cannot be registered
@@ -7812,30 +9070,53 @@ Public Sub M_KeyboardShortcut_Register()
 '   Application.OnKey
 '   M_GetQualifiedMacroName
 '   DP_OpenForActiveCell
+'   DP_KEYBOARD_SHORTCUT_KEY
 '
 ' NOTES
 '   The callback is workbook-qualified so the shortcut resolves to this project
 '
+'   Application.OnKey is application-wide for the current Excel session
+'
+'   The shortcut should be removed during teardown through
+'   M_KeyboardShortcut_Remove
+'
 ' UPDATED
-'   2026-05-02
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_KeyboardShortcut_Register"   'Current procedure name
+    Const PROC_NAME             As String = "M_KeyboardShortcut_Register"
+
+    Dim CallbackMacroName       As String       'Workbook-qualified callback macro name
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' RESOLVE CALLBACK MACRO NAME
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve callback macro name"
+    'Build the workbook-qualified DatePicker launcher macro name
+        CallbackMacroName = M_GetQualifiedMacroName("DP_OpenForActiveCell")
 
 '------------------------------------------------------------------------------
 ' REGISTER SHORTCUT
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Register keyboard shortcut"
     'Assign Ctrl + Shift + D to the DatePicker public launcher
-        Application.OnKey DP_KEYBOARD_SHORTCUT_KEY, M_GetQualifiedMacroName("DP_OpenForActiveCell")
+        Application.OnKey DP_KEYBOARD_SHORTCUT_KEY, CallbackMacroName
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -7847,8 +9128,14 @@ Public Sub M_KeyboardShortcut_Register()
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Keyboard shortcut registration failed: " & ErrorDescription
 
 End Sub
 
@@ -7859,12 +9146,12 @@ Public Sub M_KeyboardShortcut_Remove()
 '                         REMOVE KEYBOARD SHORTCUT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Restores the DatePicker keyboard shortcut to Excel
+'   Restores the DatePicker keyboard shortcut to Excel default handling
 '
 ' WHY THIS EXISTS
 '   Application.OnKey assignments are application-wide. If the workbook or add-in
-'   is closed, the shortcut must not remain bound to a macro that may no longer
-'   exist
+'   is closed, reset, or unloaded, the shortcut must not remain bound to a macro
+'   that may no longer exist
 '
 ' INPUTS
 '   None
@@ -7878,30 +9165,73 @@ Public Sub M_KeyboardShortcut_Remove()
 ' ERROR POLICY
 '   Best-effort cleanup. Does not raise outward
 '
+'   Shortcut-removal failures are suppressed and written to the Immediate Window
+'   for diagnostics
+'
 ' DEPENDENCIES
 '   Application.OnKey
+'   DP_KEYBOARD_SHORTCUT_KEY
 '
 ' NOTES
-'   Calling Application.OnKey with only the key argument restores normal behavior
+'   Calling Application.OnKey with only the key argument restores normal Excel
+'   behavior for that key combination
+'
+'   This routine intentionally does not call M_Settings_EnsureLoaded because it
+'   is a teardown-safe cleanup routine
 '
 ' UPDATED
-'   2026-05-02
+'   2026-05-06
 '------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_KeyboardShortcut_Remove"
+
+    Dim RemoveErrNumber         As Long         'Captured shortcut-removal error number
+    Dim RemoveErrDescription    As String       'Captured shortcut-removal error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress cleanup errors because shortcut removal is best-effort
+        On Error Resume Next
 
 '------------------------------------------------------------------------------
 ' REMOVE SHORTCUT
 '------------------------------------------------------------------------------
-    'Suppress cleanup errors
-        On Error Resume Next
-
-    'Restore the key to Excel
+    'Restore the key to Excel default handling
         Application.OnKey DP_KEYBOARD_SHORTCUT_KEY
 
+'------------------------------------------------------------------------------
+' CAPTURE DIAGNOSTICS
+'------------------------------------------------------------------------------
+    'Capture shortcut-removal error number
+        RemoveErrNumber = Err.Number
+    'Capture shortcut-removal error description
+        RemoveErrDescription = Err.Description
+    'Clear any suppressed shortcut-removal error
+        Err.Clear
+
+'------------------------------------------------------------------------------
+' WRITE DIAGNOSTICS
+'------------------------------------------------------------------------------
+    'Write diagnostics only when shortcut removal failed
+        If RemoveErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=Application.OnKey" & _
+                " | Key=" & DP_KEYBOARD_SHORTCUT_KEY & _
+                " | Error=" & VBA.CStr(RemoveErrNumber) & _
+                " | " & RemoveErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE ERROR HANDLING
+'------------------------------------------------------------------------------
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
-
 
 '
 '------------------------------------------------------------------------------
@@ -7911,11 +9241,6 @@ End Sub
 '------------------------------------------------------------------------------
 '
 
-Public Sub M_GridIcon_SetPath(ByVal IconPath As String)
-
-    'Store the optional icon path
-        gDP_IconPath = Trim$(IconPath)
-End Sub
 
 Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 
@@ -7924,8 +9249,8 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '                         SHOW OR MOVE GRID ICON
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Shows the DatePicker in-grid icon by reusing the existing worksheet shape
-'   whenever possible
+'   Shows or moves the DatePicker in-grid icon by reusing an existing worksheet
+'   shape whenever possible
 '
 ' WHY THIS EXISTS
 '   SelectionChange can fire very frequently. Deleting and recreating the
@@ -7934,7 +9259,9 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '
 ' INPUTS
 '   TargetCell
-'     Optional single-cell anchor. ActiveCell is used when omitted
+'     Optional single-cell anchor
+'
+'     If omitted, Excel.Application.ActiveCell is used
 '
 ' RETURNS
 '   Nothing
@@ -7946,9 +9273,10 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '   the icon only when no reusable target-sheet shape exists
 '
 ' ERROR POLICY
-'   Best-effort UI routine. Suppresses failures, falls back to the cold-path
-'   creation routine where possible, and writes diagnostics to the Immediate
-'   Window when the fallback path is used
+'   Best-effort UI routine
+'
+'   Suppresses failures, clears stale tracked references, falls back to the cold
+'   creation path when possible, and writes diagnostics to the Immediate Window
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
@@ -7968,37 +9296,48 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '   directly, otherwise the reuse / move optimization is bypassed
 '
 ' UPDATED
-'   2026-05-03
+'   2026-05-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_GridIcon_ShowOrMove"      'Current procedure name
-    Const ICON_SIZE             As Double = 24#                          'Icon width and height
-    Const ICON_GAP              As Double = 5#                           'Gap between target cell and icon
+    Const PROC_NAME             As String = "M_GridIcon_ShowOrMove"
+    Const ICON_SIZE             As Double = 24#
+    Const ICON_GAP              As Double = 5#
 
-    Dim AnchorCell              As Excel.Range                           'Resolved anchor cell
-    Dim TargetSheet             As Excel.Worksheet                       'Worksheet receiving the icon
-    Dim CandidateShape          As Excel.Shape                           'Existing reusable icon candidate
-    Dim IconLeft                As Double                                'Icon left position
-    Dim IconTop                 As Double                                'Icon top position
-    Dim HasReusableIcon         As Boolean                               'True when an existing shape can be moved
-    Dim ErrorNumber             As Long                                  'Captured error number
-    Dim ErrorDescription        As String                                'Captured error description
+    Dim AnchorCell              As Excel.Range       'Resolved anchor cell
+    Dim TargetSheet             As Excel.Worksheet   'Worksheet receiving the icon
+    Dim CandidateShape          As Excel.Shape       'Existing reusable icon candidate
+    Dim IconLeft                As Double            'Icon left position
+    Dim IconTop                 As Double            'Icon top position
+    Dim MergeState              As Variant           'Target merge-state snapshot
+    Dim HasReusableIcon         As Boolean           'True when an existing shape can be moved
+    Dim HandlerStep             As String            'Current handler step for diagnostics
+    Dim ErrorNumber             As Long              'Captured error number
+    Dim ErrorDescription        As String            'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable fail-safe error handling
         On Error GoTo FailSafe
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
     'Load settings before reading the grid-icon feature flag
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
 ' FEATURE GATE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Check grid-icon feature flag"
     'Remove any stale icon and exit when the feature is disabled
         If Not gDP_ShowGridIcon Then
             M_GridIcon_Remove
@@ -8008,19 +9347,18 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
 ' RESOLVE ANCHOR CELL
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve anchor cell"
     'Use the supplied target cell when provided
         If Not TargetCell Is Nothing Then
             Set AnchorCell = TargetCell
-
     'Otherwise use ActiveCell safely
         Else
             On Error Resume Next
-            Set AnchorCell = Application.ActiveCell
+            Set AnchorCell = Excel.Application.ActiveCell
             Err.Clear
             On Error GoTo FailSafe
-
         End If
-
     'Remove stale icon and exit when no anchor cell is available
         If AnchorCell Is Nothing Then
             M_GridIcon_Remove
@@ -8028,22 +9366,38 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         End If
 
 '------------------------------------------------------------------------------
-' NORMALIZE MERGED CELL TARGETS
+' VALIDATE TARGET AREA
 '------------------------------------------------------------------------------
-    'Normalize merged cells before rejecting multi-cell merged ranges
-        If AnchorCell.MergeCells Then
-            Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
+    'Track the current handler step
+        HandlerStep = "Validate target area"
+    'Remove stale icon and exit for multi-area targets
+        If AnchorCell.Areas.Count <> 1 Then
+            M_GridIcon_Remove
+            Exit Sub
         End If
 
+'------------------------------------------------------------------------------
+' NORMALIZE MERGED CELL TARGETS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize merged target"
+    'Capture merge state safely
+        MergeState = AnchorCell.MergeCells
+    'Normalize merged targets to the top-left cell of the merge area
+        If Not VBA.IsError(MergeState) Then
+            If Not VBA.IsNull(MergeState) Then
+                If VBA.CBool(MergeState) Then
+                    Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
+                End If
+            End If
+        End If
     'Remove stale icon and exit when the target is still not a single cell
         If AnchorCell.Cells.CountLarge <> 1 Then
             M_GridIcon_Remove
             Exit Sub
         End If
-
     'Store the target worksheet
         Set TargetSheet = AnchorCell.Worksheet
-
     'Remove stale icon and exit when no worksheet is available
         If TargetSheet Is Nothing Then
             M_GridIcon_Remove
@@ -8053,98 +9407,79 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
 ' CALCULATE ICON POSITION
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Calculate icon position"
     'Position the icon to the right of the anchor cell
         IconLeft = AnchorCell.Left + AnchorCell.Width + ICON_GAP
-
     'Vertically center the icon against the anchor cell
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
 
 '------------------------------------------------------------------------------
 ' RESOLVE TRACKED ICON
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve tracked icon"
     'Suppress stale shape-reference failures
         On Error Resume Next
-
     'Start from the tracked icon reference
         Set CandidateShape = gDP_GridIconShape
-
     'Clear invalid tracked references
         If Err.Number <> 0 Then
             Err.Clear
             Set CandidateShape = Nothing
             Set gDP_GridIconShape = Nothing
         End If
-
     'Restore fail-safe error handling
         On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
 ' HANDLE TRACKED ICON FROM ANOTHER WORKSHEET
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate tracked icon parent"
     'Validate the tracked icon parent when a candidate exists
         If Not CandidateShape Is Nothing Then
-
-            'Suppress stale shape-parent failures
-                On Error Resume Next
-
-            'Reuse only when the tracked icon already belongs to the target sheet
-                HasReusableIcon = (CandidateShape.Parent Is TargetSheet)
-
-            'Delete a valid tracked icon that belongs to a previous worksheet
-                If Err.Number = 0 Then
-                    If Not HasReusableIcon Then
-                        CandidateShape.Delete
-                        Set CandidateShape = Nothing
-                        Set gDP_GridIconShape = Nothing
-                    End If
-                End If
-
-            'Clear stale candidate references
-                If Err.Number <> 0 Then
-                    Err.Clear
-                    Set CandidateShape = Nothing
-                    Set gDP_GridIconShape = Nothing
-                    HasReusableIcon = False
-                End If
-
-            'Restore fail-safe error handling
-                On Error GoTo FailSafe
-
+            On Error Resume Next
+            HasReusableIcon = (CandidateShape.Parent Is TargetSheet)
+            If Err.Number <> 0 Then
+                Err.Clear
+                Set CandidateShape = Nothing
+                Set gDP_GridIconShape = Nothing
+                HasReusableIcon = False
+            ElseIf Not HasReusableIcon Then
+                CandidateShape.Delete
+                Err.Clear
+                Set CandidateShape = Nothing
+                Set gDP_GridIconShape = Nothing
+            End If
+            On Error GoTo FailSafe
         End If
 
 '------------------------------------------------------------------------------
 ' RESOLVE SAME-SHEET FALLBACK ICON
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve same-sheet icon"
     'Try to reuse a same-named shape on the target worksheet
         If CandidateShape Is Nothing Then
-
-            'Suppress missing-shape failures
-                On Error Resume Next
-
-            'Resolve the existing same-named shape from the target worksheet
-                Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
-
-            'Use the same-named shape when it exists
-                HasReusableIcon = Not (CandidateShape Is Nothing)
-
-            'Clear missing-shape errors
-                If Err.Number <> 0 Then
-                    Err.Clear
-                    Set CandidateShape = Nothing
-                    HasReusableIcon = False
-                End If
-
-            'Restore fail-safe error handling
-                On Error GoTo FailSafe
-
+            On Error Resume Next
+            Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+            HasReusableIcon = Not (CandidateShape Is Nothing)
+            If Err.Number <> 0 Then
+                Err.Clear
+                Set CandidateShape = Nothing
+                HasReusableIcon = False
+            End If
+            On Error GoTo FailSafe
         End If
 
 '------------------------------------------------------------------------------
 ' MOVE EXISTING ICON
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Move reusable icon"
     'Move and show the existing icon when it can be reused
         If HasReusableIcon Then
-
             With CandidateShape
                 .Left = IconLeft
                 .Top = IconTop
@@ -8156,24 +9491,31 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
                 .Visible = msoTrue
                 .ZOrder msoBringToFront
             End With
-
             'Store the reusable icon reference
                 Set gDP_GridIconShape = CandidateShape
-
+            'Release local references
+                Set CandidateShape = Nothing
+                Set TargetSheet = Nothing
+                Set AnchorCell = Nothing
             'Exit after moving the icon
                 Exit Sub
-
         End If
 
 '------------------------------------------------------------------------------
 ' CREATE ICON ONLY WHEN NEEDED
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Create icon"
     'Create the icon only when no reusable shape exists
         M_GridIcon_Create AnchorCell
 
 '------------------------------------------------------------------------------
-' NORMAL EXIT
+' CLEAN EXIT
 '------------------------------------------------------------------------------
+    'Release local references
+        Set CandidateShape = Nothing
+        Set TargetSheet = Nothing
+        Set AnchorCell = Nothing
     'Exit the procedure
         Exit Sub
 
@@ -8183,34 +9525,33 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 FailSafe:
     'Capture the error number
         ErrorNumber = Err.Number
-
     'Capture the error description
         ErrorDescription = Err.Description
-
     'Suppress fallback failures
         On Error Resume Next
-
     'Clear invalid tracked references
         Set gDP_GridIconShape = Nothing
-
     'Fall back to cold-path creation when an anchor cell is available
         If Not AnchorCell Is Nothing Then
             M_GridIcon_Create AnchorCell
         End If
-
     'Write diagnostics without interrupting worksheet interaction
         Debug.Print PROC_NAME & _
+            " | Step=" & HandlerStep & _
             " | Error=" & VBA.CStr(ErrorNumber) & _
             " | " & ErrorDescription
-
+    'Release local references
+        Set CandidateShape = Nothing
+        Set TargetSheet = Nothing
+        Set AnchorCell = Nothing
     'Clear any suppressed fallback error
         Err.Clear
-
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
-Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
+
+Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 
 '
 '------------------------------------------------------------------------------
@@ -8221,28 +9562,32 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
 '
 ' WHY THIS EXISTS
 '   Users can invoke the DatePicker directly from the worksheet grid without
-'   using the right-click menu or Ribbon
+'   using the right-click menu, keyboard shortcut, or Ribbon
 '
 ' INPUTS
 '   TargetCell
-'     Optional single-cell anchor. ActiveCell is used when omitted
+'     Optional single-cell anchor
+'
+'     If omitted, Excel.Application.ActiveCell is used
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   - resolves the target cell
-'   - exits and removes the icon when the grid-icon feature is disabled
-'   - resolves the embedded temporary icon file before touching the worksheet
-'   - creates a fully formatted temporary shape while ScreenUpdating is disabled
-'   - applies the embedded picture icon when available
-'   - falls back to the built-in font glyph when the embedded icon is unavailable
-'   - replaces the old icon only after the new icon is fully prepared
-'   - restores Application.ScreenUpdating deterministically
+'   Resolves the target cell, exits and removes the icon when the grid-icon
+'   feature is disabled, resolves the embedded temporary icon file before
+'   touching the worksheet, creates a fully formatted temporary shape while
+'   ScreenUpdating is disabled, applies the embedded picture icon when available,
+'   falls back to the built-in font glyph when the embedded icon is unavailable,
+'   replaces the old icon only after the new icon is fully prepared, and restores
+'   Application.ScreenUpdating deterministically
 '
 ' ERROR POLICY
-'   Best-effort UI routine. Suppresses creation failures, removes partial
-'   temporary shapes, and restores Application state
+'   Best-effort UI routine
+'
+'   Suppresses creation failures, removes partial temporary shapes, restores
+'   Application state, clears invalid tracked-shape references, and writes
+'   diagnostics to the Immediate Window
 '
 ' DEPENDENCIES
 '   Excel Shapes object model
@@ -8267,40 +9612,55 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
 '   The old icon is replaced only after the new temporary icon has been created,
 '   formatted, and filled
 '
+'   M_GridIcon_ShowOrMove remains the preferred high-frequency selection-change
+'   path. This routine is the cold creation / recreation path
+'
 ' UPDATED
-'   2026-04-30
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_GridIcon_Create"           'Current procedure name
-    Const ICON_SIZE            As Double = 24#                           'Icon width and height
-    Const ICON_GAP             As Double = 5#                            'Gap between target cell and icon
+    Const PROC_NAME             As String = "M_GridIcon_Create"
+    Const ICON_SIZE             As Double = 24#
+    Const ICON_GAP              As Double = 5#
 
-    Dim AnchorCell             As Range                                  'Resolved anchor cell
-    Dim TargetSheet            As Worksheet                              'Worksheet receiving the icon
-    Dim NewIconShape           As Shape                                  'New temporary icon shape
-    Dim IconLeft               As Double                                 'Icon left position
-    Dim IconTop                As Double                                 'Icon top position
-    Dim IconFilePath           As String                                 'Resolved embedded icon file path
-    Dim TempShapeName          As String                                 'Temporary icon shape name
-    Dim UsedPictureIcon        As Boolean                                'True when picture fill succeeds
-    Dim PreviousScreenUpdating As Boolean                                'Previous ScreenUpdating state
-    Dim HasScreenState         As Boolean                                'True after ScreenUpdating is captured
+    Dim AnchorCell              As Excel.Range      'Resolved anchor cell
+    Dim TargetSheet             As Excel.Worksheet  'Worksheet receiving the icon
+    Dim NewIconShape            As Excel.Shape      'New temporary icon shape
+    Dim IconLeft                As Double           'Icon left position
+    Dim IconTop                 As Double           'Icon top position
+    Dim IconFilePath            As String           'Resolved embedded icon file path
+    Dim TempShapeName           As String           'Temporary icon shape name
+    Dim UsedPictureIcon         As Boolean          'True when picture fill succeeds
+    Dim PreviousScreenUpdating  As Boolean          'Previous ScreenUpdating state
+    Dim HasScreenState          As Boolean          'True after ScreenUpdating is captured
+    Dim HandlerStep             As String           'Current handler step for diagnostics
+    Dim ErrorNumber             As Long             'Captured error number
+    Dim ErrorDescription        As String           'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable fail-safe error handling
         On Error GoTo FailSafe
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
     'Load settings before reading the grid-icon feature flag
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
 ' FEATURE GATE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Check grid-icon feature flag"
     'Remove any stale icon and exit when the feature is disabled
         If Not gDP_ShowGridIcon Then
             M_GridIcon_Remove
@@ -8310,61 +9670,57 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
 '------------------------------------------------------------------------------
 ' RESOLVE EMBEDDED ICON FILE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve embedded icon file"
     'Suppress embedded-icon creation failures and allow fallback glyph rendering
         On Error Resume Next
-
     'Resolve or create the embedded temporary icon file
         IconFilePath = M_GridIcon_EnsureEmbeddedIconFile()
-
     'Clear any suppressed embedded-icon error
         Err.Clear
-
     'Restore fail-safe error handling
         On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
 ' RESOLVE ANCHOR CELL
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve anchor cell"
     'Use the supplied target cell when provided
         If Not TargetCell Is Nothing Then
             Set AnchorCell = TargetCell
+    'Otherwise use ActiveCell safely
         Else
-
-            'Suppress ActiveCell access failures
-                On Error Resume Next
-
-            'Use ActiveCell when no explicit target is supplied
-                Set AnchorCell = Application.ActiveCell
-
-            'Clear any suppressed ActiveCell error
-                Err.Clear
-
-            'Restore fail-safe error handling
-                On Error GoTo FailSafe
-
+            On Error Resume Next
+            Set AnchorCell = Excel.Application.ActiveCell
+            Err.Clear
+            On Error GoTo FailSafe
         End If
-
     'Remove stale icon and exit when no anchor cell is available
         If AnchorCell Is Nothing Then
             M_GridIcon_Remove
             Exit Sub
         End If
 
+'------------------------------------------------------------------------------
+' NORMALIZE ANCHOR CELL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize anchor cell"
+    'Use the first physical cell defensively
+        Set AnchorCell = AnchorCell.Cells(1, 1)
+    'Normalize merged cells to the top-left cell
+        If AnchorCell.MergeCells Then
+            Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
+        End If
     'Remove stale icon and exit when the target is not a single cell
         If AnchorCell.Cells.CountLarge <> 1 Then
             M_GridIcon_Remove
             Exit Sub
         End If
-
-    'Normalize merged cells to the top-left cell
-        If AnchorCell.MergeCells Then
-            Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
-        End If
-
     'Store the target worksheet
         Set TargetSheet = AnchorCell.Worksheet
-
-    'Exit when no worksheet is available
+    'Remove stale icon and exit when no worksheet is available
         If TargetSheet Is Nothing Then
             M_GridIcon_Remove
             Exit Sub
@@ -8373,45 +9729,46 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
 '------------------------------------------------------------------------------
 ' CALCULATE ICON POSITION
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Calculate icon position"
     'Position the icon to the right of the anchor cell
         IconLeft = AnchorCell.Left + AnchorCell.Width + ICON_GAP
-
     'Vertically center the icon against the anchor cell
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
-
     'Build the temporary shape name
         TempShapeName = DP_GRID_ICON_NAME & "_Pending"
 
 '------------------------------------------------------------------------------
 ' CAPTURE APPLICATION STATE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture Application state"
     'Capture the current ScreenUpdating state
-        PreviousScreenUpdating = Application.ScreenUpdating
-
+        PreviousScreenUpdating = Excel.Application.ScreenUpdating
     'Mark ScreenUpdating as captured
         HasScreenState = True
-
     'Suppress worksheet repaint during icon creation
-        Application.ScreenUpdating = False
+        Excel.Application.ScreenUpdating = False
 
 '------------------------------------------------------------------------------
 ' REMOVE STALE TEMPORARY SHAPE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Remove stale temporary shape"
     'Suppress stale temporary-shape cleanup errors
         On Error Resume Next
-
     'Delete a stale temporary icon from a previous interrupted run
         TargetSheet.Shapes(TempShapeName).Delete
-
     'Clear any suppressed cleanup error
         Err.Clear
-
     'Restore fail-safe error handling
         On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
 ' CREATE TEMPORARY ICON SHAPE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Create temporary icon shape"
     'Create the new icon with a temporary name
         Set NewIconShape = TargetSheet.Shapes.AddShape( _
             msoShapeRoundedRectangle, _
@@ -8419,16 +9776,16 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
             IconTop, _
             ICON_SIZE, _
             ICON_SIZE)
-
     'Assign the temporary shape name
         NewIconShape.Name = TempShapeName
-
     'Hide the shape while it is being formatted
         NewIconShape.Visible = msoFalse
 
 '------------------------------------------------------------------------------
 ' APPLY BASE SHAPE SETTINGS
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply base shape settings"
     'Apply base icon behavior and callback settings
         With NewIconShape
             .Placement = xlMove
@@ -8443,111 +9800,72 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Range)
 '------------------------------------------------------------------------------
 ' APPLY EMBEDDED PICTURE ICON
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply embedded picture icon"
     'Start from fallback mode
         UsedPictureIcon = False
-
     'Try to apply the embedded picture icon when available
-        If LenB(IconFilePath) <> 0 Then
-            If LenB(Dir$(IconFilePath, vbNormal)) <> 0 Then
-
-                'Suppress picture-fill failures and fall back to the glyph
-                    On Error Resume Next
-
-                'Apply the embedded picture as the shape fill
-                    NewIconShape.Fill.UserPicture IconFilePath
-
-                'Store whether the picture fill succeeded
-                    UsedPictureIcon = (Err.Number = 0)
-
-                'Clear any suppressed picture-fill error
-                    Err.Clear
-
-                'Restore fail-safe error handling
-                    On Error GoTo FailSafe
-
+        If VBA.LenB(IconFilePath) <> 0 Then
+            If VBA.LenB(VBA.Dir$(IconFilePath, vbNormal)) <> 0 Then
+                On Error Resume Next
+                NewIconShape.Fill.UserPicture IconFilePath
+                UsedPictureIcon = (Err.Number = 0)
+                Err.Clear
+                On Error GoTo FailSafe
             End If
         End If
 
 '------------------------------------------------------------------------------
 ' APPLY FALLBACK GLYPH ICON
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply fallback glyph icon"
     'Apply the built-in fallback glyph when no picture icon was applied
         If Not UsedPictureIcon Then
-
-            'Apply fallback shape fill
-                With NewIconShape
-                    .Fill.Visible = msoTrue
-                    .Fill.ForeColor.RGB = DP_THEME_COLOR_HEADER
-                    .Line.Visible = msoFalse
-                End With
-
-            'Suppress TextFrame2 formatting failures
-                On Error Resume Next
-
-            'Clear any existing text
-                NewIconShape.TextFrame2.TextRange.Text = vbNullString
-
-            'Apply the calendar glyph
-                NewIconShape.TextFrame2.TextRange.Text = ChrW$(DP_GRID_ICON_CALENDAR_CODEPOINT)
-
-            'Apply the glyph font name
-                NewIconShape.TextFrame2.TextRange.Font.Name = DP_GRID_ICON_FONT_NAME
-
-            'Apply the glyph font size
-                NewIconShape.TextFrame2.TextRange.Font.Size = DP_GRID_ICON_FONT_SIZE
-
-            'Apply the glyph foreground color
-                NewIconShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = DP_GRID_ICON_FORE_COLOR
-
-            'Remove text margins
-                NewIconShape.TextFrame2.MarginLeft = 0
-                NewIconShape.TextFrame2.MarginRight = 0
-                NewIconShape.TextFrame2.MarginTop = 0
-                NewIconShape.TextFrame2.MarginBottom = 0
-
-            'Vertically center the glyph
-                NewIconShape.TextFrame2.VerticalAnchor = msoAnchorMiddle
-
-            'Horizontally center the glyph
-                NewIconShape.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
-
-            'Clear any suppressed TextFrame2 error
-                Err.Clear
-
-            'Restore fail-safe error handling
-                On Error GoTo FailSafe
-
+            With NewIconShape
+                .Fill.Visible = msoTrue
+                .Fill.ForeColor.RGB = DP_THEME_COLOR_HEADER
+                .Line.Visible = msoFalse
+            End With
+            On Error Resume Next
+            NewIconShape.TextFrame2.TextRange.Text = vbNullString
+            NewIconShape.TextFrame2.TextRange.Text = VBA.ChrW$(DP_GRID_ICON_CALENDAR_CODEPOINT)
+            NewIconShape.TextFrame2.TextRange.Font.Name = DP_GRID_ICON_FONT_NAME
+            NewIconShape.TextFrame2.TextRange.Font.Size = DP_GRID_ICON_FONT_SIZE
+            NewIconShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = DP_GRID_ICON_FORE_COLOR
+            NewIconShape.TextFrame2.MarginLeft = 0
+            NewIconShape.TextFrame2.MarginRight = 0
+            NewIconShape.TextFrame2.MarginTop = 0
+            NewIconShape.TextFrame2.MarginBottom = 0
+            NewIconShape.TextFrame2.VerticalAnchor = msoAnchorMiddle
+            NewIconShape.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
+            Err.Clear
+            On Error GoTo FailSafe
         End If
 
 '------------------------------------------------------------------------------
 ' ATOMIC REPLACE OLD ICON
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Replace old icon"
     'Suppress old-icon cleanup errors
         On Error Resume Next
-
     'Delete the tracked old icon when available
         If Not gDP_GridIconShape Is Nothing Then
             gDP_GridIconShape.Delete
         End If
-
     'Delete any same-named icon on the target sheet
         TargetSheet.Shapes(DP_GRID_ICON_NAME).Delete
-
     'Clear any suppressed cleanup error
         Err.Clear
-
     'Restore fail-safe error handling
         On Error GoTo FailSafe
-
     'Promote the temporary icon to the stable DatePicker icon name
         NewIconShape.Name = DP_GRID_ICON_NAME
-
     'Store the new icon reference
         Set gDP_GridIconShape = NewIconShape
-
     'Show the fully formatted icon
         gDP_GridIconShape.Visible = msoTrue
-
     'Bring the icon to the front
         gDP_GridIconShape.ZOrder msoBringToFront
 
@@ -8559,8 +9877,14 @@ CleanExit:
         On Error Resume Next
     'Restore ScreenUpdating when it was captured
         If HasScreenState Then
-            Application.ScreenUpdating = PreviousScreenUpdating
+            Excel.Application.ScreenUpdating = PreviousScreenUpdating
         End If
+    'Release local references
+        Set NewIconShape = Nothing
+        Set TargetSheet = Nothing
+        Set AnchorCell = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
     'Exit the procedure
@@ -8570,22 +9894,38 @@ CleanExit:
 ' FAIL-SAFE
 '------------------------------------------------------------------------------
 FailSafe:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
     'Suppress cleanup failures
         On Error Resume Next
-
     'Delete the partially created temporary icon
         If Not NewIconShape Is Nothing Then
             NewIconShape.Delete
         End If
+    'Clear the tracked icon reference if creation failed
+        Set gDP_GridIconShape = Nothing
     'Restore ScreenUpdating when it was captured
         If HasScreenState Then
-            Application.ScreenUpdating = PreviousScreenUpdating
+            Excel.Application.ScreenUpdating = PreviousScreenUpdating
         End If
-
+    'Write diagnostics without interrupting worksheet interaction
+        Debug.Print PROC_NAME & _
+            " | Step=" & HandlerStep & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Release local references
+        Set NewIconShape = Nothing
+        Set TargetSheet = Nothing
+        Set AnchorCell = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
+
 Public Sub M_GridIcon_Remove()
 
 '
@@ -8613,7 +9953,8 @@ Public Sub M_GridIcon_Remove()
 '   cheap fallback for stale references
 '
 ' ERROR POLICY
-'   Best-effort cleanup. Suppresses shape-deletion errors
+'   Best-effort cleanup. Suppresses shape-deletion errors and writes limited
+'   diagnostics only for non-trivial cleanup failures
 '
 ' DEPENDENCIES
 '   gDP_GridIconShape
@@ -8627,14 +9968,20 @@ Public Sub M_GridIcon_Remove()
 '   print, teardown, or regression reset
 '
 ' UPDATED
-'   2026-04-30
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ActiveSheetObject       As Object           'Current active sheet object
-    Dim ActiveWorksheet         As Worksheet        'Current active worksheet
+    Const PROC_NAME                 As String = "M_GridIcon_Remove"
+
+    Dim ActiveSheetObject           As Object       'Current active sheet object
+    Dim ActiveWorksheet             As Worksheet    'Current active worksheet
+    Dim TrackedErrNumber            As Long         'Tracked-shape deletion error number
+    Dim TrackedErrDescription       As String       'Tracked-shape deletion error description
+    Dim ActiveSheetErrNumber        As Long         'ActiveSheet resolution error number
+    Dim ActiveSheetErrDescription   As String       'ActiveSheet resolution error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -8645,37 +9992,77 @@ Public Sub M_GridIcon_Remove()
 '------------------------------------------------------------------------------
 ' DELETE TRACKED SHAPE
 '------------------------------------------------------------------------------
+    'Clear any pending error before deleting the tracked shape
+        Err.Clear
     'Delete the tracked grid icon shape when available
         If Not gDP_GridIconShape Is Nothing Then
             gDP_GridIconShape.Delete
+            TrackedErrNumber = Err.Number
+            TrackedErrDescription = Err.Description
+            Err.Clear
         End If
-
-    'Clear the tracked shape reference
+    'Clear the tracked shape reference regardless of deletion result
         Set gDP_GridIconShape = Nothing
+
+'------------------------------------------------------------------------------
+' RESOLVE ACTIVE WORKSHEET
+'------------------------------------------------------------------------------
+    'Clear any pending error before resolving ActiveSheet
+        Err.Clear
+    'Capture the active sheet object safely
+        Set ActiveSheetObject = Application.ActiveSheet
+    'Capture ActiveSheet resolution failure if any
+        ActiveSheetErrNumber = Err.Number
+        ActiveSheetErrDescription = Err.Description
+    'Clear any suppressed ActiveSheet error
+        Err.Clear
+    'Use the active sheet only when it is a worksheet
+        If Not ActiveSheetObject Is Nothing Then
+            If TypeOf ActiveSheetObject Is Worksheet Then
+                Set ActiveWorksheet = ActiveSheetObject
+            End If
+        End If
 
 '------------------------------------------------------------------------------
 ' DELETE ACTIVE-SHEET FALLBACK
 '------------------------------------------------------------------------------
-    'Capture the active sheet object safely
-        Set ActiveSheetObject = ActiveSheet
-
-    'Use the active sheet only when it is a worksheet
-        If TypeOf ActiveSheetObject Is Excel.Worksheet Then
-            Set ActiveWorksheet = ActiveSheetObject
-        End If
-
     'Delete a same-named icon from the active worksheet as a cheap stale cleanup
         If Not ActiveWorksheet Is Nothing Then
             ActiveWorksheet.Shapes(DP_GRID_ICON_NAME).Delete
+            Err.Clear
         End If
 
 '------------------------------------------------------------------------------
-' RESTORE ERROR HANDLING
+' DIAGNOSTICS
 '------------------------------------------------------------------------------
+    'Write tracked-shape diagnostics only when a tracked deletion failed
+        If TrackedErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=DeleteTrackedShape" & _
+                " | Error=" & VBA.CStr(TrackedErrNumber) & _
+                " | " & TrackedErrDescription
+        End If
+    'Write ActiveSheet diagnostics only when ActiveSheet resolution failed
+        If ActiveSheetErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=ResolveActiveSheet" & _
+                " | Error=" & VBA.CStr(ActiveSheetErrNumber) & _
+                " | " & ActiveSheetErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release local object references
+        Set ActiveWorksheet = Nothing
+        Set ActiveSheetObject = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
+
 Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
 
 '
@@ -8698,60 +10085,79 @@ Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
 '   Full path of the temporary PNG file
 '
 ' BEHAVIOR
-'   - Resolves the user's temp directory
-'   - Builds a stable icon file path
-'   - Reuses the file if it already exists and appears valid
-'   - Recreates the file from embedded Base64 when missing or invalid
-'   - Returns the final valid file path
+'   Resolves the user's temp directory, builds a stable icon file path, reuses
+'   the file if it already exists and appears valid, recreates the file from the
+'   embedded Base64 payload when missing or invalid, validates the written file,
+'   and returns the final valid file path
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the temp path cannot be resolved, the
-'   embedded payload cannot be decoded, or the icon file cannot be written
+'   embedded payload cannot be decoded, the icon file cannot be written, or the
+'   written icon file fails validation
 '
 ' DEPENDENCIES
+'   M_GridIcon_GetTempFolder
+'   M_GridIcon_CombinePath
+'   M_GridIcon_IconFileIsUsable
 '   M_GridIcon_EmbeddedIconBytes
 '   M_GridIcon_WriteBytesToFile
-'   M_GridIcon_IconFileIsUsable
+'   DP_GRID_ICON_TEMP_FILE_NAME
 '
 ' NOTES
 '   The temp file is intentionally not deleted during normal cleanup
 '
+'   The routine returns an existing valid temp file without decoding the embedded
+'   payload again
+'
 ' UPDATED
-'   2026-04-30
+'   2026-05-06
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_GridIcon_EnsureEmbeddedIconFile" 'Current procedure name
+    Const PROC_NAME             As String = "M_GridIcon_EnsureEmbeddedIconFile"
 
-    Dim TempFolder             As String       'Resolved temp folder
-    Dim IconPath               As String       'Resolved icon file path
-    Dim IconBytes()            As Byte         'Decoded embedded PNG bytes
+    Dim TempFolder              As String       'Resolved temp folder
+    Dim IconPath                As String       'Resolved icon file path
+    Dim IconBytes()             As Byte         'Decoded embedded PNG bytes
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
 ' RESOLVE TEMP PATH
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve temp folder"
     'Resolve the user's temp folder
         TempFolder = M_GridIcon_GetTempFolder()
-
     'Reject an empty temp folder
-        If LenB(TempFolder) = 0 Then
+        If VBA.LenB(TempFolder) = 0 Then
             Err.Raise vbObjectError + 513, PROC_NAME, "Temporary folder could not be resolved."
         End If
 
+'------------------------------------------------------------------------------
+' BUILD ICON PATH
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Build icon path"
     'Build the full icon path
         IconPath = M_GridIcon_CombinePath(TempFolder, DP_GRID_ICON_TEMP_FILE_NAME)
 
 '------------------------------------------------------------------------------
 ' REUSE EXISTING FILE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate existing icon file"
     'Return the existing temp file when it appears usable
         If M_GridIcon_IconFileIsUsable(IconPath) Then
             M_GridIcon_EnsureEmbeddedIconFile = IconPath
@@ -8759,17 +10165,26 @@ Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
         End If
 
 '------------------------------------------------------------------------------
-' CREATE TEMP FILE
+' DECODE EMBEDDED PAYLOAD
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Decode embedded icon payload"
     'Decode the embedded PNG payload
         IconBytes = M_GridIcon_EmbeddedIconBytes()
 
+'------------------------------------------------------------------------------
+' WRITE TEMP FILE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Write embedded icon file"
     'Write the decoded bytes to the temp file
         M_GridIcon_WriteBytesToFile IconPath, IconBytes
 
 '------------------------------------------------------------------------------
 ' VALIDATE WRITTEN FILE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate written icon file"
     'Reject the file if it still does not appear usable
         If Not M_GridIcon_IconFileIsUsable(IconPath) Then
             Err.Raise vbObjectError + 514, PROC_NAME, "Embedded icon file was written but failed validation."
@@ -8782,8 +10197,10 @@ Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
         M_GridIcon_EnsureEmbeddedIconFile = IconPath
 
 '------------------------------------------------------------------------------
-' EXIT PROCEDURE
+' CLEAN EXIT
 '------------------------------------------------------------------------------
+    'Release decoded byte-array storage
+        Erase IconBytes
     'Exit before the error handler
         Exit Function
 
@@ -8791,8 +10208,16 @@ Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Release decoded byte-array storage
+        Erase IconBytes
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            ErrorDescription
 
 End Function
 
@@ -8816,45 +10241,71 @@ Private Function M_GridIcon_GetTempFolder() As String
 '   Normalized temp folder path without a trailing path separator
 '
 ' BEHAVIOR
-'   Tries TEMP first, then TMP
+'   Reads TEMP first, falls back to TMP when TEMP is unavailable, trims the
+'   resolved value, removes trailing path separators, and returns the normalized
+'   folder path
 '
 ' ERROR POLICY
-'   Safe default. Returns an empty string on failure
+'   Safe default. Returns an empty string on failure and writes diagnostics to
+'   the Immediate Window only when an unexpected runtime error occurs
 '
 ' DEPENDENCIES
-'   Environ$
+'   VBA.Environ$
 '
 ' NOTES
 '   The Windows temp folder should already exist
 '
+'   This routine only resolves the path. It does not validate write permission
+'   and does not create folders
+'
 ' UPDATED
-'   2026-04-30
+'   2026-05-06
 '------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_GridIcon_GetTempFolder"
+
+    Dim TempFolder              As String       'Resolved temporary folder path
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Suppress temp-resolution failures
+    'Set the safe default
+        M_GridIcon_GetTempFolder = vbNullString
+    'Enable safe-default error handling
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' RESOLVE TEMP FOLDER
 '------------------------------------------------------------------------------
-    'Use TEMP when available
-        M_GridIcon_GetTempFolder = Trim$(Environ$("TEMP"))
-
-    'Use TMP when TEMP is unavailable
-        If LenB(M_GridIcon_GetTempFolder) = 0 Then
-            M_GridIcon_GetTempFolder = Trim$(Environ$("TMP"))
+    'Read TEMP first
+        TempFolder = VBA.Trim$(VBA.Environ$("TEMP"))
+    'Read TMP when TEMP is unavailable
+        If VBA.LenB(TempFolder) = 0 Then
+            TempFolder = VBA.Trim$(VBA.Environ$("TMP"))
         End If
 
 '------------------------------------------------------------------------------
 ' NORMALIZE PATH
 '------------------------------------------------------------------------------
-    'Remove trailing backslash when present
-        If Right$(M_GridIcon_GetTempFolder, 1) = "\" Then
-            M_GridIcon_GetTempFolder = Left$(M_GridIcon_GetTempFolder, Len(M_GridIcon_GetTempFolder) - 1)
-        End If
+    'Remove trailing path separators when present
+        Do While VBA.LenB(TempFolder) > 0
+            If VBA.Right$(TempFolder, 1) = "\" Or VBA.Right$(TempFolder, 1) = "/" Then
+                TempFolder = VBA.Left$(TempFolder, VBA.Len(TempFolder) - 1)
+            Else
+                Exit Do
+            End If
+        Loop
+
+'------------------------------------------------------------------------------
+' RETURN VALUE
+'------------------------------------------------------------------------------
+    'Return the normalized temp folder path
+        M_GridIcon_GetTempFolder = TempFolder
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -8866,8 +10317,20 @@ Private Function M_GridIcon_GetTempFolder() As String
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Return safe default
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Return the safe default
         M_GridIcon_GetTempFolder = vbNullString
+    'Write diagnostics only when an unexpected error occurred
+        If ErrorNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Error=" & VBA.CStr(ErrorNumber) & _
+                " | " & ErrorDescription
+        End If
+    'Clear the suppressed error
+        Err.Clear
 
 End Function
 
@@ -8876,14 +10339,15 @@ Private Function M_GridIcon_CombinePath( _
     ByVal FileName As String) As String
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           COMBINE PATH
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Combines a folder path and file name using a Windows path separator
 '
 ' WHY THIS EXISTS
-'   Repeated temp-file path construction should remain deterministic and simple
+'   Repeated temp-file path construction should remain deterministic, readable,
+'   and isolated in one helper
 '
 ' INPUTS
 '   FolderPath
@@ -8895,27 +10359,39 @@ Private Function M_GridIcon_CombinePath( _
 ' RETURNS
 '   Combined file path
 '
+' BEHAVIOR
+'   If FolderPath already ends with a backslash, appends FileName directly
+'   If FolderPath does not end with a backslash, inserts one backslash separator
+'   Does not trim, validate, normalize, expand, or inspect either input
+'
 ' ERROR POLICY
-'   Does not raise errors directly
+'   Does not raise custom errors
+'   Lets native VBA string behavior apply
 '
 ' DEPENDENCIES
 '   None
 '
 ' NOTES
 '   This helper assumes a Windows Excel environment
+'   Empty FolderPath behavior is intentionally preserved from the original code
 '
 ' UPDATED
-'   2026-04-30
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const C_PATH_SEPARATOR As String = "\"        'Windows path separator
 
 '------------------------------------------------------------------------------
 ' RETURN COMBINED PATH
 '------------------------------------------------------------------------------
-    'Return the combined path
-        If Right$(FolderPath, 1) = "\" Then
+    'Return the direct concatenation when the folder already ends with a separator
+        If Right$(FolderPath, Len(C_PATH_SEPARATOR)) = C_PATH_SEPARATOR Then
             M_GridIcon_CombinePath = FolderPath & FileName
         Else
-            M_GridIcon_CombinePath = FolderPath & "\" & FileName
+            M_GridIcon_CombinePath = FolderPath & C_PATH_SEPARATOR & FileName
         End If
 
 End Function
@@ -8923,36 +10399,56 @@ End Function
 Private Function M_GridIcon_IconFileIsUsable(ByVal IconPath As String) As Boolean
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         ICON FILE IS USABLE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns whether a candidate embedded grid-icon file appears usable
 '
 ' WHY THIS EXISTS
-'   A previous temp-file write may have failed or produced a truncated file. The
-'   DatePicker should recreate the file when it is missing or invalid
+'   A previous temp-file write may have failed, produced a missing file, or
+'   produced a truncated file
+'
+'   The DatePicker should recreate the embedded grid-icon file when the existing
+'   candidate file is missing, too small, unreadable, or not recognizable as PNG
 '
 ' INPUTS
 '   IconPath
 '     Candidate PNG path
 '
 ' RETURNS
-'   True if the file exists, has a plausible size, and has a PNG signature
+'   True if the file exists, has a plausible size, and starts with the PNG
+'   signature bytes
+'
+'   False otherwise
+'
+' BEHAVIOR
+'   Rejects blank paths after Trim$
+'   Rejects missing files
+'   Rejects files smaller than DP_GRID_ICON_TEMP_MIN_BYTES
+'   Opens the candidate file in binary read mode
+'   Reads the first eight bytes
+'   Accepts the file only when the standard PNG signature matches
 '
 ' ERROR POLICY
-'   Safe default. Returns False on failure
+'   Safe-default predicate
+'   Returns False on any failure
+'   Suppresses cleanup errors while attempting to close the file handle
 '
 ' DEPENDENCIES
+'   DP_GRID_ICON_TEMP_MIN_BYTES
 '   Dir$
 '   FileLen
+'   FreeFile
 '
 ' NOTES
 '   This is a lightweight validation, not a full PNG parser
+'   The routine intentionally does not validate the full PNG structure
+'   The routine intentionally preserves the original path handling behavior
 '
 ' UPDATED
-'   2026-04-30
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -8963,9 +10459,8 @@ Private Function M_GridIcon_IconFileIsUsable(ByVal IconPath As String) As Boolea
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Safe-default predicate
+    'Enable safe-default error handling
         On Error GoTo ErrorHandler
-
     'Default to unusable
         M_GridIcon_IconFileIsUsable = False
 
@@ -8973,39 +10468,28 @@ Private Function M_GridIcon_IconFileIsUsable(ByVal IconPath As String) As Boolea
 ' VALIDATE PATH
 '------------------------------------------------------------------------------
     'Exit when the path is blank
-        If LenB(Trim$(IconPath)) = 0 Then
-            Exit Function
-        End If
-
+        If LenB(Trim$(IconPath)) = 0 Then Exit Function
     'Exit when the file does not exist
-        If LenB(Dir$(IconPath, vbNormal)) = 0 Then
-            Exit Function
-        End If
-
+        If LenB(Dir$(IconPath, vbNormal)) = 0 Then Exit Function
     'Exit when the file is implausibly small
-        If FileLen(IconPath) < DP_GRID_ICON_TEMP_MIN_BYTES Then
-            Exit Function
-        End If
+        If FileLen(IconPath) < DP_GRID_ICON_TEMP_MIN_BYTES Then Exit Function
 
 '------------------------------------------------------------------------------
 ' READ SIGNATURE
 '------------------------------------------------------------------------------
     'Get a free file number
         FileNumber = FreeFile
-
     'Open the file for binary reading
         Open IconPath For Binary Access Read As #FileNumber
-
     'Read the first eight bytes
         Get #FileNumber, 1, Signature
-
     'Close the file
         Close #FileNumber
 
 '------------------------------------------------------------------------------
 ' VALIDATE PNG SIGNATURE
 '------------------------------------------------------------------------------
-    'Return True only when the PNG signature matches
+    'Return True only when the standard PNG signature matches
         M_GridIcon_IconFileIsUsable = _
             (Signature(1) = &H89 And _
              Signature(2) = &H50 And _
@@ -9026,26 +10510,24 @@ Private Function M_GridIcon_IconFileIsUsable(ByVal IconPath As String) As Boolea
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Suppress close failure
+    'Suppress cleanup errors
         On Error Resume Next
-
-    'Close the file if it was opened
+    'Close the file number when one has been assigned
         If FileNumber <> 0 Then Close #FileNumber
-
     'Return safe default
         M_GridIcon_IconFileIsUsable = False
-
     'Restore normal error handling
         On Error GoTo 0
 
 End Function
+
 
 Private Sub M_GridIcon_WriteBytesToFile( _
     ByVal IconPath As String, _
     ByRef IconBytes() As Byte)
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         WRITE BYTES TO FILE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -9054,6 +10536,9 @@ Private Sub M_GridIcon_WriteBytesToFile( _
 ' WHY THIS EXISTS
 '   The embedded PNG is stored as Base64 text in code, but Excel requires a
 '   physical file path for Shape.Fill.UserPicture
+'
+'   This helper isolates the disk-write step so the grid-icon creation logic
+'   remains focused on path resolution, icon validation, and shape rendering
 '
 ' INPUTS
 '   IconPath
@@ -9065,25 +10550,43 @@ Private Sub M_GridIcon_WriteBytesToFile( _
 ' RETURNS
 '   Nothing
 '
+' BEHAVIOR
+'   Rejects blank destination paths after Trim$
+'   Rejects empty byte payloads
+'   Deletes an existing target file before writing
+'   Opens the target file in binary write mode
+'   Writes the full byte array starting at byte position 1
+'   Closes the file handle after writing
+'
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the file cannot be written
+'   Raises a descriptive runtime error if validation fails or the file cannot
+'   be written
+'
+'   Attempts to close the file handle before re-raising the original error
 '
 ' DEPENDENCIES
+'   M_GridIcon_ByteArrayLength
+'   Dir$
+'   Kill
 '   FreeFile
 '
 ' NOTES
 '   Existing temp files are overwritten
+'   Parent-folder creation is intentionally not handled here
+'   The caller is responsible for passing a valid writable destination folder
 '
 ' UPDATED
-'   2026-04-30
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_GridIcon_WriteBytesToFile"  'Current procedure name
+    Const PROC_NAME            As String = "M_GridIcon_WriteBytesToFile"
 
     Dim FileNumber             As Integer      'Free file number
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9098,7 +10601,6 @@ Private Sub M_GridIcon_WriteBytesToFile( _
         If LenB(Trim$(IconPath)) = 0 Then
             Err.Raise vbObjectError + 513, PROC_NAME, "IconPath cannot be empty."
         End If
-
     'Reject an empty byte payload
         If M_GridIcon_ByteArrayLength(IconBytes) = 0 Then
             Err.Raise vbObjectError + 514, PROC_NAME, "IconBytes cannot be empty."
@@ -9108,22 +10610,17 @@ Private Sub M_GridIcon_WriteBytesToFile( _
 ' REPLACE EXISTING FILE
 '------------------------------------------------------------------------------
     'Delete any existing file before writing
-        If LenB(Dir$(IconPath, vbNormal)) <> 0 Then
-            Kill IconPath
-        End If
+        If LenB(Dir$(IconPath, vbNormal)) <> 0 Then Kill IconPath
 
 '------------------------------------------------------------------------------
 ' WRITE FILE
 '------------------------------------------------------------------------------
     'Get a free file number
         FileNumber = FreeFile
-
     'Open the target file for binary writing
         Open IconPath For Binary Access Write As #FileNumber
-
     'Write the byte array to disk
         Put #FileNumber, 1, IconBytes
-
     'Close the file
         Close #FileNumber
 
@@ -9137,29 +10634,34 @@ Private Sub M_GridIcon_WriteBytesToFile( _
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Suppress close failure
+    'Capture the original error before cleanup
+        ErrorNumber = Err.Number
+    'Capture the original error description before cleanup
+        ErrorDescription = Err.Description
+    'Suppress cleanup errors
         On Error Resume Next
-
-    'Close the file if it was opened
+    'Close the file number when one has been assigned
         If FileNumber <> 0 Then Close #FileNumber
-
+    'Restore normal error handling
+        On Error GoTo 0
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Sub
-
 Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         BYTE ARRAY LENGTH
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns the number of bytes in a byte array
 '
 ' WHY THIS EXISTS
-'   Dynamic arrays may be uninitialized. A defensive length helper keeps binary
-'   write validation safe
+'   Dynamic byte arrays may be uninitialized
+'
+'   A defensive length helper keeps binary-write validation safe and avoids
+'   repeating fragile LBound / UBound checks around the grid-icon file writer
 '
 ' INPUTS
 '   SourceBytes
@@ -9168,8 +10670,17 @@ Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 ' RETURNS
 '   Number of bytes in the array
 '
+'   Zero when the array bounds cannot be read
+'
+' BEHAVIOR
+'   Uses LBound and UBound to calculate the byte count
+'   Returns zero when SourceBytes is uninitialized
+'   Returns zero when array-bound inspection fails for any reason
+'
 ' ERROR POLICY
-'   Safe default. Returns zero for uninitialized arrays
+'   Safe-default predicate
+'   Returns zero on failure
+'   Does not raise custom errors
 '
 ' DEPENDENCIES
 '   LBound
@@ -9177,21 +10688,22 @@ Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 '
 ' NOTES
 '   This helper assumes a one-dimensional byte array
+'   The routine intentionally performs no content validation
 '
 ' UPDATED
-'   2026-04-30
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Return zero for uninitialized arrays
+    'Return zero when array bounds cannot be read
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' RETURN LENGTH
 '------------------------------------------------------------------------------
-    'Return byte count
+    'Return the byte count from the declared array bounds
         M_GridIcon_ByteArrayLength = UBound(SourceBytes) - LBound(SourceBytes) + 1
 
 '------------------------------------------------------------------------------
@@ -9204,7 +10716,7 @@ Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Return safe default
+    'Return the safe default
         M_GridIcon_ByteArrayLength = 0
 
 End Function
@@ -9212,7 +10724,7 @@ End Function
 Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         EMBEDDED ICON BYTES
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -9222,24 +10734,42 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 '   The project stores the grid icon directly in VBA code and materializes it to
 '   a temporary file only when needed
 '
+'   Excel Shape.Fill.UserPicture requires a physical file path, so the embedded
+'   PNG must first be decoded into bytes and then written to disk by the caller
+'
 ' INPUTS
 '   None
 '
 ' RETURNS
 '   Decoded PNG bytes
 '
+' BEHAVIOR
+'   Loads the embedded Base64 payload from M_GridIcon_EmbeddedIconBase64
+'   Rejects an empty embedded payload
+'   Creates a late-bound MSXML DOM document
+'   Creates a temporary XML node configured as bin.base64
+'   Assigns the Base64 text to the node
+'   Returns the decoded NodeTypedValue byte array
+'
 ' ERROR POLICY
+'   Raises a descriptive runtime error if the embedded payload is empty
+'   Raises a descriptive runtime error if MSXML object creation fails
 '   Raises a descriptive runtime error if Base64 decoding fails
+'   Preserves the original error number and description
 '
 ' DEPENDENCIES
+'   M_GridIcon_EmbeddedIconBase64
 '   MSXML2.DOMDocument.6.0
+'   CreateObject
 '
 ' NOTES
 '   Late binding avoids requiring a VBA reference
+'   This routine performs Base64 decoding only
+'   File creation is intentionally handled by M_GridIcon_WriteBytesToFile
 '
 ' UPDATED
-'   2026-04-30
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -9249,6 +10779,8 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
     Dim XmlDoc                 As Object       'MSXML document
     Dim XmlNode                As Object       'MSXML Base64 node
     Dim EncodedText            As String       'Base64 encoded PNG
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9261,7 +10793,6 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 '------------------------------------------------------------------------------
     'Load the embedded Base64 payload
         EncodedText = M_GridIcon_EmbeddedIconBase64()
-
     'Reject an empty embedded payload
         If LenB(EncodedText) = 0 Then
             Err.Raise vbObjectError + 513, PROC_NAME, "Embedded icon payload is empty."
@@ -9272,16 +10803,12 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 '------------------------------------------------------------------------------
     'Create the MSXML document
         Set XmlDoc = CreateObject("MSXML2.DOMDocument.6.0")
-
     'Create a Base64 node
         Set XmlNode = XmlDoc.createElement("Base64Data")
-
     'Configure the node as Base64 binary data
         XmlNode.DataType = "bin.base64"
-
     'Assign the encoded payload
         XmlNode.Text = EncodedText
-
     'Return the decoded bytes
         M_GridIcon_EmbeddedIconBytes = XmlNode.NodeTypedValue
 
@@ -9295,15 +10822,19 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Function
 
 Private Function M_GridIcon_EmbeddedIconBase64() As String
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         EMBEDDED ICON BASE64
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -9311,7 +10842,9 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 '
 ' WHY THIS EXISTS
 '   The DatePicker should not require a distributed external icon file, but
-'   Shape.Fill.UserPicture requires a real file path. This payload is decoded
+'   Shape.Fill.UserPicture requires a real file path
+'
+'   This helper keeps the embedded PNG payload centralized so it can be decoded
 '   into the user's temp folder on demand
 '
 ' INPUTS
@@ -9320,18 +10853,29 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 ' RETURNS
 '   Base64 text representing a PNG icon
 '
+' BEHAVIOR
+'   Builds the Base64 payload by concatenating short string chunks
+'   Returns the concatenated Base64 payload as a String
+'   Performs no validation, decoding, trimming, or file I/O
+'
 ' ERROR POLICY
-'   Does not raise errors directly
+'   Does not raise custom errors
+'   Lets native VBA string behavior apply
 '
 ' DEPENDENCIES
 '   None
 '
 ' NOTES
-'   Keep chunks short enough to avoid line-continuation limits
+'   Keep chunks short enough to avoid VBA line-continuation and physical-line
+'   length limits
+'
+'   The embedded payload is intentionally stored as plain VBA string chunks for
+'   portability and to avoid requiring an external image asset at distribution
+'   time
 '
 ' UPDATED
-'   2026-04-30
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -9341,13 +10885,12 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 '------------------------------------------------------------------------------
 ' BUILD PAYLOAD
 '------------------------------------------------------------------------------
-    'Append Base64 chunks
+    'Append the embedded Base64 chunks
         EncodedText = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAJm0lEQVR42u1ae4xcVRn/fefce2dm59GdZR/dtrSlDxaBAKb8"
         EncodedText = EncodedText & "AcFaDEoMIRKig/5n9A+hgiIYgmBkWDQxKhWiJqQlGAJo4g5gUHxQaEgVH4BVa215bFu6ZeljX/OeO3vvOefzj5ld16a7OzP7"
         EncodedText = EncodedText & "rvslJ3sz3+Z3z/nO9/id7x5gWWZVCMy0hPEbl0RPjxx77pnwvFTwZyRc3ZVEIiG//oOnwuO7tQTwxUwBkkkWRMTfevSJm6+6"
         EncodedText = EncodedText & "4XP7z2+L9CZ/9NP7K/OeubvONf4s7AzT/d/Z2fnIk6nckRNDfGIoyz//7R/5mz/cef1M3XWu8WfsAalUSgDEnqMvWbVyZbR1"
-        EncodedText = EncodedText & "RVQ1R8PeBeevNFpjGwAcbGujxYo/QwMwHTzYRgATMWutNftKCV9poZQWgsgDmE6+GyWAGxr14TeWE0SdPknbkq9alZcRP9T9"
-        EncodedText = EncodedText & "MQUQC+FpqgiIACICsWaA+PHbrvQB4kZGffjgRKJHIpmsa01WHXVIgkjvBRQAXH7nq80hMSpOjrgm6w40n2EolI0Mr/v8q83t"
+        EncodedText = EncodedText & "RVQ1R8PeBeevNFpjGwAcbGujxYo/QwMwHTzYRgATMWutNftKCV9poZQWgsgDmE6+GyWAGxr14TeWE0SdPknbkq80hMSpOjrgm6w40n2EolI0Mr/v8q83t"
         EncodedText = EncodedText & "nUoOuAXdyO60K5YDBdLT4Xtuq97ffEUu1U16fK6pW/TsGSDJAt2kL7r9+fM0rfgqATeWfG+jyyARDNO/0m38Ub8MAMIwhPaK"
         EncodedText = EncodedText & "OJKJ3oGgui2bU+SYEDdigAwxiaDEVPi5rIahId48tOcU3fHKn4zv7Ti884ZDlbAgnnkIVBZvNm1/6XqD2BEh7QdY+1fAcJCk"
         EncodedText = EncodedText & "cJRWppAdeJ+EGMvcLKQNv5w+VS4XClI6NoAAqM4BBISQ9nT4wrIdGBWEUZsA+qIMhA9eePvLdwPESExfIaxp3b6b9KZbf/MJ"
@@ -9385,11 +10928,10 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
         M_GridIcon_EmbeddedIconBase64 = EncodedText
 
 End Function
-
 Public Sub M_GridIcon_PurgeAll()
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         PURGE ALL GRID ICONS
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -9400,6 +10942,9 @@ Public Sub M_GridIcon_PurgeAll()
 '   tracked shape reference has been lost after VBA reset, workbook activation,
 '   add-in reload, or unexpected UI interruption
 '
+'   This routine provides a broader cleanup pass than the normal single-icon
+'   removal path
+'
 ' INPUTS
 '   None
 '
@@ -9407,32 +10952,37 @@ Public Sub M_GridIcon_PurgeAll()
 '   Nothing
 '
 ' BEHAVIOR
-'   Deletes the tracked grid icon shape when available, then scans all open
-'   workbooks and deletes shapes named DP_GRID_ICON_NAME
+'   Suppresses cleanup errors
+'   Deletes the tracked grid icon shape when available
+'   Clears the tracked grid icon shape reference
+'   Scans all open workbooks
+'   Deletes shapes named DP_GRID_ICON_NAME from each open workbook
+'   Restores normal error handling before exit
 '
 ' ERROR POLICY
-'   Best-effort cleanup. Suppresses workbook, worksheet, protection, and shape
-'   deletion errors
+'   Best-effort cleanup
+'   Suppresses workbook, worksheet, protection, and shape-deletion errors
+'   Does not raise custom errors
 '
 ' DEPENDENCIES
 '   gDP_GridIconShape
 '   DP_GRID_ICON_NAME
 '   M_GridIcon_DeleteNamedShapeAcrossWorkbook
-'   Excel Workbooks / Worksheets / Shapes object model
+'   Application.Workbooks
+'   Excel Workbook / Worksheet / Shape object model
 '
 ' NOTES
 '   This routine is intentionally heavier than M_GridIcon_Remove
-'
 '   Do not call this routine from high-frequency selection-change paths
 '
 ' UPDATED
-'   2026-04-30
-'------------------------------------------------------------------------------
+'   2026-05-06
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim CurWorkbook             As Workbook        'Workbook being scanned
+    Dim CurWorkbook            As Workbook     'Workbook being scanned
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9447,7 +10997,6 @@ Public Sub M_GridIcon_PurgeAll()
         If Not gDP_GridIconShape Is Nothing Then
             gDP_GridIconShape.Delete
         End If
-
     'Clear the tracked shape reference
         Set gDP_GridIconShape = Nothing
 
@@ -9456,10 +11005,8 @@ Public Sub M_GridIcon_PurgeAll()
 '------------------------------------------------------------------------------
     'Loop through all open workbooks
         For Each CurWorkbook In Application.Workbooks
-
             'Delete same-named grid icon shapes from this workbook
                 M_GridIcon_DeleteNamedShapeAcrossWorkbook CurWorkbook, DP_GRID_ICON_NAME
-
         Next CurWorkbook
 
 '------------------------------------------------------------------------------
@@ -9475,61 +11022,100 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
     ByVal TargetShapeName As String)
 
 '
-'------------------------------------------------------------------------------
-'                           DELETENAMEDSHAPEACROSSWORKBOOK
+'==============================================================================
+'                    DELETE NAMED SHAPE ACROSS WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Manages the DatePicker in-grid icon
+'   Deletes same-named DatePicker in-grid icon shapes from every worksheet in a
+'   target workbook
 '
 ' WHY THIS EXISTS
-'   The worksheet icon is a transient entry point and must be created, formatted, and removed consistently
+'   DatePicker in-grid icons are transient worksheet shapes
+'
+'   During workbook activation, add-in reload, VBA reset, or interrupted UI
+'   flows, a stale icon may remain on a worksheet even when the tracked shape
+'   reference has already been lost
+'
+'   This helper provides the workbook-level cleanup pass used by the broader
+'   grid-icon purge routine
 '
 ' INPUTS
-'   See procedure signature
+'   TargetWorkbook
+'     Workbook to scan
+'
+'   TargetShapeName
+'     Name of the worksheet shape to delete
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Resolves the target cell
-'   - Removes stale icons
-'   - Creates or deletes the DatePicker icon
-'   - Applies fallback visual formatting
+'   Suppresses cleanup errors
+'   Exits when no workbook is supplied
+'   Exits when the target shape name is blank
+'   Loops through every worksheet in the workbook
+'   Attempts to delete the same-named shape from each worksheet
+'   Restores normal error handling before exit
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Best-effort cleanup
+'   Suppresses workbook, worksheet, protection, and shape-deletion errors
+'   Does not raise custom errors
 '
 ' DEPENDENCIES
-'   Excel Shapes object model
+'   Excel Workbook / Worksheet / Shape object model
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally deletes by shape name only
+'   This routine intentionally does not validate whether the named shape belongs
+'   to the DatePicker beyond the supplied shape name
+'   This routine intentionally does not trim TargetShapeName
+'   Keep this helper aligned with M_GridIcon_PurgeAll
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CurWorksheet           As Worksheet    'Worksheet being scanned
 
-    Dim CurWorksheet As Worksheet                                     'Worksheet being scanned
-
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Suppress cleanup errors
         On Error Resume Next
 
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
     'Exit when no workbook is supplied
-        If TargetWorkbook Is Nothing Then Exit Sub
+        If TargetWorkbook Is Nothing Then GoTo ExitProcedure
+    'Exit when the target shape name is blank
+        If LenB(TargetShapeName) = 0 Then GoTo ExitProcedure
 
-    'Exit when shape name is blank
-        If LenB(TargetShapeName) = 0 Then Exit Sub
 
-    'Loop through all worksheets
+'------------------------------------------------------------------------------
+' DELETE NAMED SHAPES
+'------------------------------------------------------------------------------
+    'Loop through all worksheets in the target workbook
         For Each CurWorksheet In TargetWorkbook.Worksheets
-
             'Delete the named shape when found
                 CurWorksheet.Shapes(TargetShapeName).Delete
-
         Next CurWorksheet
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release local object references
+        Set CurWorksheet = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
     'Restore normal error handling
         On Error GoTo 0
+
 End Sub
 
 '
@@ -9542,69 +11128,140 @@ End Sub
 Private Function M_FormBridge_GetLoadedForm(ByVal UserFormName As String) As Object
 
 '
-'------------------------------------------------------------------------------
-'                           GET LOADED FORM
+'==============================================================================
+'                         FORM BRIDGE GET LOADED FORM
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Coordinates the loaded DatePicker UserForm from the companion module
+'   Returns an already-loaded UserForm instance by class name or runtime name
 '
 ' WHY THIS EXISTS
-'   The companion module owns write-back and settings while the UserForm owns rendering,
-'   so loaded-form access must avoid instantiating the default form accidentally
+'   Direct references to a UserForm default instance can instantiate it
+'
+'   This helper scans only the currently loaded VBA.UserForms collection so the
+'   lookup does not create a new default UserForm instance as a side effect
 '
 ' INPUTS
-'   See procedure signature
+'   UserFormName
+'     UserForm class name or runtime name to locate
 '
 ' RETURNS
-'   See procedure type
+'   Matching loaded UserForm object
+'
+'   Nothing when no matching form is currently loaded
 '
 ' BEHAVIOR
-'   - Scans loaded UserForms
-'   - Calls the required public form method when available
-'   - Falls back safely when the form is not loaded
+'   Trims the requested form name
+'   Returns Nothing when the requested form name is blank
+'   Scans only currently loaded UserForms
+'   Compares both TypeName and the runtime Name property case-insensitively
+'   Prefers a visible matching instance
+'   Falls back to the first hidden matching instance when no visible match exists
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Safe-default lookup
+'   Returns Nothing on error
+'   Suppresses metadata-read errors while inspecting each loaded form
 '
 ' DEPENDENCIES
 '   VBA.UserForms
-'   Frm_DatePicker
+'   VBA.TypeName
 '
 ' NOTES
-'   Keep this routine aligned with the DatePicker companion-module API
+'   TypeName is preferred because the runtime Name property can theoretically be
+'   changed
+'
+'   The runtime Name property is still checked as a practical fallback for
+'   callers that identify a form by its current instance name
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LoadedForm             As Object       'Loaded UserForm instance
+    Dim HiddenMatch            As Object       'First hidden matching UserForm
+    Dim NormalizedFormName     As String       'Trimmed requested form name
+    Dim FormTypeName           As String       'Loaded form class name
+    Dim FormRuntimeName        As String       'Loaded form runtime name
 
-    Dim LoadedForm As Object                                           'Loaded UserForm instance
-
-    'Set safe default
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the safe default
         Set M_FormBridge_GetLoadedForm = Nothing
-
-    'Suppress lookup errors
+    'Enable safe-default lookup handling
         On Error GoTo FailSafe
+    'Normalize the requested form name
+        NormalizedFormName = VBA.Trim$(UserFormName)
 
-    'Exit if form name is blank
-        If Len(Trim$(UserFormName)) = 0 Then Exit Function
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Exit when no form name was supplied
+        If VBA.Len(NormalizedFormName) = 0 Then GoTo ExitProcedure
 
-    'Loop through loaded UserForms
+'------------------------------------------------------------------------------
+' SCAN LOADED FORMS
+'------------------------------------------------------------------------------
+    'Loop through loaded UserForms without instantiating default instances
         For Each LoadedForm In VBA.UserForms
-
-            'Return the matching loaded form
-                If StrComp(CStr(LoadedForm.Name), Trim$(UserFormName), vbTextCompare) = 0 Then
-                    Set M_FormBridge_GetLoadedForm = LoadedForm
-                    Exit Function
+            'Reset current metadata
+                FormTypeName = vbNullString
+            'Reset current metadata
+                FormRuntimeName = vbNullString
+            'Suppress metadata-read errors for unusual transient form states
+                On Error Resume Next
+            'Capture the loaded form class name
+                FormTypeName = VBA.TypeName(LoadedForm)
+            'Capture the loaded form runtime name
+                FormRuntimeName = VBA.CStr(LoadedForm.Name)
+            'Clear any suppressed metadata-read error
+                Err.Clear
+            'Restore safe-default lookup handling
+                On Error GoTo FailSafe
+            'Check whether this loaded form matches the requested name
+                If VBA.StrComp(FormTypeName, NormalizedFormName, vbTextCompare) = 0 Or _
+                   VBA.StrComp(FormRuntimeName, NormalizedFormName, vbTextCompare) = 0 Then
+                    'Return immediately when a visible match is found
+                        If VBA.CBool(LoadedForm.Visible) Then
+                            Set M_FormBridge_GetLoadedForm = LoadedForm
+                            GoTo ExitProcedure
+                        End If
+                    'Keep the first hidden match as a fallback
+                        If HiddenMatch Is Nothing Then
+                            Set HiddenMatch = LoadedForm
+                        End If
                 End If
-
         Next LoadedForm
 
-    'Exit after scan
+'------------------------------------------------------------------------------
+' RETURN HIDDEN FALLBACK
+'------------------------------------------------------------------------------
+    'Return the first hidden match when no visible match was found
+        If Not HiddenMatch Is Nothing Then
+            Set M_FormBridge_GetLoadedForm = HiddenMatch
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Restore normal error handling
+        On Error GoTo 0
+    'Exit before the fail-safe handler
         Exit Function
 
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
 FailSafe:
-    'Return safe default
+    'Return the safe default
         Set M_FormBridge_GetLoadedForm = Nothing
+    'Restore normal error handling
+        On Error GoTo 0
+
 End Function
 
 Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
@@ -9617,9 +11274,10 @@ Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 '   Refreshes the visible DatePicker form from an explicit worksheet cell
 '
 ' WHY THIS EXISTS
-'   The manager already resolves the authoritative target cell. The form bridge
-'   must therefore refresh from that same cell instead of independently reading
-'   Excel.Application.ActiveCell
+'   The manager already resolves the authoritative target cell
+'
+'   The form bridge must therefore refresh from that same cell instead of
+'   independently reading Excel.Application.ActiveCell
 '
 ' INPUTS
 '   TargetCell
@@ -9629,30 +11287,54 @@ Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 '   Nothing
 '
 ' BEHAVIOR
-'   Refreshes the existing visible DatePicker form from the supplied cell
+'   Exits when no target cell is supplied
+'   Normalizes the target to one physical cell
+'   Normalizes merged cells to the top-left cell of the merge area
+'   Captures workbook, worksheet, and target-address diagnostics
+'   Resolves a selected date only from non-error date-like values
+'   Locates the already-loaded DatePicker form
+'   Exits when the DatePicker form is not loaded
+'   Exits when the DatePicker form is loaded but not visible
+'   Delegates the refresh to UF_DP_RefreshFromExternalSelection
 '
 ' ERROR POLICY
-'   Best-effort. Does not raise outward
+'   Best-effort bridge routine
+'   Does not raise errors outward
+'   Writes diagnostics to the Immediate Window when refresh fails
+'   Releases local object references before exit
 '
 ' DEPENDENCIES
-'   Existing M_FormBridge form-refresh implementation
+'   DP_FORM_NAME
+'   M_FormBridge_GetLoadedForm
+'   UF_DatePicker.UF_DP_RefreshFromExternalSelection
+'   Excel Range / Worksheet / Workbook object model
 '
 ' NOTES
-'   This routine is the correct entry point for cDatePickerManager
+'   This routine deliberately avoids Excel.Application.ActiveCell
 '
-'   Do not read Excel.Application.ActiveCell inside this routine
+'   This routine does not create or show the DatePicker form
+'
+'   If no visible DatePicker form is already loaded, the refresh is a safe no-op
 '
 ' UPDATED
-'   2026-05-03
+'   2026-05-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_FormBridge_RefreshFromCell"
+    Const PROC_NAME            As String = "M_FormBridge_RefreshFromCell" 'Current procedure name
 
-    Dim ErrorNumber             As Long             'Captured error number
-    Dim ErrorDescription        As String           'Captured error description
+    Dim EffectiveCell          As Excel.Range  'Normalized explicit target cell
+    Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim CellValue              As Variant      'Target cell value snapshot
+    Dim SelectedDate           As Date         'Resolved selected date
+    Dim HasSelectedDate        As Boolean      'True when target contains a date-like value
+    Dim WorkbookName           As String       'Diagnostic workbook name
+    Dim WorksheetName          As String       'Diagnostic worksheet name
+    Dim TargetAddress          As String       'Diagnostic target address
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9663,28 +11345,70 @@ Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
 ' VALIDATE INPUT
 '------------------------------------------------------------------------------
-    'Exit if no target cell was supplied
-        If TargetCell Is Nothing Then Exit Sub
+    'Exit when no target cell was supplied
+        If TargetCell Is Nothing Then GoTo ExitProcedure
+
+'------------------------------------------------------------------------------
+' NORMALIZE TARGET
+'------------------------------------------------------------------------------
+    'Use the first physical cell defensively
+        Set EffectiveCell = TargetCell.Cells(1, 1)
+    'Normalize merged cells to the top-left cell of the merge area
+        If EffectiveCell.MergeCells Then
+            Set EffectiveCell = EffectiveCell.MergeArea.Cells(1, 1)
+        End If
+
+'------------------------------------------------------------------------------
+' SNAPSHOT DIAGNOSTIC CONTEXT
+'------------------------------------------------------------------------------
+    'Capture workbook name for diagnostics
+        WorkbookName = VBA.CStr(EffectiveCell.Worksheet.Parent.Name)
+    'Capture worksheet name for diagnostics
+        WorksheetName = VBA.CStr(EffectiveCell.Worksheet.Name)
+    'Capture target address for diagnostics
+        TargetAddress = VBA.CStr(EffectiveCell.Address(External:=True))
+
+'------------------------------------------------------------------------------
+' RESOLVE TARGET DATE STATE
+'------------------------------------------------------------------------------
+    'Capture the target cell value once
+        CellValue = EffectiveCell.Value
+    'Default to no selected date
+        HasSelectedDate = False
+    'Resolve a date only from non-error date-like values
+        If Not VBA.IsError(CellValue) Then
+            If VBA.IsDate(CellValue) Then
+                SelectedDate = VBA.DateValue(VBA.CDate(CellValue))
+                HasSelectedDate = True
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE LOADED FORM
+'------------------------------------------------------------------------------
+    'Resolve the already-loaded DatePicker form instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    'Exit when the picker is not loaded
+        If LoadedForm Is Nothing Then GoTo ExitProcedure
+    'Exit when the picker is loaded but not visible
+        If Not VBA.CBool(LoadedForm.Visible) Then GoTo ExitProcedure
 
 '------------------------------------------------------------------------------
 ' REFRESH FORM
 '------------------------------------------------------------------------------
-    'Move the existing implementation of M_FormBridge_RefreshFromCell here
-    'and replace every ActiveCell reference with TargetCell
-        '
-        ' Example of the intended internal policy:
-        '
-        '   - use TargetCell.Worksheet as the write-back worksheet
-        '   - use TargetCell.Address as the write-back address
-        '   - use TargetCell.Value / Value2 as the current cell value
-        '   - use TargetCell.NumberFormat as the display/date-format context
-        '   - refresh the already loaded DatePicker form from that explicit cell
-        '
-        ' Do not call Excel.Application.ActiveCell here
+    'Refresh the visible picker from the explicit target-cell date state
+        LoadedForm.UF_DP_RefreshFromExternalSelection SelectedDate, HasSelectedDate
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+ExitProcedure:
+    'Release object references
+        Set EffectiveCell = Nothing
+    'Release object references
+        Set LoadedForm = Nothing
+    'Restore normal error handling
+        On Error GoTo 0
     'Exit before the error handler
         Exit Sub
 
@@ -9694,140 +11418,232 @@ Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 ErrorHandler:
     'Capture the error number
         ErrorNumber = Err.Number
-
     'Capture the error description
         ErrorDescription = Err.Description
-
+    'Suppress diagnostic and cleanup errors
+        On Error Resume Next
     'Write bridge diagnostics without interrupting caller flow
         Debug.Print PROC_NAME & _
+            " | Workbook=" & WorkbookName & _
+            " | Worksheet=" & WorksheetName & _
+            " | Target=" & TargetAddress & _
             " | Error=" & VBA.CStr(ErrorNumber) & _
             " | " & ErrorDescription
-
+    'Release object references
+        Set EffectiveCell = Nothing
+    'Release object references
+        Set LoadedForm = Nothing
     'Clear the suppressed bridge error
         Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
 End Sub
+
 Private Sub M_FormBridge_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 
 '
-'------------------------------------------------------------------------------
-'                           FORM AFTERSUCCESSFULSELECTION
+'==============================================================================
+'                     FORM BRIDGE AFTER SUCCESSFUL SELECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Coordinates the loaded DatePicker UserForm from the companion module
+'   Notifies the already-loaded DatePicker UserForm after a date has been
+'   successfully selected
 '
 ' WHY THIS EXISTS
-'   The companion module owns write-back and settings while the UserForm owns rendering, so loaded-form access must avoid instantiating the default form accidentally
+'   The companion module owns write-back, settings, and integration flow
+'
+'   The UserForm owns rendering and post-selection UI state
+'
+'   This bridge lets the companion module notify the loaded form without
+'   directly referencing the default UserForm instance and accidentally
+'   instantiating it
 '
 ' INPUTS
-'   See procedure signature
+'   SelectedDate
+'     Date selected by the user
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Scans loaded UserForms
-'   - Calls the required public form method when available
-'   - Falls back safely when the form is not loaded
+'   Resolves the already-loaded DatePicker form instance
+'   Calls UF_DP_AfterSuccessfulSelection when a loaded form is available
+'   Performs no action when the DatePicker form is not loaded
+'   Does not create, show, or activate the DatePicker form
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error to the caller when notification fails
+'   Preserves the original error number and description
 '
 ' DEPENDENCIES
-'   VBA.UserForms
-'   UF_DatePicker
+'   DP_FORM_NAME
+'   M_FormBridge_GetLoadedForm
+'   UF_DatePicker.UF_DP_AfterSuccessfulSelection
 '
 ' NOTES
 '   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally relies on M_FormBridge_GetLoadedForm to avoid
+'   default-instance creation
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_FormBridge_AfterSuccessfulSelection" 'Current procedure name
 
-    Const PROC_NAME As String = "M_FormBridge_AfterSuccessfulSelection"    'Current procedure name
-    Dim LoadedForm As Object                                           'Loaded DatePicker form instance
+    Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
+'------------------------------------------------------------------------------
+' RESOLVE LOADED FORM
+'------------------------------------------------------------------------------
     'Retrieve the loaded DatePicker form instance
         Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
 
+'------------------------------------------------------------------------------
+' NOTIFY FORM
+'------------------------------------------------------------------------------
     'Notify the loaded form after successful selection
         If Not LoadedForm Is Nothing Then
             LoadedForm.UF_DP_AfterSuccessfulSelection SelectedDate
         End If
 
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release object references
+        Set LoadedForm = Nothing
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Release object references
+        Set LoadedForm = Nothing
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
+
 End Sub
 
 Private Sub M_FormBridge_RefreshSettings()
 
 '
-'------------------------------------------------------------------------------
-'                           FORM REFRESHSETTINGSDEPENDENTCAPTIONS
+'==============================================================================
+'                         FORM BRIDGE REFRESH SETTINGS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Coordinates the loaded DatePicker UserForm from the companion module
+'   Refreshes settings-dependent state on an already-loaded DatePicker UserForm
 '
 ' WHY THIS EXISTS
-'   The companion module owns write-back and settings while the UserForm owns rendering, so loaded-form access must avoid instantiating the default form accidentally
+'   The companion module owns write-back, settings, and integration flow
+'
+'   The UserForm owns rendering and settings-dependent UI state
+'
+'   This bridge lets the companion module notify the loaded form without
+'   directly referencing the default UserForm instance and accidentally
+'   instantiating it
 '
 ' INPUTS
-'   See procedure signature
+'   None
 '
 ' RETURNS
-'   See procedure type
+'   Nothing
 '
 ' BEHAVIOR
-'   - Scans loaded UserForms
-'   - Calls the required public form method when available
-'   - Falls back safely when the form is not loaded
+'   Resolves the already-loaded DatePicker form through the shared form bridge
+'   Performs no action when the DatePicker form is not loaded
+'   Calls UF_DP_RefreshSettings when a loaded form is available
+'   Does not create, show, activate, or otherwise instantiate the DatePicker form
 '
 ' ERROR POLICY
-'   Uses the local documented error-handling path or safe-default behavior
+'   Raises a descriptive runtime error to the caller when refresh fails
+'   Preserves the original error number and description
 '
 ' DEPENDENCIES
-'   VBA.UserForms
-'   UF_DatePicker
+'   DP_FORM_NAME
+'   M_FormBridge_GetLoadedForm
+'   UF_DatePicker.UF_DP_RefreshSettings
 '
 ' NOTES
 '   Keep this routine aligned with the DatePicker companion-module API
+'   This routine intentionally relies on M_FormBridge_GetLoadedForm so all form
+'   bridge routines use the same loaded-form lookup policy
+'
+'   M_FormBridge_GetLoadedForm checks both TypeName and runtime Name, prefers a
+'   visible matching instance, and falls back to a hidden matching instance
 '
 ' UPDATED
-'   2026-04-29
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_FormBridge_RefreshSettings"
+    
+    Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim ErrorNumber            As Long         'Captured error number
+    Dim ErrorDescription       As String       'Captured error description
 
-    Const PROC_NAME As String = "M_FormBridge_RefreshSettings" 'Current procedure name
-    Dim LoadedForm As Object                                           'Loaded UserForm instance
-
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
 
-    'Loop through loaded UserForms
-        For Each LoadedForm In VBA.UserForms
+'------------------------------------------------------------------------------
+' RESOLVE LOADED FORM
+'------------------------------------------------------------------------------
+    'Resolve the already-loaded DatePicker form instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
 
-            'Refresh the DatePicker form when it is loaded
-                If TypeName(LoadedForm) = DP_FORM_NAME Then
-                    LoadedForm.UF_DP_RefreshSettings
-                    Exit For
-                End If
+'------------------------------------------------------------------------------
+' REFRESH SETTINGS
+'------------------------------------------------------------------------------
+    'Refresh the DatePicker form when it is loaded
+        If Not LoadedForm Is Nothing Then
+            LoadedForm.UF_DP_RefreshSettings
+        End If
 
-        Next LoadedForm
-
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release object references
+        Set LoadedForm = Nothing
     'Exit before the error handler
         Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Release object references
+        Set LoadedForm = Nothing
     'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, Err.Description
-End Sub
+        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
+End Sub
 Private Sub M_FormBridge_UnloadLoadedPicker()
 
 '
@@ -9840,8 +11656,13 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '
 ' WHY THIS EXISTS
 '   DP_Show relies on UserForm_Initialize to rebuild the runtime UI and consume
-'   the pending initial-date bridge state. If a previous DatePicker instance is
-'   already loaded, it should be removed before the new instance is loaded
+'   the pending initial-date bridge state
+'
+'   If a previous DatePicker instance is already loaded, it should be removed
+'   before the new instance is loaded
+'
+'   The helper must avoid direct references to the DatePicker default instance
+'   because such references can instantiate the form accidentally
 '
 ' INPUTS
 '   None
@@ -9850,53 +11671,62 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '   Nothing
 '
 ' BEHAVIOR
-'   Scans the loaded VBA.UserForms collection, collects matching DatePicker form
-'   instances, stops the DatePicker timer only when a picker instance exists, and
-'   unloads matching forms on a best-effort basis
+'   Scans the currently loaded VBA.UserForms collection
+'   Collects loaded DatePicker instances by class name or runtime name
+'   Separates the scan phase from the unload phase
+'   Exits without stopping the timer when no DatePicker instance is loaded
+'   Stops the DatePicker timer only when at least one picker instance exists
+'   Hides each collected picker before unload to reduce visual flicker
+'   Unloads collected picker instances in reverse collection order
+'   Writes non-fatal diagnostics to the Immediate Window
+'   Does not create, show, activate, or instantiate the DatePicker form
 '
 ' ERROR POLICY
-'   Best-effort cleanup. Does not raise outward
+'   Best-effort cleanup
+'   Does not raise errors outward
+'   Suppresses metadata-read, timer-stop, hide, and unload failures where needed
+'   Continues through cleanup after unexpected helper failures
 '
 ' DEPENDENCIES
-'   VBA.UserForms
 '   DP_FORM_NAME
 '   M_Timer_Stop
+'   VBA.UserForms
+'   VBA.TypeName
 '
 ' NOTES
-'   This routine deliberately avoids direct references to UF_DatePicker to avoid
-'   accidentally loading the default form instance
+'   This routine deliberately avoids direct references to UF_DatePicker
 '
-'   The scan and the unload phases are separated because unloading a form changes
+'   The scan and unload phases are separated because unloading a form changes
 '   the VBA.UserForms collection
 '
 '   DP_Show must not fail just because an old transient form instance cannot be
 '   unloaded cleanly
 '
 ' UPDATED
-'   2026-05-04
+'   2026-05-06
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_FormBridge_UnloadLoadedPicker"
+    Const PROC_NAME            As String = "M_FormBridge_UnloadLoadedPicker" 'Current procedure name
 
-    Dim CurForm                 As Object       'Current loaded UserForm instance
-    Dim LoadedForm              As Object       'DatePicker form selected for unload
-    Dim FormsToUnload           As Collection   'Matching DatePicker forms to unload
-    Dim Index                   As Long         'Collection reverse-loop index
-    Dim FormTypeName            As String       'Loaded form class name
-    Dim FormRuntimeName         As String       'Loaded form runtime name
-    Dim StepName                As String       'Current diagnostic step
-    Dim StepErrNumber           As Long         'Captured non-fatal cleanup error number
-    Dim StepErrDescription      As String       'Captured non-fatal cleanup error description
+    Dim CurForm                As Object       'Current loaded UserForm instance
+    Dim LoadedForm             As Object       'DatePicker form selected for unload
+    Dim FormsToUnload          As Collection   'Matching DatePicker forms to unload
+    Dim Index                  As Long         'Collection reverse-loop index
+    Dim FormTypeName           As String       'Loaded form class name
+    Dim FormRuntimeName        As String       'Loaded form runtime name
+    Dim FormMatchesPicker      As Boolean      'True when loaded form is a DatePicker instance
+    Dim StepName               As String       'Current diagnostic step
+    Dim StepErrNumber          As Long         'Captured non-fatal cleanup error number
+    Dim StepErrDescription     As String       'Captured non-fatal cleanup error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Protect DP_Show from all unload helper failures
         On Error GoTo FailSafe
-
     'Create the collection used to decouple scan and unload phases
         Set FormsToUnload = New Collection
 
@@ -9905,33 +11735,32 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '------------------------------------------------------------------------------
     'Track the current step
         StepName = "Scan loaded UserForms"
-
     'Loop through currently loaded UserForms without unloading during enumeration
         For Each CurForm In VBA.UserForms
-
             'Reset form metadata
                 FormTypeName = vbNullString
+            'Reset form metadata
                 FormRuntimeName = vbNullString
-
+            'Reset match state
+                FormMatchesPicker = False
+            'Reset captured step error
+                StepErrNumber = 0
+            'Reset captured step error
+                StepErrDescription = vbNullString
             'Suppress metadata-read errors for unusual transient form states
                 On Error Resume Next
-
             'Capture the loaded form class name
                 FormTypeName = VBA.TypeName(CurForm)
-
             'Capture the loaded form runtime name
                 FormRuntimeName = VBA.CStr(CurForm.Name)
-
             'Capture metadata-read failure if any
                 StepErrNumber = Err.Number
+            'Capture metadata-read failure if any
                 StepErrDescription = Err.Description
-
             'Clear any suppressed metadata error
                 Err.Clear
-
             'Restore fail-safe handling
                 On Error GoTo FailSafe
-
             'Write metadata diagnostics only when a read failed
                 If StepErrNumber <> 0 Then
                     Debug.Print PROC_NAME & _
@@ -9939,13 +11768,14 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
                         " | Error=" & VBA.CStr(StepErrNumber) & _
                         " | " & StepErrDescription
                 End If
-
+            'Evaluate whether the loaded form is a DatePicker instance
+                FormMatchesPicker = _
+                    (VBA.StrComp(FormTypeName, DP_FORM_NAME, vbTextCompare) = 0 Or _
+                     VBA.StrComp(FormRuntimeName, DP_FORM_NAME, vbTextCompare) = 0)
             'Collect matching DatePicker forms by class name or runtime name
-                If VBA.StrComp(FormTypeName, DP_FORM_NAME, vbTextCompare) = 0 Or _
-                   VBA.StrComp(FormRuntimeName, DP_FORM_NAME, vbTextCompare) = 0 Then
+                If FormMatchesPicker Then
                     FormsToUnload.Add CurForm
                 End If
-
         Next CurForm
 
 '------------------------------------------------------------------------------
@@ -9953,29 +11783,28 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '------------------------------------------------------------------------------
     'Exit cleanly when there is no loaded DatePicker form
         If FormsToUnload.Count = 0 Then GoTo CleanExit
-
+        
 '------------------------------------------------------------------------------
 ' STOP TIMER
 '------------------------------------------------------------------------------
     'Track the current step
         StepName = "Stop timer"
-
+    'Reset captured step error
+        StepErrNumber = 0
+    'Reset captured step error
+        StepErrDescription = vbNullString
     'Suppress timer-stop errors because Application.OnTime cancellation can fail
         On Error Resume Next
-
     'Stop any active DatePicker timer before unloading the form
         M_Timer_Stop
-
     'Capture timer-stop failure if any
         StepErrNumber = Err.Number
+    'Capture timer-stop failure if any
         StepErrDescription = Err.Description
-
     'Clear any suppressed timer-stop error
         Err.Clear
-
     'Restore fail-safe handling
         On Error GoTo FailSafe
-
     'Write timer-stop diagnostics only when stop failed
         If StepErrNumber <> 0 Then
             Debug.Print PROC_NAME & _
@@ -9989,35 +11818,30 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '------------------------------------------------------------------------------
     'Track the current step
         StepName = "Unload DatePicker forms"
-
     'Unload collected DatePicker forms in reverse order
         For Index = FormsToUnload.Count To 1 Step -1
-
             'Resolve the collected form reference
                 Set LoadedForm = FormsToUnload.Item(Index)
-
-            'Suppress individual unload errors
+            'Reset captured step error
+                StepErrNumber = 0
+            'Reset captured step error
+                StepErrDescription = vbNullString
+            'Suppress individual hide and unload errors
                 On Error Resume Next
-
             'Hide the form first to reduce visual flicker
                 LoadedForm.Hide
-
             'Clear any non-fatal hide error
                 Err.Clear
-
             'Unload the DatePicker form
                 Unload LoadedForm
-
             'Capture unload failure if any
                 StepErrNumber = Err.Number
+            'Capture unload failure if any
                 StepErrDescription = Err.Description
-
             'Clear any suppressed unload error
                 Err.Clear
-
             'Restore fail-safe handling
                 On Error GoTo FailSafe
-
             'Write unload diagnostics only when unload failed
                 If StepErrNumber <> 0 Then
                     Debug.Print PROC_NAME & _
@@ -10026,10 +11850,8 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
                         " | Error=" & VBA.CStr(StepErrNumber) & _
                         " | " & StepErrDescription
                 End If
-
             'Release the loop form reference
                 Set LoadedForm = Nothing
-
         Next Index
 
 '------------------------------------------------------------------------------
@@ -10038,19 +11860,14 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 CleanExit:
     'Release the current form reference
         Set CurForm = Nothing
-
     'Release the loaded form reference
         Set LoadedForm = Nothing
-
     'Release the collection reference
         Set FormsToUnload = Nothing
-
     'Clear any suppressed cleanup error
         Err.Clear
-
     'Restore normal error handling
         On Error GoTo 0
-
     'Exit the procedure
         Exit Sub
 
@@ -10063,37 +11880,79 @@ FailSafe:
             " | Step=" & StepName & _
             " | Error=" & VBA.CStr(Err.Number) & _
             " | " & Err.Description
-
     'Continue through clean exit
         Resume CleanExit
 
 End Sub
+
 '
 '------------------------------------------------------------------------------
 '
 '                         COMPATIBILITY / STARTUP WRAPPERS
 '
 '------------------------------------------------------------------------------
-
+'
 
 
 Public Sub M_Settings_UseLocalNames(ByVal UseLocalDayNames As Boolean)
 
+'
+'==============================================================================
+'                           SETTINGS USE LOCAL NAMES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Compatibility wrapper for setting whether DatePicker day names use local
+'   language names
+'
+' WHY THIS EXISTS
+'   Older calling code may still call M_Settings_UseLocalNames
+'
+'   The preferred settings routine is M_Settings_SetUseLocalDayNames, so this
+'   wrapper preserves the legacy entry point while centralizing the actual
+'   settings update in the preferred routine
+'
+' INPUTS
+'   UseLocalDayNames
+'     True to use local day names
+'     False to use the standard configured day-name behavior
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates directly to M_Settings_SetUseLocalDayNames
+'   Does not validate, transform, or reinterpret the input value
+'   Does not perform any additional settings logic locally
+'
+' ERROR POLICY
+'   Does not raise custom errors
+'   Does not suppress errors
+'   Lets M_Settings_SetUseLocalDayNames error behavior propagate unchanged
+'
+' DEPENDENCIES
+'   M_Settings_SetUseLocalDayNames
+'
+' NOTES
+'   Keep this routine as a thin compatibility wrapper
+'   Do not add duplicate settings logic here
+'
+' UPDATED
+'   2026-05-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DELEGATE SETTING UPDATE
+'------------------------------------------------------------------------------
     'Delegate to the preferred setting routine
         M_Settings_SetUseLocalDayNames UseLocalDayNames
+
 End Sub
 
-'
-'------------------------------------------------------------------------------
-'
-'                                SHARED HELPERS
-'
-'------------------------------------------------------------------------------
 
 Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As String
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           GET QUALIFIED MACRO NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10103,6 +11962,9 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
 '   Shape.OnAction, CommandBarButton.OnAction, and Application.OnTime callbacks
 '   should resolve back to the workbook that contains this module
 '
+'   Qualifying the callback with ThisWorkbook.Name avoids accidental resolution
+'   against another active workbook that may contain a same-named procedure
+'
 ' INPUTS
 '   ProcedureName
 '     Public procedure name to qualify
@@ -10111,29 +11973,51 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
 '   Workbook-qualified macro name
 '
 ' BEHAVIOR
-'   Quotes ThisWorkbook.Name and appends the supplied procedure name
+'   Trims the supplied procedure name
+'   Rejects a blank procedure name
+'   Quotes ThisWorkbook.Name for Excel callback compatibility
+'   Escapes apostrophes in ThisWorkbook.Name by doubling them
+'   Appends the trimmed procedure name after the workbook qualifier
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error when ProcedureName is blank
+'   Does not suppress errors
 '
 ' DEPENDENCIES
 '   ThisWorkbook
+'   VBA.Replace
+'   VBA.Trim$
 '
 ' NOTES
 '   The routine intentionally returns a workbook-level macro reference rather
 '   than a module-qualified reference for broad callback compatibility
 '
+'   Expected output format:
+'     'WorkbookName.xlsm'!ProcedureName
+'
 ' UPDATED
-'   2026-04-28
+'   2026-05-06
+'==============================================================================
+
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME            As String = "M_GetQualifiedMacroName"
+
+    Dim NormalizedProcedureName As String
+    
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Normalize the supplied procedure name once
+        NormalizedProcedureName = Trim$(ProcedureName)
 
 '------------------------------------------------------------------------------
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
     'Reject an empty procedure name
-        If Len(Trim$(ProcedureName)) = 0 Then
-            Err.Raise vbObjectError + 513, "M_GetQualifiedMacroName", _
-                "ProcedureName cannot be empty."
+        If Len(NormalizedProcedureName) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "ProcedureName cannot be empty."
         End If
 
 '------------------------------------------------------------------------------
@@ -10141,10 +12025,7 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
 '------------------------------------------------------------------------------
     'Return the workbook-qualified macro name
         M_GetQualifiedMacroName = _
-            "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!" & Trim$(ProcedureName)
+            "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!" & NormalizedProcedureName
 
 End Function
-
-
-
 
