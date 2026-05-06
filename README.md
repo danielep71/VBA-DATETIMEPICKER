@@ -14,6 +14,11 @@
 
 ---
 
+<img width="1280" height="640" alt="vba-datetimepicker-social-preview" src="https://github.com/user-attachments/assets/b7e70418-8a08-4b60-9e6c-602d322425be" />
+
+
+---
+
 ## ✨ Overview
 
 **VBA-DATETIMEPICKER** is a modern, modular, and worksheet-friendly **Date / DateTime Picker for Excel VBA**.
