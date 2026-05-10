@@ -100,7 +100,7 @@ Attribute VB_Exposed = False
 '   gDP_ClockMode
 '   gDP_SizeMode
 '   gDP_HighlightWeekends
-'   gDP_AllowOutsideMonthSel
+'   gDP_AllowOutsideMonthSelection
 '   gDP_CloseAfterSelection
 '   gDP_ShowRightClick
 '   gDP_ShowGridIcon
@@ -654,7 +654,7 @@ End Sub
 Private Sub UserForm_Activate()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           ACTIVATE USERFORM
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -701,7 +701,7 @@ Private Sub UserForm_Activate()
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -4581,7 +4581,7 @@ End Function
 Private Sub UF_DayGrid_Build()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           CREATE DAY LABELS GRID
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -4629,7 +4629,7 @@ Private Sub UF_DayGrid_Build()
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -5778,7 +5778,7 @@ End Sub
 Public Sub UF_DayCell_HoverApply(ByVal LabelName As String)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APPLY DAY LABEL HOVER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -5824,7 +5824,7 @@ Public Sub UF_DayCell_HoverApply(ByVal LabelName As String)
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -6019,7 +6019,7 @@ End Sub
 Private Sub UF_DayCell_HoverReset()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           RESET DAY LABELS HOVER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -6060,7 +6060,7 @@ Private Sub UF_DayCell_HoverReset()
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -6218,7 +6218,7 @@ End Sub
 Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As Long
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                   GET DAY CELL INDEX FROM LABEL NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -6261,7 +6261,7 @@ Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As 
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -10745,7 +10745,7 @@ Private Sub UF_SettingsPanel_Save()
     'Capture the current weekend-highlight setting
         OldHighlightWeekends = gDP_HighlightWeekends
     'Capture the current outside-month setting
-        OldAllowOutside = gDP_AllowOutsideMonthSel
+        OldAllowOutside = gDP_AllowOutsideMonthSelection
     'Capture the current close-after-selection setting
         OldCloseAfter = gDP_CloseAfterSelection
     'Capture the current right-click setting
@@ -10800,7 +10800,7 @@ Private Sub UF_SettingsPanel_Save()
     'Store the new weekend-highlight setting
         gDP_HighlightWeekends = NewHighlightWeekends
     'Store the new outside-month setting
-        gDP_AllowOutsideMonthSel = NewAllowOutside
+        gDP_AllowOutsideMonthSelection = NewAllowOutside
     'Store the new close-after-selection setting
         gDP_CloseAfterSelection = NewCloseAfter
     'Store the new right-click setting
@@ -10838,7 +10838,7 @@ Private Sub UF_SettingsPanel_Save()
         If KeyboardChanged Then M_KeyboardShortcut_Update
     'Remove any stale in-grid icon only when the feature was disabled
         If GridIconChanged Then
-            If Not gDP_ShowGridIcon Then M_GridIcon_Remove
+            If Not gDP_ShowGridIcon Then M_GridIcon_Hide
         End If
 
 '------------------------------------------------------------------------------
@@ -10913,7 +10913,7 @@ ErrorHandler:
                 gDP_ClockMode = OldClockMode
                 gDP_SizeMode = OldSizeMode
                 gDP_HighlightWeekends = OldHighlightWeekends
-                gDP_AllowOutsideMonthSel = OldAllowOutside
+                gDP_AllowOutsideMonthSelection = OldAllowOutside
                 gDP_CloseAfterSelection = OldCloseAfter
                 gDP_ShowRightClick = OldShowRightClick
                 gDP_ShowGridIcon = OldShowGridIcon
@@ -11365,7 +11365,7 @@ Private Sub UF_SettingsPanel_RefreshCaptions()
 '   gDP_SizeMode
 '   DP_SizeMode_Compact
 '   gDP_HighlightWeekends
-'   gDP_AllowOutsideMonthSel
+'   gDP_AllowOutsideMonthSelection
 '   gDP_CloseAfterSelection
 '   gDP_ShowRightClick
 '   gDP_ShowGridIcon
@@ -11577,7 +11577,7 @@ Private Sub UF_SettingsPanel_RefreshCaptions()
         HandlerStep = "Refresh Behavior Settings values"
 
     'Refresh the allow-outside-month checkbox value
-        Chk_AllowOutside.Value = CBool(gDP_AllowOutsideMonthSel)
+        Chk_AllowOutside.Value = CBool(gDP_AllowOutsideMonthSelection)
     'Refresh the close-after-selection checkbox value
         Chk_CloseAfter.Value = CBool(gDP_CloseAfterSelection)
 
@@ -12764,7 +12764,7 @@ End Function
 Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           AFTER SUCCESSFUL SELECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -12813,7 +12813,7 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -12942,7 +12942,7 @@ Public Sub UF_DP_RefreshFromExternalSelection( _
     ByVal HasSelectedDate As Boolean)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                       REFRESH FROM EXTERNAL SELECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -12993,7 +12993,7 @@ Public Sub UF_DP_RefreshFromExternalSelection( _
 '
 ' UPDATED
 '   2026-05-02
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
