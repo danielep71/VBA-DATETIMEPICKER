@@ -4,7 +4,7 @@ Option Explicit
 
 '
 '------------------------------------------------------------------------------
-' MODULE: M_DATEPICKER
+' MODULE: M_DatePicker
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Provides the shared companion module for the DatePicker project
