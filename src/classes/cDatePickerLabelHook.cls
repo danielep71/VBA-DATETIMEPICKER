@@ -7,11 +7,10 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = False
 Attribute VB_Exposed = False
-
 Option Explicit
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 ' CLASS: cDatePickerLabelHook
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -108,7 +107,7 @@ Option Explicit
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
@@ -145,14 +144,18 @@ Attribute mLabel.VB_VarHelpID = -1
     Private mIsInitialized              As Boolean              'True after successful initialization
     Private mIsHovered                  As Boolean              'True while the mouse is over this label
 
-'==============================================================================
-' PUBLIC PROPERTIES
-'==============================================================================
+'
+'------------------------------------------------------------------------------
+'
+'                           PUBLIC PROPERTIES
+'
+'------------------------------------------------------------------------------
+'
 
 Public Property Get IsInitialized() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS INITIALIZED
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -185,7 +188,7 @@ Public Property Get IsInitialized() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     IsInitialized = mIsInitialized
 
@@ -194,7 +197,7 @@ End Property
 Public Property Get HoverMode() As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           HOVER MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -225,7 +228,7 @@ Public Property Get HoverMode() As String
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     HoverMode = mHoverMode
 
@@ -234,7 +237,7 @@ End Property
 Public Property Get ActionName() As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           ACTION NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -264,7 +267,7 @@ Public Property Get ActionName() As String
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     ActionName = mActionName
 
@@ -273,7 +276,7 @@ End Property
 Public Property Get LabelName() As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           LABEL NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -304,7 +307,7 @@ Public Property Get LabelName() As String
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     If Not mLabel Is Nothing Then LabelName = mLabel.Name
 
@@ -313,7 +316,7 @@ End Property
 Public Property Get LeaveHandlerName() As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           LEAVE HANDLER NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -345,7 +348,7 @@ Public Property Get LeaveHandlerName() As String
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     LeaveHandlerName = mLeaveHandlerName
 
@@ -354,7 +357,7 @@ End Property
 Public Property Get IsHovered() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS HOVERED
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -387,26 +390,24 @@ Public Property Get IsHovered() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
     IsHovered = mIsHovered
 
 End Property
 
-'==============================================================================
+'------------------------------------------------------------------------------
 ' PUBLIC METHODS
-'==============================================================================
+'------------------------------------------------------------------------------
 
-Public Sub Initialize( _
-    ByVal OwnerForm As Object, _
-    ByVal TargetLabel As MSForms.Label, _
-    Optional ByVal ActionName As String = vbNullString, _
-    Optional ByVal ClickHandlerName As String = "UF_PickerPanel_HandleAction", _
-    Optional ByVal HoverMode As String = "NONE", _
-    Optional ByVal LeaveHandlerName As String = vbNullString)
+Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
+    MSForms.Label, Optional ByVal ActionName As String = vbNullString, Optional _
+    ByVal HoverMode As String = "NONE", Optional ByVal ClickHandlerName As String = _
+    "UF_PickerPanel_HandleAction", Optional ByVal LeaveHandlerName As String = _
+    vbNullString)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           INITIALIZE LABEL HOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -425,13 +426,7 @@ Public Sub Initialize( _
 '     Runtime-created MSForms.Label to monitor
 '
 '   ActionName
-'     Optional click action name passed to the owner form click handler.
-'     Leave empty for hover-only labels.
-'
-'   ClickHandlerName
-'     Optional name of the public method on OwnerForm that receives click
-'     actions. Defaults to UF_PickerPanel_HandleAction. Verified against the
-'     owner form at initialization time.
+'     Optional click action name passed to the owner form click handler
 '
 '   HoverMode
 '     Optional hover behavior
@@ -442,26 +437,22 @@ Public Sub Initialize( _
 '       - FOOTER
 '       - SETTINGS
 '
+'   ClickHandlerName
+'     Optional name of the public method on OwnerForm that receives click
+'     actions. Defaults to UF_PickerPanel_HandleAction
+'
 '   LeaveHandlerName
 '     Optional name of the public method on OwnerForm that receives the
-'     simulated MouseLeave notification. Leave empty to suppress leave routing.
-'     When supplied, the method is verified against the owner form at
-'     initialization time. The method receives the departing label name as its
-'     only argument.
+'     simulated MouseLeave notification. Leave empty to suppress leave routing
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Rejects re-initialization of an already-live hook.
-'
-'   Clears state, validates all supplied arguments, probes the owner form for
-'   every required routing method, normalizes the hover mode, action name, and
-'   leave handler name, and stores all references. The target label reference
-'   is stored last so that a partial failure cannot leave a live event
-'   subscription pointing at stale state.
-'
-'   Sets mIsInitialized = True only after all steps succeed.
+'   Rejects re-initialization of an already-live hook, clears state, validates
+'   supplied references and supported hover modes, normalizes all routing names,
+'   and stores the owner form, target label, action, hover, click-handler, and
+'   optional leave-handler state
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if:
@@ -469,33 +460,31 @@ Public Sub Initialize( _
 '     - OwnerForm is Nothing
 '     - TargetLabel is Nothing
 '     - HoverMode is unsupported
-'     - any required routing method is absent from the owner form
-'     - ClickHandlerName is absent from the owner form (when ActionName is set)
-'     - LeaveHandlerName is absent from the owner form (when supplied)
+'     - ActionName is supplied but ClickHandlerName is blank
 '
 ' DEPENDENCIES
 '   MSForms.Label
 '
 ' NOTES
-'   Instances of this class must be stored in a module-level Collection in the
-'   UserForm. Otherwise they are destroyed and events stop firing.
+'   This routine preserves the DatePicker call pattern used throughout
+'   UF_DatePicker:
 '
-'   The optional HoverMode default is the literal string "NONE" rather than the
-'   private class constant DP_HOVER_NONE because VBA can be fragile with
-'   class-level constants in public optional-argument defaults.
+'       LabelHook.Initialize Me, Label, ActionName, "HEADER"
 '
-'   ActionName is intentionally optional because some labels are hover-only.
+'   Therefore the fourth positional argument is HoverMode, not ClickHandlerName
 '
-'   ClickHandlerName is verified using CallByName with a sentinel argument so
-'   that method existence is confirmed without triggering real side effects.
-'   The owner form handler must tolerate an empty-string argument gracefully.
+'   This routine deliberately does not probe OwnerForm methods with CallByName at
+'   initialization time. The previous probe approach executed real hover / click
+'   handlers with blank sentinel arguments, but those handlers correctly reject
+'   blank action or label names. Probing therefore caused DP_Show to fail during
+'   UserForm_Initialize even when the methods existed
 '
-'   LeaveHandlerName is optional. When absent, NotifyMouseLeft exits without
-'   routing, making leave handling fully opt-in per label.
+'   Click and hover routing failures remain diagnosable at the point of actual
+'   event routing
 '
 ' UPDATED
-'   2026-05-03
-'==============================================================================
+'   2026-05-04
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -503,9 +492,9 @@ Public Sub Initialize( _
     Const PROC_NAME             As String = "cDatePickerLabelHook.Initialize"
 
     Dim NormalizedActionName    As String       'Normalized click action name
+    Dim NormalizedHoverMode     As String       'Normalized hover mode
     Dim NormalizedHandlerName   As String       'Normalized click handler method name
     Dim NormalizedLeaveHandler  As String       'Normalized leave handler method name
-    Dim NormalizedHoverMode     As String       'Normalized hover mode
     Dim ErrorNumber             As Long         'Captured error number
     Dim ErrorDescription        As String       'Captured error description
 
@@ -545,7 +534,7 @@ Public Sub Initialize( _
         mIsInitialized = False
 
 '------------------------------------------------------------------------------
-' VALIDATE INPUTS
+' VALIDATE REFERENCES
 '------------------------------------------------------------------------------
     'Reject a missing owner form
         If OwnerForm Is Nothing Then
@@ -563,28 +552,24 @@ Public Sub Initialize( _
 '------------------------------------------------------------------------------
     'Normalize the click action name
         NormalizedActionName = VBA.Trim$(ActionName)
-    'Normalize the click handler method name
-        NormalizedHandlerName = VBA.Trim$(ClickHandlerName)
-    'Normalize the leave handler method name
-        NormalizedLeaveHandler = VBA.Trim$(LeaveHandlerName)
     'Normalize the requested hover mode
         NormalizedHoverMode = VBA.UCase$(VBA.Trim$(HoverMode))
     'Default blank hover mode to NONE
         If VBA.Len(NormalizedHoverMode) = 0 Then
             NormalizedHoverMode = DP_HOVER_NONE
         End If
+    'Normalize the click handler method name
+        NormalizedHandlerName = VBA.Trim$(ClickHandlerName)
+    'Normalize the optional leave handler method name
+        NormalizedLeaveHandler = VBA.Trim$(LeaveHandlerName)
 
 '------------------------------------------------------------------------------
 ' VALIDATE HOVER MODE
 '------------------------------------------------------------------------------
     'Validate the normalized hover mode against the supported set
         Select Case NormalizedHoverMode
-            Case DP_HOVER_NONE, _
-                 DP_HOVER_DAY, _
-                 DP_HOVER_HEADER, _
-                 DP_HOVER_PICKER, _
-                 DP_HOVER_FOOTER, _
-                 DP_HOVER_SETTINGS
+            Case DP_HOVER_NONE, DP_HOVER_DAY, DP_HOVER_HEADER, DP_HOVER_PICKER, _
+                DP_HOVER_FOOTER, DP_HOVER_SETTINGS
             Case Else
                 Err.Raise vbObjectError + DP_ERR_BAD_HOVER, PROC_NAME, _
                     "Unsupported HoverMode '" & HoverMode & _
@@ -592,55 +577,14 @@ Public Sub Initialize( _
         End Select
 
 '------------------------------------------------------------------------------
-' VERIFY OWNER FORM INTERFACE - HOVER METHODS
+' VALIDATE CLICK HANDLER NAME
 '------------------------------------------------------------------------------
-    'Verify that all hover routing methods exist on the owner form.
-    'Each probe uses CallByName with a sentinel empty-string argument.
-    'A runtime error 438 here means the method is absent or misnamed.
-
-    'Probe UF_DayCell_HoverApply
-        On Error GoTo MissingMethod_DayCell
-        CallByName OwnerForm, "UF_DayCell_HoverApply", VbMethod, vbNullString
-        On Error GoTo ErrorHandler
-
-    'Probe UF_Header_HoverApply
-        On Error GoTo MissingMethod_Header
-        CallByName OwnerForm, "UF_Header_HoverApply", VbMethod, vbNullString
-        On Error GoTo ErrorHandler
-
-    'Probe UF_PickerPanel_HoverApply
-        On Error GoTo MissingMethod_Picker
-        CallByName OwnerForm, "UF_PickerPanel_HoverApply", VbMethod, vbNullString
-        On Error GoTo ErrorHandler
-
-    'Probe UF_Footer_HoverApply
-        On Error GoTo MissingMethod_Footer
-        CallByName OwnerForm, "UF_Footer_HoverApply", VbMethod, vbNullString
-        On Error GoTo ErrorHandler
-
-    'Probe UF_SettingsPanel_HoverApply
-        On Error GoTo MissingMethod_Settings
-        CallByName OwnerForm, "UF_SettingsPanel_HoverApply", VbMethod, vbNullString
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' VERIFY OWNER FORM INTERFACE - CLICK HANDLER
-'------------------------------------------------------------------------------
-    'Verify the click handler method only when a click action is assigned
+    'Require a click handler name only when a click action is assigned
         If VBA.Len(NormalizedActionName) > 0 Then
-            On Error GoTo MissingMethod_ClickHandler
-            CallByName OwnerForm, NormalizedHandlerName, VbMethod, vbNullString
-            On Error GoTo ErrorHandler
-        End If
-
-'------------------------------------------------------------------------------
-' VERIFY OWNER FORM INTERFACE - LEAVE HANDLER
-'------------------------------------------------------------------------------
-    'Verify the leave handler method only when a leave handler name is supplied
-        If VBA.Len(NormalizedLeaveHandler) > 0 Then
-            On Error GoTo MissingMethod_LeaveHandler
-            CallByName OwnerForm, NormalizedLeaveHandler, VbMethod, vbNullString
-            On Error GoTo ErrorHandler
+            If VBA.Len(NormalizedHandlerName) = 0 Then
+                Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
+                    "ClickHandlerName cannot be blank when ActionName is supplied"
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -671,37 +615,6 @@ Public Sub Initialize( _
         Exit Sub
 
 '------------------------------------------------------------------------------
-' MISSING METHOD LABELS
-'------------------------------------------------------------------------------
-MissingMethod_DayCell:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing required method 'UF_DayCell_HoverApply'"
-
-MissingMethod_Header:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing required method 'UF_Header_HoverApply'"
-
-MissingMethod_Picker:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing required method 'UF_PickerPanel_HoverApply'"
-
-MissingMethod_Footer:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing required method 'UF_Footer_HoverApply'"
-
-MissingMethod_Settings:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing required method 'UF_SettingsPanel_HoverApply'"
-
-MissingMethod_ClickHandler:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing click handler method '" & NormalizedHandlerName & "'"
-
-MissingMethod_LeaveHandler:
-    Err.Raise vbObjectError + DP_ERR_BAD_METHOD, PROC_NAME, _
-        "OwnerForm is missing leave handler method '" & NormalizedLeaveHandler & "'"
-
-'------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
@@ -730,14 +643,14 @@ ErrorHandler:
     'Restore normal error handling
         On Error GoTo 0
     'Raise a descriptive initialization error
-        Err.Raise ErrorNumber, PROC_NAME, "Label hook initialization failed: " & ErrorDescription
+        Err.Raise ErrorNumber, PROC_NAME, "Label hook initialization failed: " & _
+            ErrorDescription
 
 End Sub
-
 Private Sub mLabel_Click()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           LABEL CLICK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -779,7 +692,7 @@ Private Sub mLabel_Click()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -846,7 +759,8 @@ Private Sub mLabel_Click()
 ' ROUTE CLICK ACTION
 '------------------------------------------------------------------------------
     'Route the click action to the owner form via the configured handler method
-        CallByName RoutedOwnerForm, RoutedHandlerName, VbMethod, RoutedActionName
+        CallByName RoutedOwnerForm, RoutedHandlerName, VbMethod, _
+            RoutedActionName
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -865,20 +779,17 @@ ErrorHandler:
     'Capture the inner error description
         InnerErrDescription = Err.Description
     'Raise a diagnostic error that preserves label, action, and inner source
-        Err.Raise InnerErrNumber, _
-            PROC_NAME & " | Label=" & RoutedLabelName & " | Action=" & RoutedActionName, _
-            "InnerSource=[" & InnerErrSource & "] | InnerDescription=[" & InnerErrDescription & "]"
+        Err.Raise InnerErrNumber, PROC_NAME & " | Label=" & RoutedLabelName & _
+            " | Action=" & RoutedActionName, "InnerSource=[" & InnerErrSource & _
+            "] | InnerDescription=[" & InnerErrDescription & "]"
 
 End Sub
 
-Private Sub mLabel_MouseMove( _
-    ByVal Button As Integer, _
-    ByVal Shift As Integer, _
-    ByVal X As Single, _
-    ByVal Y As Single)
+Private Sub mLabel_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, _
+    ByVal X As Single, ByVal Y As Single)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           LABEL MOUSE MOVE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -944,12 +855,13 @@ Private Sub mLabel_MouseMove( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "cDatePickerLabelHook.mLabel_MouseMove"
+    Const PROC_NAME             As String = _
+        "cDatePickerLabelHook.mLabel_MouseMove"
 
     Dim RoutedLabelName         As String       'Label name snapshot
     Dim RoutedHoverMode         As String       'Hover mode snapshot
@@ -1011,9 +923,8 @@ Private Sub mLabel_MouseMove( _
             Case DP_HOVER_SETTINGS
                 RoutedOwnerForm.UF_SettingsPanel_HoverApply RoutedLabelName
             Case Else
-                Debug.Print PROC_NAME & _
-                    " | Unsupported hover mode=" & RoutedHoverMode & _
-                    " | Label=" & RoutedLabelName
+                Debug.Print PROC_NAME & " | Unsupported hover mode=" & _
+                    RoutedHoverMode & " | Label=" & RoutedLabelName
         End Select
 
     'Stamp the hover flag so NotifyMouseLeft can detect departure from this label
@@ -1032,11 +943,9 @@ FailSafe:
     'Write hover diagnostics without interrupting the UserForm.
     'RoutedLabelName is captured before any routing call so this print always
     'includes a non-empty label identity even when routing failed early.
-        Debug.Print PROC_NAME & _
-            " | Label=" & RoutedLabelName & _
-            " | HoverMode=" & RoutedHoverMode & _
-            " | Error=" & VBA.CStr(Err.Number) & _
-            " | " & Err.Description
+        Debug.Print PROC_NAME & " | Label=" & RoutedLabelName & " | HoverMode=" _
+            & RoutedHoverMode & " | Error=" & VBA.CStr(Err.Number) & " | " & _
+            Err.Description
 
     'Clear the suppressed error
         Err.Clear
@@ -1046,7 +955,7 @@ End Sub
 Public Sub NotifyMouseLeft()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           NOTIFY MOUSE LEFT
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1101,12 +1010,13 @@ Public Sub NotifyMouseLeft()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "cDatePickerLabelHook.NotifyMouseLeft"
+    Const PROC_NAME             As String = _
+        "cDatePickerLabelHook.NotifyMouseLeft"
 
     Dim RoutedLabelName         As String       'Label name snapshot
     Dim RoutedLeaveHandler      As String       'Leave handler method name snapshot
@@ -1164,7 +1074,8 @@ Public Sub NotifyMouseLeft()
 ' ROUTE LEAVE CALLBACK
 '------------------------------------------------------------------------------
     'Route the leave callback to the owner form via the configured handler
-        CallByName RoutedOwnerForm, RoutedLeaveHandler, VbMethod, RoutedLabelName
+        CallByName RoutedOwnerForm, RoutedLeaveHandler, VbMethod, _
+            RoutedLabelName
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1179,11 +1090,9 @@ FailSafe:
     'Write leave diagnostics without interrupting the UserForm.
     'RoutedLabelName is captured before the routing call so this print always
     'includes a non-empty label identity even when routing failed early.
-        Debug.Print PROC_NAME & _
-            " | Label=" & RoutedLabelName & _
-            " | LeaveHandler=" & RoutedLeaveHandler & _
-            " | Error=" & VBA.CStr(Err.Number) & _
-            " | " & Err.Description
+        Debug.Print PROC_NAME & " | Label=" & RoutedLabelName & _
+            " | LeaveHandler=" & RoutedLeaveHandler & " | Error=" & _
+            VBA.CStr(Err.Number) & " | " & Err.Description
 
     'Clear the suppressed error
         Err.Clear
@@ -1193,7 +1102,7 @@ End Sub
 Private Sub Class_Terminate()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           TERMINATE CLASS
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1229,7 +1138,7 @@ Private Sub Class_Terminate()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CLEAN UP
@@ -1258,6 +1167,9 @@ Private Sub Class_Terminate()
         On Error GoTo 0
 
 End Sub
+
+
+
 
 
 
