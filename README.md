@@ -258,6 +258,80 @@ Suggested validation areas:
 
 ---
 
+## 🧭 Roadmap
+
+Planned or possible future enhancements include:
+
+- 📆 business-day / holiday-calendar integration
+- 🧠 richer detection heuristics
+- 🔌 stronger framework integration with related repos
+
+---
+
+## 🌐 Part of a Broader Framework
+
+**VBA-DATETIMEPICKER** is intended to sit naturally alongside other reusable Excel VBA components, such as:
+
+- performance / execution managers
+- Excel UI controllers
+- demo builders
+- progress-bar components
+- calendar and date infrastructure
+
+If you are building a broader VBA engineering ecosystem, this repo can serve as the **date-input / calendar UX component** of that toolkit.
+
+---
+
+## 📚 Wiki
+
+<p align="left">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Extended Guidance-blue">
+</p>
+
+For additional examples, notes, and repository-level guidance, see the project wiki:
+
+[cDateTimePicker Wiki](https://github.com/danielep71/VBA-DATETIMEPICKER/wiki)
+
+---
+
+## 📄 License
+
+<p align="left">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
+</p>
+
+This project is licensed under the terms in `LICENSE`.
+
+---
+
+## 👤 Author
+
+<p align="left">
+  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele Penza-orange">
+</p>
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome.
+
+Please aim to:
+
+- preserve architectural clarity
+- keep external behavior stable unless change is justified
+- follow the project coding style
+- document meaningful changes
+- use clear commit messages
+
+Conventional Commit examples:
+
+- `feat(ui): add compact settings layout`
+- `fix(manager): clean up stale in-grid icon on sheet change`
+- `docs(readme): expand installation instructions`
+
+---
+
 ## 🔧 Coding Style
 
 This repository follows a structured VBA style.
@@ -282,60 +356,5 @@ General conventions:
 - no comments inside `With ... End With`
 - explicit cleanup / fail-safe logic where appropriate
 
----
-
-## 🧭 Roadmap
-
-Planned or possible future enhancements include:
-
-- 🌍 localization support
-- 📆 business-day / holiday-calendar integration
-- 🪶 compact display modes
-- ⚡ optional caching
-- 🧠 richer detection heuristics
-- 🧪 lightweight regression harness
-- 🔌 stronger framework integration with related repos
 
 ---
-
-## 🌐 Part of a Broader Framework
-
-**VBA-DATETIMEPICKER** is intended to sit naturally alongside other reusable Excel VBA components, such as:
-
-- performance / execution managers
-- Excel UI controllers
-- demo builders
-- progress-bar components
-- calendar and date infrastructure
-
-If you are building a broader VBA engineering ecosystem, this repo can serve as the **date-input / calendar UX component** of that toolkit.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome.
-
-Please aim to:
-
-- preserve architectural clarity
-- keep external behavior stable unless change is justified
-- follow the project coding style
-- document meaningful changes
-- use clear commit messages
-
-Conventional Commit examples:
-
-- `feat(ui): add compact settings layout`
-- `fix(manager): clean up stale in-grid icon on sheet change`
-- `docs(readme): expand installation instructions`
-
----
-
-## 📄 License
-
-This project is released under the **MIT License**.
-
----
-
-
