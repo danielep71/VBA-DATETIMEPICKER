@@ -258,42 +258,12 @@ Suggested validation areas:
 
 ---
 
-## 🔧 Coding Style
-
-This repository follows a structured VBA style.
-
-Typical routine headers include:
-
-- PURPOSE
-- WHY THIS EXISTS
-- INPUTS
-- RETURNS
-- BEHAVIOR
-- ERROR POLICY
-- DEPENDENCIES
-- NOTES
-- UPDATED
-
-General conventions:
-
-- `Option Explicit`
-- comments above executable lines
-- inline comments only for declarations
-- no comments inside `With ... End With`
-- explicit cleanup / fail-safe logic where appropriate
-
----
-
 ## 🧭 Roadmap
 
 Planned or possible future enhancements include:
 
-- 🌍 localization support
 - 📆 business-day / holiday-calendar integration
-- 🪶 compact display modes
-- ⚡ optional caching
 - 🧠 richer detection heuristics
-- 🧪 lightweight regression harness
 - 🔌 stronger framework integration with related repos
 
 ---
@@ -309,6 +279,36 @@ Planned or possible future enhancements include:
 - calendar and date infrastructure
 
 If you are building a broader VBA engineering ecosystem, this repo can serve as the **date-input / calendar UX component** of that toolkit.
+
+---
+
+## 📚 Wiki
+
+<p align="left">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Extended Guidance-blue">
+</p>
+
+For additional examples, notes, and repository-level guidance, see the project wiki:
+
+[cDateTimePicker Wiki](https://github.com/danielep71/VBA-DATETIMEPICKER/wiki)
+
+---
+
+## 📄 License
+
+<p align="left">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
+</p>
+
+This project is licensed under the terms in `LICENSE`.
+
+---
+
+## 👤 Author
+
+<p align="left">
+  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele Penza-orange">
+</p>
 
 ---
 
@@ -332,31 +332,28 @@ Conventional Commit examples:
 
 ---
 
-## 📚 Wiki
-
-<p align="left">
-  <img alt="Docs" src="https://img.shields.io/badge/Docs-Extended Guidance-blue">
-</p>
-
-For additional examples, notes, and repository-level guidance, see the project wiki:
-
-[cPerformanceManager Wiki](https://github.com/danielep71/VBA-Performance_Manager/wiki)
-
 ---
 
-## 📄 License
+## 🔧 Coding Style
 
-<p align="left">
-  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
-</p>
+This repository follows a structured VBA style.
 
-This project is licensed under the terms in `LICENSE`.
+Typical routine headers include:
 
----
+- PURPOSE
+- WHY THIS EXISTS
+- INPUTS
+- RETURNS
+- BEHAVIOR
+- ERROR POLICY
+- DEPENDENCIES
+- NOTES
+- UPDATED
 
-## 👤 Author
+General conventions:
 
-<p align="left">
-  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele Penza-orange">
-</p>
-
+- `Option Explicit`
+- comments above executable lines
+- inline comments only for declarations
+- no comments inside `With ... End With`
+- explicit cleanup / fail-safe logic where appropriate
