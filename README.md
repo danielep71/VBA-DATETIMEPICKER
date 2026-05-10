@@ -73,15 +73,13 @@ Built as part of a broader **Excel VBA Runtime Framework**, this project focuses
 
 ## 📸 Screenshots
 
-> Add your screenshots into an `assets/` folder and update the paths below.
-
 ### Main picker
 <img  src="assets/datepicker-main.png" />
 ```
 
 ### Settings panel
-```markdown
-![Settings Panel](assets/datepicker-settings.png)
+
+<img  src="assets/datepicker-settings.png" />
 ```
 
 ### In-grid activation
