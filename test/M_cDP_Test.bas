@@ -1,4 +1,4 @@
-Attribute VB_Name = "M_DatePicker_Test"
+Attribute VB_Name = "M_cDP_Test"
 Option Explicit
 
 '
@@ -160,7 +160,7 @@ Public Sub TST_DP_RunAll()
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
     'Buil template
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
-        "Test Sheet"
+        "Test Sheet", , 5
         
 '------------------------------------------------------------------------------
 ' RUN TESTS
@@ -2838,6 +2838,7 @@ Private Sub TST_DP_WriteSummary()
     mTST_DP_ResultSheet.Range("K7").Value = mTST_DP_FailCount
     mTST_DP_ResultSheet.Range("J4:J7").Font.Bold = True
     mTST_DP_ResultSheet.Columns("C:K").AutoFit
+    mTST_DP_ResultSheet.Columns("C:F").HorizontalAlignment = xlCenter
 
 End Sub
 
