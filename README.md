@@ -71,6 +71,29 @@ Built as part of a broader **Excel VBA Runtime Framework**, this project focuses
 
 ---
 
+## 📸 Screenshots
+
+> Add your screenshots into an `assets/` folder and update the paths below.
+
+### Main picker
+```markdown
+![Main Picker](assets/datepicker-main.png)
+```
+
+### Settings panel
+```markdown
+![Settings Panel](assets/datepicker-settings.png)
+```
+
+### In-grid activation
+```markdown
+![In-Grid Activation](assets/datepicker-ingrid.png)
+```
+
+If you already have images ready, you can simply replace the placeholder paths above with your actual filenames.
+
+---
+
 ## 🏗️ Architecture
 
 The project is organized around a clean separation of responsibilities.
@@ -123,29 +146,6 @@ This repo follows a few core principles:
 
 - **Production-minded code quality**  
   This is not just a demo widget; it is intended as a robust reusable component
-
----
-
-## 📸 Screenshots
-
-> Add your screenshots into an `assets/` folder and update the paths below.
-
-### Main picker
-```markdown
-![Main Picker](assets/datepicker-main.png)
-```
-
-### Settings panel
-```markdown
-![Settings Panel](assets/datepicker-settings.png)
-```
-
-### In-grid activation
-```markdown
-![In-Grid Activation](assets/datepicker-ingrid.png)
-```
-
-If you already have images ready, you can simply replace the placeholder paths above with your actual filenames.
 
 ---
 
