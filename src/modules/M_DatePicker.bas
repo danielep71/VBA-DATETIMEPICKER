@@ -196,8 +196,6 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-    Private Const DP_FORM_NAME                     As String = "UF_DatePicker"          'DatePicker UserForm name
-
     Private Const DP_SETTINGS_SECTION_DISPLAY      As String = "Display"                 'Display settings section
     Private Const DP_SETTINGS_SECTION_BEHAVIOR     As String = "Behavior"                'Behavior settings section
     Private Const DP_SETTINGS_SECTION_FEATURES     As String = "Features"                'Feature settings section
@@ -247,10 +245,11 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
 '------------------------------------------------------------------------------
+    Public Const DP_FORM_NAME                      As String = "UF_DatePicker"           'DatePicker UserForm name
 
     Public Const DP_SETTINGS_APP_NAME              As String = "VBA_DATETIMEPICKER"      'Legacy registry application name
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
-    Public Const DP_MSGBOX_TITLE                   As String = "Date Picker"             'Message-box title
+    Public Const DP_MSGBOX_TITLE                   As String = "Date / Time Picker"      'Message-box title
 
     Public Const DP_DEFAULT_FIRST_DAY_OF_WEEK      As Long = vbMonday                    'Default first day of week
     Public Const DP_DEFAULT_USE_LOCAL_NAMES        As Boolean = True                     'Default local names flag
