@@ -1,4 +1,4 @@
-Attribute VB_Name = "M_DATEPICKER"
+Attribute VB_Name = "M_DatePicker"
 
 Option Explicit
 
@@ -3243,7 +3243,7 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         If Not GridIconChanged Then
             If Not KeyboardChanged Then
                 'Remove any stale in-grid icon when the feature is disabled
-                    If Not ShowGridIcon Then M_GridIcon_Hide
+                    If Not ShowGridIcon Then M_GridIcon_Remove
                 'Exit because no registry write is required
                     Exit Sub
             End If
@@ -3267,7 +3267,6 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Persist settings"
-
     'Persist the updated settings
         M_Settings_Save
     'Mark settings as persisted
@@ -3278,7 +3277,6 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Synchronize keyboard shortcut"
-
     'Synchronize keyboard shortcut integration only when the fallback changed
         If KeyboardChanged Then M_KeyboardShortcut_Update
 
@@ -3287,10 +3285,9 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Remove stale grid icon"
-
     'Remove any stale in-grid icon when the feature is disabled
-        If Not gDP_ShowGridIcon Then M_GridIcon_Hide
-
+        If Not gDP_ShowGridIcon Then M_GridIcon_Remove
+        
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -8768,21 +8765,22 @@ Public Function M_Platform_ShouldUseWinAPI() As Boolean
 '                           PLATFORM SHOULD USE WINAPI
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns whether DatePicker WinAPI-dependent behavior should be enabled
+'   Returns whether optional DatePicker WinAPI styling should be enabled
 '
 ' WHY THIS EXISTS
-'   Native DatePicker behavior must be controlled by both:
+'   Some DatePicker visual behavior, especially native title-bar removal, should
+'   be controlled by both:
 '     - platform capability
 '     - user / project configuration
 '
-'   This helper provides the single effective runtime policy for optional
-'   WinAPI-dependent behavior
+'   This helper provides the effective runtime policy for optional WinAPI styling
+'   behavior. It is not the general WinAPI capability check.
 '
 ' INPUTS
 '   None
 '
 ' RETURNS
-'   True when WinAPI is available on the current platform and enabled by setting
+'   True when WinAPI is available on the current platform and styling is enabled
 '   False otherwise
 '
 ' BEHAVIOR
@@ -8798,13 +8796,18 @@ Public Function M_Platform_ShouldUseWinAPI() As Boolean
 '   gDP_UseWinAPI
 '
 ' NOTES
-'   Do not call M_Settings_EnsureLoaded from this helper
+'   Use this helper for optional styling features such as title-bar removal.
+'
+'   Use M_Platform_CanUseWinAPI for capability-only operations that should remain
+'   available on Windows even when optional WinAPI styling is disabled.
+'
+'   Do not call M_Settings_EnsureLoaded from this helper.
 '
 '   Settings load / save routines already use M_Platform_CanUseWinAPI to avoid
-'   circular policy dependencies while normalizing gDP_UseWinAPI
+'   circular policy dependencies while normalizing gDP_UseWinAPI.
 '
 ' UPDATED
-'   2026-05-06
+'   2026-05-10
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -9280,7 +9283,7 @@ Public Sub M_Window_MoveFormToMouse( _
 '   errors are suppressed and written to the Immediate Window for diagnostics
 '
 ' DEPENDENCIES
-'   M_Platform_ShouldUseWinAPI
+'   M_Platform_CanUseWinAPI
 '   M_Window_GetUserFormHwnd
 '   GetCursorPos
 '   GetWindowRect
@@ -9299,8 +9302,9 @@ Public Sub M_Window_MoveFormToMouse( _
 ' NOTES
 '   This routine intentionally does nothing on Mac
 '
-'   This routine uses M_Platform_ShouldUseWinAPI so the user setting disables
-'   mouse-positioning WinAPI calls as well as borderless styling
+'   This routine uses M_Platform_CanUseWinAPI, not M_Platform_ShouldUseWinAPI,
+'   because mouse positioning is a capability-only behavior. Disabling optional
+'   WinAPI styling should disable title-bar removal, not mouse positioning.
 '
 '   Positioning is pixel-based because WinAPI cursor, window, and monitor APIs
 '   operate in screen pixels
@@ -9368,10 +9372,10 @@ Public Sub M_Window_MoveFormToMouse( _
         If Frm Is Nothing Then Exit Sub
 
 '------------------------------------------------------------------------------
-' CHECK WINAPI POLICY
+' CHECK WINAPI CAPABILITY
 '------------------------------------------------------------------------------
-    'Exit when optional WinAPI-dependent behavior is disabled
-        If Not M_Platform_ShouldUseWinAPI Then Exit Sub
+    'Exit when the current platform cannot use WinAPI calls
+        If Not M_Platform_CanUseWinAPI Then Exit Sub
 
 '------------------------------------------------------------------------------
 ' READ MOUSE POSITION
@@ -11066,6 +11070,7 @@ Public Sub M_GridIcon_Hide()
         On Error GoTo 0
 
 End Sub
+
 Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 
 '
@@ -11103,9 +11108,10 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 ' ERROR POLICY
 '   Best-effort UI routine
 '
-'   Suppresses creation failures, removes partial temporary shapes, restores
-'   Application state, clears invalid tracked-shape references, and writes
-'   diagnostics to the Immediate Window
+'   Suppresses creation failures, removes partial temporary shapes before stable
+'   promotion, restores Application state, clears the tracked icon reference only
+'   when stable replacement started but did not finish, and writes diagnostics to
+'   the Immediate Window
 '
 ' DEPENDENCIES
 '   Excel Shapes object model
@@ -11160,6 +11166,8 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     Dim IconFilePath            As String           'Resolved embedded icon file path
     Dim TempShapeName           As String           'Temporary icon shape name
     Dim UsedPictureIcon         As Boolean          'True when picture fill succeeds
+    Dim StableReplaceStarted    As Boolean          'True once old stable icon replacement begins
+    Dim StableIconPromoted      As Boolean          'True once the new icon is named and tracked
     Dim MergeState              As Variant          'Anchor merge-state snapshot
     Dim PreviousScreenUpdating  As Boolean          'Previous ScreenUpdating state
     Dim HasScreenState          As Boolean          'True after ScreenUpdating is captured
@@ -11436,6 +11444,8 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Replace old icon"
+    'Mark that stable icon replacement has started
+        StableReplaceStarted = True
     'Suppress old-icon cleanup errors
         On Error Resume Next
     'Delete the tracked old icon when available
@@ -11452,6 +11462,8 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         NewIconShape.Name = DP_GRID_ICON_NAME
     'Store the new icon reference
         Set gDP_GridIconShape = NewIconShape
+    'Mark the new icon as safely promoted
+        StableIconPromoted = True
 
 '------------------------------------------------------------------------------
 ' SHOW FINAL ICON
@@ -11502,10 +11514,14 @@ FailSafe:
         ErrorDescription = Err.Description
     'Suppress cleanup failures
         On Error Resume Next
-    'Delete the partially created temporary icon
-        If Not NewIconShape Is Nothing Then NewIconShape.Delete
-    'Clear the tracked icon reference if creation failed before stable assignment
-        If gDP_GridIconShape Is Nothing Then Set gDP_GridIconShape = Nothing
+    'Delete the partially created temporary icon only before stable promotion
+        If Not StableIconPromoted Then
+            If Not NewIconShape Is Nothing Then NewIconShape.Delete
+        End If
+    'Clear the tracked icon reference only when replacement started but did not finish
+        If StableReplaceStarted And Not StableIconPromoted Then
+            Set gDP_GridIconShape = Nothing
+        End If
     'Restore ScreenUpdating when it was captured
         If HasScreenState Then
             Excel.Application.ScreenUpdating = PreviousScreenUpdating

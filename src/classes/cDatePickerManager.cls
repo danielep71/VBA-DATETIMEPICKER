@@ -6,7 +6,7 @@ Attribute VB_Name = "cDatePickerManager"
 Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = False
-Attribute VB_Exposed = True
+Attribute VB_Exposed = False
 Option Explicit
 
 '
@@ -71,6 +71,7 @@ Option Explicit
 '   M_KeyboardShortcut_Remove
 '   M_GridIcon_ShowOrMove
 '   M_GridIcon_Hide
+'   M_GridIcon_Remove
 '   M_GridIcon_PurgeAll
 '   M_FormBridge_RefreshFromCell
 '   gDP_ShowGridIcon
@@ -97,9 +98,12 @@ Option Explicit
 '   Date-format detection is intentionally heuristic and is used only for UI
 '   gating, not for full semantic format parsing
 '
-'   M_GridIcon_ShowOrMove is the normal high-frequency icon path
+'   M_GridIcon_ShowOrMove is the normal high-frequency eligible-cell path
 '
-'   M_GridIcon_Remove is the lightweight active-context cleanup path
+'   M_GridIcon_Hide is the normal high-frequency non-eligible-cell path
+'
+'   M_GridIcon_Remove is the lightweight active-context cleanup path used when
+'   the icon feature is disabled or the current UI context is explicitly cleared
 '
 '   M_GridIcon_PurgeAll is the heavier all-workbook cleanup path used only for
 '   hard lifecycle boundaries
@@ -1079,10 +1083,15 @@ Public Sub Clear_AllDatePickerUI( _
 '   M_GridIcon_PurgeAll
 '
 ' NOTES
-'   Use PurgeGridIcons = False for high-frequency selection refreshes
+'   Use PurgeGridIcons = False for scoped cleanup of the currently tracked
+'   grid icon when the DatePicker UI context is explicitly cleared
 '
 '   Use PurgeGridIcons = True for hard boundaries such as save, close, print,
 '   explicit reset, and manager teardown
+'
+'   Do not use this routine for normal high-frequency eligible / non-eligible
+'   selection refreshes. Refresh_CurrentUI should use M_GridIcon_ShowOrMove
+'   for eligible cells and M_GridIcon_Hide for non-eligible cells
 '
 '   This routine does not manage the manager busy guard directly. Callers that
 '   invoke it from event flow are responsible for guard ownership
@@ -1249,7 +1258,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 ' BEHAVIOR
 '   Resolves one authoritative target cell, keeps or closes the visible picker
 '   according to the close-after-selection policy, refreshes the open form from
-'   that same resolved target cell, and either moves / shows or removes the
+'   that same resolved target cell, and either moves / shows or hides the
 '   in-grid icon
 '
 '   When the form bridge fails, the failure is logged and the picker is closed
@@ -1266,7 +1275,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 '   M_FormBridge_RefreshFromCell
 '   Should_ShowGridIcon_ForCell
 '   M_GridIcon_ShowOrMove
-'   M_GridIcon_Remove
+'   M_GridIcon_Hide
 '   Clear_AllDatePickerUI
 '
 ' NOTES
@@ -1276,7 +1285,8 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 '   For eligible cells, the high-frequency path moves or reuses the existing
 '   icon instead of deleting and recreating it
 '
-'   For non-eligible cells, the existing icon is removed explicitly
+'   For non-eligible cells, the existing icon is hidden rather than deleted
+'   so selection refresh remains cheap and flicker-resistant
 '
 '   The resolved TargetCell is the single source of truth for both the picker
 '   form and the in-grid icon
@@ -1442,7 +1452,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
     'Move or create the icon when the resolved target allows it
         If ShowGridIcon Then
             M_GridIcon_ShowOrMove TargetCell
-    'Otherwise remove the current icon
+    'Otherwise hide the current icon
         Else
             M_GridIcon_Hide
         End If
