@@ -10,7 +10,7 @@ Attribute VB_Exposed = True
 Option Explicit
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 ' CLASS: cDatePickerManager
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -69,9 +69,8 @@ Option Explicit
 '   M_Settings_Load
 '   M_KeyboardShortcut_Update
 '   M_KeyboardShortcut_Remove
-'   M_GridIcon_EnsureEmbeddedIconFile
 '   M_GridIcon_ShowOrMove
-'   M_GridIcon_Remove
+'   M_GridIcon_Hide
 '   M_GridIcon_PurgeAll
 '   M_FormBridge_RefreshFromCell
 '   gDP_ShowGridIcon
@@ -110,7 +109,7 @@ Option Explicit
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
@@ -128,7 +127,6 @@ Attribute mExcelApp.VB_VarHelpID = -1
 '------------------------------------------------------------------------------
     Private mIsBusy                     As Boolean                      'True while guarded refresh / teardown is running
     Private mIsHooked                   As Boolean                      'True when the Application event hook was created
-    Private mEmbeddedGridIconPath       As String                       'Prepared embedded grid-icon temp-file path
 
 
 '
@@ -142,7 +140,7 @@ Attribute mExcelApp.VB_VarHelpID = -1
 Private Sub Class_Initialize()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           INITIALIZE MANAGER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -160,9 +158,8 @@ Private Sub Class_Initialize()
 '
 ' BEHAVIOR
 '   Initializes internal state flags, loads DatePicker settings on a best-effort
-'   basis, synchronizes the keyboard shortcut fallback, prepares the embedded
-'   grid icon file, hooks the Excel Application object, and records whether
-'   hook-up succeeded
+'   basis, synchronizes the keyboard shortcut fallback, hooks the Excel
+'   Application object, and records whether hook-up succeeded
 '
 ' ERROR POLICY
 '   Best-effort initialization. Startup should not hard-fail if Excel is in a
@@ -174,7 +171,6 @@ Private Sub Class_Initialize()
 ' DEPENDENCIES
 '   M_Settings_Load
 '   M_KeyboardShortcut_Update
-'   M_GridIcon_EnsureEmbeddedIconFile
 '   Excel.Application
 '
 ' NOTES
@@ -187,7 +183,7 @@ Private Sub Class_Initialize()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -204,8 +200,6 @@ Private Sub Class_Initialize()
         mIsBusy = False
     'Clear the hook-state flag
         mIsHooked = False
-    'Clear any previous embedded grid icon path
-        mEmbeddedGridIconPath = vbNullString
     'Release any existing Excel Application reference defensively
         Set mExcelApp = Nothing
 
@@ -253,25 +247,6 @@ Private Sub Class_Initialize()
         End If
 
 '------------------------------------------------------------------------------
-' PREPARE EMBEDDED GRID ICON
-'------------------------------------------------------------------------------
-    'Clear any previous startup error
-        Err.Clear
-    'Prepare the embedded grid icon file on a best-effort basis
-        mEmbeddedGridIconPath = M_GridIcon_EnsureEmbeddedIconFile
-    'Log embedded-icon preparation errors without stopping manager startup
-        If Err.Number <> 0 Then
-            StepErrNumber = Err.Number
-            StepErrDescription = Err.Description
-            mEmbeddedGridIconPath = vbNullString
-            Debug.Print PROC_NAME & _
-                " | Step=EmbeddedGridIcon" & _
-                " | Error=" & VBA.CStr(StepErrNumber) & _
-                " | " & StepErrDescription
-            Err.Clear
-        End If
-
-'------------------------------------------------------------------------------
 ' HOOK APPLICATION EVENTS
 '------------------------------------------------------------------------------
     'Clear any previous startup error
@@ -302,10 +277,11 @@ Private Sub Class_Initialize()
         On Error GoTo 0
 
 End Sub
+
 Private Sub Class_Terminate()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           TERMINATE MANAGER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -325,8 +301,8 @@ Private Sub Class_Terminate()
 '
 ' BEHAVIOR
 '   Marks the manager as busy, releases the Application event hook, removes the
-'   keyboard shortcut fallback, performs hard UI cleanup, clears cached transient
-'   state, and resets internal state flags
+'   keyboard shortcut fallback, performs hard UI cleanup, and resets internal
+'   state flags
 '
 ' ERROR POLICY
 '   Best-effort teardown. Termination must not raise outward
@@ -348,7 +324,7 @@ Private Sub Class_Terminate()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' CLEANUP
@@ -365,8 +341,6 @@ Private Sub Class_Terminate()
         M_KeyboardShortcut_Remove
     'Clear all transient UI artifacts using the hard-purge path
         Clear_AllDatePickerUI True, True
-    'Clear cached embedded grid-icon path
-        mEmbeddedGridIconPath = vbNullString
 
 '------------------------------------------------------------------------------
 ' RESET STATE
@@ -387,7 +361,7 @@ End Sub
 Public Property Get Is_PickerLoaded() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS PICKER LOADED
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -422,7 +396,7 @@ Public Property Get Is_PickerLoaded() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -446,10 +420,11 @@ SafeExit:
         Err.Clear
 
 End Property
+
 Public Property Get PickerVisible() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           PICKER VISIBLE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -484,7 +459,7 @@ Public Property Get PickerVisible() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -508,10 +483,11 @@ SafeExit:
         Err.Clear
 
 End Property
+
 Public Property Get Is_Hooked() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS HOOKED
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -547,7 +523,7 @@ Public Property Get Is_Hooked() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -571,10 +547,11 @@ SafeExit:
         Err.Clear
 
 End Property
+
 Public Property Get Is_Busy() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS BUSY
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -607,7 +584,7 @@ Public Property Get Is_Busy() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RETURN STATE
@@ -618,16 +595,16 @@ Public Property Get Is_Busy() As Boolean
 End Property
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 '                               PUBLIC COMMANDS
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 
 Public Sub Reset_DatePickerUI()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           RESET DATEPICKER UI
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -661,13 +638,13 @@ Public Sub Reset_DatePickerUI()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "cDatePickerManager.Reset_DatePickerUI"    'Current procedure name
-
+    Const PROC_NAME     As String = "cDatePickerManager.Reset_DatePickerUI"
+    
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -704,7 +681,7 @@ End Sub
 Public Sub Handle_SelectionChange(Optional ByVal vTarget As Variant)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           HANDLE SELECTION CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -738,14 +715,14 @@ Public Sub Handle_SelectionChange(Optional ByVal vTarget As Variant)
 '
 ' NOTES
 '   When gDP_CloseAfterSelection is False and the picker is visible, this routine
-'   keeps the form open and refreshes it from the new ActiveCell
+'   keeps the form open and refreshes it from the resolved TargetCell
 '
 '   This routine is a public event-facing wrapper. The detailed UI decision tree
 '   remains centralized in Refresh_CurrentUI
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -825,7 +802,7 @@ End Sub
 Public Sub Handle_WorksheetChange(Optional ByVal vTarget As Variant)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           HANDLE WORKSHEET CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -866,7 +843,7 @@ Public Sub Handle_WorksheetChange(Optional ByVal vTarget As Variant)
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -943,10 +920,11 @@ FailSafe:
         Resume CleanExit
 
 End Sub
+
 Public Sub Handle_WorkbookContextChange()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           HANDLE WORKBOOK CONTEXT CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -963,8 +941,9 @@ Public Sub Handle_WorkbookContextChange()
 '   Nothing
 '
 ' BEHAVIOR
-'   Enters the manager re-entrancy guard, refreshes DatePicker UI against the
-'   current ActiveCell context, and releases the guard deterministically
+'   Enters the manager re-entrancy guard, lets Refresh_CurrentUI resolve the
+'   current active Excel context into an authoritative TargetCell, refreshes
+'   DatePicker UI from that TargetCell, and releases the guard deterministically
 '
 ' ERROR POLICY
 '   Best-effort event handling. Failures trigger lightweight cleanup and do not
@@ -980,13 +959,17 @@ Public Sub Handle_WorkbookContextChange()
 '   This routine is intentionally thin because the detailed refresh policy is
 '   centralized in Refresh_CurrentUI
 '
-'   Workbook and worksheet context changes can occur when the active selection is
-'   temporarily unavailable or not a normal worksheet cell. Those cases are left
-'   to Refresh_CurrentUI and the fail-safe cleanup path
+'   Workbook and worksheet context changes can occur when no explicit event
+'   Target range is available. Refresh_CurrentUI resolves the current active
+'   context when possible and then uses the resolved TargetCell as the single
+'   source of truth
+'
+'   Cases where no valid TargetCell can be resolved are left to Refresh_CurrentUI
+'   and the fail-safe cleanup path
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1014,7 +997,7 @@ Public Sub Handle_WorkbookContextChange()
 '------------------------------------------------------------------------------
 ' REFRESH UI
 '------------------------------------------------------------------------------
-    'Refresh DatePicker UI against the current active-cell context
+    'Refresh DatePicker UI by resolving the current active context into a TargetCell
         Refresh_CurrentUI
 
 '------------------------------------------------------------------------------
@@ -1054,12 +1037,13 @@ FailSafe:
         Resume CleanExit
 
 End Sub
+
 Public Sub Clear_AllDatePickerUI( _
     Optional ByVal ClosePicker As Boolean = True, _
     Optional ByVal PurgeGridIcons As Boolean = False)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           CLEAR ALL DATEPICKER UI
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1105,7 +1089,7 @@ Public Sub Clear_AllDatePickerUI( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1144,10 +1128,11 @@ Public Sub Clear_AllDatePickerUI( _
         On Error GoTo 0
 
 End Sub
-Public Function Should_ShowDP(Optional ByVal vTarget As Variant) As Boolean
+
+Public Function Should_ShowGridIcon(Optional ByVal vTarget As Variant) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           SHOULD SHOW DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1172,7 +1157,7 @@ Public Function Should_ShowDP(Optional ByVal vTarget As Variant) As Boolean
 '
 ' DEPENDENCIES
 '   Resolve_TargetCell
-'   Should_ShowDP_ForCell
+'   Should_ShowGridIcon_ForCell
 '
 ' NOTES
 '   This routine does not create, move, remove, or refresh UI
@@ -1182,12 +1167,12 @@ Public Function Should_ShowDP(Optional ByVal vTarget As Variant) As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "cDatePickerManager.Should_ShowDP"
+    Const PROC_NAME             As String = "cDatePickerManager.Should_ShowGridIcon"
     
     Dim TargetCell              As Excel.Range      'Resolved single target cell
     Dim TargetWasProvided       As Boolean          'True when an explicit target was supplied
@@ -1196,7 +1181,7 @@ Public Function Should_ShowDP(Optional ByVal vTarget As Variant) As Boolean
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Default to not showing the DatePicker entry point
-        Should_ShowDP = False
+        Should_ShowGridIcon = False
     'Enable safe-default error handling
         On Error GoTo ErrorHandler
     'Capture whether an explicit target was supplied
@@ -1221,7 +1206,7 @@ Public Function Should_ShowDP(Optional ByVal vTarget As Variant) As Boolean
 ' APPLY CELL GATING
 '------------------------------------------------------------------------------
     'Return the cell-level gating decision
-        Should_ShowDP = Should_ShowDP_ForCell(TargetCell)
+        Should_ShowGridIcon = Should_ShowGridIcon_ForCell(TargetCell)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1234,15 +1219,16 @@ Public Function Should_ShowDP(Optional ByVal vTarget As Variant) As Boolean
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Return the safe default
-        Should_ShowDP = False
+        Should_ShowGridIcon = False
     'Clear any suppressed predicate error
         Err.Clear
 
 End Function
+
 Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           REFRESH CURRENT UI
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1266,6 +1252,9 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 '   that same resolved target cell, and either moves / shows or removes the
 '   in-grid icon
 '
+'   When the form bridge fails, the failure is logged and the picker is closed
+'   on a best-effort basis to avoid leaving stale form state on screen
+'
 ' ERROR POLICY
 '   Best-effort refresh. Failures trigger lightweight cleanup and do not raise
 '   outward
@@ -1275,7 +1264,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 '   Resolve_TargetCell
 '   DP_Close
 '   M_FormBridge_RefreshFromCell
-'   Should_ShowDP_ForCell
+'   Should_ShowGridIcon_ForCell
 '   M_GridIcon_ShowOrMove
 '   M_GridIcon_Remove
 '   Clear_AllDatePickerUI
@@ -1295,8 +1284,8 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
 '   This routine no longer falls back to ActiveCell after target resolution
 '
 ' UPDATED
-'   2026-05-03
-'==============================================================================
+'   2026-05-04
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1304,10 +1293,16 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
     Const PROC_NAME             As String = "cDatePickerManager.Refresh_CurrentUI"
 
     Dim TargetCell              As Excel.Range      'Resolved authoritative target cell
+    
     Dim KeepPickerOpen          As Boolean          'True to keep open form alive
     Dim TargetWasProvided       As Boolean          'True when an explicit target was supplied
     Dim TargetWasResolved       As Boolean          'True when a valid target cell was resolved
     Dim ShowGridIcon            As Boolean          'True when the icon should be shown
+    Dim TargetAddress           As String           'Diagnostic target address
+    Dim BridgeErrNumber         As Long             'Captured form-bridge error number
+    Dim BridgeErrDescription    As String           'Captured form-bridge error description
+    Dim CloseErrNumber          As Long             'Captured picker-close error number
+    Dim CloseErrDescription     As String           'Captured picker-close error description
     Dim ErrorNumber             As Long             'Captured error number
     Dim ErrorDescription        As String           'Captured error description
 
@@ -1343,26 +1338,102 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
         End If
 
 '------------------------------------------------------------------------------
+' SNAPSHOT DIAGNOSTIC TARGET
+'------------------------------------------------------------------------------
+    'Suppress target-address diagnostic failures
+        On Error Resume Next
+    'Capture the resolved target address for diagnostics
+        TargetAddress = VBA.CStr(TargetCell.Address(External:=True))
+    'Clear any suppressed diagnostic error
+        Err.Clear
+    'Restore refresh error handling
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
 ' DECIDE GRID ICON VISIBILITY
 '------------------------------------------------------------------------------
     'Evaluate whether the resolved target should show the in-grid icon
-        ShowGridIcon = Should_ShowDP_ForCell(TargetCell)
+        ShowGridIcon = Should_ShowGridIcon_ForCell(TargetCell)
 
 '------------------------------------------------------------------------------
 ' UPDATE PICKER FORM LIFECYCLE
 '------------------------------------------------------------------------------
     'Close the picker when the current policy does not keep it open
         If Not KeepPickerOpen Then
-            On Error Resume Next
-            DP_Close
-            Err.Clear
-            On Error GoTo FailSafe
+            'Reset close diagnostics
+                CloseErrNumber = 0
+            'Reset close diagnostic description
+                CloseErrDescription = vbNullString
+            'Suppress close errors while capturing diagnostics
+                On Error Resume Next
+            'Close the DatePicker form
+                DP_Close
+            'Capture picker-close error number
+                CloseErrNumber = Err.Number
+            'Capture picker-close error description
+                CloseErrDescription = Err.Description
+            'Clear any suppressed picker-close error
+                Err.Clear
+            'Restore refresh error handling
+                On Error GoTo FailSafe
+            'Log picker-close failure without interrupting refresh flow
+                If CloseErrNumber <> 0 Then
+                    Debug.Print PROC_NAME & _
+                        " | Step=DP_Close" & _
+                        " | Target=" & TargetAddress & _
+                        " | Error=" & VBA.CStr(CloseErrNumber) & _
+                        " | " & CloseErrDescription
+                End If
     'Otherwise refresh the open picker from the same resolved target cell
         Else
-            On Error Resume Next
-            M_FormBridge_RefreshFromCell TargetCell
-            Err.Clear
-            On Error GoTo FailSafe
+            'Reset bridge diagnostics
+                BridgeErrNumber = 0
+            'Reset bridge diagnostic description
+                BridgeErrDescription = vbNullString
+            'Suppress bridge errors while capturing diagnostics
+                On Error Resume Next
+            'Refresh the visible picker from the resolved target cell
+                M_FormBridge_RefreshFromCell TargetCell
+            'Capture form-bridge error number
+                BridgeErrNumber = Err.Number
+            'Capture form-bridge error description
+                BridgeErrDescription = Err.Description
+            'Clear any suppressed form-bridge error
+                Err.Clear
+            'Restore refresh error handling
+                On Error GoTo FailSafe
+            'Log form-bridge failure without interrupting Excel event flow
+                If BridgeErrNumber <> 0 Then
+                    Debug.Print PROC_NAME & _
+                        " | Step=M_FormBridge_RefreshFromCell" & _
+                        " | Target=" & TargetAddress & _
+                        " | Error=" & VBA.CStr(BridgeErrNumber) & _
+                        " | " & BridgeErrDescription
+                    'Reset close diagnostics
+                        CloseErrNumber = 0
+                    'Reset close diagnostic description
+                        CloseErrDescription = vbNullString
+                    'Suppress close errors while capturing diagnostics
+                        On Error Resume Next
+                    'Close the picker to avoid stale visible form state
+                        DP_Close
+                    'Capture picker-close error number
+                        CloseErrNumber = Err.Number
+                    'Capture picker-close error description
+                        CloseErrDescription = Err.Description
+                    'Clear any suppressed picker-close error
+                        Err.Clear
+                    'Restore refresh error handling
+                        On Error GoTo FailSafe
+                    'Log picker-close failure after bridge failure
+                        If CloseErrNumber <> 0 Then
+                            Debug.Print PROC_NAME & _
+                                " | Step=DP_CloseAfterBridgeFailure" & _
+                                " | Target=" & TargetAddress & _
+                                " | Error=" & VBA.CStr(CloseErrNumber) & _
+                                " | " & CloseErrDescription
+                        End If
+                End If
         End If
 
 '------------------------------------------------------------------------------
@@ -1373,7 +1444,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
             M_GridIcon_ShowOrMove TargetCell
     'Otherwise remove the current icon
         Else
-            M_GridIcon_Remove
+            M_GridIcon_Hide
         End If
 
 '------------------------------------------------------------------------------
@@ -1398,6 +1469,7 @@ FailSafe:
         Debug.Print PROC_NAME & _
             " | TargetWasProvided=" & VBA.CStr(TargetWasProvided) & _
             " | TargetWasResolved=" & VBA.CStr(TargetWasResolved) & _
+            " | Target=" & TargetAddress & _
             " | KeepPickerOpen=" & VBA.CStr(KeepPickerOpen) & _
             " | ShowGridIcon=" & VBA.CStr(ShowGridIcon) & _
             " | Error=" & VBA.CStr(ErrorNumber) & _
@@ -1409,10 +1481,11 @@ FailSafe:
         On Error GoTo 0
 
 End Sub
+
 Private Function Should_KeepPickerOpenOnContextChange() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           SHOULD KEEP PICKER OPEN
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1448,7 +1521,7 @@ Private Function Should_KeepPickerOpenOnContextChange() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1496,20 +1569,24 @@ ErrorHandler:
         Err.Clear
 
 End Function
+
 Private Sub Clear_UI_IfIdle( _
     Optional ByVal ClosePicker As Boolean = True, _
     Optional ByVal PurgeGridIcons As Boolean = False)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           CLEAR UI IF IDLE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Clears transient DatePicker UI only when no guarded refresh is in progress
+'   Clears transient DatePicker UI only when no guarded refresh or teardown work
+'   is in progress
 '
 ' WHY THIS EXISTS
-'   Some Application events are cleanup boundaries. Guarding those callbacks
-'   avoids re-entrant cleanup churn if teardown triggers more Excel events
+'   Some Application events request cleanup at lifecycle boundaries. However,
+'   cleanup should not interrupt an active guarded refresh because that can
+'   create re-entrant form closing, shape deletion, or partially completed UI
+'   transitions
 '
 ' INPUTS
 '   ClosePicker
@@ -1533,17 +1610,20 @@ Private Sub Clear_UI_IfIdle( _
 '   Clear_AllDatePickerUI
 '
 ' NOTES
-'   Save, print, close, and teardown should generally pass PurgeGridIcons = True
+'   Save, print, close, and workbook deactivation may request hard cleanup with
+'   PurgeGridIcons = True
 '
-'   Selection, resize, and window deactivation should generally keep
-'   PurgeGridIcons = False for responsiveness
+'   A hard cleanup request is not forced when mIsBusy = True
 '
-'   This routine does not own the busy guard. It only observes the current guard
-'   state and skips cleanup while guarded work is active
+'   Skipping cleanup while busy is intentional because the active guarded path is
+'   already responsible for reaching a safe UI state or fail-safe cleanup
+'
+'   Class_Terminate remains the true forced teardown boundary because it calls
+'   Clear_AllDatePickerUI directly after releasing the Application event hook
 '
 ' UPDATED
-'   2026-05-03
-'==============================================================================
+'   2026-05-04
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1559,8 +1639,14 @@ Private Sub Clear_UI_IfIdle( _
 '------------------------------------------------------------------------------
 ' GUARD RE-ENTRANT CLEANUP
 '------------------------------------------------------------------------------
-    'Do nothing if guarded work is already running
-        If mIsBusy Then Exit Sub
+    'Skip cleanup while guarded work is already running
+        If mIsBusy Then
+            Debug.Print PROC_NAME & _
+                " | Step=SkippedBusy" & _
+                " | ClosePicker=" & VBA.CStr(ClosePicker) & _
+                " | PurgeGridIcons=" & VBA.CStr(PurgeGridIcons)
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAR UI
@@ -1584,24 +1670,25 @@ CleanFail:
             " | PurgeGridIcons=" & VBA.CStr(PurgeGridIcons) & _
             " | Error=" & VBA.CStr(Err.Number) & _
             " | " & Err.Description
+
     'Clear the suppressed cleanup error
         Err.Clear
 
 End Sub
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 '                                UI GATING
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 
 
-Private Function Should_ShowDP_ForCell(ByVal TargetCell As Excel.Range) As Boolean
+Private Function Should_ShowGridIcon_ForCell(ByVal TargetCell As Excel.Range) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           SHOULD SHOW FOR CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1638,13 +1725,13 @@ Private Function Should_ShowDP_ForCell(ByVal TargetCell As Excel.Range) As Boole
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Default to not showing the DatePicker icon
-        Should_ShowDP_ForCell = False
+        Should_ShowGridIcon_ForCell = False
     'Enable safe-default error handling
         On Error GoTo ErrorHandler
 
@@ -1667,7 +1754,7 @@ Private Function Should_ShowDP_ForCell(ByVal TargetCell As Excel.Range) As Boole
 '------------------------------------------------------------------------------
     'Show the entry point for date-like values
         If Is_CellDateValue(TargetCell) Then
-            Should_ShowDP_ForCell = True
+            Should_ShowGridIcon_ForCell = True
             Exit Function
         End If
 
@@ -1676,7 +1763,7 @@ Private Function Should_ShowDP_ForCell(ByVal TargetCell As Excel.Range) As Boole
 '------------------------------------------------------------------------------
     'Show the entry point for date/time-like formats
         If Is_CellDateFormatted(TargetCell) Then
-            Should_ShowDP_ForCell = True
+            Should_ShowGridIcon_ForCell = True
             Exit Function
         End If
 
@@ -1691,15 +1778,16 @@ Private Function Should_ShowDP_ForCell(ByVal TargetCell As Excel.Range) As Boole
 '------------------------------------------------------------------------------
 ErrorHandler:
     'Return the safe default
-        Should_ShowDP_ForCell = False
+        Should_ShowGridIcon_ForCell = False
     'Clear any suppressed predicate error
         Err.Clear
 
 End Function
+
 Private Function Is_CellDateValue(ByVal TargetCell As Excel.Range) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS CELL DATE VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1737,7 +1825,7 @@ Private Function Is_CellDateValue(ByVal TargetCell As Excel.Range) As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1825,10 +1913,11 @@ ErrorHandler:
         Err.Clear
 
 End Function
+
 Private Function Is_CellDateFormatted(ByVal TargetCell As Excel.Range) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS CELL DATE FORMATTED
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1868,7 +1957,7 @@ Private Function Is_CellDateFormatted(ByVal TargetCell As Excel.Range) As Boolea
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -1952,10 +2041,11 @@ ErrorHandler:
         Err.Clear
 
 End Function
+
 Private Function Is_DateFormatString(ByVal FormatCode As String) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS DATE FORMAT STRING
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1995,7 +2085,7 @@ Private Function Is_DateFormatString(ByVal FormatCode As String) As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2132,10 +2222,11 @@ ErrorHandler:
         Err.Clear
 
 End Function
+
 Private Function Normalize_FormatCodeForDateScan(ByVal FormatCode As String) As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                    NORMALIZE FORMAT CODE FOR DATE SCAN
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2175,7 +2266,7 @@ Private Function Normalize_FormatCodeForDateScan(ByVal FormatCode As String) As 
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2280,18 +2371,18 @@ ErrorHandler:
 End Function
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 '                              TARGET RESOLUTION
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 
 Private Function Resolve_TargetCell( _
     ByRef TargetCell As Excel.Range, _
     Optional ByVal vTarget As Variant) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           RESOLVE TARGET CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2333,7 +2424,7 @@ Private Function Resolve_TargetCell( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2370,7 +2461,6 @@ Private Function Resolve_TargetCell( _
     'Treat Empty as no explicit target supplied
         ElseIf VBA.IsEmpty(vTarget) Then
             If Not Try_GetActiveCell(TargetCell) Then Exit Function
-
     'Treat Null as no explicit target supplied
         ElseIf VBA.IsNull(vTarget) Then
             If Not Try_GetActiveCell(TargetCell) Then Exit Function
@@ -2415,7 +2505,7 @@ End Function
 Private Function Try_GetActiveCell(ByRef TargetCell As Excel.Range) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           TRY GET ACTIVE CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2452,7 +2542,7 @@ Private Function Try_GetActiveCell(ByRef TargetCell As Excel.Range) As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2508,7 +2598,7 @@ End Function
 Private Function Normalize_TargetCell(ByRef TargetCell As Excel.Range) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           NORMALIZE TARGET CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2558,7 +2648,7 @@ Private Function Normalize_TargetCell(ByRef TargetCell As Excel.Range) As Boolea
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2668,17 +2758,19 @@ ErrorHandler:
         Err.Clear
 
 End Function
+
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 '                           USERFORM STATE HELPERS
 '
-'==============================================================================
+'------------------------------------------------------------------------------
+'
 
 Private Function Is_UserFormLoaded(ByVal FormName As String) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS USERFORM LOADED
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2690,13 +2782,15 @@ Private Function Is_UserFormLoaded(ByVal FormName As String) As Boolean
 '
 ' INPUTS
 '   FormName
-'     Name of the UserForm to find
+'     UserForm class name or runtime Name property to find
 '
 ' RETURNS
-'   True if the form is loaded; otherwise False
+'   True if a matching form is loaded; otherwise False
 '
 ' BEHAVIOR
-'   Scans VBA.UserForms and compares names case-insensitively
+'   Scans VBA.UserForms and compares both:
+'     - TypeName(CurForm)
+'     - CurForm.Name
 '
 ' ERROR POLICY
 '   Safe default. Returns False on error
@@ -2710,15 +2804,21 @@ Private Function Is_UserFormLoaded(ByVal FormName As String) As Boolean
 '   This routine deliberately avoids references such as UF_DatePicker.Visible,
 '   because referencing a default form instance may load it
 '
+'   TypeName is preferred because the runtime Name property can be changed
+'
 ' UPDATED
-'   2026-05-03
-'==============================================================================
+'   2026-05-04
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "cDatePickerManager.Is_UserFormLoaded"
+
     Dim CurForm                 As Object        'Loaded UserForm instance
     Dim NormalizedFormName      As String        'Trimmed form name to find
+    Dim CurTypeName             As String        'Current form class name
+    Dim CurRuntimeName          As String        'Current form runtime name
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2740,14 +2840,28 @@ Private Function Is_UserFormLoaded(ByVal FormName As String) As Boolean
     'Exit for blank form names
         If VBA.Len(NormalizedFormName) = 0 Then Exit Function
 
-
 '------------------------------------------------------------------------------
 ' SCAN LOADED FORMS
 '------------------------------------------------------------------------------
     'Loop through currently loaded UserForms
         For Each CurForm In VBA.UserForms
-            'Return True when the requested form is found
-                If VBA.StrComp(VBA.CStr(CurForm.Name), NormalizedFormName, vbTextCompare) = 0 Then
+            'Reset current form metadata
+                CurTypeName = vbNullString
+            'Reset current runtime name
+                CurRuntimeName = vbNullString
+            'Suppress metadata-read errors for unusual transient form states
+                On Error Resume Next
+            'Capture the form class name
+                CurTypeName = VBA.TypeName(CurForm)
+            'Capture the form runtime name
+                CurRuntimeName = VBA.CStr(CurForm.Name)
+            'Clear any suppressed metadata error
+                Err.Clear
+            'Restore safe-default error handling
+                On Error GoTo ErrorHandler
+            'Return True when either the class name or runtime name matches
+                If VBA.StrComp(CurTypeName, NormalizedFormName, vbTextCompare) = 0 Or _
+                   VBA.StrComp(CurRuntimeName, NormalizedFormName, vbTextCompare) = 0 Then
                     Is_UserFormLoaded = True
                     Exit Function
                 End If
@@ -2756,6 +2870,8 @@ Private Function Is_UserFormLoaded(ByVal FormName As String) As Boolean
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+    'Release local object reference
+        Set CurForm = Nothing
     'Exit before the error handler
         Exit Function
 
@@ -2775,7 +2891,7 @@ End Function
 Private Function Is_UserFormVisible(ByVal FormName As String) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           IS USERFORM VISIBLE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2787,13 +2903,17 @@ Private Function Is_UserFormVisible(ByVal FormName As String) As Boolean
 '
 ' INPUTS
 '   FormName
-'     Name of the UserForm to find
+'     UserForm class name or runtime Name property to find
 '
 ' RETURNS
-'   True if the form is loaded and visible; otherwise False
+'   True if any matching loaded form is visible; otherwise False
 '
 ' BEHAVIOR
-'   Scans VBA.UserForms and reads Visible on the matching loaded form
+'   Scans VBA.UserForms and compares both:
+'     - TypeName(CurForm)
+'     - CurForm.Name
+'
+'   Returns True if at least one matching loaded instance is visible
 '
 ' ERROR POLICY
 '   Safe default. Returns False on error
@@ -2807,15 +2927,24 @@ Private Function Is_UserFormVisible(ByVal FormName As String) As Boolean
 '   This routine deliberately avoids references such as UF_DatePicker.Visible,
 '   because referencing a default form instance may load it
 '
+'   If multiple matching instances are loaded, this routine returns True when
+'   any matching instance is visible
+'
 ' UPDATED
-'   2026-05-03
-'==============================================================================
+'   2026-05-04
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "cDatePickerManager.Is_UserFormVisible"
+
     Dim CurForm                 As Object        'Loaded UserForm instance
     Dim NormalizedFormName      As String        'Trimmed form name to find
+    Dim CurTypeName             As String        'Current form class name
+    Dim CurRuntimeName          As String        'Current form runtime name
+    Dim CurIsVisible            As Boolean       'Current form visibility state
+    Dim IsMatchingForm          As Boolean       'True when current form matches requested form
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2837,21 +2966,49 @@ Private Function Is_UserFormVisible(ByVal FormName As String) As Boolean
     'Exit for blank form names
         If VBA.Len(NormalizedFormName) = 0 Then Exit Function
 
- '------------------------------------------------------------------------------
+'------------------------------------------------------------------------------
 ' SCAN LOADED FORMS
 '------------------------------------------------------------------------------
     'Loop through currently loaded UserForms
         For Each CurForm In VBA.UserForms
-            'Return actual visibility when the requested form is found
-                If VBA.StrComp(VBA.CStr(CurForm.Name), NormalizedFormName, vbTextCompare) = 0 Then
-                    Is_UserFormVisible = VBA.CBool(CurForm.Visible)
-                    Exit Function
+            'Reset current form metadata
+                CurTypeName = vbNullString
+            'Reset current runtime name
+                CurRuntimeName = vbNullString
+            'Reset current visibility state
+                CurIsVisible = False
+            'Reset current match flag
+                IsMatchingForm = False
+            'Suppress metadata-read errors for unusual transient form states
+                On Error Resume Next
+            'Capture the form class name
+                CurTypeName = VBA.TypeName(CurForm)
+            'Capture the form runtime name
+                CurRuntimeName = VBA.CStr(CurForm.Name)
+            'Capture the form visibility state
+                CurIsVisible = VBA.CBool(CurForm.Visible)
+            'Clear any suppressed metadata error
+                Err.Clear
+            'Restore safe-default error handling
+                On Error GoTo ErrorHandler
+            'Test whether either the class name or runtime name matches
+                IsMatchingForm = _
+                    (VBA.StrComp(CurTypeName, NormalizedFormName, vbTextCompare) = 0) Or _
+                    (VBA.StrComp(CurRuntimeName, NormalizedFormName, vbTextCompare) = 0)
+            'Return True as soon as a visible matching instance is found
+                If IsMatchingForm Then
+                    If CurIsVisible Then
+                        Is_UserFormVisible = True
+                        Exit Function
+                    End If
                 End If
         Next CurForm
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+    'Release local object reference
+        Set CurForm = Nothing
     'Exit before the error handler
         Exit Function
 
@@ -2869,16 +3026,16 @@ ErrorHandler:
 End Function
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 '                                BUSY GUARD
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 
 Private Function Try_BeginBusy() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           TRY BEGIN BUSY
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2911,7 +3068,7 @@ Private Function Try_BeginBusy() As Boolean
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2934,10 +3091,11 @@ Private Function Try_BeginBusy() As Boolean
         Try_BeginBusy = True
 
 End Function
+
 Private Sub Release_Busy()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           RELEASE BUSY
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2970,7 +3128,7 @@ Private Sub Release_Busy()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' LEAVE BUSY STATE
@@ -2981,18 +3139,18 @@ Private Sub Release_Busy()
 End Sub
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '
 '                               APPLICATION EVENTS
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 
 Private Sub mExcelApp_SheetSelectionChange( _
     ByVal Sh As Object, _
     ByVal Target As Excel.Range)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP SHEET SELECTION CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3031,7 +3189,7 @@ Private Sub mExcelApp_SheetSelectionChange( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3099,7 +3257,7 @@ Private Sub mExcelApp_SheetChange( _
     ByVal Target As Excel.Range)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP SHEET CHANGE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3139,7 +3297,7 @@ Private Sub mExcelApp_SheetChange( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3201,10 +3359,11 @@ ErrorHandler:
         Err.Clear
 
 End Sub
+
 Private Sub mExcelApp_NewWorkbook(ByVal Wb As Excel.Workbook)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP NEW WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3238,7 +3397,7 @@ Private Sub mExcelApp_NewWorkbook(ByVal Wb As Excel.Workbook)
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3296,12 +3455,13 @@ ErrorHandler:
         Err.Clear
 
 End Sub
+
 Private Sub mExcelApp_WorkbookBeforePrint( _
     ByVal Wb As Excel.Workbook, _
     Cancel As Boolean)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WORKBOOK BEFORE PRINT
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3342,7 +3502,7 @@ Private Sub mExcelApp_WorkbookBeforePrint( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3405,13 +3565,14 @@ ErrorHandler:
         Err.Clear
 
 End Sub
+
 Private Sub mExcelApp_WorkbookBeforeSave( _
     ByVal Wb As Excel.Workbook, _
     ByVal SaveAsUI As Boolean, _
     Cancel As Boolean)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WORKBOOK BEFORE SAVE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3459,7 +3620,7 @@ Private Sub mExcelApp_WorkbookBeforeSave( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3525,12 +3686,13 @@ ErrorHandler:
         Err.Clear
 
 End Sub
+
 Private Sub mExcelApp_WorkbookBeforeClose( _
     ByVal Wb As Excel.Workbook, _
     Cancel As Boolean)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WORKBOOK BEFORE CLOSE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3574,7 +3736,7 @@ Private Sub mExcelApp_WorkbookBeforeClose( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3642,12 +3804,13 @@ ErrorHandler:
         Err.Clear
 
 End Sub
+
 Private Sub mExcelApp_WindowResize( _
     ByVal Wb As Excel.Workbook, _
     ByVal Wn As Excel.Window)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WINDOW RESIZE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3690,7 +3853,7 @@ Private Sub mExcelApp_WindowResize( _
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3752,12 +3915,125 @@ ErrorHandler:
         Err.Clear
 
 End Sub
+'
+
+
+Private Sub mExcelApp_WindowActivate( _
+    ByVal Wb As Excel.Workbook, _
+    ByVal Wn As Excel.Window)
+
+'
+'------------------------------------------------------------------------------
+'                           APP WINDOW ACTIVATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Refreshes DatePicker UI when an Excel window is activated
+'
+' WHY THIS EXISTS
+'   Window deactivation may remove transient grid artifacts without closing the
+'   modeless picker. When the Excel window becomes active again, the manager
+'   should re-evaluate the current active Excel context, resolve it into a
+'   TargetCell when possible, and restore the in-grid icon when appropriate
+'
+' INPUTS
+'   Wb
+'     Workbook owning the activated window
+'
+'   Wn
+'     Activated Excel window
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to Handle_WorkbookContextChange, which resolves the current active
+'   context into an authoritative TargetCell when possible
+'
+' ERROR POLICY
+'   Best-effort. Does not raise into Excel event flow
+'
+' DEPENDENCIES
+'   Handle_WorkbookContextChange
+'
+' NOTES
+'   This handler complements mExcelApp_WindowDeactivate
+'
+'   The workbook and window arguments are used only for diagnostic context
+'
+'   This event only fires when Application.EnableEvents is True and the manager
+'   instance already exists
+'
+' UPDATED
+'   2026-05-04
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "cDatePickerManager.mExcelApp_WindowActivate"
+
+    Dim WorkbookName            As String        'Diagnostic workbook name
+    Dim WindowCaption           As String        'Diagnostic window caption
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Protect Excel from event-handler failures
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' SNAPSHOT DIAGNOSTIC CONTEXT
+'------------------------------------------------------------------------------
+    'Suppress diagnostic snapshot failures
+        On Error Resume Next
+    'Capture the workbook name when available
+        If Not Wb Is Nothing Then WorkbookName = VBA.CStr(Wb.Name)
+    'Capture the window caption when available
+        If Not Wn Is Nothing Then WindowCaption = VBA.CStr(Wn.Caption)
+    'Clear any suppressed diagnostic error
+        Err.Clear
+    'Restore event-handler error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REFRESH ACTIVE CONTEXT
+'------------------------------------------------------------------------------
+    'Re-evaluate DatePicker UI under the newly activated window context
+        Handle_WorkbookContextChange
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Write event diagnostics without interrupting Excel event flow
+        Debug.Print PROC_NAME & _
+            " | Workbook=" & WorkbookName & _
+            " | Window=" & WindowCaption & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Clear the suppressed event error
+        Err.Clear
+
+End Sub
+
 Private Sub mExcelApp_WindowDeactivate( _
     ByVal Wb As Excel.Workbook, _
     ByVal Wn As Excel.Window)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WINDOW DEACTIVATE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3795,14 +4071,14 @@ Private Sub mExcelApp_WindowDeactivate( _
 '   that path may close the picker depending on the close-after-selection policy
 '
 '   If immediate icon restoration is required when the Excel window is activated
-'   again, use the matching activation/context-change handler to refresh the
-'   current active-cell context
+'   again, use the matching activation/context-change handler to resolve the
+'   current active context into a TargetCell when possible
 '
 '   This event only fires when Application.EnableEvents is True
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3868,7 +4144,7 @@ End Sub
 Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP SHEET ACTIVATE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -3897,14 +4173,14 @@ Private Sub mExcelApp_SheetActivate(ByVal Sh As Object)
 ' NOTES
 '   The sheet argument is used only for diagnostic context
 '
-'   The actual refresh remains active-context driven, consistently with the
-'   existing manager behavior
+'   The refresh uses the current active Excel context only as an input source.
+'   Refresh_CurrentUI then normalizes that context into a resolved TargetCell
 '
 '   This event only fires when Application.EnableEvents is True
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -3974,7 +4250,7 @@ End Sub
 Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Excel.Workbook)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WORKBOOK ACTIVATE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -4003,14 +4279,14 @@ Private Sub mExcelApp_WorkbookActivate(ByVal Wb As Excel.Workbook)
 ' NOTES
 '   The workbook argument is used only for diagnostic context
 '
-'   The actual refresh remains active-context driven, consistently with the
-'   existing manager behavior
+'   The refresh uses the current active Excel context only as an input source.
+'   Refresh_CurrentUI then normalizes that context into a resolved TargetCell
 '
 '   This event only fires when Application.EnableEvents is True
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -4077,7 +4353,7 @@ End Sub
 Private Sub mExcelApp_WorkbookDeactivate(ByVal Wb As Excel.Workbook)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APP WORKBOOK DEACTIVATE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -4113,7 +4389,7 @@ Private Sub mExcelApp_WorkbookDeactivate(ByVal Wb As Excel.Workbook)
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
