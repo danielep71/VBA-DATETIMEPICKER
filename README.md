@@ -19,6 +19,15 @@
 
 ---
 
+## ⭐ Why this repo exists
+
+Excel still powers an enormous number of business-critical workflows, but native date-entry UX is often poor.
+
+This repository exists to provide a **clean, modern, and reusable VBA-based solution** for a very common problem:  
+**making date input in Excel feel much better without sacrificing control, portability, or maintainability**.
+
+---
+
 ## ✨ Overview
 
 **VBA-DATETIMEPICKER** is a modern, modular, and worksheet-friendly **Date / DateTime Picker for Excel VBA**.
@@ -332,12 +341,4 @@ This project is released under the **MIT License**.
 
 ---
 
-## ⭐ Why this repo exists
-
-Excel still powers an enormous number of business-critical workflows, but native date-entry UX is often poor.
-
-This repository exists to provide a **clean, modern, and reusable VBA-based solution** for a very common problem:  
-**making date input in Excel feel much better without sacrificing control, portability, or maintainability**.
-
----
 
