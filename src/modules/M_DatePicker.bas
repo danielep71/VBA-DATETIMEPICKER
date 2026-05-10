@@ -178,6 +178,21 @@ Option Explicit
         #End If
     #End If
 
+    #If Mac Then
+    #Else
+        #If VBA7 Then
+            Private Declare PtrSafe Function GetLastError Lib "kernel32" () As Long
+    
+            Private Declare PtrSafe Sub SetLastError Lib "kernel32" ( _
+                ByVal dwErrCode As Long)
+        #Else
+            Private Declare Function GetLastError Lib "kernel32" () As Long
+    
+            Private Declare Sub SetLastError Lib "kernel32" ( _
+                ByVal dwErrCode As Long)
+        #End If
+    #End If
+
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
@@ -695,6 +710,7 @@ ErrorHandler:
             "DatePicker settings load failed: " & Err.Description
 
 End Sub
+
 Public Sub M_Settings_Save()
 
 '
@@ -1429,7 +1445,7 @@ ErrorHandler:
 
 End Sub
 
-Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
+Public Sub M_Settings_SetUseLocalNames(ByVal UseLocalDayNames As Boolean)
 
 '
 '------------------------------------------------------------------------------
@@ -1481,7 +1497,7 @@ Public Sub M_Settings_SetUseLocalDayNames(ByVal UseLocalDayNames As Boolean)
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "M_Settings_SetUseLocalDayNames"
+    Const PROC_NAME         As String = "M_Settings_SetUseLocalNames"
 
     Dim OldUseLocalNames    As Boolean          'Previous local-name setting
     Dim SettingsMutated     As Boolean          'True after in-memory setting is changed
@@ -1561,11 +1577,394 @@ ErrorHandler:
 
 End Sub
 
-Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Boolean)
+Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As Boolean)
 
 '
 '------------------------------------------------------------------------------
-'                           SET ALLOW OUTSIDE MONTH DAYS
+'                       SET ENABLE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets and saves whether the DatePicker keyboard shortcut is enabled
+'
+' WHY THIS EXISTS
+'   The keyboard shortcut is the safe fallback entry point when optional visual
+'   integrations such as the in-grid icon and right-click menu are disabled
+'
+'   Caller code, demo sheets, settings panels, and host workbooks need one
+'   controlled public entry point to update keyboard shortcut integration without
+'   mutating public DatePicker state inconsistently
+'
+' INPUTS
+'   EnableKeyboardShortcut
+'     True to enable keyboard shortcut integration
+'     False to disable keyboard shortcut integration
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures current settings are loaded
+'   Applies the requested keyboard shortcut setting
+'   Forces keyboard shortcut access on when both right-click menu access and
+'   in-grid icon access are disabled
+'   Persists the updated settings when needed
+'   Synchronizes Application.OnKey with the final setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded, settings
+'   cannot be saved, or keyboard shortcut integration cannot be synchronized
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory setting is restored before the error is re-raised
+'
+'   If synchronization fails after persistence succeeds, the saved setting is not
+'   rolled back because the user preference has already been committed
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_Settings_Save
+'   M_KeyboardShortcut_Update
+'   gDP_EnableKeyboardShortcut
+'   gDP_ShowRightClick
+'   gDP_ShowGridIcon
+'
+' NOTES
+'   Disabling right-click menu access, in-grid icon access, and keyboard shortcut
+'   access at the same time would leave the user without a practical manual
+'   DatePicker entry point
+'
+'   For this reason, a request to disable the keyboard shortcut is normalized
+'   back to True when both other manual access paths are disabled
+'
+'   The keyboard shortcut is synchronized even when the setting is unchanged
+'   because Application.OnKey is session state and may have been reset by Excel,
+'   another add-in, workbook activation, or teardown logic
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Settings_SetEnableKeyboardShortcut"
+
+    Dim OldEnableKeyboard       As Boolean      'Previous keyboard shortcut setting
+    Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
+    Dim SettingsChanged         As Boolean      'True when the resolved setting differs
+    Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
+    Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
+    'Ensure existing settings are loaded before changing one value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current setting"
+    'Capture the current keyboard shortcut setting
+        OldEnableKeyboard = gDP_EnableKeyboardShortcut
+    'Initialize the resolved keyboard shortcut setting from the requested value
+        NewEnableKeyboard = EnableKeyboardShortcut
+
+'------------------------------------------------------------------------------
+' PROTECT MANUAL ACCESS PATH
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve access fallback"
+    'Keep keyboard access enabled when both visual entry points are disabled
+        If Not NewEnableKeyboard Then
+            If Not gDP_ShowRightClick Then
+                If Not gDP_ShowGridIcon Then
+                    NewEnableKeyboard = True
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE CHANGE FLAG
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve change flag"
+    'Resolve whether the final keyboard shortcut setting changed
+        SettingsChanged = (NewEnableKeyboard <> OldEnableKeyboard)
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE ONLY WHEN SETTING IS UNCHANGED
+'------------------------------------------------------------------------------
+    'Synchronize Application.OnKey and exit when no persisted setting changed
+        If Not SettingsChanged Then
+            'Track the current handler step
+                HandlerStep = "Synchronize keyboard shortcut"
+            'Synchronize keyboard shortcut integration with the current setting
+                M_KeyboardShortcut_Update
+            'Exit because no registry write is required
+                Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory setting"
+    'Store the resolved keyboard shortcut setting
+        gDP_EnableKeyboardShortcut = NewEnableKeyboard
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist setting"
+    'Persist the updated settings
+        M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Synchronize keyboard shortcut"
+    'Synchronize keyboard shortcut integration with the saved setting
+        M_KeyboardShortcut_Update
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting when persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous keyboard shortcut setting
+                gDP_EnableKeyboardShortcut = OldEnableKeyboard
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Keyboard shortcut setting update failed: " & ErrorDescription
+
+End Sub
+
+Public Sub M_Settings_SetUseWinAPI(ByVal UseWinAPI As Boolean)
+
+'
+'------------------------------------------------------------------------------
+'                           SET USE WINAPI
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets and saves whether optional WinAPI-dependent native behavior is enabled
+'
+' WHY THIS EXISTS
+'   Some DatePicker features, such as borderless styling, native window-handle
+'   operations, and mouse-based positioning, require Windows API calls
+'
+'   Caller code, demo sheets, settings panels, and host workbooks need one
+'   controlled public entry point to update the WinAPI policy without mutating
+'   public DatePicker state inconsistently
+'
+' INPUTS
+'   UseWinAPI
+'     True to enable optional WinAPI-dependent native behavior when the platform
+'     supports it
+'
+'     False to disable optional WinAPI-dependent native behavior
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures current settings are loaded
+'   Resolves current platform WinAPI capability
+'   Normalizes the requested setting to False when WinAPI is not supported on the
+'   current platform
+'   Exits when the normalized setting is already active
+'   Updates the in-memory WinAPI setting
+'   Persists the updated settings
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded or saved
+'
+'   If persistence fails after the in-memory setting was changed, the previous
+'   in-memory setting is restored before the error is re-raised
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_Settings_Save
+'   M_Platform_CanUseWinAPI
+'   gDP_UseWinAPI
+'
+' NOTES
+'   This setter controls the user / project preference only
+'
+'   The effective runtime policy remains M_Platform_ShouldUseWinAPI, which
+'   combines platform capability and gDP_UseWinAPI
+'
+'   A request to enable WinAPI on Mac is normalized to False rather than saved as
+'   True, because the current platform cannot execute the native API calls
+'
+'   This routine does not directly restyle, reposition, unload, or rebuild an
+'   already-loaded DatePicker form
+'
+'   Visual WinAPI-dependent effects are applied by the relevant window helper
+'   routines when they are next called
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Settings_SetUseWinAPI"
+
+    Dim OldUseWinAPI            As Boolean      'Previous WinAPI setting
+    Dim NewUseWinAPI            As Boolean      'Resolved WinAPI setting
+    Dim PlatformCanUseWinAPI    As Boolean      'True when WinAPI helpers are supported
+    Dim SettingsChanged         As Boolean      'True when the resolved setting differs
+    Dim SettingsMutated         As Boolean      'True after in-memory setting is changed
+    Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
+    Dim ErrorNumber             As Long         'Captured error number
+    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep             As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' LOAD CURRENT SETTINGS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Ensure settings loaded"
+    'Ensure existing settings are loaded before changing one value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RESOLVE PLATFORM CAPABILITY
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve platform capability"
+    'Resolve whether WinAPI helpers can be used on the current platform
+        PlatformCanUseWinAPI = M_Platform_CanUseWinAPI
+
+'------------------------------------------------------------------------------
+' CAPTURE CURRENT SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Capture current setting"
+    'Capture the current WinAPI setting
+        OldUseWinAPI = gDP_UseWinAPI
+
+'------------------------------------------------------------------------------
+' NORMALIZE REQUESTED SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Normalize requested setting"
+    'Initialize the resolved WinAPI setting from the requested value
+        NewUseWinAPI = UseWinAPI
+    'Force WinAPI off when the current platform does not support it
+        If Not PlatformCanUseWinAPI Then NewUseWinAPI = False
+
+'------------------------------------------------------------------------------
+' EXIT IF UNCHANGED
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve change flag"
+    'Resolve whether the final WinAPI setting changed
+        SettingsChanged = (NewUseWinAPI <> OldUseWinAPI)
+    'Exit when no setting change is required
+        If Not SettingsChanged Then Exit Sub
+
+'------------------------------------------------------------------------------
+' UPDATE IN-MEMORY SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Update in-memory setting"
+    'Store the resolved WinAPI setting
+        gDP_UseWinAPI = NewUseWinAPI
+    'Mark settings as mutated
+        SettingsMutated = True
+
+'------------------------------------------------------------------------------
+' PERSIST SETTING
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Persist setting"
+    'Persist the updated settings
+        M_Settings_Save
+    'Mark settings as persisted
+        SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Restore the previous in-memory setting when persistence failed after mutation
+        If SettingsMutated And Not SettingsPersisted Then
+            'Suppress rollback errors
+                On Error Resume Next
+            'Restore the previous WinAPI setting
+                gDP_UseWinAPI = OldUseWinAPI
+            'Restore normal error handling
+                On Error GoTo 0
+        End If
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "WinAPI setting update failed: " & ErrorDescription
+
+End Sub
+Public Sub M_Settings_SetAllowOutsideMonthSelection(ByVal AllowOutsideMonthSelection As Boolean)
+
+'
+'------------------------------------------------------------------------------
+'                       SET ALLOW OUTSIDE MONTH SELECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Sets and saves whether outside-month days can be selected
@@ -1575,7 +1974,7 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 '   calendar cells, while others restrict users to the displayed month
 '
 ' INPUTS
-'   AllowOutsideMonthDays
+'   AllowOutsideMonthSelection
 '     True to allow outside-month day selection
 '     False to disable outside-month day selection
 '
@@ -1612,7 +2011,7 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "M_Settings_SetAllowOutsideMonthDays"
+    Const PROC_NAME         As String = "M_Settings_SetAllowOutsideMonthSelection"
 
     Dim OldAllowOutside     As Boolean      'Previous outside-month setting
     Dim SettingsMutated     As Boolean      'True after in-memory setting is changed
@@ -1636,7 +2035,7 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 ' EXIT IF UNCHANGED
 '------------------------------------------------------------------------------
     'Exit when the requested setting is already active
-        If gDP_AllowOutsideMonthSelection = AllowOutsideMonthDays Then Exit Sub
+        If gDP_AllowOutsideMonthSelection = AllowOutsideMonthSelection Then Exit Sub
 
 '------------------------------------------------------------------------------
 ' CAPTURE CURRENT SETTING
@@ -1648,7 +2047,7 @@ Public Sub M_Settings_SetAllowOutsideMonthDays(ByVal AllowOutsideMonthDays As Bo
 ' UPDATE IN-MEMORY SETTING
 '------------------------------------------------------------------------------
     'Store the requested outside-month setting
-        gDP_AllowOutsideMonthSelection = AllowOutsideMonthDays
+        gDP_AllowOutsideMonthSelection = AllowOutsideMonthSelection
     'Mark settings as mutated
         SettingsMutated = True
 
@@ -1688,14 +2087,14 @@ ErrorHandler:
         End If
     'Raise a descriptive error to the caller
         Err.Raise ErrorNumber, PROC_NAME, _
-            "Allow-outside-month-days setting update failed: " & ErrorDescription
+            "Allow-outside-month-selection setting update failed: " & ErrorDescription
 
 End Sub
 
 Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           SET HIGHLIGHT WEEKENDS
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -1759,7 +2158,7 @@ Public Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2137,7 +2536,7 @@ End Sub
 Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           SET SIZE MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -2202,7 +2601,7 @@ Public Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -2844,7 +3243,7 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         If Not GridIconChanged Then
             If Not KeyboardChanged Then
                 'Remove any stale in-grid icon when the feature is disabled
-                    If Not ShowGridIcon Then M_GridIcon_Remove
+                    If Not ShowGridIcon Then M_GridIcon_Hide
                 'Exit because no registry write is required
                     Exit Sub
             End If
@@ -2890,7 +3289,7 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         HandlerStep = "Remove stale grid icon"
 
     'Remove any stale in-grid icon when the feature is disabled
-        If Not gDP_ShowGridIcon Then M_GridIcon_Remove
+        If Not gDP_ShowGridIcon Then M_GridIcon_Hide
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -3017,11 +3416,11 @@ ErrorHandler:
 
 End Function
 
-Public Function M_Settings_GetUseLocalDayNames() As Boolean
+Public Function M_Settings_GetUseLocalNames() As Boolean
 
 '
 '------------------------------------------------------------------------------
-'                           GET USE LOCAL DAY NAMES
+'                           GET USE LOCAL NAMES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns whether the DatePicker uses local day and month captions
@@ -3062,7 +3461,7 @@ Public Function M_Settings_GetUseLocalDayNames() As Boolean
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_GetUseLocalDayNames"
+    Const PROC_NAME            As String = "M_Settings_GetUseLocalNames"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3080,7 +3479,7 @@ Public Function M_Settings_GetUseLocalDayNames() As Boolean
 ' RETURN SETTING
 '------------------------------------------------------------------------------
     'Return the current local-name setting
-        M_Settings_GetUseLocalDayNames = gDP_UseLocalNames
+        M_Settings_GetUseLocalNames = gDP_UseLocalNames
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -3095,6 +3494,88 @@ ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, _
             "Use-local-day-names setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetAllowOutsideMonthSelection() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   GET ALLOW OUTSIDE MONTH SELECTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether outside-month days can be selected in the DatePicker
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when outside-month day selection is enabled
+'
+'   False when outside-month day selection is disabled
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current outside-month selection
+'   setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_AllowOutsideMonthSelection
+'
+' NOTES
+'   This routine does not read the registry directly
+'
+'   Registry loading, migration, normalization, and defaulting are handled by
+'   M_Settings_Load through M_Settings_EnsureLoaded
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_GetAllowOutsideMonthSelection"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current outside-month selection setting
+        M_Settings_GetAllowOutsideMonthSelection = gDP_AllowOutsideMonthSelection
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Outside-month selection setting retrieval failed: " & Err.Description
 
 End Function
 
@@ -3191,6 +3672,746 @@ ErrorHandler:
 
 End Function
 
+
+Public Function M_Settings_GetShowRightClick() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           GET SHOW RIGHT-CLICK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether DatePicker right-click menu integration is enabled
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when right-click menu integration is enabled
+'
+'   False when right-click menu integration is disabled
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current right-click menu setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_ShowRightClick
+'
+' NOTES
+'   This routine does not read the registry directly
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_GetShowRightClick"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current right-click menu setting
+        M_Settings_GetShowRightClick = gDP_ShowRightClick
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Right-click menu setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetShowGridIcon() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           GET SHOW GRID ICON
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether DatePicker in-grid worksheet icon integration is enabled
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when in-grid icon integration is enabled
+'
+'   False when in-grid icon integration is disabled
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current in-grid icon setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_ShowGridIcon
+'
+' NOTES
+'   This routine does not create, move, or remove the worksheet icon
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_GetShowGridIcon"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current in-grid icon setting
+        M_Settings_GetShowGridIcon = gDP_ShowGridIcon
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "In-grid icon setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetEnableKeyboardShortcut() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       GET ENABLE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether the DatePicker keyboard shortcut is enabled
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when keyboard shortcut integration is enabled
+'
+'   False when keyboard shortcut integration is disabled
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current keyboard shortcut setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_EnableKeyboardShortcut
+'
+' NOTES
+'   This routine reports the setting only
+'
+'   It does not register or remove the Application.OnKey binding
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_GetEnableKeyboardShortcut"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current keyboard shortcut setting
+        M_Settings_GetEnableKeyboardShortcut = gDP_EnableKeyboardShortcut
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Keyboard shortcut setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetUseWinAPI() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           GET USE WINAPI
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether optional WinAPI-dependent native behavior is enabled by
+'   DatePicker settings
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when optional WinAPI-dependent behavior is enabled by setting
+'
+'   False when optional WinAPI-dependent behavior is disabled by setting or by
+'   platform normalization
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current WinAPI setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_UseWinAPI
+'
+' NOTES
+'   This routine returns the normalized setting state
+'
+'   Use M_Platform_ShouldUseWinAPI when the caller needs the effective runtime
+'   policy combining platform capability and setting state
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_GetUseWinAPI"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current WinAPI setting
+        M_Settings_GetUseWinAPI = gDP_UseWinAPI
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "WinAPI setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetClockMode() As DP_ClockMode
+
+'
+'------------------------------------------------------------------------------
+'                           GET CLOCK MODE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the current DatePicker clock-mode setting
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Current DatePicker clock mode
+'
+' BEHAVIOR
+'   Ensures settings are loaded
+'   Validates the in-memory clock-mode setting
+'   Returns the current clock-mode value
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded or if the
+'   loaded in-memory clock mode is unsupported
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_Settings_IsValidClockMode
+'   gDP_ClockMode
+'
+' NOTES
+'   This routine does not start, stop, or resynchronize the live-clock timer
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_GetClockMode"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' VALIDATE SETTING
+'------------------------------------------------------------------------------
+    'Reject unsupported clock modes
+        If Not M_Settings_IsValidClockMode(gDP_ClockMode) Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "gDP_ClockMode is unsupported"
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current clock-mode setting
+        M_Settings_GetClockMode = gDP_ClockMode
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Clock-mode setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetSizeMode() As DP_SizeMode
+
+'
+'------------------------------------------------------------------------------
+'                           GET SIZE MODE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the current DatePicker size-mode setting
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Current DatePicker size mode
+'
+' BEHAVIOR
+'   Ensures settings are loaded
+'   Validates the in-memory size-mode setting
+'   Returns the current size-mode value
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded or if the
+'   loaded in-memory size mode is unsupported
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_Settings_IsValidSizeMode
+'   gDP_SizeMode
+'
+' NOTES
+'   This routine reports the setting only
+'
+'   It does not resize, rebuild, or repaint the loaded DatePicker form
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_GetSizeMode"
+    
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' VALIDATE SETTING
+'------------------------------------------------------------------------------
+    'Reject unsupported size modes
+        If Not M_Settings_IsValidSizeMode(gDP_SizeMode) Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "gDP_SizeMode is unsupported"
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current size-mode setting
+        M_Settings_GetSizeMode = gDP_SizeMode
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Size-mode setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetHighlightWeekends() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           GET HIGHLIGHT WEEKENDS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether weekend days are visually highlighted in the DatePicker
+'   calendar grid
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when weekend highlighting is enabled
+'
+'   False when weekend highlighting is disabled
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current weekend-highlight setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_HighlightWeekends
+'
+' NOTES
+'   This routine reports the setting only
+'
+'   It does not repaint or rebuild the loaded DatePicker form
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_GetHighlightWeekends"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current weekend-highlight setting
+        M_Settings_GetHighlightWeekends = gDP_HighlightWeekends
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Weekend-highlight setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetCloseAfterSelection() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                         GET CLOSE AFTER SELECTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether the DatePicker closes after a successful write-back
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the picker closes after successful write-back
+'
+'   False when the picker remains open after successful write-back
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current close-after-selection
+'   setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_CloseAfterSelection
+'
+' NOTES
+'   This routine reports the setting only
+'
+'   The setting is consumed during the successful write-back lifecycle
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_GetCloseAfterSelection"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current close-after-selection setting
+        M_Settings_GetCloseAfterSelection = gDP_CloseAfterSelection
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Close-after-selection setting retrieval failed: " & Err.Description
+
+End Function
+
+Public Function M_Settings_GetHolidayCallback() As String
+
+'
+'------------------------------------------------------------------------------
+'                           GET HOLIDAY CALLBACK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the configured DatePicker holiday-callback name
+'
+' WHY THIS EXISTS
+'   External callers, demo sheets, settings panels, and host workbooks should
+'   read DatePicker settings through controlled accessors instead of depending
+'   directly on mutable public module state
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Current holiday-callback name
+'
+'   Blank when callback-based holiday logic is disabled
+'
+' BEHAVIOR
+'   Ensures settings are loaded and returns the current holiday-callback setting
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if settings cannot be loaded
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   gDP_HolidayCallbackName
+'
+' NOTES
+'   This routine reports the configured callback name only
+'
+'   It does not execute, validate, or inspect the callback procedure
+'
+' UPDATED
+'   2026-05-06
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_GetHolidayCallback"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are loaded before reading the current value
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' RETURN SETTING
+'------------------------------------------------------------------------------
+    'Return the current holiday-callback setting
+        M_Settings_GetHolidayCallback = VBA.Trim$(gDP_HolidayCallbackName)
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Holiday-callback setting retrieval failed: " & Err.Description
+
+End Function
+
 Public Function M_Settings_FirstDayOfWeekToText(ByVal FirstDayOfWeek As Long) As String
 
 '
@@ -3239,7 +4460,7 @@ Public Function M_Settings_FirstDayOfWeekToText(ByVal FirstDayOfWeek As Long) As
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Settings_FirstDayOfWeekToText"
+    Const PROC_NAME         As String = "M_Settings_FirstDayOfWeekToText"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -4077,7 +5298,7 @@ End Sub
 Public Sub DP_Start()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           START DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -4125,7 +5346,7 @@ Public Sub DP_Start()
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -4168,6 +5389,14 @@ Public Sub DP_Start()
     'Synchronize the DatePicker keyboard shortcut with current settings
         M_KeyboardShortcut_Update
 
+'------------------------------------------------------------------------------
+' PRE-CREATE GRID ICON
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Pre-create hidden grid icon"
+    'Pre-create the grid icon for fast selection-change reuse
+        M_GridIcon_PreCreateHidden
+        
 '------------------------------------------------------------------------------
 ' REFRESH CURRENT UI
 '------------------------------------------------------------------------------
@@ -4407,6 +5636,12 @@ Public Sub DP_Show()
         LoadedForm.Show vbModeless
 
 '------------------------------------------------------------------------------
+' APPLY CLOCK MODE
+'------------------------------------------------------------------------------
+    'Apply the configured clock mode after the form is loaded and visible
+        M_Timer_ApplyClockMode
+
+'------------------------------------------------------------------------------
 ' FINAL POSITION CORRECTION
 '------------------------------------------------------------------------------
     'Track the current step
@@ -4614,7 +5849,7 @@ End Sub
 Public Sub DP_RepairRuntime()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           REPAIR DATEPICKER RUNTIME
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -4657,7 +5892,7 @@ Public Sub DP_RepairRuntime()
 '
 ' UPDATED
 '   2026-05-03
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -4692,6 +5927,18 @@ Public Sub DP_RepairRuntime()
         Set gDP_Manager = Nothing
     'Recreate and hook the DatePicker manager
         M_Picker_EnsureManager
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE RIGHT-CLICK MENU
+'------------------------------------------------------------------------------
+    'Synchronize the DatePicker right-click menu with current settings
+        M_ContextMenu_Update
+
+'------------------------------------------------------------------------------
+' SYNCHRONIZE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+    'Synchronize the DatePicker keyboard shortcut with current settings
+        M_KeyboardShortcut_Update
 
 '------------------------------------------------------------------------------
 ' REFRESH CURRENT CONTEXT
@@ -5323,7 +6570,7 @@ Public Sub M_WriteBack_Apply( _
     Optional ByVal NoTableGrow As Boolean = False)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           APPLY WRITE-BACK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -5383,7 +6630,7 @@ Public Sub M_WriteBack_Apply( _
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -6094,7 +7341,7 @@ End Function
 Private Function M_WriteBack_GetPickedValue() As Date
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           GET PICKED WRITE VALUE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -6144,7 +7391,7 @@ Private Function M_WriteBack_GetPickedValue() As Date
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -6291,9 +7538,6 @@ Public Function M_DatePolicy_CanSelectDate( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const MIN_SUPPORTED_YEAR    As Long = 100       'Minimum supported DatePicker year
-    Const MAX_SUPPORTED_YEAR    As Long = 9999      'Maximum supported DatePicker year
-
     Dim CandidateDateOnly       As Date             'Candidate date without time
     Dim CandidateYear           As Long             'Candidate date year
     Dim CandidateMonth          As Long             'Candidate date month
@@ -6310,7 +7554,7 @@ Public Function M_DatePolicy_CanSelectDate( _
 ' VALIDATE DISPLAY PERIOD
 '------------------------------------------------------------------------------
     'Reject invalid display years
-        If DisplayYear < MIN_SUPPORTED_YEAR Or DisplayYear > MAX_SUPPORTED_YEAR Then
+        If DisplayYear < DP_MIN_YEAR Or DisplayYear > DP_MAX_YEAR Then
             Exit Function
         End If
     'Reject invalid display months
@@ -6331,7 +7575,7 @@ Public Function M_DatePolicy_CanSelectDate( _
 ' VALIDATE CANDIDATE DATE
 '------------------------------------------------------------------------------
     'Reject candidate dates outside the supported DatePicker year range
-        If CandidateYear < MIN_SUPPORTED_YEAR Or CandidateYear > MAX_SUPPORTED_YEAR Then
+        If CandidateYear < DP_MIN_YEAR Or CandidateYear > DP_MAX_YEAR Then
             Exit Function
         End If
 
@@ -6400,12 +7644,8 @@ Public Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Bo
 '   Boolean callback result
 '
 ' ERROR POLICY
-'   Fail-open policy routine
-'
-'   Does not raise outward because this routine may be used by high-frequency UI
-'   rendering and selection-policy paths
-'
-'   Unexpected callback errors are suppressed and interpreted as not holiday
+'   Fail-open from a date-selection perspective
+'   Callback failures are interpreted as not holiday
 '
 ' DEPENDENCIES
 '   Application.Run
@@ -6426,9 +7666,6 @@ Public Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Bo
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const MIN_SUPPORTED_YEAR    As Long = 100       'Minimum supported DatePicker year
-    Const MAX_SUPPORTED_YEAR    As Long = 9999      'Maximum supported DatePicker year
-
     Dim CallbackName            As String           'Configured holiday callback name
     Dim CandidateDateOnly       As Date             'Candidate date without time
     Dim CandidateYear           As Long             'Candidate date year
@@ -6462,9 +7699,9 @@ Public Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Bo
 ' VALIDATE CANDIDATE DATE
 '------------------------------------------------------------------------------
     'Reject dates before the supported DatePicker year range
-        If CandidateYear < MIN_SUPPORTED_YEAR Then Exit Function
+        If CandidateYear < DP_MIN_YEAR Then Exit Function
     'Reject dates after the supported DatePicker year range
-        If CandidateYear > MAX_SUPPORTED_YEAR Then Exit Function
+        If CandidateYear > DP_MAX_YEAR Then Exit Function
 
 '------------------------------------------------------------------------------
 ' RUN HOLIDAY CALLBACK
@@ -6804,6 +8041,7 @@ Public Function M_Caption_GetEnglishMonthShort(ByVal MonthNumber As Long) As Str
         End Select
 
 End Function
+
 Public Function M_Caption_GetEnglishMonthFull(ByVal MonthNumber As Long) As String
 
 '
@@ -6894,12 +8132,14 @@ Public Sub M_Timer_ApplyClockMode()
 '                           TIMER APPLY CLOCK MODE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Applies the current DatePicker clock mode to the loaded picker form
+'   Applies the current DatePicker clock mode to the already-loaded picker form
 '
 ' WHY THIS EXISTS
-'   Application.OnTime is one-shot. The DatePicker therefore needs one controlled
-'   routine that stops any existing clock timer, refreshes the loaded form clock
-'   once, and restarts the timer only when live-clock mode is enabled
+'   Application.OnTime is one-shot
+'
+'   The DatePicker therefore needs one controlled routine that stops any existing
+'   clock timer, refreshes the loaded form clock once, and restarts the timer
+'   only when live-clock mode is enabled and a DatePicker form is actually loaded
 '
 ' INPUTS
 '   None
@@ -6911,6 +8151,7 @@ Public Sub M_Timer_ApplyClockMode()
 '   Ensures settings are loaded
 '   Stops any existing DatePicker timer
 '   Resolves the already-loaded DatePicker form through the shared form bridge
+'   Exits without starting a new timer when no DatePicker form is loaded
 '   Refreshes the loaded DatePicker form clock when a form is available
 '   Starts the next timer tick only when gDP_ClockMode is DP_ClockMode_Live
 '
@@ -6935,8 +8176,12 @@ Public Sub M_Timer_ApplyClockMode()
 '   Loaded-form lookup is delegated to M_FormBridge_GetLoadedForm so timer,
 '   refresh, and unload routines use the same loaded-form matching policy
 '
-'   M_FormBridge_GetLoadedForm checks both TypeName and runtime Name, prefers a
-'   visible matching instance, and falls back to a hidden matching instance
+'   This routine intentionally does not start Application.OnTime when the
+'   DatePicker form is not loaded
+'
+'   If live-clock mode is enabled while the form is closed, the timer should be
+'   started later by the form open / initialize lifecycle when the picker becomes
+'   loaded
 '
 ' UPDATED
 '   2026-05-06
@@ -6945,8 +8190,8 @@ Public Sub M_Timer_ApplyClockMode()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_Timer_ApplyClockMode" 'Current procedure name
-
+    Const PROC_NAME            As String = "M_Timer_ApplyClockMode"
+    
     Dim LoadedForm             As Object       'Loaded DatePicker form instance
     Dim ErrorNumber            As Long         'Captured error number
     Dim ErrorDescription       As String       'Captured error description
@@ -6978,12 +8223,16 @@ Public Sub M_Timer_ApplyClockMode()
         Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
 
 '------------------------------------------------------------------------------
+' EXIT WHEN NO FORM IS LOADED
+'------------------------------------------------------------------------------
+    'Exit without starting a timer when the DatePicker form is not loaded
+        If LoadedForm Is Nothing Then GoTo ExitProcedure
+
+'------------------------------------------------------------------------------
 ' REFRESH LOADED FORM CLOCK
 '------------------------------------------------------------------------------
-    'Update the loaded DatePicker clock once when the picker is loaded
-        If Not LoadedForm Is Nothing Then
-            LoadedForm.UF_DP_UpdateLiveClock
-        End If
+    'Update the loaded DatePicker clock once
+        LoadedForm.UF_DP_UpdateLiveClock
 
 '------------------------------------------------------------------------------
 ' START LIVE TIMER WHEN ENABLED
@@ -6994,6 +8243,7 @@ Public Sub M_Timer_ApplyClockMode()
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+ExitProcedure:
     'Release the loaded form reference
         Set LoadedForm = Nothing
     'Exit before the error handler
@@ -7284,7 +8534,7 @@ End Sub
 Public Sub M_Timer_Tick()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           TIMER TICK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -7340,7 +8590,7 @@ Public Sub M_Timer_Tick()
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -7464,7 +8714,7 @@ End Sub
 Public Function M_Platform_CanUseWinAPI() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           PLATFORM CAN USE WINAPI
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -7500,7 +8750,7 @@ Public Function M_Platform_CanUseWinAPI() As Boolean
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 #If Mac Then
     'Return False when running on Mac
@@ -7514,7 +8764,7 @@ End Function
 Public Function M_Platform_ShouldUseWinAPI() As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           PLATFORM SHOULD USE WINAPI
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -7555,7 +8805,7 @@ Public Function M_Platform_ShouldUseWinAPI() As Boolean
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' RETURN POLICY DECISION
@@ -7568,16 +8818,18 @@ End Function
 Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           WINDOW REMOVE TITLE BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes the native title bar from a DatePicker UserForm on Windows
 '
 ' WHY THIS EXISTS
-'   The DatePicker can use a borderless visual style. Removing the native
-'   UserForm title bar requires Windows API calls and must therefore degrade
-'   safely on Mac or when WinAPI behavior is disabled by settings
+'   The DatePicker can use a borderless visual style
+'
+'   Removing the native UserForm title bar requires Windows API calls and must
+'   therefore degrade safely on Mac or when WinAPI behavior is disabled by
+'   settings
 '
 ' INPUTS
 '   Frm
@@ -7587,14 +8839,22 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '   Nothing
 '
 ' BEHAVIOR
-'   Exits safely on Mac, when no form is supplied, when WinAPI usage is disabled,
-'   or when the form window handle cannot be resolved. On Windows, removes the
-'   WS_CAPTION style bit, refreshes the non-client frame, and redraws the menu
-'   bar / frame area
+'   Exits safely on Mac
+'   Exits safely when no form is supplied
+'   Exits safely when WinAPI usage is disabled
+'   Exits safely when the form window handle cannot be resolved
+'   Reads the current native window style
+'   Removes the WS_CAPTION style bit
+'   Writes the updated native window style
+'   Refreshes the non-client frame
+'   Redraws the menu bar / frame area
+'   Logs WinAPI return-code failures to the Immediate Window
 '
 ' ERROR POLICY
-'   Best-effort UI styling. Unexpected WinAPI or form-handle errors are
-'   suppressed and written to the Immediate Window for diagnostics
+'   Best-effort UI styling
+'   Suppresses unexpected WinAPI or form-handle errors
+'   Diagnoses both VBA runtime errors and WinAPI return-code failures
+'   Does not raise outward
 '
 ' DEPENDENCIES
 '   M_Platform_ShouldUseWinAPI
@@ -7603,6 +8863,8 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '   SetWindowLongPtr / SetWindowLong
 '   SetWindowPos
 '   DrawMenuBar
+'   GetLastError
+'   SetLastError
 '   GWL_STYLE
 '   WS_CAPTION
 '   SWP_NOMOVE
@@ -7614,15 +8876,21 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 ' NOTES
 '   This routine intentionally does nothing on Mac
 '
-'   This routine assumes all WinAPI declarations are conditionally compiled
-'   elsewhere in the module
+'   SetWindowLongPtr / SetWindowLong return the previous value, not a Boolean
+'   success flag
+'
+'   Because zero can theoretically be either a previous value or a failure, the
+'   routine clears the WinAPI last-error state before the call and then inspects
+'   GetLastError when the return value is zero
+'
+'   SetWindowPos and DrawMenuBar return zero on failure
 '
 '   The routine does not raise outward because title-bar removal is visual polish,
 '   not a functional requirement for date selection
 '
 ' UPDATED
 '   2026-05-06
-'------------------------------------------------------------------------------
+'==============================================================================
 
 #If Mac Then
 
@@ -7637,49 +8905,67 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_Window_RemoveTitleBar"
+    Const PROC_NAME             As String = "M_Window_RemoveTitleBar" 'Current procedure name
 
     #If VBA7 Then
         Dim hWndForm            As LongPtr       'UserForm window handle
         Dim WindowStyle         As LongPtr       'Window style bits
+        Dim SetStyleResult      As LongPtr       'Previous window style returned by SetWindowLongPtr
     #Else
         Dim hWndForm            As Long          'UserForm window handle
         Dim WindowStyle         As Long          'Window style bits
+        Dim SetStyleResult      As Long          'Previous window style returned by SetWindowLong
     #End If
 
     Dim WindowFlags             As Long          'SetWindowPos flags
-    Dim ErrorNumber             As Long          'Captured error number
-    Dim ErrorDescription        As String        'Captured error description
+    Dim ApiResult               As Long          'Generic WinAPI Boolean-style result
+    Dim LastApiError            As Long          'WinAPI last-error code
+    Dim HandlerStep             As String        'Current handler step for diagnostics
+    Dim ErrorNumber             As Long          'Captured VBA error number
+    Dim ErrorDescription        As String        'Captured VBA error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Suppress borderless styling errors through the local cleanup path
         On Error GoTo CleanExit
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
 ' VALIDATE INPUT
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate input"
     'Exit if no form was supplied
-        If Frm Is Nothing Then Exit Sub
+        If Frm Is Nothing Then GoTo CleanExit
 
 '------------------------------------------------------------------------------
 ' CHECK WINAPI POLICY
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Check WinAPI policy"
     'Exit if WinAPI features should not be used
-        If Not M_Platform_ShouldUseWinAPI Then Exit Sub
+        If Not M_Platform_ShouldUseWinAPI Then GoTo CleanExit
+
 
 '------------------------------------------------------------------------------
 ' RESOLVE FORM HANDLE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve form handle"
     'Resolve the form window handle
         hWndForm = M_Window_GetUserFormHwnd(Frm)
     'Exit if the form window handle is unavailable
-        If hWndForm = 0 Then Exit Sub
+        If hWndForm = 0 Then GoTo CleanExit
+
 
 '------------------------------------------------------------------------------
 ' READ WINDOW STYLE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Read window style"
+
     #If VBA7 Then
         'Read current window style
             WindowStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
@@ -7687,50 +8973,104 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         'Read current window style
             WindowStyle = GetWindowLong(hWndForm, GWL_STYLE)
     #End If
+
     'Exit if the style cannot be read
-        If WindowStyle = 0 Then Exit Sub
+        If WindowStyle = 0 Then
+            LastApiError = GetLastError
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Api=GetWindowLong" & _
+                " | LastError=" & VBA.CStr(LastApiError)
+            GoTo CleanExit
+        End If
 
 '------------------------------------------------------------------------------
 ' REMOVE TITLE BAR STYLE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Remove title bar style"
     'Remove the caption style bit
         WindowStyle = (WindowStyle And Not WS_CAPTION)
 
 '------------------------------------------------------------------------------
 ' WRITE WINDOW STYLE
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Write window style"
+    'Clear the WinAPI last-error state before SetWindowLong
+        SetLastError 0
+
     #If VBA7 Then
         'Write the updated window style
-            Call SetWindowLongPtr(hWndForm, GWL_STYLE, WindowStyle)
+            SetStyleResult = SetWindowLongPtr(hWndForm, GWL_STYLE, WindowStyle)
     #Else
         'Write the updated window style
-            Call SetWindowLong(hWndForm, GWL_STYLE, WindowStyle)
+            SetStyleResult = SetWindowLong(hWndForm, GWL_STYLE, WindowStyle)
     #End If
+
+    'Diagnose SetWindowLong failure when return is zero and LastError is non-zero
+        If SetStyleResult = 0 Then
+            LastApiError = GetLastError
+            If LastApiError <> 0 Then
+                Debug.Print PROC_NAME & _
+                    " | Step=" & HandlerStep & _
+                    " | Api=SetWindowLong" & _
+                    " | LastError=" & VBA.CStr(LastApiError)
+                GoTo CleanExit
+            End If
+        End If
 
 '------------------------------------------------------------------------------
 ' REFRESH NON-CLIENT FRAME
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh non-client frame"
     'Build non-client refresh flags
         WindowFlags = SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or _
             SWP_NOACTIVATE Or SWP_FRAMECHANGED
-
+    'Clear the WinAPI last-error state before SetWindowPos
+        SetLastError 0
     'Force Windows to recalculate the frame
-        Call SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+        ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+    'Diagnose SetWindowPos return-code failure
+        If ApiResult = 0 Then
+            LastApiError = GetLastError
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Api=SetWindowPos" & _
+                " | LastError=" & VBA.CStr(LastApiError)
+        End If
 
+'------------------------------------------------------------------------------
+' REDRAW FRAME
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Redraw frame"
+    'Clear the WinAPI last-error state before DrawMenuBar
+        SetLastError 0
     'Redraw menu bar and non-client elements
-        Call DrawMenuBar(hWndForm)
+        ApiResult = DrawMenuBar(hWndForm)
+    'Diagnose DrawMenuBar return-code failure
+        If ApiResult = 0 Then
+            LastApiError = GetLastError
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Api=DrawMenuBar" & _
+                " | LastError=" & VBA.CStr(LastApiError)
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
 CleanExit:
-    'Capture any suppressed error number
+    'Capture any suppressed VBA error number
         ErrorNumber = Err.Number
-    'Capture any suppressed error description
+    'Capture any suppressed VBA error description
         ErrorDescription = Err.Description
-    'Write diagnostics only when borderless styling failed
+    'Write diagnostics only when VBA raised during borderless styling
         If ErrorNumber <> 0 Then
             Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
                 " | Error=" & VBA.CStr(ErrorNumber) & _
                 " | " & ErrorDescription
         End If
@@ -7783,6 +9123,7 @@ Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As Long
 '   FindWindow
 '   ThunderDFrame UserForm window class
 '   ThunderXFrame UserForm window class
+'   M_Platform_ShouldUseWinAPI
 '
 ' NOTES
 '   This routine deliberately avoids raising outward because native handle lookup
@@ -7836,6 +9177,7 @@ Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As Long
 ' CHECK WINAPI POLICY
 '------------------------------------------------------------------------------
     'Exit when optional WinAPI-dependent behavior is disabled
+        If Not M_Platform_ShouldUseWinAPI Then Exit Function
 
 '------------------------------------------------------------------------------
 ' READ FORM CAPTION
@@ -8004,9 +9346,14 @@ Public Sub M_Window_MoveFormToMouse( _
     Dim WorkHeightPx            As Long          'Monitor work-area height in pixels
     Dim TargetX                 As Long          'Target X position in pixels
     Dim TargetY                 As Long          'Target Y position in pixels
+    
     Dim MoveFlags               As Long          'SetWindowPos movement flags
+    
     Dim ErrorNumber             As Long          'Captured error number
     Dim ErrorDescription        As String        'Captured error description
+    
+    Dim ApiResult               As Long          'Generic WinAPI Boolean-style result
+    Dim LastApiError            As Long          'WinAPI last-error code
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -8140,8 +9487,18 @@ Public Sub M_Window_MoveFormToMouse( _
 '------------------------------------------------------------------------------
     'Build movement flags
         MoveFlags = SWP_NOSIZE Or SWP_NOZORDER Or SWP_NOACTIVATE Or SWP_SHOWWINDOW
+    'Clear the WinAPI last-error state before moving the form
+        SetLastError 0
     'Move the form without resizing, changing z-order, or activating it
-        Call SetWindowPos(hWndForm, 0, TargetX, TargetY, 0, 0, MoveFlags)
+        ApiResult = SetWindowPos(hWndForm, 0, TargetX, TargetY, 0, 0, MoveFlags)
+    'Diagnose SetWindowPos return-code failure
+        If ApiResult = 0 Then
+            LastApiError = GetLastError
+            Debug.Print PROC_NAME & _
+                " | Step=Move form" & _
+                " | Api=SetWindowPos" & _
+                " | LastError=" & VBA.CStr(LastApiError)
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -8271,17 +9628,18 @@ ErrorHandler:
 
 End Sub
 
-Public Sub M_ContextMenu_Add()
+Private Sub M_ContextMenu_Add()
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                           ADD RIGHT-CLICK MENU
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Adds DatePicker entries to the supported Excel right-click menus
 '
 ' WHY THIS EXISTS
-'   DatePicker right-click integration targets more than one Excel context menu.
+'   DatePicker right-click integration targets more than one Excel context menu
+'
 '   Centralizing the add operation keeps the supported command-bar list
 '   consistent and avoids duplicating menu wiring logic across the project
 '
@@ -8292,13 +9650,14 @@ Public Sub M_ContextMenu_Add()
 '   Nothing
 '
 ' BEHAVIOR
-'   Adds the DatePicker right-click entry to:
-'     - the standard cell context menu
-'     - the table / list range context menu
+'   Adds the DatePicker right-click entry to the standard cell context menu
+'   Adds the DatePicker right-click entry to the table / list range context menu
+'   Delegates duplicate-control prevention to M_ContextMenu_AddToCommandBar
+'   Delegates safe command-bar lookup to M_ContextMenu_GetCommandBar
 '
 ' ERROR POLICY
-'   Allows unexpected failures from the delegated add routine to propagate
-'   naturally to the caller
+'   Raises a descriptive runtime error if right-click menu synchronization fails
+'   Preserves the original error number and description
 '
 ' DEPENDENCIES
 '   M_ContextMenu_GetCommandBar
@@ -8307,35 +9666,70 @@ Public Sub M_ContextMenu_Add()
 '
 ' NOTES
 '   Duplicate-control prevention should remain inside
-'   M_ContextMenu_AddToCommandBar because that routine owns the command-bar
-'   mutation logic and stable-tag checks
+'   M_ContextMenu_AddToCommandBar because that routine owns command-bar mutation
+'   logic and stable-tag checks
 '
 '   This routine owns only the list of supported right-click command bars
 '
 ' UPDATED
 '   2026-05-06
-'------------------------------------------------------------------------------
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const CELL_COMMAND_BAR_NAME         As String = "Cell"
-    Const LIST_RANGE_COMMAND_BAR_NAME   As String = "List Range Popup"
+    Const PROC_NAME                    As String = "M_ContextMenu_Add"  'Current procedure name
+    Const CELL_COMMAND_BAR_NAME        As String = "Cell"               'Standard cell context menu
+    Const LIST_RANGE_COMMAND_BAR_NAME  As String = "List Range Popup"   'Table / list range context menu
+
+    Dim HandlerStep                    As String                        'Current handler step for diagnostics
+    Dim ErrorNumber                    As Long                          'Captured error number
+    Dim ErrorDescription               As String                        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
 ' ADD STANDARD CELL CONTEXT MENU ENTRY
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Add standard cell context menu entry"
     'Add to the standard cell context menu
         M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar(CELL_COMMAND_BAR_NAME)
 
 '------------------------------------------------------------------------------
 ' ADD TABLE / LIST RANGE CONTEXT MENU ENTRY
 '------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Add table / list range context menu entry"
     'Add to the table / list range context menu
         M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar(LIST_RANGE_COMMAND_BAR_NAME)
 
-End Sub
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
 
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Right-click menu add failed: " & ErrorDescription
+
+End Sub
 Public Sub M_ContextMenu_Remove()
 
 '
@@ -8363,8 +9757,8 @@ Public Sub M_ContextMenu_Remove()
 '     - the table / list range context menu
 '
 ' ERROR POLICY
-'   Allows unexpected failures from the delegated remove routine to propagate
-'   naturally to the caller
+'   Delegates best-effort removal to M_ContextMenu_RemoveFromCommandBar
+'   Does not normally raise for missing, protected, or stale command-bar controls
 '
 ' DEPENDENCIES
 '   M_ContextMenu_GetCommandBar
@@ -8620,7 +10014,7 @@ End Sub
 Private Sub M_ContextMenu_RemoveFromCommandBar(ByVal TargetCommandBar As CommandBar)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           REMOVE FROM COMMAND BAR
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -8670,7 +10064,7 @@ Private Sub M_ContextMenu_RemoveFromCommandBar(ByVal TargetCommandBar As Command
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -9040,7 +10434,7 @@ ErrorHandler:
 End Sub
 
 
-Public Sub M_KeyboardShortcut_Register()
+Private Sub M_KeyboardShortcut_Register()
 
 '
 '------------------------------------------------------------------------------
@@ -9253,13 +10647,18 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '   shape whenever possible
 '
 ' WHY THIS EXISTS
-'   SelectionChange can fire very frequently. Deleting and recreating the
-'   worksheet icon on every eligible cell selection creates visible latency
-'   because Excel must rebuild and repaint the drawing-layer shape
+'   SelectionChange can fire very frequently
+'
+'   Deleting and recreating the worksheet icon on every eligible cell selection
+'   creates visible latency because Excel must rebuild and repaint the drawing-
+'   layer shape
+'
+'   This routine is the optimized high-frequency path: it moves a reusable icon
+'   when possible and creates a new icon only when needed
 '
 ' INPUTS
 '   TargetCell
-'     Optional single-cell anchor
+'     Optional anchor range
 '
 '     If omitted, Excel.Application.ActiveCell is used
 '
@@ -9267,10 +10666,18 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '   Nothing
 '
 ' BEHAVIOR
-'   Resolves the target cell, exits and removes the icon when the grid-icon
-'   feature is disabled, reuses a valid existing icon on the target worksheet,
-'   deletes a tracked icon from a previous worksheet when necessary, and creates
-'   the icon only when no reusable target-sheet shape exists
+'   Ensures settings are loaded
+'   Removes the icon and exits when the grid-icon feature is disabled
+'   Resolves the target cell from TargetCell or ActiveCell
+'   Normalizes the target to the first physical cell
+'   Normalizes merged cells to the top-left cell of the merge area
+'   Resolves the target worksheet
+'   Calculates the icon position
+'   Reuses the tracked icon when it belongs to the target worksheet
+'   Deletes the tracked icon when it belongs to another worksheet
+'   Reuses a same-named target-sheet icon when available
+'   Updates only changed icon properties where practical
+'   Creates the icon only when no reusable target-sheet shape exists
 '
 ' ERROR POLICY
 '   Best-effort UI routine
@@ -9280,20 +10687,29 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
-'   M_GridIcon_Remove
+'   M_GridIcon_Hide
 '   M_GridIcon_Create
 '   M_GetQualifiedMacroName
 '   DP_GRID_ICON_NAME
 '   gDP_ShowGridIcon
 '   gDP_GridIconShape
+'   Excel Shapes object model
 '
 ' NOTES
 '   This is the preferred high-frequency SelectionChange path
 '
 '   M_GridIcon_Create remains the cold-path creation routine
 '
-'   The manager refresh path must call this routine, not M_GridIcon_Create
+'   The manager refresh path should call this routine, not M_GridIcon_Create
 '   directly, otherwise the reuse / move optimization is bypassed
+'
+'   Target normalization is intentionally aligned with M_GridIcon_Create
+'
+'   When a multi-cell range is supplied, the first physical cell is used as the
+'   icon anchor
+'
+'   The icon is still brought to front on each move because other worksheet
+'   shapes may have changed z-order since the last selection event
 '
 ' UPDATED
 '   2026-05-06
@@ -9303,8 +10719,9 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "M_GridIcon_ShowOrMove"
-    Const ICON_SIZE             As Double = 24#
-    Const ICON_GAP              As Double = 5#
+    Const ICON_SIZE             As Double = 24#                     'Grid icon size in points
+    Const ICON_GAP              As Double = 5#                      'Gap between target cell and icon
+    Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point" 'Grid icon alternative text
 
     Dim AnchorCell              As Excel.Range       'Resolved anchor cell
     Dim TargetSheet             As Excel.Worksheet   'Worksheet receiving the icon
@@ -9312,6 +10729,7 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     Dim IconLeft                As Double            'Icon left position
     Dim IconTop                 As Double            'Icon top position
     Dim MergeState              As Variant           'Target merge-state snapshot
+    Dim CallbackMacroName       As String            'Workbook-qualified icon callback
     Dim HasReusableIcon         As Boolean           'True when an existing shape can be moved
     Dim HandlerStep             As String            'Current handler step for diagnostics
     Dim ErrorNumber             As Long              'Captured error number
@@ -9340,8 +10758,8 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Check grid-icon feature flag"
     'Remove any stale icon and exit when the feature is disabled
         If Not gDP_ShowGridIcon Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -9361,26 +10779,17 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         End If
     'Remove stale icon and exit when no anchor cell is available
         If AnchorCell Is Nothing Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
-' VALIDATE TARGET AREA
+' NORMALIZE ANCHOR CELL
 '------------------------------------------------------------------------------
     'Track the current handler step
-        HandlerStep = "Validate target area"
-    'Remove stale icon and exit for multi-area targets
-        If AnchorCell.Areas.Count <> 1 Then
-            M_GridIcon_Remove
-            Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' NORMALIZE MERGED CELL TARGETS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Normalize merged target"
+        HandlerStep = "Normalize anchor cell"
+    'Use the first physical cell defensively
+        Set AnchorCell = AnchorCell.Cells(1, 1)
     'Capture merge state safely
         MergeState = AnchorCell.MergeCells
     'Normalize merged targets to the top-left cell of the merge area
@@ -9391,17 +10800,23 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
                 End If
             End If
         End If
-    'Remove stale icon and exit when the target is still not a single cell
+    'Remove stale icon and exit when the target is not a single cell
         If AnchorCell.Cells.CountLarge <> 1 Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
+
+'------------------------------------------------------------------------------
+' RESOLVE TARGET WORKSHEET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve target worksheet"
     'Store the target worksheet
         Set TargetSheet = AnchorCell.Worksheet
     'Remove stale icon and exit when no worksheet is available
         If TargetSheet Is Nothing Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -9413,6 +10828,14 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         IconLeft = AnchorCell.Left + AnchorCell.Width + ICON_GAP
     'Vertically center the icon against the anchor cell
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
+
+'------------------------------------------------------------------------------
+' RESOLVE CALLBACK MACRO
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve callback macro"
+    'Build the workbook-qualified icon callback once
+        CallbackMacroName = M_GetQualifiedMacroName("DP_Click")
 
 '------------------------------------------------------------------------------
 ' RESOLVE TRACKED ICON
@@ -9433,26 +10856,31 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
-' HANDLE TRACKED ICON FROM ANOTHER WORKSHEET
+' VALIDATE TRACKED ICON PARENT
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Validate tracked icon parent"
     'Validate the tracked icon parent when a candidate exists
         If Not CandidateShape Is Nothing Then
-            On Error Resume Next
-            HasReusableIcon = (CandidateShape.Parent Is TargetSheet)
-            If Err.Number <> 0 Then
-                Err.Clear
-                Set CandidateShape = Nothing
-                Set gDP_GridIconShape = Nothing
-                HasReusableIcon = False
-            ElseIf Not HasReusableIcon Then
-                CandidateShape.Delete
-                Err.Clear
-                Set CandidateShape = Nothing
-                Set gDP_GridIconShape = Nothing
-            End If
-            On Error GoTo FailSafe
+            'Suppress stale parent-reference failures
+                On Error Resume Next
+            'Resolve whether the tracked icon belongs to the target worksheet
+                HasReusableIcon = (CandidateShape.Parent Is TargetSheet)
+            'Clear invalid tracked references when parent inspection fails
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    Set CandidateShape = Nothing
+                    Set gDP_GridIconShape = Nothing
+                    HasReusableIcon = False
+            'Delete a tracked icon from another worksheet
+                ElseIf Not HasReusableIcon Then
+                    CandidateShape.Delete
+                    Err.Clear
+                    Set CandidateShape = Nothing
+                    Set gDP_GridIconShape = Nothing
+                End If
+            'Restore fail-safe error handling
+                On Error GoTo FailSafe
         End If
 
 '------------------------------------------------------------------------------
@@ -9462,15 +10890,20 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Resolve same-sheet icon"
     'Try to reuse a same-named shape on the target worksheet
         If CandidateShape Is Nothing Then
-            On Error Resume Next
-            Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
-            HasReusableIcon = Not (CandidateShape Is Nothing)
-            If Err.Number <> 0 Then
-                Err.Clear
-                Set CandidateShape = Nothing
-                HasReusableIcon = False
-            End If
-            On Error GoTo FailSafe
+            'Suppress missing-shape lookup errors
+                On Error Resume Next
+            'Resolve a same-named shape from the target worksheet
+                Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+            'Resolve whether a reusable same-sheet icon was found
+                HasReusableIcon = Not (CandidateShape Is Nothing)
+            'Clear lookup failures
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    Set CandidateShape = Nothing
+                    HasReusableIcon = False
+                End If
+            'Restore fail-safe error handling
+                On Error GoTo FailSafe
         End If
 
 '------------------------------------------------------------------------------
@@ -9481,24 +10914,20 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     'Move and show the existing icon when it can be reused
         If HasReusableIcon Then
             With CandidateShape
-                .Left = IconLeft
-                .Top = IconTop
-                .Width = ICON_SIZE
-                .Height = ICON_SIZE
-                .Placement = xlMove
-                .AlternativeText = "DatePicker Grid Entry Point"
-                .OnAction = M_GetQualifiedMacroName("DP_Click")
-                .Visible = msoTrue
+                If .Left <> IconLeft Then .Left = IconLeft
+                If .Top <> IconTop Then .Top = IconTop
+                If .Width <> ICON_SIZE Then .Width = ICON_SIZE
+                If .Height <> ICON_SIZE Then .Height = ICON_SIZE
+                If .Placement <> xlMove Then .Placement = xlMove
+                If .AlternativeText <> ICON_ALT_TEXT Then .AlternativeText = ICON_ALT_TEXT
+                If .OnAction <> CallbackMacroName Then .OnAction = CallbackMacroName
+                If .Visible <> msoTrue Then .Visible = msoTrue
                 .ZOrder msoBringToFront
             End With
             'Store the reusable icon reference
                 Set gDP_GridIconShape = CandidateShape
-            'Release local references
-                Set CandidateShape = Nothing
-                Set TargetSheet = Nothing
-                Set AnchorCell = Nothing
             'Exit after moving the icon
-                Exit Sub
+                GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -9512,10 +10941,17 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
+CleanExit:
     'Release local references
         Set CandidateShape = Nothing
+    'Release local references
         Set TargetSheet = Nothing
+    'Release local references
         Set AnchorCell = Nothing
+    'Clear any non-fatal pending error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
     'Exit the procedure
         Exit Sub
 
@@ -9542,7 +10978,9 @@ FailSafe:
             " | " & ErrorDescription
     'Release local references
         Set CandidateShape = Nothing
+    'Release local references
         Set TargetSheet = Nothing
+    'Release local references
         Set AnchorCell = Nothing
     'Clear any suppressed fallback error
         Err.Clear
@@ -9551,10 +10989,87 @@ FailSafe:
 
 End Sub
 
-Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
+Public Sub M_GridIcon_Hide()
 
 '
+'==============================================================================
+'                           HIDE CURRENT GRID ICON
 '------------------------------------------------------------------------------
+' PURPOSE
+'   Hides the currently tracked DatePicker in-grid icon without deleting it
+'
+' WHY THIS EXISTS
+'   SelectionChange can fire very frequently
+'
+'   When the active cell is not eligible for the DatePicker, deleting the icon
+'   forces the next eligible date-cell selection to recreate the worksheet shape
+'
+'   Hiding the existing icon keeps the drawing-layer shape available for fast
+'   reuse when the user moves back to an eligible date cell
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Hides the tracked grid icon shape when available
+'   Leaves the tracked shape reference intact when hiding succeeds
+'   Clears the tracked shape reference only when the reference is stale
+'   Does not scan worksheets or workbooks
+'   Does not delete shapes
+'
+' ERROR POLICY
+'   Best-effort high-frequency UI routine
+'   Suppresses stale-shape and visibility errors
+'   Does not raise outward
+'
+' DEPENDENCIES
+'   gDP_GridIconShape
+'
+' NOTES
+'   Use this routine from high-frequency selection-change paths when the current
+'   target is not DatePicker-eligible
+'
+'   Use M_GridIcon_Remove or M_GridIcon_PurgeAll for hard cleanup boundaries
+'
+' UPDATED
+'   2026-05-06
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress high-frequency UI cleanup errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' HIDE TRACKED SHAPE
+'------------------------------------------------------------------------------
+    'Hide the tracked icon when available
+        If Not gDP_GridIconShape Is Nothing Then
+            gDP_GridIconShape.Visible = msoFalse
+            'Clear stale tracked references only when hiding failed
+                If Err.Number <> 0 Then
+                    Err.Clear
+                    Set gDP_GridIconShape = Nothing
+                End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESTORE ERROR HANDLING
+'------------------------------------------------------------------------------
+    'Clear any suppressed visibility error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
+
+'
+'==============================================================================
 '                         CREATE GRID ICON
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -9566,21 +11081,24 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '
 ' INPUTS
 '   TargetCell
-'     Optional single-cell anchor
+'     Optional anchor range
 '
-'     If omitted, Excel.Application.ActiveCell is used
+'     If omitted, Excel.Application.ActiveCell is used when available
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Resolves the target cell, exits and removes the icon when the grid-icon
-'   feature is disabled, resolves the embedded temporary icon file before
-'   touching the worksheet, creates a fully formatted temporary shape while
-'   ScreenUpdating is disabled, applies the embedded picture icon when available,
-'   falls back to the built-in font glyph when the embedded icon is unavailable,
-'   replaces the old icon only after the new icon is fully prepared, and restores
-'   Application.ScreenUpdating deterministically
+'   Ensures settings are loaded
+'   Hides the current icon and exits when the grid-icon feature is disabled
+'   Resolves and normalizes the anchor cell
+'   Calculates the icon position
+'   Resolves the embedded PNG file as the primary icon source
+'   Creates a hidden temporary worksheet shape
+'   Applies the embedded PNG picture icon when available
+'   Falls back to the built-in font glyph only when the PNG path fails
+'   Replaces the previous stable icon only after the new icon is prepared
+'   Restores Application.ScreenUpdating deterministically
 '
 ' ERROR POLICY
 '   Best-effort UI routine
@@ -9592,7 +11110,7 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 ' DEPENDENCIES
 '   Excel Shapes object model
 '   M_Settings_EnsureLoaded
-'   M_GridIcon_Remove
+'   M_GridIcon_Hide
 '   M_GridIcon_EnsureEmbeddedIconFile
 '   M_GetQualifiedMacroName
 '   DP_GRID_ICON_NAME
@@ -9605,19 +11123,26 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '   gDP_GridIconShape
 '
 ' NOTES
-'   The routine deliberately does not call M_GridIcon_Remove at the beginning of
-'   the valid create path, because deleting the old icon before the new icon is
+'   The embedded PNG is the primary icon source
+'
+'   The Segoe MDL2 glyph is only a fallback when the embedded PNG cannot be
+'   resolved, decoded, written, found, or applied to the shape
+'
+'   The routine deliberately does not delete the old icon at the beginning of
+'   the valid create path because deleting the old icon before the new icon is
 '   ready creates visible flicker
 '
 '   The old icon is replaced only after the new temporary icon has been created,
 '   formatted, and filled
 '
 '   M_GridIcon_ShowOrMove remains the preferred high-frequency selection-change
-'   path. This routine is the cold creation / recreation path
+'   path
+'
+'   This routine is the cold creation / recreation path
 '
 ' UPDATED
-'   2026-05-06
-'------------------------------------------------------------------------------
+'   2026-05-08
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -9625,6 +11150,7 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     Const PROC_NAME             As String = "M_GridIcon_Create"
     Const ICON_SIZE             As Double = 24#
     Const ICON_GAP              As Double = 5#
+    Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point"
 
     Dim AnchorCell              As Excel.Range      'Resolved anchor cell
     Dim TargetSheet             As Excel.Worksheet  'Worksheet receiving the icon
@@ -9634,8 +11160,13 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     Dim IconFilePath            As String           'Resolved embedded icon file path
     Dim TempShapeName           As String           'Temporary icon shape name
     Dim UsedPictureIcon         As Boolean          'True when picture fill succeeds
+    Dim MergeState              As Variant          'Anchor merge-state snapshot
     Dim PreviousScreenUpdating  As Boolean          'Previous ScreenUpdating state
     Dim HasScreenState          As Boolean          'True after ScreenUpdating is captured
+    Dim IconErrNumber           As Long             'Embedded icon resolution error number
+    Dim IconErrDescription      As String           'Embedded icon resolution error description
+    Dim PictureErrNumber        As Long             'Picture-fill error number
+    Dim PictureErrDescription   As String           'Picture-fill error description
     Dim HandlerStep             As String           'Current handler step for diagnostics
     Dim ErrorNumber             As Long             'Captured error number
     Dim ErrorDescription        As String           'Captured error description
@@ -9661,25 +11192,11 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Check grid-icon feature flag"
-    'Remove any stale icon and exit when the feature is disabled
+    'Hide any reusable icon and exit when the feature is disabled
         If Not gDP_ShowGridIcon Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
-
-'------------------------------------------------------------------------------
-' RESOLVE EMBEDDED ICON FILE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve embedded icon file"
-    'Suppress embedded-icon creation failures and allow fallback glyph rendering
-        On Error Resume Next
-    'Resolve or create the embedded temporary icon file
-        IconFilePath = M_GridIcon_EnsureEmbeddedIconFile()
-    'Clear any suppressed embedded-icon error
-        Err.Clear
-    'Restore fail-safe error handling
-        On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
 ' RESOLVE ANCHOR CELL
@@ -9689,17 +11206,17 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     'Use the supplied target cell when provided
         If Not TargetCell Is Nothing Then
             Set AnchorCell = TargetCell
-    'Otherwise use ActiveCell safely
         Else
             On Error Resume Next
             Set AnchorCell = Excel.Application.ActiveCell
             Err.Clear
             On Error GoTo FailSafe
         End If
-    'Remove stale icon and exit when no anchor cell is available
+
+    'Hide any reusable icon and exit when no anchor cell is available
         If AnchorCell Is Nothing Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -9709,21 +11226,33 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Normalize anchor cell"
     'Use the first physical cell defensively
         Set AnchorCell = AnchorCell.Cells(1, 1)
+    'Capture merge state safely
+        MergeState = AnchorCell.MergeCells
     'Normalize merged cells to the top-left cell
-        If AnchorCell.MergeCells Then
-            Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
+        If Not VBA.IsError(MergeState) Then
+            If Not VBA.IsNull(MergeState) Then
+                If VBA.CBool(MergeState) Then
+                    Set AnchorCell = AnchorCell.MergeArea.Cells(1, 1)
+                End If
+            End If
         End If
-    'Remove stale icon and exit when the target is not a single cell
+    'Hide any reusable icon and exit when the target is not a single cell
         If AnchorCell.Cells.CountLarge <> 1 Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
+
+'------------------------------------------------------------------------------
+' RESOLVE TARGET WORKSHEET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve target worksheet"
     'Store the target worksheet
         Set TargetSheet = AnchorCell.Worksheet
-    'Remove stale icon and exit when no worksheet is available
+    'Hide any reusable icon and exit when no worksheet is available
         If TargetSheet Is Nothing Then
-            M_GridIcon_Remove
-            Exit Sub
+            M_GridIcon_Hide
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -9737,6 +11266,28 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
     'Build the temporary shape name
         TempShapeName = DP_GRID_ICON_NAME & "_Pending"
+
+'------------------------------------------------------------------------------
+' RESOLVE EMBEDDED ICON FILE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve embedded icon file"
+    'Start with no resolved picture icon
+        IconFilePath = vbNullString
+    'Suppress embedded-icon materialization errors and allow fallback only if needed
+        On Error Resume Next
+    'Resolve or create the embedded temporary icon file
+        IconFilePath = M_GridIcon_EnsureEmbeddedIconFile()
+    'Write diagnostics when embedded-icon resolution failed
+        If Err.Number <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Error=" & VBA.CStr(Err.Number) & _
+                " | " & Err.Description
+            Err.Clear
+        End If
+    'Restore fail-safe error handling
+        On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
 ' CAPTURE APPLICATION STATE
@@ -9776,10 +11327,6 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
             IconTop, _
             ICON_SIZE, _
             ICON_SIZE)
-    'Assign the temporary shape name
-        NewIconShape.Name = TempShapeName
-    'Hide the shape while it is being formatted
-        NewIconShape.Visible = msoFalse
 
 '------------------------------------------------------------------------------
 ' APPLY BASE SHAPE SETTINGS
@@ -9788,13 +11335,15 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Apply base shape settings"
     'Apply base icon behavior and callback settings
         With NewIconShape
+            .Name = TempShapeName
             .Placement = xlMove
-            .AlternativeText = "DatePicker Grid Entry Point"
+            .AlternativeText = ICON_ALT_TEXT
             .OnAction = M_GetQualifiedMacroName("DP_Click")
             .LockAspectRatio = msoTrue
             .Fill.Visible = msoTrue
             .Fill.ForeColor.RGB = DP_THEME_COLOR_HEADER
             .Line.Visible = msoFalse
+            .Visible = msoFalse
         End With
 
 '------------------------------------------------------------------------------
@@ -9804,15 +11353,39 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Apply embedded picture icon"
     'Start from fallback mode
         UsedPictureIcon = False
-    'Try to apply the embedded picture icon when available
+    'Try to apply the embedded picture icon when a usable file path exists
         If VBA.LenB(IconFilePath) <> 0 Then
             If VBA.LenB(VBA.Dir$(IconFilePath, vbNormal)) <> 0 Then
-                On Error Resume Next
-                NewIconShape.Fill.UserPicture IconFilePath
-                UsedPictureIcon = (Err.Number = 0)
-                Err.Clear
-                On Error GoTo FailSafe
+                'Suppress picture-fill errors so glyph remains an emergency fallback
+                    On Error Resume Next
+                'Clear any fallback text before applying the picture
+                    NewIconShape.TextFrame2.TextRange.Text = vbNullString
+                'Apply the embedded PNG as the icon fill
+                    NewIconShape.Fill.UserPicture IconFilePath
+                'Store whether picture application succeeded
+                    UsedPictureIcon = (Err.Number = 0)
+                'Write diagnostics when picture application failed
+                    If Err.Number <> 0 Then
+                        Debug.Print PROC_NAME & _
+                            " | Step=" & HandlerStep & _
+                            " | IconFilePath=" & IconFilePath & _
+                            " | Error=" & VBA.CStr(Err.Number) & _
+                            " | " & Err.Description
+                        Err.Clear
+                    End If
+                'Restore fail-safe error handling
+                    On Error GoTo FailSafe
+            Else
+                'Log missing materialized icon file
+                    Debug.Print PROC_NAME & _
+                        " | Step=" & HandlerStep & _
+                        " | Embedded icon file not found: " & IconFilePath
             End If
+        Else
+            'Log empty icon path so fallback is explainable
+                Debug.Print PROC_NAME & _
+                    " | Step=" & HandlerStep & _
+                    " | Embedded icon path is empty"
         End If
 
 '------------------------------------------------------------------------------
@@ -9820,27 +11393,42 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Apply fallback glyph icon"
-    'Apply the built-in fallback glyph when no picture icon was applied
+    'Apply the built-in fallback glyph only when no picture icon was applied
         If Not UsedPictureIcon Then
-            With NewIconShape
-                .Fill.Visible = msoTrue
-                .Fill.ForeColor.RGB = DP_THEME_COLOR_HEADER
-                .Line.Visible = msoFalse
-            End With
-            On Error Resume Next
-            NewIconShape.TextFrame2.TextRange.Text = vbNullString
-            NewIconShape.TextFrame2.TextRange.Text = VBA.ChrW$(DP_GRID_ICON_CALENDAR_CODEPOINT)
-            NewIconShape.TextFrame2.TextRange.Font.Name = DP_GRID_ICON_FONT_NAME
-            NewIconShape.TextFrame2.TextRange.Font.Size = DP_GRID_ICON_FONT_SIZE
-            NewIconShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = DP_GRID_ICON_FORE_COLOR
-            NewIconShape.TextFrame2.MarginLeft = 0
-            NewIconShape.TextFrame2.MarginRight = 0
-            NewIconShape.TextFrame2.MarginTop = 0
-            NewIconShape.TextFrame2.MarginBottom = 0
-            NewIconShape.TextFrame2.VerticalAnchor = msoAnchorMiddle
-            NewIconShape.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
-            Err.Clear
-            On Error GoTo FailSafe
+            'Apply the base fallback shape appearance
+                With NewIconShape
+                    .Fill.Visible = msoTrue
+                    .Fill.ForeColor.RGB = DP_THEME_COLOR_HEADER
+                    .Line.Visible = msoFalse
+                End With
+            'Suppress glyph-formatting errors because the shape itself remains usable
+                On Error Resume Next
+            'Clear existing text
+                NewIconShape.TextFrame2.TextRange.Text = vbNullString
+            'Apply the calendar glyph
+                NewIconShape.TextFrame2.TextRange.Text = VBA.ChrW$(DP_GRID_ICON_CALENDAR_CODEPOINT)
+            'Apply the glyph font name
+                NewIconShape.TextFrame2.TextRange.Font.Name = DP_GRID_ICON_FONT_NAME
+            'Apply the glyph font size
+                NewIconShape.TextFrame2.TextRange.Font.Size = DP_GRID_ICON_FONT_SIZE
+            'Apply the glyph foreground color
+                NewIconShape.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = DP_GRID_ICON_FORE_COLOR
+            'Remove left text margin
+                NewIconShape.TextFrame2.MarginLeft = 0
+            'Remove right text margin
+                NewIconShape.TextFrame2.MarginRight = 0
+            'Remove top text margin
+                NewIconShape.TextFrame2.MarginTop = 0
+            'Remove bottom text margin
+                NewIconShape.TextFrame2.MarginBottom = 0
+            'Vertically center the glyph
+                NewIconShape.TextFrame2.VerticalAnchor = msoAnchorMiddle
+            'Horizontally center the glyph
+                NewIconShape.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
+            'Clear any suppressed glyph-formatting error
+                Err.Clear
+            'Restore fail-safe error handling
+                On Error GoTo FailSafe
         End If
 
 '------------------------------------------------------------------------------
@@ -9856,7 +11444,7 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         End If
     'Delete any same-named icon on the target sheet
         TargetSheet.Shapes(DP_GRID_ICON_NAME).Delete
-    'Clear any suppressed cleanup error
+    'Clear any suppressed old-icon cleanup error
         Err.Clear
     'Restore fail-safe error handling
         On Error GoTo FailSafe
@@ -9864,10 +11452,22 @@ Public Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         NewIconShape.Name = DP_GRID_ICON_NAME
     'Store the new icon reference
         Set gDP_GridIconShape = NewIconShape
+
+'------------------------------------------------------------------------------
+' SHOW FINAL ICON
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Show final icon"
+    'Suppress final visual-order failures because the icon has already been created
+        On Error Resume Next
     'Show the fully formatted icon
         gDP_GridIconShape.Visible = msoTrue
     'Bring the icon to the front
         gDP_GridIconShape.ZOrder msoBringToFront
+    'Clear any suppressed final visual-order error
+        Err.Clear
+    'Restore fail-safe error handling
+        On Error GoTo FailSafe
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -9881,7 +11481,9 @@ CleanExit:
         End If
     'Release local references
         Set NewIconShape = Nothing
+    'Release local references
         Set TargetSheet = Nothing
+    'Release local references
         Set AnchorCell = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
@@ -9901,15 +11503,14 @@ FailSafe:
     'Suppress cleanup failures
         On Error Resume Next
     'Delete the partially created temporary icon
-        If Not NewIconShape Is Nothing Then
-            NewIconShape.Delete
-        End If
-    'Clear the tracked icon reference if creation failed
-        Set gDP_GridIconShape = Nothing
+        If Not NewIconShape Is Nothing Then NewIconShape.Delete
+    'Clear the tracked icon reference if creation failed before stable assignment
+        If gDP_GridIconShape Is Nothing Then Set gDP_GridIconShape = Nothing
     'Restore ScreenUpdating when it was captured
         If HasScreenState Then
             Excel.Application.ScreenUpdating = PreviousScreenUpdating
         End If
+
     'Write diagnostics without interrupting worksheet interaction
         Debug.Print PROC_NAME & _
             " | Step=" & HandlerStep & _
@@ -9917,7 +11518,9 @@ FailSafe:
             " | " & ErrorDescription
     'Release local references
         Set NewIconShape = Nothing
+    'Release local references
         Set TargetSheet = Nothing
+    'Release local references
         Set AnchorCell = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
@@ -9925,20 +11528,139 @@ FailSafe:
         On Error GoTo 0
 
 End Sub
+Public Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)
 
+'
+'==============================================================================
+'                         PRE-CREATE HIDDEN GRID ICON
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Pre-creates the DatePicker in-grid icon and hides it for later fast reuse
+'
+' WHY THIS EXISTS
+'   Creating worksheet shapes during SelectionChange can create visible latency
+'
+'   Pre-creating the icon during startup allows the high-frequency selection path
+'   to move and show an existing shape instead of creating one on demand
+'
+' INPUTS
+'   TargetCell
+'     Optional initial anchor cell
+'
+'     If omitted, Excel.Application.ActiveCell is used when available
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures settings are loaded
+'   Exits when the grid-icon feature is disabled
+'   Creates the icon through the normal cold creation path when no tracked icon
+'   exists
+'   Hides the icon immediately after creation
+'
+' ERROR POLICY
+'   Best-effort startup optimization
+'   Does not raise outward
+'
+' DEPENDENCIES
+'   M_Settings_EnsureLoaded
+'   M_GridIcon_Create
+'   gDP_ShowGridIcon
+'   gDP_GridIconShape
+'
+' NOTES
+'   This routine is an optimization only
+'
+'   M_GridIcon_ShowOrMove should still keep M_GridIcon_Create as a fallback
+'
+' UPDATED
+'   2026-05-08
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AnchorCell              As Excel.Range  'Initial icon anchor cell
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress startup optimization errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' LOAD SETTINGS
+'------------------------------------------------------------------------------
+    'Ensure settings are available before reading the grid-icon feature flag
+        M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' FEATURE GATE
+'------------------------------------------------------------------------------
+    'Exit when the grid-icon feature is disabled
+        If Not gDP_ShowGridIcon Then GoTo ExitProcedure
+
+'------------------------------------------------------------------------------
+' EXIT IF ICON ALREADY EXISTS
+'------------------------------------------------------------------------------
+    'Exit when a tracked icon already exists
+        If Not gDP_GridIconShape Is Nothing Then GoTo HideIcon
+
+'------------------------------------------------------------------------------
+' RESOLVE INITIAL ANCHOR
+'------------------------------------------------------------------------------
+    'Use the supplied target cell when provided
+        If Not TargetCell Is Nothing Then
+            Set AnchorCell = TargetCell
+        Else
+            Set AnchorCell = Application.ActiveCell
+        End If
+
+    'Exit when no anchor cell is available
+        If AnchorCell Is Nothing Then GoTo ExitProcedure
+
+'------------------------------------------------------------------------------
+' CREATE ICON
+'------------------------------------------------------------------------------
+    'Create the icon through the normal cold creation path
+        M_GridIcon_Create AnchorCell
+
+'------------------------------------------------------------------------------
+' HIDE ICON
+'------------------------------------------------------------------------------
+HideIcon:
+    'Hide the icon after creation so startup does not display it prematurely
+        If Not gDP_GridIconShape Is Nothing Then
+            gDP_GridIconShape.Visible = msoFalse
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release local references
+        Set AnchorCell = Nothing
+    'Clear any suppressed startup optimization error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
 Public Sub M_GridIcon_Remove()
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                         REMOVE CURRENT GRID ICON
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Removes the currently tracked DatePicker in-grid icon
 '
 ' WHY THIS EXISTS
-'   Selection-change and worksheet-change events can fire very frequently. The
-'   normal icon-removal path must therefore be lightweight and must not scan all
-'   worksheets or workbooks
+'   Selection-change and worksheet-change events can fire very frequently
+'
+'   The normal icon-removal path must therefore be lightweight and must not scan
+'   all worksheets or workbooks
 '
 ' INPUTS
 '   None
@@ -9948,13 +11670,20 @@ Public Sub M_GridIcon_Remove()
 '
 ' BEHAVIOR
 '   Deletes the tracked DatePicker icon shape when available
-'
-'   Also attempts to delete a same-named icon from the active worksheet as a
-'   cheap fallback for stale references
+'   Clears the tracked icon reference regardless of deletion result
+'   Attempts to resolve the active worksheet
+'   Attempts to resolve a same-named icon from the active worksheet
+'   Deletes the active-sheet fallback icon when found
+'   Logs non-trivial cleanup failures to the Immediate Window
 '
 ' ERROR POLICY
-'   Best-effort cleanup. Suppresses shape-deletion errors and writes limited
-'   diagnostics only for non-trivial cleanup failures
+'   Best-effort cleanup
+'   Suppresses shape-deletion and ActiveSheet-resolution errors
+'   Logs tracked-shape deletion failures
+'   Logs ActiveSheet resolution failures
+'   Logs active-sheet fallback-shape deletion failures
+'   Does not log the expected case where no same-named active-sheet shape exists
+'   Does not raise outward
 '
 ' DEPENDENCIES
 '   gDP_GridIconShape
@@ -9964,24 +11693,31 @@ Public Sub M_GridIcon_Remove()
 ' NOTES
 '   This routine is intended for high-frequency UI refresh paths
 '
+'   Missing active-sheet fallback icons are normal and are intentionally not
+'   logged
+'
 '   Use M_GridIcon_PurgeAll for hard cleanup boundaries such as save, close,
 '   print, teardown, or regression reset
 '
 ' UPDATED
 '   2026-05-06
-'------------------------------------------------------------------------------
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME                 As String = "M_GridIcon_Remove"
+    Const PROC_NAME                 As String = "M_GridIcon_Remove" 'Current procedure name
 
     Dim ActiveSheetObject           As Object       'Current active sheet object
     Dim ActiveWorksheet             As Worksheet    'Current active worksheet
+    Dim FallbackShape               As Shape        'Same-named active-sheet fallback shape
+
     Dim TrackedErrNumber            As Long         'Tracked-shape deletion error number
     Dim TrackedErrDescription       As String       'Tracked-shape deletion error description
     Dim ActiveSheetErrNumber        As Long         'ActiveSheet resolution error number
     Dim ActiveSheetErrDescription   As String       'ActiveSheet resolution error description
+    Dim FallbackDeleteErrNumber     As Long         'Fallback-shape deletion error number
+    Dim FallbackDeleteErrDescription As String      'Fallback-shape deletion error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10010,26 +11746,44 @@ Public Sub M_GridIcon_Remove()
     'Clear any pending error before resolving ActiveSheet
         Err.Clear
     'Capture the active sheet object safely
-        Set ActiveSheetObject = Application.ActiveSheet
+        Set ActiveSheetObject = Excel.Application.ActiveSheet
     'Capture ActiveSheet resolution failure if any
         ActiveSheetErrNumber = Err.Number
+    'Capture ActiveSheet resolution failure description if any
         ActiveSheetErrDescription = Err.Description
     'Clear any suppressed ActiveSheet error
         Err.Clear
     'Use the active sheet only when it is a worksheet
         If Not ActiveSheetObject Is Nothing Then
-            If TypeOf ActiveSheetObject Is Worksheet Then
+            If TypeOf ActiveSheetObject Is Excel.Worksheet Then
                 Set ActiveWorksheet = ActiveSheetObject
             End If
         End If
 
 '------------------------------------------------------------------------------
-' DELETE ACTIVE-SHEET FALLBACK
+' RESOLVE ACTIVE-SHEET FALLBACK SHAPE
 '------------------------------------------------------------------------------
-    'Delete a same-named icon from the active worksheet as a cheap stale cleanup
+    'Resolve a same-named icon from the active worksheet when available
         If Not ActiveWorksheet Is Nothing Then
-            ActiveWorksheet.Shapes(DP_GRID_ICON_NAME).Delete
+            Set FallbackShape = ActiveWorksheet.Shapes(DP_GRID_ICON_NAME)
             Err.Clear
+        End If
+
+'------------------------------------------------------------------------------
+' DELETE ACTIVE-SHEET FALLBACK SHAPE
+'------------------------------------------------------------------------------
+    'Delete the fallback shape only when it was resolved
+        If Not FallbackShape Is Nothing Then
+            'Clear any pending error before deleting the fallback shape
+                Err.Clear
+            'Delete the same-named active-sheet fallback icon
+                FallbackShape.Delete
+            'Capture fallback-shape deletion failure if any
+                FallbackDeleteErrNumber = Err.Number
+            'Capture fallback-shape deletion failure description if any
+                FallbackDeleteErrDescription = Err.Description
+            'Clear any suppressed fallback deletion error
+                Err.Clear
         End If
 
 '------------------------------------------------------------------------------
@@ -10049,12 +11803,22 @@ Public Sub M_GridIcon_Remove()
                 " | Error=" & VBA.CStr(ActiveSheetErrNumber) & _
                 " | " & ActiveSheetErrDescription
         End If
+    'Write fallback-shape diagnostics only when deletion of a resolved shape failed
+        If FallbackDeleteErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Step=DeleteActiveSheetFallbackShape" & _
+                " | Error=" & VBA.CStr(FallbackDeleteErrNumber) & _
+                " | " & FallbackDeleteErrDescription
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
     'Release local object references
+        Set FallbackShape = Nothing
+    'Release local object references
         Set ActiveWorksheet = Nothing
+    'Release local object references
         Set ActiveSheetObject = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
@@ -10062,7 +11826,6 @@ Public Sub M_GridIcon_Remove()
         On Error GoTo 0
 
 End Sub
-
 Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
 
 '
@@ -10339,7 +12102,7 @@ Private Function M_GridIcon_CombinePath( _
     ByVal FileName As String) As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           COMBINE PATH
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10377,7 +12140,7 @@ Private Function M_GridIcon_CombinePath( _
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -10399,7 +12162,7 @@ End Function
 Private Function M_GridIcon_IconFileIsUsable(ByVal IconPath As String) As Boolean
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         ICON FILE IS USABLE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10448,7 +12211,7 @@ Private Function M_GridIcon_IconFileIsUsable(ByVal IconPath As String) As Boolea
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -10527,7 +12290,7 @@ Private Sub M_GridIcon_WriteBytesToFile( _
     ByRef IconBytes() As Byte)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         WRITE BYTES TO FILE
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10577,7 +12340,7 @@ Private Sub M_GridIcon_WriteBytesToFile( _
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -10651,7 +12414,7 @@ End Sub
 Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         BYTE ARRAY LENGTH
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10692,7 +12455,7 @@ Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10721,21 +12484,170 @@ ErrorHandler:
 
 End Function
 
-Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
+Private Function M_GridIcon_Base64LooksValid(ByVal EncodedText As String) As Boolean
 
 '
 '==============================================================================
+'                         BASE64 LOOKS VALID
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Performs lightweight validation of an embedded Base64 payload
+'
+' WHY THIS EXISTS
+'   MSXML raises a generic parsing error when an invalid Base64 string is assigned
+'   to a bin.base64 node
+'
+'   This helper catches obvious payload corruption before the decode step so the
+'   caller can fail with a clearer diagnostic
+'
+' INPUTS
+'   EncodedText
+'     Base64 text to validate
+'
+' RETURNS
+'   True when the text looks like a valid Base64 payload
+'
+'   False when the text is blank, has invalid length, contains unsupported
+'   characters, or contains padding in an invalid position
+'
+' BEHAVIOR
+'   Removes common whitespace characters
+'   Checks that the remaining length is a multiple of four
+'   Allows only A-Z, a-z, 0-9, plus, slash, and equals
+'   Allows equals padding only in the final two characters
+'
+' ERROR POLICY
+'   Safe-default predicate
+'
+'   Returns False on any unexpected validation failure
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   This is not a full decoder
+'
+'   It is intentionally a fast pre-flight check before MSXML decoding
+'
+' UPDATED
+'   2026-05-08
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CleanText       As String       'Whitespace-normalized Base64 text
+    Dim TextLength      As Long         'Normalized text length
+    Dim CharIndex       As Long         'Character loop index
+    Dim CurrentChar     As String       'Current character being inspected
+    Dim PaddingPosition As Long         'First equals padding position
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set safe default result
+        M_GridIcon_Base64LooksValid = False
+
+    'Enable safe-default validation
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' NORMALIZE INPUT
+'------------------------------------------------------------------------------
+    'Trim the supplied payload
+        CleanText = VBA.Trim$(EncodedText)
+
+    'Remove carriage returns
+        CleanText = VBA.Replace(CleanText, vbCr, vbNullString)
+
+    'Remove line feeds
+        CleanText = VBA.Replace(CleanText, vbLf, vbNullString)
+
+    'Remove tab characters
+        CleanText = VBA.Replace(CleanText, vbTab, vbNullString)
+
+    'Remove spaces
+        CleanText = VBA.Replace(CleanText, " ", vbNullString)
+
+'------------------------------------------------------------------------------
+' VALIDATE LENGTH
+'------------------------------------------------------------------------------
+    'Capture normalized text length
+        TextLength = VBA.Len(CleanText)
+
+    'Reject an empty payload
+        If TextLength = 0 Then Exit Function
+
+    'Reject payloads whose length is not divisible by four
+        If TextLength Mod 4 <> 0 Then Exit Function
+
+'------------------------------------------------------------------------------
+' VALIDATE CHARACTERS
+'------------------------------------------------------------------------------
+    'Loop through each Base64 character
+        For CharIndex = 1 To TextLength
+            'Read the current character
+                CurrentChar = VBA.Mid$(CleanText, CharIndex, 1)
+            'Validate the current character
+                Select Case CurrentChar
+                    Case "A" To "Z", "a" To "z", "0" To "9", "+", "/"
+                        'Valid non-padding Base64 character
+                    Case "="
+                        'Store the first padding position
+                            If PaddingPosition = 0 Then PaddingPosition = CharIndex
+                        'Reject padding before the final two characters
+                            If CharIndex < TextLength - 1 Then Exit Function
+                    Case Else
+                        'Reject unsupported characters
+                            Exit Function
+                End Select
+        Next CharIndex
+
+'------------------------------------------------------------------------------
+' VALIDATE PADDING ORDER
+'------------------------------------------------------------------------------
+    'Reject non-padding characters after padding begins
+        If PaddingPosition > 0 Then
+            For CharIndex = PaddingPosition To TextLength
+                If VBA.Mid$(CleanText, CharIndex, 1) <> "=" Then Exit Function
+            Next CharIndex
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+    'Return successful validation
+        M_GridIcon_Base64LooksValid = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after successful validation
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Return safe default on unexpected validation failure
+        M_GridIcon_Base64LooksValid = False
+
+End Function
+
+Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
+
+'
+'------------------------------------------------------------------------------
 '                         EMBEDDED ICON BYTES
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Decodes the embedded Base64 PNG payload into a byte array
 '
 ' WHY THIS EXISTS
-'   The project stores the grid icon directly in VBA code and materializes it to
-'   a temporary file only when needed
+'   The grid icon should use the embedded PNG as the primary visual asset
 '
-'   Excel Shape.Fill.UserPicture requires a physical file path, so the embedded
-'   PNG must first be decoded into bytes and then written to disk by the caller
+'   The worksheet glyph remains only a fallback when the PNG cannot be decoded,
+'   written, or applied to the shape
 '
 ' INPUTS
 '   None
@@ -10744,41 +12656,44 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 '   Decoded PNG bytes
 '
 ' BEHAVIOR
-'   Loads the embedded Base64 payload from M_GridIcon_EmbeddedIconBase64
-'   Rejects an empty embedded payload
-'   Creates a late-bound MSXML DOM document
-'   Creates a temporary XML node configured as bin.base64
-'   Assigns the Base64 text to the node
-'   Returns the decoded NodeTypedValue byte array
+'   Loads the embedded Base64 payload
+'   Normalizes the Base64 text by removing whitespace and copy/paste artifacts
+'   Validates the Base64 character set and padding position before decoding
+'   Decodes the payload through a late-bound MSXML Base64 node
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the embedded payload is empty
-'   Raises a descriptive runtime error if MSXML object creation fails
-'   Raises a descriptive runtime error if Base64 decoding fails
-'   Preserves the original error number and description
+'   Raises a compact descriptive runtime error when the embedded payload is
+'   blank, structurally invalid, or cannot be decoded
+'
+'   Does not raise the full MSXML error text because that can contain the entire
+'   Base64 payload and flood the Immediate Window or result sheet
 '
 ' DEPENDENCIES
 '   M_GridIcon_EmbeddedIconBase64
+'   M_GridIcon_NormalizeBase64
+'   M_GridIcon_Base64LooksValid
 '   MSXML2.DOMDocument.6.0
-'   CreateObject
 '
 ' NOTES
-'   Late binding avoids requiring a VBA reference
-'   This routine performs Base64 decoding only
-'   File creation is intentionally handled by M_GridIcon_WriteBytesToFile
+'   This routine keeps the embedded PNG as the primary grid-icon source
+'
+'   If this routine fails, M_GridIcon_Create should fall back to the glyph path
 '
 ' UPDATED
-'   2026-05-06
-'==============================================================================
+'   2026-05-08
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_GridIcon_EmbeddedIconBytes" 'Current procedure name
+    Const PROC_NAME            As String = "M_GridIcon_EmbeddedIconBytes"
 
     Dim XmlDoc                 As Object       'MSXML document
     Dim XmlNode                As Object       'MSXML Base64 node
-    Dim EncodedText            As String       'Base64 encoded PNG
+    Dim EncodedText            As String       'Normalized Base64 encoded PNG
+    Dim PayloadLength          As Long         'Normalized Base64 payload length
+    Dim PayloadRemainder       As Long         'Payload length remainder modulo 4
+    Dim HandlerStep            As String       'Current handler step for diagnostics
     Dim ErrorNumber            As Long         'Captured error number
     Dim ErrorDescription       As String       'Captured error description
 
@@ -10787,34 +12702,59 @@ Private Function M_GridIcon_EmbeddedIconBytes() As Byte()
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
-' BUILD BASE64 TEXT
+' LOAD AND NORMALIZE PAYLOAD
 '------------------------------------------------------------------------------
-    'Load the embedded Base64 payload
-        EncodedText = M_GridIcon_EmbeddedIconBase64()
-    'Reject an empty embedded payload
-        If LenB(EncodedText) = 0 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "Embedded icon payload is empty."
+    'Track the current handler step
+        HandlerStep = "Load embedded Base64 payload"
+    'Load and normalize the embedded Base64 payload
+        EncodedText = M_GridIcon_NormalizeBase64(M_GridIcon_EmbeddedIconBase64())
+    'Capture normalized payload length
+        PayloadLength = VBA.Len(EncodedText)
+    'Capture normalized payload modulo 4
+        PayloadRemainder = PayloadLength Mod 4
+
+'------------------------------------------------------------------------------
+' VALIDATE BASE64 PAYLOAD
+'------------------------------------------------------------------------------
+    'Reject an invalid embedded payload before MSXML decoding
+        If Not M_GridIcon_Base64LooksValid(EncodedText) Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "Embedded icon payload is not valid Base64."
         End If
+
+'------------------------------------------------------------------------------
+' CREATE DECODER
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Create MSXML decoder"
+    'Create the MSXML document
+        Set XmlDoc = VBA.CreateObject("MSXML2.DOMDocument.6.0")
+    'Create a temporary Base64 node
+        Set XmlNode = XmlDoc.createElement("Base64Data")
 
 '------------------------------------------------------------------------------
 ' DECODE BASE64
 '------------------------------------------------------------------------------
-    'Create the MSXML document
-        Set XmlDoc = CreateObject("MSXML2.DOMDocument.6.0")
-    'Create a Base64 node
-        Set XmlNode = XmlDoc.createElement("Base64Data")
+    'Track the current handler step
+        HandlerStep = "Decode Base64 payload"
     'Configure the node as Base64 binary data
         XmlNode.DataType = "bin.base64"
-    'Assign the encoded payload
+    'Assign the normalized Base64 text
         XmlNode.Text = EncodedText
-    'Return the decoded bytes
+    'Return the decoded byte array
         M_GridIcon_EmbeddedIconBytes = XmlNode.NodeTypedValue
 
 '------------------------------------------------------------------------------
-' EXIT PROCEDURE
+' CLEAN EXIT
 '------------------------------------------------------------------------------
+    'Release object references
+        Set XmlNode = Nothing
+    'Release object references
+        Set XmlDoc = Nothing
     'Exit before the error handler
         Exit Function
 
@@ -10826,15 +12766,106 @@ ErrorHandler:
         ErrorNumber = Err.Number
     'Capture the original error description
         ErrorDescription = Err.Description
-    'Raise a descriptive error to the caller
-        Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
+    'Release object references
+        Set XmlNode = Nothing
+    'Release object references
+        Set XmlDoc = Nothing
+    'Raise a compact descriptive error to the caller
+        Err.Raise ErrorNumber, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Embedded grid-icon PNG decode failed. " & _
+            "Length=" & VBA.CStr(PayloadLength) & _
+            "; Length Mod 4=" & VBA.CStr(PayloadRemainder) & _
+            "; Native error=" & VBA.CStr(ErrorNumber) & _
+            "; " & ErrorDescription
+
+End Function
+
+Private Function M_GridIcon_NormalizeBase64(ByVal EncodedText As String) As String
+
+'
+'------------------------------------------------------------------------------
+'                         NORMALIZE BASE64 TEXT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes whitespace and common copy/paste artifacts from Base64 text
+'
+' WHY THIS EXISTS
+'   Embedded Base64 stored in VBA can be damaged by line wrapping, copied hidden
+'   characters, non-breaking spaces, or accidental formatting artifacts
+'
+' INPUTS
+'   EncodedText
+'     Raw Base64 text
+'
+' RETURNS
+'   Normalized Base64 text
+'
+' BEHAVIOR
+'   Removes carriage returns, line feeds, tabs, normal spaces, non-breaking
+'   spaces, zero-width spaces, and byte-order-mark characters
+'
+' ERROR POLICY
+'   Does not raise custom errors
+'
+' DEPENDENCIES
+'   VBA.Replace
+'   VBA.ChrW$
+'
+' NOTES
+'   This routine does not validate Base64 correctness
+'
+'   Validation belongs in M_GridIcon_Base64LooksValid
+'
+' UPDATED
+'   2026-05-08
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ResultText             As String       'Normalized Base64 text
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Start from the supplied text
+        ResultText = EncodedText
+
+'------------------------------------------------------------------------------
+' REMOVE STANDARD WHITESPACE
+'------------------------------------------------------------------------------
+    'Remove carriage returns
+        ResultText = VBA.Replace(ResultText, vbCr, vbNullString)
+    'Remove line feeds
+        ResultText = VBA.Replace(ResultText, vbLf, vbNullString)
+    'Remove tabs
+        ResultText = VBA.Replace(ResultText, vbTab, vbNullString)
+    'Remove normal spaces
+        ResultText = VBA.Replace(ResultText, " ", vbNullString)
+
+'------------------------------------------------------------------------------
+' REMOVE COMMON COPY / PASTE ARTIFACTS
+'------------------------------------------------------------------------------
+    'Remove non-breaking spaces
+        ResultText = VBA.Replace(ResultText, VBA.ChrW$(160), vbNullString)
+    'Remove zero-width spaces
+        ResultText = VBA.Replace(ResultText, VBA.ChrW$(8203), vbNullString)
+    'Remove byte-order marks
+        ResultText = VBA.Replace(ResultText, VBA.ChrW$(65279), vbNullString)
+
+'------------------------------------------------------------------------------
+' RETURN VALUE
+'------------------------------------------------------------------------------
+    'Return the normalized Base64 text
+        M_GridIcon_NormalizeBase64 = ResultText
 
 End Function
 
 Private Function M_GridIcon_EmbeddedIconBase64() As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         EMBEDDED ICON BASE64
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10844,38 +12875,30 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 '   The DatePicker should not require a distributed external icon file, but
 '   Shape.Fill.UserPicture requires a real file path
 '
-'   This helper keeps the embedded PNG payload centralized so it can be decoded
-'   into the user's temp folder on demand
-'
 ' INPUTS
 '   None
 '
 ' RETURNS
-'   Base64 text representing a PNG icon
+'   Base64 text representing a 64 x 64 transparent PNG icon
 '
 ' BEHAVIOR
 '   Builds the Base64 payload by concatenating short string chunks
 '   Returns the concatenated Base64 payload as a String
-'   Performs no validation, decoding, trimming, or file I/O
 '
 ' ERROR POLICY
 '   Does not raise custom errors
-'   Lets native VBA string behavior apply
 '
 ' DEPENDENCIES
 '   None
 '
 ' NOTES
-'   Keep chunks short enough to avoid VBA line-continuation and physical-line
-'   length limits
-'
-'   The embedded payload is intentionally stored as plain VBA string chunks for
-'   portability and to avoid requiring an external image asset at distribution
-'   time
+'   Generated from DP_GridIcon_64.png
+'   Base64 length: 6228
+'   Base64 length Mod 4: 0
 '
 ' UPDATED
-'   2026-05-06
-'==============================================================================
+'   2026-05-08
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -10886,40 +12909,71 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 ' BUILD PAYLOAD
 '------------------------------------------------------------------------------
     'Append the embedded Base64 chunks
-        EncodedText = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAJm0lEQVR42u1ae4xcVRn/fefce2dm59GdZR/dtrSlDxaBAKb8"
-        EncodedText = EncodedText & "AcFaDEoMIRKig/5n9A+hgiIYgmBkWDQxKhWiJqQlGAJo4g5gUHxQaEgVH4BVa215bFu6ZeljX/OeO3vvOefzj5ld16a7OzP7"
-        EncodedText = EncodedText & "rvslJ3sz3+Z3z/nO9/id7x5gWWZVCMy0hPEbl0RPjxx77pnwvFTwZyRc3ZVEIiG//oOnwuO7tQTwxUwBkkkWRMTfevSJm6+6"
-        EncodedText = EncodedText & "4XP7z2+L9CZ/9NP7K/OeubvONf4s7AzT/d/Z2fnIk6nckRNDfGIoyz//7R/5mz/cef1M3XWu8WfsAalUSgDEnqMvWbVyZbR1"
-        EncodedText = EncodedText & "RVQ1R8PeBeevNFpjGwAcbGujxYo/QwMwHTzYRgATMWutNftKCV9poZQWgsgDmE6+GyWAGxr14TeWE0SdPknbkq80hMSpOjrgm6w40n2EolI0Mr/v8q83t"
-        EncodedText = EncodedText & "nUoOuAXdyO60K5YDBdLT4Xtuq97ffEUu1U16fK6pW/TsGSDJAt2kL7r9+fM0rfgqATeWfG+jyyARDNO/0m38Ub8MAMIwhPaK"
-        EncodedText = EncodedText & "OJKJ3oGgui2bU+SYEDdigAwxiaDEVPi5rIahId48tOcU3fHKn4zv7Ti884ZDlbAgnnkIVBZvNm1/6XqD2BEh7QdY+1fAcJCk"
-        EncodedText = EncodedText & "cJRWppAdeJ+EGMvcLKQNv5w+VS4XClI6NoAAqM4BBISQ9nT4wrIdGBWEUZsA+qIMhA9eePvLdwPESExfIaxp3b6b9KZbf/MJ"
-        EncodedText = EncodedText & "GQi/JGGeCwYDvxTRoNYaVjgWHv3nm69fHQ25WxkEMBio/DFs9NDAid0b16/eM6rZAPVVK6N9EY7FasQXBhpgCTVaLF6lRWjH"
-        EncodedText = EncodedText & "5lt/39y785MPJBI9MjVFOFhTZXn0wKz98otxQc6zZEZfaF3TuaPkeq0WANsBK8+1y+ViuxUTJKUAUSURSyHZlpK0cluyI8PB"
-        EncodedText = EncodedText & "5o61Hyi/bJOQNYcCOVbd+CyIYp0dzw2dHshwKNK9+UsvvpLadeMfpsoJk4dADwSIOGCsu8gOxMKxFT2e67XCwNZKWZqNHC37"
-        EncodedText = EncodedText & "ASk4kC2jOJLJY9TzCADSmSxlSlwgIqm1ChpjpNawtOLaRwP4rEjki/nOWHP8r6zcE5DyewATLk5MavjJ/bLnQWzDtVa+pB5l"
-        EncodedText = EncodedText & "rVqDkfCzEFJDM5EQzNoIJxR1C8Mn155Ol5ts8pUuDZ93rP8Dennf0VO73yr32pZwV63veh0STCSqJay20Sg+wwgpLc/N5beS"
-        EncodedText = EncodedText & "kB+OX/7OEyOPXJgFkgLYyzWGABOI+L3tL0YdyFXSCVEpm7u6tX3VcyVVaGeAIQgCWsQ7zv9bufT2+l/vL7y3//1jA0GbrN5B"
-        EncodedText = EncodedText & "lRHgcFvHqj870eaSX8wGUYf7V7MA1YvP2ohQqCldyKUvZNBGkg6M43cB6EfiEkKqgTJIBsRakzL6CyPpwXQ4Gn+DBDMAKK2p"
-        EncodedText = EncodedText & "Y/UF77HxfzF08vg1x9PlZm2ASNAuN7e07Vl70WUHtO9Ly2kqNlIG68Fno0nYwhTzhc2lons3EUJgAxjmhquA8UoEO0pgBQbH"
-        EncodedText = EncodedText & "PLf8oFfq7yWCyyABZgaIpAx67Z2b7LhX7gDYsuzAgJR21+DxD5wqUoMk1aA2fIz/L7P5EElbsva0kLaE0TQDA7gEO1phvqwN"
-        EncodedText = EncodedText & "syGSzmYmATBX5sgAgwDJcIJWtUiJFkOV36ZLNVOLrBF/wjuUD1Yej50NmA3NnAmONyCIWPmTbidj7HxOjDmQmvAJlXrJXNMc"
-        EncodedText = EncodedText & "rLpnQVOxR8Jsd4PmGt+q5ZUEVEnI4uxHTuItNc12WgP4plKYfU8t2obsWRcmBSxJ0KoBA1RyO3Dd6hyaVkg0hZpw03VXI+A4"
-        EncodedText = EncodedText & "4EXuB8wMIsLu197EqZHTgHLxGIBEAkjVywNWx4BItIxIxMK2S9tmkM3nX/reBSyvBMHVFgFwNh40fQiMGoKjCIWSj1BQLBkP"
-        EncodedText = EncodedText & "KPuAZwQsrWchCRIgBUEKWgIGqLbMCLOTBM9mEKU0VNWyQhAc2/5fCrvA+rnpCY5VBaVwanAY2lTKDDOjrSWOcFOwqtc4NTi0"
-        EncodedText = EncodedText & "YPo5b4trbWAMQxBBVBsU/oQ401ovmJ7nwwBnEqTJaNlC6+csBESVZusq1TaGx1tVqDLGhdTPuQFsx0bbeXEopaoGEQg3hcb1"
-        EncodedText = EncodedText & "gQXUUwNhYDVitXAo2LCeGQgFg2c/4swCPubDADM6z9Hi4hHzxgPGCFS+5OPpPYeRLfkVYmUYn732AqzviMIwIOgc5QGhUBBE"
-        EncodedText = EncodedText & "wFN7DuPOJ99CezwMZsZIwcOB41k8c89W0CzwjDk3wEQeQAA086R1eqJ+LI3lSz7a4mF0toahNSMUcuB6Zjw8GsVfMjxAymoZ"
-        EncodedText = EncodedText & "MwzDDGMYUtD/Dw8whpEueAiHnPHnUV+M7+A5ywPGpviZretxoC8L1zOQguD5Al/5VNf4Ufac5wEbO2N45p6tk3rXfPMAgXkW"
-        EncodedText = EncodedText & "Zobhic3Lihuf8zxgYgwrpeEt9wOWSD+AzvgKs9T6AUJM/YVoSgMEHIcYLMdcdyn1A8bmyyysBg3AdDJ/oiRIDLqjHkayOWb+"
-        EncodedText = EncodedText & "r9tpY6CMmbxOL4S+utm+rzCcyRIx+0XXPQkAicTZb4lYZz+xEff0sLzllu5S94+f3MskNr554B1z03XXCMuy0NrSDKU0iCav"
-        EncodedText = EncodedText & "076v5l2vjYElJQ4d6TMjuSLZgo4cLg68nUwmBRGZujzgYKJCzDLp4UclWP/9UC96j/WzlAKRphCaYxGsiEYQjTRVrqYwj49w"
-        EncodedText = EncodedText & "KDjvegCwpESuUMTu195QkUiEPG90R6q72wOuFVNVtUklmUxa3d3d6t7v/+QbHSvXfDefS+uPbLkMV17aJWKR8KL6PDDq+Th0"
-        EncodedText = EncodedText & "+JjZ85d9CnbAyWeGf7X3+Wc+3dXVRbt27fIbMgAAuvjihH3oUIrve/ixb0ejK+4dVQohW2Jla4uZCQefbRnO5EQ6X0Q4HEG5"
-        EncodedText = EncodedText & "mHuh998Htve/84/B9vZ2TqVSulEDAIBcs2aN09/fX95+30M3d65e+zUmXMkQocWz/wQ2SttSvpvJDO96+P67Hgfgb9myhfft"
-        EncodedText = EncodedText & "2+dPR+xqIX/Whg0bmo4ePVoGEP34jYmLVq1ft0H5vhAL/M2chTBOIMDZkeHTv3v2Zwdd1x1saWkJRKNRr6+vz8M0F5RqnbwA"
-        EncodedText = EncodedText & "IFs2bQr5p0/b+Xx+4uWfhbw5wWPHibHT9Lp163RfX5+Lyq12Xcvu1sMaJQArHo87wWDQNsYIY4xYUOcnYiGEcV3Xz2azPgC/"
-        EncodedText = EncodedText & "unBTy+mY6gq0yhATxmw1Zhrd/TO9wExYONe6qNnuhi1UKKCehS/LsizLsiwLgP8AgyHWpjCmt5QAAAAASUVORK5CYII="
+        EncodedText = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAASBklEQVR42uVbfYwd1XX/nXNn5r19u+u1jXHBBttFoSStEtSK"
+        EncodedText = EncodedText & "RoikUIgUVY3U0lYmfzVRm0aVQC1/RFHbKNLalRopqhoV8gFKE0ILIek6QAOtBUEE07pQWoiBLCFAUooB8+EPvPv2fc3Mvad/"
+        EncodedText = EncodedText & "zJ07987MW5uoSKQZaeX1ezP349xzfud3fmcW+Bm/6M3eLyIgIvnanff//llnbn7P0eMrz9196+tf3bfvKi0iRETyVi64nGNx"
+        EncodedText = EncodedText & "8YHo/IvUH2zbuvn8F48c/f5Hf+fyW+x3ACBvhaFoaWlJAcC+/QdvPNafiDYiqyMt37rn4B2Liw9ES0tLCiJU3v9//SMitCjC"
+        EncodedText = EncodedText & "i4uL0e33HLyrP9YiInJsdSL79h/8PAAUa3Rr+MmvxcVFvmxxMcLiIvve8tdfXvr5/3ryGRGRfDAYpiKS/uC/X5bP3njbReVz"
+        EncodedText = EncodedText & "b9Xpl2N/8R/uvOS5w6+JaJ3aNeQPH3o6/+Rnv7Kt9gRfdtli9GbXRNhdnLTvdiLLiYjwl7+5/+If/OhFMx6PzcrqmhmPJ/rH"
+        EncodedText = EncodedText & "h1/VNy39yxUiwsvLy4mIqOJnyfu3/F1qn7V9N+X7ZUlEhL9+132/9+JrJ/R4NM5XVtdkMknN40//WF//1dsvFBEWkVgKT6yu"
+        EncodedText = EncodedText & "Yk+0PgaIEGwM/9Ynb7lgLcWHc03vA/EOEYlAZLJMdz/zh7+649JfPg/9YYq5mQRPPHcEf3L9Ay+BoyFTMaaIQAAQuQ8A8qYj"
+        EncodedText = EncodedText & "ghEAYsAggMndI/Zz2OfL+2FAUGyUmcx+4dortl+w6yyMxhnmZzv47qM/kr/4yiMvdJI4hRgGU6aIj8Dk/zYTp9+897o/esZu"
+        EncodedText = EncodedText & "koAKp6L65peXl5Nr/u7QZ06Mu1cnc2fMJCqBFoERQDEhHY2hRUFEYIqVYpILdG/7ObOzsxBj3EYp9CL7SfEMEUNAxa0i7jzE"
+        EncodedText = EncodedText & "fg+pbd7eIwCyyQi5KT4zIoAYjI0izO/Y1ZntQGsDxQAg79LZ5AP9wfE//7Wr//66v9y949OXX065b4TIbX7PHvqbhw53P/6F"
+        EncodedText = EncodedText & "B/6pu+ncD8Iw1sY6z82QREDF/ILJJEVuDIsYiBFoYwAQxplIujIQd8j2frEbIw+ag1uIQBBQ4S8Q95xnRPswEUGLIGJDRETG"
+        EncodedText = EncodedText & "SOFpIhADrK6NjclzlKYSQBLF0pvb2gXMn336H1+4cP/+/Vf+5iN7MuwVACQMAIt79hDt3Wu+dfN3buxs2vHBScbpytpIsjyL"
+        EncodedText = EncodedText & "CFAEMJFwpBSngzdYjwcQMIwxABhmMsDo+EsUxxErAjMRM8H9EIGJwcxgxcTsfoe9H1wEgTCRMFP1ObP9nomJhOM44tEbr1E6"
+        EncodedText = EncodedText & "GhRhZARCxRrStaMcxREzCVPxvMq0jlYGE8mNSuOFc37jr+569fO0d6/ZvfsqBgDevXtJ7d271/z61Tdfis7mj4xTyYfjcRLZ"
+        EncodedText = EncodedText & "lfonIRCsHn0BJAbaCIwYGDHQ2qB/4mUYk5f+DhDssyUG1LKzVP8V5/5U+QjZSBIfNgg6T4s1EGDK0xdA5xn6J45ALHaU4xII"
+        EncodedText = EncodedText & "RET9wShOc+SIFz7+/j+++b379u3Tu3cvKd5nbx5puVrNbJJxmiFigpBzSut/DK0zpHmONDdgAnJd7EKIkWuNdDwEMYdY54Fe"
+        EncodedText = EncodedText & "yVGobo3SGOLNWDNWAYqEPB0h1xpSQCdybUAE5EaQTYYweQq2wEue3ZmZRpMcPLMgucmvAYDXX3+KGPuu0tddt78DFV8ySTUR"
+        EncodedText = EncodedText & "iMtAJodHBIhBHMUgFeGOB5/CcDjCpvkOjM6w7/4nkGpBksxAjHEnCqBAeru56sTJbVjE8wPPVcqTrUBRYIxGp9PDKBN8497v"
+        EncodedText = EncodedText & "AaKxab6L1dU13PnAMqK4A1axndOagAhEbAGVeJwKiUouffTRR+MHH9ybRwBwaHVlq9G8VQtAJFS5Y+WcxcXYfs4u3P3wM3j1"
+        EncodedText = EncodedText & "U1/HJe/ZhceffRn/+uRL2HbueSBWEKNtKhM3hoj9TeAyRGHU0BNcRiCyC5YgRCACYoWzt+/Ezfcs4/kjJ/Hu87fh4e8fxmPP"
+        EncodedText = EncodedText & "vobtu94JIQUgh+dQLvlBDGkhaI3Ne257bAHAsQgA0oGJtUAV6clDbbeGwn21ztHbeDZ2MvDk4Zfw0A8fwUyng3N3vgPdTecg"
+        EncodedText = EncodedText & "z3IvdaFIHUE4VChPVEG88wIRL2NIGcRVPBPBiMHC1p2IFOHg0y/j/ideRq/bxc7zLkAyfxa0zmzadGYunjdSegFyrfHKK/2K"
+        EncodedText = EncodedText & "B7DSQuDqwXLhdmFE5HK21hqdhbPxjk1nw+gUrBLkhpFlKYjZHSiDIFy6uQ9k5SalBhQe2AacgZx3kPWMPNeYPWMHLthyDsRk"
+        EncodedText = EncodedText & "IE6QGUae2wOQCjQJ4rZTgUt1KlGN8sKur1iEx8zKIq9AYo2cCEQJJDUQ0WBiVBm8IDQk5P7nxqfCs+pM1VaZDrSodMFwvRBT"
+        EncodedText = EncodedText & "rCnPNTIAoASiBYTckkmBFHm7wJDS+j7h8mwfBUxNvEkgpdktBlXkhIndZGXIVDFNDeLj6K0HdD4zFg8oqxRC3rFVX5eGdazR"
+        EncodedText = EncodedText & "GLBdpxgTbtCBLNm0bNkl1QwwGRefMRPIA0DyFu9nJaKC3Uh5PFLl3CK+yW2yJJogDwcggLL3U3VKbj6QJariuEQ1OYPgsUx/"
+        EncodedText = EncodedText & "YYp9AhDgSzkvK4KhWgjEc4qGRyc01sMA+4nIEQvnnlLGIqpTFQqYDpUsRsSRYReH1KTDzm+s2/uUuRy6DK0SZEXEM7L4SOnR"
+        EncodedText = EncodedText & "h/KZimewiqAmGeZ9A1C2Nvrdi3dM3v2ud/a0zl3+dOFDFSRBPO8sF2LTXrFxcWhPHoJX35eRIMHmqzEpDHuq0qWxSF4eRsiW"
+        EncodedText = EncodedText & "Ku8TrxapQrS4X0URln+o6KUXBvRYaYCNc2l6+YVnZldcsutnQgfcgFfkvrVuVQ12JgmtjTVpI9BaVycVxNOU/78drtNck4hA"
+        EncodedText = EncodedText & "KYW1cQ70vRBYQ6FHKC5yFNHbfcc/+cVMxT7DNNgPqigf7X1i4YdbkGMBm4ra9VgjUhvTs6tMH9Pd26LzhmOiWuc6Y7bQgBoP"
+        EncodedText = EncodedText & "qG1+kmYYjychK7P77M10EEXKDdofFFUaAUGCj5RCr9d1Y2ZZjuF4gsa+RDDT7SBJYgeYw9EYWZZb0aS6n4kwOzvjEqTWBoPh"
+        EncodedText = EncodedText & "uBmtIuh0EnQ7SbA/aSdCzZPr9weYpJmluGI3TzDGwBjBpoU5gIA0zbDSH3hoTi6DiwBxHCFJYgDAYDjGYDgGc5jujDHIco0t"
+        EncodedText = EncodedText & "mxeK8jbXWO0PbGUnAS4ZbRBFCjPdDgBgOJqgPxhZbhJmqEmao5NElS5hZ1xro8ItMeAkGbGEpzhcRpXhy3qbHP2sMftGVDBT"
+        EncodedText = EncodedText & "JZbaJTOz5R2CqrdBUFxuvzIqmFtpNBEFHuATspoei7mGAWh628j3DqlVWaGoIaeEzDD7Sx2mPXHUqwg9M8p0iA8FRDccBXBe"
+        EncodedText = EncodedText & "/43X65E1H6jYl0y11np9KWmZjZr035NUKuNXAkdAKU8xR1to+37CoRpxOsmWpvfOiFpbDtSYWqakV2rso76stvMs5TYiqmvO"
+        EncodedText = EncodedText & "rdsiAkouzOs6q9TjV1p/dV4hTRMJJEDgQspuiOO2CjXBsMZIEHZuHiMNDGh6ZVho+TMaIyERavcVQieJYYyx4ORZj9ihuogg"
+        EncodedText = EncodedText & "UhHiKII2uqjWvL0pFSGKlCt1O0mMLM/BzJ7wQWA26HQSB4RKMTpJXKRWQlAERZEKx4wjjBV7pa7VIw2QJHE1V5lFBPUsMN/w"
+        EncodedText = EncodedText & "FRHB/FwPs7MzjdN2BYm1ilKEMzZvcCcW3mu1A2vk2V4XMzOd1thUyitfibB50wbbe6DG/MxlC03QdfyhGbLMFFaLduy5OhM0"
+        EncodedText = EncodedText & "xrRTx5qA0IYB5cTM7TEduLV4SnHtTq+r5qVMbh9T2tLgFLSQ6RgQVR/yVGBrw27TwhwprEyDUtg/ZTUVeiTwolB3CIduY65t"
+        EncodedText = EncodedText & "x+PfK57B1vq1EGigLRVNhzTNA7AqBZFuJ64mJWCSZshzHWQoESCKFDpJBGMEzIwT/RQPLh8LExYBeW7w/l86E2dt7Nh7C4aZ"
+        EncodedText = EncodedText & "5TqQyCEAW3zwT3g8mTSMIgJ0kthS9tCwc81iqAmCK6sDjCepJ38VnxtjsGGuh4X5WQiANMtx/I2VqvkhlfbGxDhj0wawUiAi"
+        EncodedText = EncodedText & "fO7bz+Gm+57HQi8qOku2El0dZrjy4u244ZqLAAi0Njhxsg9tjBM1SpIhALZsXkAniUEA+sMRTq6uFeEScH5BksTYsnkBtRKl"
+        EncodedText = EncodedText & "XgvMT6+fuRQ5q1yrAWjjUWFjySpzrdFBro2u7Own+xNsno2x0IugTeUB3ZjxxtrEYUmWWYBlqhEhFD1JY5y3GSuMluJoPVRK"
+        EncodedText = EncodedText & "jCiXZnKNNZsHufSAaeSmkYNdN0dO+1UrHwojRchyDW1b67kxMFKEWxyxJ7PB0/yotava6CGiWpusQ95IEebsofOpuF8borbS"
+        EncodedText = EncodedText & "SzoV+pIjIdTKEkOK2qJxtk1W39qUXbQDZmCABgbIm32jLhCrW6avqClxjeOLBFloGqL74vup19KsQqWF9UdtVgne7SA6BeeH"
+        EncodedText = EncodedText & "1+SkoiVWc9f6giMmRIpgpCAzzIRIGadKiUgznzpMCTfQ1IWn+RPWF0QgaHUTrXWwYSI4eTp4ccGYoB8wvUgjHFudQGuD3OZ8"
+        EncodedText = EncodedText & "Vgr94QTAhuCcxXV2JFDIpcVLdEDkvHKXVesh4nQEkQ1zPYyi5gCwklh5wnEcYeOGOSuJhfVapBhxHDkAveZD5+PnFrogeC9T"
+        EncodedText = EncodedText & "EUFrwYfeu831JCOlsDA/i8w2PMVrnLJiJHHsPKU30w3A09WcVhIjanbdmmmQmikwSWJ0OvFpCZhzvZmmlC4VayRbmf3C9nl8"
+        EncodedText = EncodedText & "6sO/ONXorviCoNfrtguoHhMVAFHEWNgw21q9B+uUZnBEVRqkVh4g0hIi05TflnvqMZtr3cr5CyywtUfNGG2VONWelSlh16Y6"
+        EncodedText = EncodedText & "iEizFsAUWbyEQ5I6ilKDXrYtgpmC12MUc6HzNbh8rZlJRX3SOiaFY9absb6zsLeuQFxq6AH1jEqEwXCM4WgUYoA1xPxcz8nN"
+        EncodedText = EncodedText & "IoKTK2vIc416U0kphY0bZl0JPR4XCi7V+oIiwOxMF71e13neSn8NWZqFdb4UNcXChlkoLl7qSNMMq/1BYxvGFFL7/FwvNKSc"
+        EncodedText = EncodedText & "JggOR2OkWR6qvTYLjEYTzHQSu4BC6/etXRotTTPM9rqueBmOJ5ikmSudKxS3gNbrFv2DPMdwOA4KrjKcTJZjJutgptsBETCa"
+        EncodedText = EncodedText & "pHZMDgJERDAYjTFrx2y7ovVoINk3HIvTk8Dd/DIZtq1WhEH4aku9ni/FDK4tqDhMqqUw8trtCIhUXQx28r347yjBvblSx8e1"
+        EncodedText = EncodedText & "UzLB2tuNJQUWaUfB8DuawuKmy6XrAay0HU4LNRafe8r0ef1ymNcVhWWdVZ2iepDT5OnSqmbTNJlyisxdb8a0P98m7FQGqEtP"
+        EncodedText = EncodedText & "9VfcCC2y0/oGkilGlcYUza7OKewbZlyR9jR4Gk1tPq0JPfd2oeDevoB7iSqUsL3PxW90SMMI5SZM7RU2n4f4b402lR8JQtDR"
+        EncodedText = EncodedText & "Z2mXxaVugCyNqU05TJJC9iIue3dcCA+lJGUfiaIIcRyBrApLDjgLmhxFyk3csVIal708r6lRKjyFEFNQaNcM8qTxKFKIS1kc"
+        EncodedText = EncodedText & "hfStFLvx/LFLWbzWGaJOEpHLAju2bsiMER1ggQjm52Yxa1vbdd9STI6OKkXYEsji3qtWtsHq8/Zup9MaNszsxmQmbNm8YIss"
+        EncodedText = EncodedText & "tGaSUhaf6XaQxPHUMSXs2EJEJslcIT9F9k/NVr52x32H09xsTCJljDGqRFSlONDjUNPVyBNKlaKakkGt8am4ev9wWk+xfCRS"
+        EncodedText = EncodedText & "KvySmqKMk+4a/DrEcVbKpLnhteHohb3XXrsqIsQHDhxQAKTfH93z2vFV64GmwbNLqt+YvJYGw/tkKrTUx5Optbs395RmZzCm"
+        EncodedText = EncodedText & "tI9pm27yyvEVWhuM7wWAAwcOKD5w4IABADMef+k/Di0PDcBKRWba4t8kyL4trqJ9p0xuwP/5vacGufAN1gDFSZd/EHnDN/75"
+        EncodedText = EncodedText & "Y//++HMiIrmI5Hmey/+Hn3I/Bw89K1+89dsf8/fsrvKD62+9+xPfeegJ6Y9SEREjItlP+Y/pD1O576En5Eu33f2J+uapboSr"
+        EncodedText = EncodedText & "rrpK/+0td37gzI2b9m7besb7ztuxPSgmqldmZXooBLIYVdzVgqP/brDUKKr7e0O0vpw29a0F/92kMv/3ByM8/+IRvHr0xMFj"
+        EncodedText = EncodedText & "J04u/ulHfvu75R6njunf8Lmbbv+V3szMRUTYaYzEdeWmAJew4OEAeELCYfxvTLMBylw0SKu77H3F33fZMUw1ov3Ofg0GFWBn"
+        EncodedText = EncodedText & "AGY2eW7+J9fZI9d+9MpDALB7aUnt8zY/9VpaWlKNPz39Kb5EhBoxb6//BTrnfQKAxO/pAAAAAElFTkSuQmCC"
 
 '------------------------------------------------------------------------------
 ' RETURN PAYLOAD
@@ -10928,10 +12982,11 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
         M_GridIcon_EmbeddedIconBase64 = EncodedText
 
 End Function
+
 Public Sub M_GridIcon_PurgeAll()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         PURGE ALL GRID ICONS
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -10977,7 +13032,7 @@ Public Sub M_GridIcon_PurgeAll()
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -11022,7 +13077,7 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
     ByVal TargetShapeName As String)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                    DELETE NAMED SHAPE ACROSS WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11074,7 +13129,7 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -11128,7 +13183,7 @@ End Sub
 Private Function M_FormBridge_GetLoadedForm(ByVal UserFormName As String) As Object
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         FORM BRIDGE GET LOADED FORM
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11175,7 +13230,7 @@ Private Function M_FormBridge_GetLoadedForm(ByVal UserFormName As String) As Obj
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -11267,7 +13322,7 @@ End Function
 Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           FORM BRIDGE REFRESH FROM CELL
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11318,7 +13373,7 @@ Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -11443,7 +13498,7 @@ End Sub
 Private Sub M_FormBridge_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                     FORM BRIDGE AFTER SUCCESSFUL SELECTION
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11488,7 +13543,7 @@ Private Sub M_FormBridge_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -11545,7 +13600,7 @@ End Sub
 Private Sub M_FormBridge_RefreshSettings()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                         FORM BRIDGE REFRESH SETTINGS
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11591,7 +13646,7 @@ Private Sub M_FormBridge_RefreshSettings()
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
@@ -11647,7 +13702,7 @@ End Sub
 Private Sub M_FormBridge_UnloadLoadedPicker()
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                       FORM BRIDGE UNLOAD LOADED PICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11674,8 +13729,8 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '   Scans the currently loaded VBA.UserForms collection
 '   Collects loaded DatePicker instances by class name or runtime name
 '   Separates the scan phase from the unload phase
-'   Exits without stopping the timer when no DatePicker instance is loaded
-'   Stops the DatePicker timer only when at least one picker instance exists
+'   Stops any active or stale DatePicker timer after the loaded-form scan
+'   Exits after timer cleanup when no DatePicker instance is loaded
 '   Hides each collected picker before unload to reduce visual flicker
 '   Unloads collected picker instances in reverse collection order
 '   Writes non-fatal diagnostics to the Immediate Window
@@ -11699,17 +13754,17 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '   The scan and unload phases are separated because unloading a form changes
 '   the VBA.UserForms collection
 '
-'   DP_Show must not fail just because an old transient form instance cannot be
-'   unloaded cleanly
+'   DP_Show must not fail just because an old transient form instance or stale
+'   timer cannot be cleaned up fully
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_FormBridge_UnloadLoadedPicker" 'Current procedure name
+    Const PROC_NAME            As String = "M_FormBridge_UnloadLoadedPicker"
 
     Dim CurForm                As Object       'Current loaded UserForm instance
     Dim LoadedForm             As Object       'DatePicker form selected for unload
@@ -11779,12 +13834,6 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
         Next CurForm
 
 '------------------------------------------------------------------------------
-' EXIT WHEN NO PICKER IS LOADED
-'------------------------------------------------------------------------------
-    'Exit cleanly when there is no loaded DatePicker form
-        If FormsToUnload.Count = 0 Then GoTo CleanExit
-        
-'------------------------------------------------------------------------------
 ' STOP TIMER
 '------------------------------------------------------------------------------
     'Track the current step
@@ -11795,7 +13844,7 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
         StepErrDescription = vbNullString
     'Suppress timer-stop errors because Application.OnTime cancellation can fail
         On Error Resume Next
-    'Stop any active DatePicker timer before unloading the form
+    'Stop any active or stale DatePicker timer before continuing
         M_Timer_Stop
     'Capture timer-stop failure if any
         StepErrNumber = Err.Number
@@ -11805,6 +13854,7 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
         Err.Clear
     'Restore fail-safe handling
         On Error GoTo FailSafe
+
     'Write timer-stop diagnostics only when stop failed
         If StepErrNumber <> 0 Then
             Debug.Print PROC_NAME & _
@@ -11812,6 +13862,12 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
                 " | Error=" & VBA.CStr(StepErrNumber) & _
                 " | " & StepErrDescription
         End If
+
+'------------------------------------------------------------------------------
+' EXIT WHEN NO PICKER IS LOADED
+'------------------------------------------------------------------------------
+    'Exit cleanly after stale-timer cleanup when there is no loaded DatePicker form
+        If FormsToUnload.Count = 0 Then GoTo CleanExit
 
 '------------------------------------------------------------------------------
 ' UNLOAD MATCHING FORMS
@@ -11897,7 +13953,7 @@ End Sub
 Public Sub M_Settings_UseLocalNames(ByVal UseLocalDayNames As Boolean)
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           SETTINGS USE LOCAL NAMES
 '------------------------------------------------------------------------------
 ' PURPOSE
@@ -11907,7 +13963,7 @@ Public Sub M_Settings_UseLocalNames(ByVal UseLocalDayNames As Boolean)
 ' WHY THIS EXISTS
 '   Older calling code may still call M_Settings_UseLocalNames
 '
-'   The preferred settings routine is M_Settings_SetUseLocalDayNames, so this
+'   The preferred settings routine is M_Settings_SetUseLocalNames, so this
 '   wrapper preserves the legacy entry point while centralizing the actual
 '   settings update in the preferred routine
 '
@@ -11920,17 +13976,17 @@ Public Sub M_Settings_UseLocalNames(ByVal UseLocalDayNames As Boolean)
 '   Nothing
 '
 ' BEHAVIOR
-'   Delegates directly to M_Settings_SetUseLocalDayNames
+'   Delegates directly to M_Settings_SetUseLocalNames
 '   Does not validate, transform, or reinterpret the input value
 '   Does not perform any additional settings logic locally
 '
 ' ERROR POLICY
 '   Does not raise custom errors
 '   Does not suppress errors
-'   Lets M_Settings_SetUseLocalDayNames error behavior propagate unchanged
+'   Lets M_Settings_SetUseLocalNames error behavior propagate unchanged
 '
 ' DEPENDENCIES
-'   M_Settings_SetUseLocalDayNames
+'   M_Settings_SetUseLocalNames
 '
 ' NOTES
 '   Keep this routine as a thin compatibility wrapper
@@ -11938,13 +13994,13 @@ Public Sub M_Settings_UseLocalNames(ByVal UseLocalDayNames As Boolean)
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DELEGATE SETTING UPDATE
 '------------------------------------------------------------------------------
     'Delegate to the preferred setting routine
-        M_Settings_SetUseLocalDayNames UseLocalDayNames
+        M_Settings_SetUseLocalNames UseLocalDayNames
 
 End Sub
 
@@ -11952,15 +14008,16 @@ End Sub
 Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As String
 
 '
-'==============================================================================
+'------------------------------------------------------------------------------
 '                           GET QUALIFIED MACRO NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Returns a workbook-qualified macro name suitable for Excel callbacks
 '
 ' WHY THIS EXISTS
-'   Shape.OnAction, CommandBarButton.OnAction, and Application.OnTime callbacks
-'   should resolve back to the workbook that contains this module
+'   Shape.OnAction, CommandBarButton.OnAction, Application.OnTime and
+'   Application.OnKey callbacks should resolve back to the workbook that contains
+'   this module
 '
 '   Qualifying the callback with ThisWorkbook.Name avoids accidental resolution
 '   against another active workbook that may contain a same-named procedure
@@ -11997,7 +14054,7 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
 '
 ' UPDATED
 '   2026-05-06
-'==============================================================================
+'------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
