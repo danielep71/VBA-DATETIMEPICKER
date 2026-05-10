@@ -1,4 +1,4 @@
-Attribute VB_Name = "M_DATEPICKER_DEMO"
+Attribute VB_Name = "M_DatePicker_Demo"
 '------------------------------------------------------------------------------
 ' MODULE: M_DATEPICKER_DEMO
 '------------------------------------------------------------------------------
@@ -613,9 +613,9 @@ Public Sub Demo_SaveSettings()
 ' DEPENDENCIES
 '   M_Settings_Load
 '   M_Settings_SetFirstDayOfWeek
-'   M_Settings_SetUseLocalDayNames
+'   M_Settings_SetUseLocalNames
 '   M_Settings_SetClockMode
-'   M_Settings_SetAllowOutsideMonthDays
+'   M_Settings_SetAllowOutsideMonthSelection
 '   M_Settings_SetShowRightClick
 '   M_Settings_SetShowGridIcon
 '   M_Settings_SetSizeMode
@@ -691,7 +691,7 @@ Public Sub Demo_SaveSettings()
     'Apply the first-day-of-week setting
         M_Settings_SetFirstDayOfWeek FirstDayOfWeek
     'Apply the local-name setting
-        M_Settings_SetUseLocalDayNames UseLocalNames
+        M_Settings_SetUseLocalNames UseLocalNames
     'Apply the clock mode setting
         If UseLiveClock Then
             M_Settings_SetClockMode DP_ClockMode_Live
@@ -709,7 +709,7 @@ Public Sub Demo_SaveSettings()
 ' APPLY BEHAVIOR SETTINGS
 '------------------------------------------------------------------------------
     'Apply the outside-month selection setting
-        M_Settings_SetAllowOutsideMonthDays AllowOutsideMonth
+        M_Settings_SetAllowOutsideMonthSelection AllowOutsideMonth
     'Apply the close-after-selection setting
         M_Settings_SetCloseAfterSelection CloseAfterSelection
     'Apply the weekend-highlight setting
@@ -856,7 +856,7 @@ Private Sub Demo_WriteCurrentSettings(ByVal Wb As Workbook)
 '------------------------------------------------------------------------------
     'Write the current outside-month selection value
         Demo_SetNamedValue Wb, DEMO_NM_ALLOW_OUTSIDE, _
-            Demo_BoolToText(gDP_AllowOutsideMonthSel)
+            Demo_BoolToText(gDP_AllowOutsideMonthSelection)
 
     'Write the current close-after-selection value
         Demo_SetNamedValue Wb, DEMO_NM_CLOSE_AFTER_SELECTION, _
@@ -1237,7 +1237,7 @@ Private Function Demo_ReadNamedBoolean( _
 '   Demo_TryParseBoolean
 '
 ' NOTES
-'   Accepted true values include TRUE, 1, YES, ON, SI, SÌ, and VERO
+'   Accepted true values include TRUE, 1, YES, ON, SI, S , and VERO
 '
 ' UPDATED
 '   2026-04-28
@@ -1405,7 +1405,7 @@ Private Function Demo_TryParseBoolean( _
     'Parse true values
         Select Case NormalizedValue
 
-            Case "1", "-1", "TRUE", "YES", "Y", "ON", "SI", "SÌ", "VERO"
+            Case "1", "-1", "TRUE", "YES", "Y", "ON", "SI", "S ", "VERO"
                 ParsedValue = True
                 Demo_TryParseBoolean = True
                 Exit Function
