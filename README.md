@@ -332,8 +332,6 @@ Conventional Commit examples:
 
 ---
 
----
-
 ## 🔧 Coding Style
 
 This repository follows a structured VBA style.
@@ -357,3 +355,6 @@ General conventions:
 - inline comments only for declarations
 - no comments inside `With ... End With`
 - explicit cleanup / fail-safe logic where appropriate
+
+
+---
