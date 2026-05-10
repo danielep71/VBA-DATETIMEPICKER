@@ -76,8 +76,7 @@ Built as part of a broader **Excel VBA Runtime Framework**, this project focuses
 > Add your screenshots into an `assets/` folder and update the paths below.
 
 ### Main picker
-```markdown
-![Main Picker](assets/datepicker-main.png)
+<img  src="assets/datepicker-main.png" />
 ```
 
 ### Settings panel
