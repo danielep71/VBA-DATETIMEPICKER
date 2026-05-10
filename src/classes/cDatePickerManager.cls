@@ -116,11 +116,6 @@ Option Explicit
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
-' PRIVATE CONSTANTS
-'------------------------------------------------------------------------------
-    Private Const DP_FORM_NAME          As String = "UF_DatePicker"     'DatePicker UserForm class / runtime name
-
-'------------------------------------------------------------------------------
 ' APPLICATION EVENT SOURCE
 '------------------------------------------------------------------------------
     Private WithEvents mExcelApp        As Excel.Application            'Hooked Excel Application instance
@@ -414,8 +409,8 @@ Public Property Get Is_PickerLoaded() As Boolean
 ' RETURN STATE
 '------------------------------------------------------------------------------
     'Return whether the DatePicker form is currently loaded
-        Is_PickerLoaded = Is_UserFormLoaded(DP_FORM_NAME)
-
+        Is_PickerLoaded = Is_UserFormLoaded(M_DatePicker.DP_FORM_NAME)
+        
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -477,8 +472,8 @@ Public Property Get PickerVisible() As Boolean
 ' RETURN STATE
 '------------------------------------------------------------------------------
     'Return whether the DatePicker form is currently visible
-        PickerVisible = Is_UserFormVisible(DP_FORM_NAME)
-
+        PickerVisible = Is_UserFormVisible(M_DatePicker.DP_FORM_NAME)
+    
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
