@@ -19,15 +19,6 @@
 
 ---
 
-## ⭐ Why this repo exists
-
-Excel still powers an enormous number of business-critical workflows, but native date-entry UX is often poor.
-
-This repository exists to provide a **clean, modern, and reusable VBA-based solution** for a very common problem:  
-**making date input in Excel feel much better without sacrificing control, portability, or maintainability**.
-
----
-
 ## ✨ Overview
 
 **VBA-DATETIMEPICKER** is a modern, modular, and worksheet-friendly **Date / DateTime Picker for Excel VBA**.
@@ -40,6 +31,15 @@ Built as part of a broader **Excel VBA Runtime Framework**, this project focuses
 - 🧩 modular, maintainable VBA architecture
 - ⚙️ reusable infrastructure for enterprise workbooks and add-ins
 - 🧪 demo-ready and regression-friendly implementation patterns
+
+---
+
+## ⭐ Why this exists
+
+Excel still powers an enormous number of business-critical workflows, but native date-entry UX is often poor.
+
+This repository exists to provide a **clean, modern, and reusable VBA-based solution** for a very common problem:  
+**making date input in Excel feel much better without sacrificing control, portability, or maintainability**.
 
 ---
 
@@ -103,7 +103,7 @@ Central controller responsible for:
 - stale UI cleanup
 - selection-driven show / hide behavior
 - reentrancy protection
-- workbook / worksheet context handling
+- workbook/worksheet context handling
 
 ### `UF_DatePicker`
 Dedicated UI layer responsible for:
@@ -114,18 +114,18 @@ Dedicated UI layer responsible for:
 - settings overlay
 - user-facing controls and visual state
 
-### Supporting modules / helpers
+### Supporting modules/helpers
 Depending on your implementation version, the project may also include:
 
 - shared constants and configuration
 - WinAPI helpers
 - formatting helpers
 - demo builder routines
-- regression / test helpers
+- regression/test helpers
 
 ---
 
-## 🧠 Design Principles
+## 🧠 Design notes
 
 This repo follows a few core principles:
 
@@ -142,7 +142,7 @@ This repo follows a few core principles:
   Reentrancy guards and cleanup logic matter in real Excel environments
 
 - **Production-minded code quality**  
-  This is not just a demo widget; it is intended as a robust reusable component
+  This is not just a demo widget; it is intended as a robust, reusable component
 
 ---
 
@@ -156,18 +156,15 @@ VBA-DATETIMEPICKER/
 │  ├─ forms/
 │  │  └─ UF_DatePicker.frm
 │  ├─ modules/
-│  │  └─ supporting modules (.bas)
-│  └─ demo/
-│     └─ VBA_DateTimePicker_Demo.xlsm
+│  │  └─ M_DatePicker.bas
+├─ demo/
+│  └─ M_DEMO_BUILDER.bas
+│  └─ DatePicker Demo.xlsm
 ├─ assets/
 │  └─ screenshots / social preview / branding
 ├─ README.md
 ├─ LICENSE
-├─ CHANGELOG.md
-└─ CONTRIBUTING.md
 ```
-
-> Adjust the structure above to match your actual repository layout
 
 ---
 
@@ -232,12 +229,16 @@ This component is useful when you want to improve date input in:
 - risk-management workbooks
 - internal operational tools
 - user-facing Excel templates
-- demo / showcase workbooks
+- demo/showcase workbooks
 - reusable VBA frameworks
 
 ---
 
-## 🧪 Demo & Testing
+##  Public API
+
+---
+
+## 🧪 Demo quick start
 
 A good demo workbook should typically include:
 
@@ -250,11 +251,15 @@ A good demo workbook should typically include:
 Suggested validation areas:
 
 - selection change behavior
-- workbook / worksheet activation handling
+- workbook/worksheet activation handling
 - cleanup after UI close
 - month navigation
 - multi-cell write-back
 - settings persistence
+
+---
+
+## Test quick start
 
 ---
 
@@ -272,7 +277,7 @@ Planned or possible future enhancements include:
 
 **VBA-DATETIMEPICKER** is intended to sit naturally alongside other reusable Excel VBA components, such as:
 
-- performance / execution managers
+- performance/execution managers
 - Excel UI controllers
 - demo builders
 - progress-bar components
@@ -355,6 +360,5 @@ General conventions:
 - inline comments only for declarations
 - no comments inside `With ... End With`
 - explicit cleanup / fail-safe logic where appropriate
-
 
 ---
