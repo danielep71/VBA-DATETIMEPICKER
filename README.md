@@ -332,10 +332,31 @@ Conventional Commit examples:
 
 ---
 
-## 📄 License
+## 📚 Wiki
 
-This project is released under the **MIT License**.
+<p align="left">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Extended Guidance-blue">
+</p>
+
+For additional examples, notes, and repository-level guidance, see the project wiki:
+
+[cPerformanceManager Wiki](https://github.com/danielep71/VBA-Performance_Manager/wiki)
 
 ---
 
+## 📄 License
+
+<p align="left">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
+</p>
+
+This project is licensed under the terms in `LICENSE`.
+
+---
+
+## 👤 Author
+
+<p align="left">
+  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele Penza-orange">
+</p>
 
