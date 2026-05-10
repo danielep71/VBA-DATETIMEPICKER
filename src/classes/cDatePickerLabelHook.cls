@@ -37,42 +37,48 @@ Option Explicit
 '     - picker-panel item hover routing
 '     - footer-label hover routing
 '     - settings-panel label hover routing
-'     - simulated MouseLeave via NotifyMouseLeft called by the owner form
+'     - labels with no click behavior
 '     - labels with no hover behavior
 '
-' ERROR POLICY
-'   Initialization raises descriptive runtime errors if required references are
-'   missing, if the hook is already initialized, if the requested hover mode is
-'   unsupported, or if the owner form does not expose every required routing
-'   method
+'   Initialize validates references, normalizes action / handler / hover names,
+'   validates supported hover modes, stores the target label and owner form, and
+'   marks the hook as initialized only after all required setup succeeds.
 '
-'   Click routing raises diagnostic runtime errors and preserves the inner error
-'   source and description
+'   Initialize deliberately does not probe owner-form methods with CallByName.
+'   Click and hover methods are resolved only when the corresponding event is
+'   actually routed.
+'
+' ERROR POLICY
+'   Initialization raises descriptive runtime errors if:
+'     - the hook is already initialized
+'     - OwnerForm is Nothing
+'     - TargetLabel is Nothing
+'     - HoverMode is unsupported
+'     - ActionName is supplied but ClickHandlerName is blank
+'
+'   Click routing exits when no action is assigned. Otherwise it raises
+'   diagnostic runtime errors if the hook is not initialized, if required
+'   references are missing, or if the configured owner-form click handler fails.
+'   The raised diagnostic preserves the inner error source and description.
 '
 '   Hover routing is best-effort and suppresses errors so MouseMove cannot
-'   interrupt UserForm interaction
+'   interrupt UserForm interaction.
 '
-'   MouseLeave routing is best-effort and suppresses errors so NotifyMouseLeft
-'   cannot interrupt UserForm interaction
-'
-'   Termination suppresses cleanup errors
+'   Termination suppresses cleanup errors.
 '
 ' DEPENDENCIES
 '   MSForms.Label
 '
-'   Expected public members on OwnerForm (verified at initialization time):
+'   Expected public hover members on OwnerForm, resolved at hover-routing time:
 '     - UF_DayCell_HoverApply
 '     - UF_Header_HoverApply
 '     - UF_PickerPanel_HoverApply
 '     - UF_Footer_HoverApply
 '     - UF_SettingsPanel_HoverApply
 '
-'   The click-action handler method name is supplied by the caller via
-'   ClickHandlerName and is verified against the owner form at initialization
-'
-'   The leave handler method name is supplied by the caller via LeaveHandlerName
-'   and is verified against the owner form at initialization when provided.
-'   The leave handler receives the departing label name as its only argument.
+'   Expected public click member on OwnerForm, resolved at click-routing time:
+'     - the method name supplied through ClickHandlerName
+'     - default: UF_PickerPanel_HandleAction
 '
 ' NOTES
 '   Instances of this class must be stored in a module-level Collection in the
@@ -80,12 +86,6 @@ Option Explicit
 '
 '   The owner form is stored as Object to keep this class generic and reusable
 '   across UserForms that expose the expected public routing methods.
-'
-'   Because OwnerForm is late-bound, method existence is probed explicitly
-'   during Initialize using CallByName so that missing or renamed routing
-'   methods are detected at initialization time rather than at first use.
-'
-'   The owning UserForm should release the hook collection during termination.
 '
 '   The optional HoverMode default is the literal string "NONE" rather than the
 '   private class constant DP_HOVER_NONE because VBA can be fragile with
@@ -97,16 +97,10 @@ Option Explicit
 '   mIsInitialized is set to True only after every reference and validation
 '   step completes successfully. It is the authoritative hook-state flag.
 '
-'   MSForms labels do not fire a native MouseLeave event. The leave mechanism
-'   in this class is cooperative: the owning UserForm must call NotifyMouseLeft
-'   on every hook from its own MouseMove handler. Each hook uses the mIsHovered
-'   flag to detect whether it was the previously hovered label. When the flag
-'   is True and NotifyMouseLeft fires, the hook concludes the mouse has left,
-'   routes the leave callback, and clears the flag. Labels that were never
-'   entered skip the callback at zero cost.
+'   The owning UserForm should release the hook collection during termination.
 '
 ' UPDATED
-'   2026-05-03
+'   2026-05-10
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -127,8 +121,6 @@ Option Explicit
     Private Const DP_ERR_BAD_METHOD     As Long = 516           'Owner form missing required method
     Private Const DP_ERR_CLICK_UNINIT   As Long = 520           'Click fired before initialization
     Private Const DP_ERR_CLICK_NO_OWNER As Long = 521           'OwnerForm lost during click
-    Private Const DP_ERR_LEAVE_UNINIT   As Long = 530           'NotifyMouseLeft called before initialization
-    Private Const DP_ERR_LEAVE_NO_OWNER As Long = 531           'OwnerForm lost during leave routing
 
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
@@ -139,10 +131,9 @@ Attribute mLabel.VB_VarHelpID = -1
     Private mOwnerForm                  As Object               'Owner UserForm exposing expected routing methods
     Private mActionName                 As String               'Normalized click action name
     Private mClickHandlerName           As String               'Normalized owner-form click handler method name
-    Private mLeaveHandlerName           As String               'Normalized owner-form leave handler method name
     Private mHoverMode                  As String               'Normalized hover behavior mode
     Private mIsInitialized              As Boolean              'True after successful initialization
-    Private mIsHovered                  As Boolean              'True while the mouse is over this label
+
 
 '
 '------------------------------------------------------------------------------
@@ -313,88 +304,9 @@ Public Property Get LabelName() As String
 
 End Property
 
-Public Property Get LeaveHandlerName() As String
 
-'
-'------------------------------------------------------------------------------
-'                           LEAVE HANDLER NAME
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Returns the normalized leave handler method name assigned to this hook
-'
-' WHY THIS EXISTS
-'   Allows the owning UserForm to inspect hook state for diagnostics and
-'   teardown logging without coupling to private internals
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Normalized leave handler method name, or empty string when no leave
-'   handler is assigned
-'
-' BEHAVIOR
-'   Returns the stored normalized leave handler name directly
-'
-' ERROR POLICY
-'   None
-'
-' DEPENDENCIES
-'   None
-'
-' NOTES
-'   An empty return value indicates that this hook will not fire a leave
-'   callback even when NotifyMouseLeft is called
-'
-' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
 
-    LeaveHandlerName = mLeaveHandlerName
 
-End Property
-
-Public Property Get IsHovered() As Boolean
-
-'
-'------------------------------------------------------------------------------
-'                           IS HOVERED
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Returns True when the mouse is currently over this label
-'
-' WHY THIS EXISTS
-'   Allows the owning UserForm to query hover state on demand without
-'   maintaining a parallel tracking variable
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   True while mLabel_MouseMove has fired more recently than NotifyMouseLeft
-'   False before first hover, after NotifyMouseLeft fires, or when not
-'   initialized
-'
-' BEHAVIOR
-'   Returns the private hover flag directly
-'
-' ERROR POLICY
-'   None
-'
-' DEPENDENCIES
-'   None
-'
-' NOTES
-'   mIsHovered is set by mLabel_MouseMove and cleared by NotifyMouseLeft.
-'   It is also cleared during Initialize and Class_Terminate.
-'
-' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
-
-    IsHovered = mIsHovered
-
-End Property
 
 '------------------------------------------------------------------------------
 ' PUBLIC METHODS
@@ -403,9 +315,7 @@ End Property
 Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
     MSForms.Label, Optional ByVal ActionName As String = vbNullString, Optional _
     ByVal HoverMode As String = "NONE", Optional ByVal ClickHandlerName As String = _
-    "UF_PickerPanel_HandleAction", Optional ByVal LeaveHandlerName As String = _
-    vbNullString)
-
+    "UF_PickerPanel_HandleAction")
 '
 '------------------------------------------------------------------------------
 '                           INITIALIZE LABEL HOOK
@@ -440,10 +350,6 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
 '   ClickHandlerName
 '     Optional name of the public method on OwnerForm that receives click
 '     actions. Defaults to UF_PickerPanel_HandleAction
-'
-'   LeaveHandlerName
-'     Optional name of the public method on OwnerForm that receives the
-'     simulated MouseLeave notification. Leave empty to suppress leave routing
 '
 ' RETURNS
 '   Nothing
@@ -494,7 +400,6 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
     Dim NormalizedActionName    As String       'Normalized click action name
     Dim NormalizedHoverMode     As String       'Normalized hover mode
     Dim NormalizedHandlerName   As String       'Normalized click handler method name
-    Dim NormalizedLeaveHandler  As String       'Normalized leave handler method name
     Dim ErrorNumber             As Long         'Captured error number
     Dim ErrorDescription        As String       'Captured error description
 
@@ -524,12 +429,8 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
         mActionName = vbNullString
     'Clear any previous click handler name
         mClickHandlerName = vbNullString
-    'Clear any previous leave handler name
-        mLeaveHandlerName = vbNullString
     'Reset hover mode to a safe default
         mHoverMode = DP_HOVER_NONE
-    'Clear the hover tracking flag
-        mIsHovered = False
     'Clear the initialization flag
         mIsInitialized = False
 
@@ -560,8 +461,6 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
         End If
     'Normalize the click handler method name
         NormalizedHandlerName = VBA.Trim$(ClickHandlerName)
-    'Normalize the optional leave handler method name
-        NormalizedLeaveHandler = VBA.Trim$(LeaveHandlerName)
 
 '------------------------------------------------------------------------------
 ' VALIDATE HOVER MODE
@@ -596,12 +495,8 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
         mActionName = NormalizedActionName
     'Store the normalized click handler method name
         mClickHandlerName = NormalizedHandlerName
-    'Store the normalized leave handler method name
-        mLeaveHandlerName = NormalizedLeaveHandler
     'Store the normalized hover mode
         mHoverMode = NormalizedHoverMode
-    'Initialise the hover tracking flag to the safe inert value
-        mIsHovered = False
     'Store the target label reference last so a partial failure cannot leave
     'a live event subscription pointing at stale state
         Set mLabel = TargetLabel
@@ -632,12 +527,8 @@ ErrorHandler:
         mActionName = vbNullString
     'Clear the click handler name
         mClickHandlerName = vbNullString
-    'Clear the leave handler name
-        mLeaveHandlerName = vbNullString
     'Reset hover mode to a safe value
         mHoverMode = DP_HOVER_NONE
-    'Clear the hover tracking flag
-        mIsHovered = False
     'Ensure the initialization flag is cleared
         mIsInitialized = False
     'Restore normal error handling
@@ -826,9 +717,6 @@ Private Sub mLabel_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, _
 '   diagnostic always has a non-empty label identity, even if routing fails
 '   on the first call into the owner form.
 '
-'   Sets mIsHovered = True after successful routing so that NotifyMouseLeft
-'   can detect when the mouse departs this label.
-'
 ' ERROR POLICY
 '   Best-effort hover routing. Suppresses hover errors so MouseMove cannot
 '   interrupt UserForm interaction.
@@ -849,12 +737,8 @@ Private Sub mLabel_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, _
 '   Hover errors are intentionally suppressed because MouseMove fires at high
 '   frequency and should never interrupt normal UserForm interaction.
 '
-'   mIsHovered is set to True here and cleared by NotifyMouseLeft. The owning
-'   UserForm must call NotifyMouseLeft on all hooks from its own MouseMove
-'   handler to complete the cooperative leave-detection contract.
-'
 ' UPDATED
-'   2026-05-03
+'   2026-05-10
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -927,9 +811,6 @@ Private Sub mLabel_MouseMove(ByVal Button As Integer, ByVal Shift As Integer, _
                     RoutedHoverMode & " | Label=" & RoutedLabelName
         End Select
 
-    'Stamp the hover flag so NotifyMouseLeft can detect departure from this label
-        mIsHovered = True
-
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -946,153 +827,6 @@ FailSafe:
         Debug.Print PROC_NAME & " | Label=" & RoutedLabelName & " | HoverMode=" _
             & RoutedHoverMode & " | Error=" & VBA.CStr(Err.Number) & " | " & _
             Err.Description
-
-    'Clear the suppressed error
-        Err.Clear
-
-End Sub
-
-Public Sub NotifyMouseLeft()
-
-'
-'------------------------------------------------------------------------------
-'                           NOTIFY MOUSE LEFT
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Delivers a simulated MouseLeave notification to this hook
-'
-' WHY THIS EXISTS
-'   MSForms labels do not fire a native MouseLeave event. The owning UserForm
-'   must call this method on every hook from its own MouseMove handler.
-'   Each hook uses its mIsHovered flag to detect whether the mouse has
-'   departed since the last mLabel_MouseMove call.
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Exits immediately when the hook is not initialized, when no leave handler
-'   is configured, or when this label was not the previously hovered label.
-'
-'   When mIsHovered is True, the mouse has left this label since the last
-'   MouseMove. The method clears mIsHovered, validates hook state, and
-'   routes the leave callback to the owner form.
-'
-' ERROR POLICY
-'   Best-effort leave routing. Suppresses leave errors so NotifyMouseLeft
-'   cannot interrupt UserForm interaction when called in bulk from the owner
-'   form MouseMove handler.
-'
-' DEPENDENCIES
-'   OwnerForm.[mLeaveHandlerName]
-'
-' NOTES
-'   The owning UserForm must call this method on every hook in its hook
-'   collection from its own UserForm_MouseMove handler to complete the
-'   cooperative leave-detection contract. Example pattern:
-'
-'     Private Sub UserForm_MouseMove(...)
-'         Dim Hook As cDatePickerLabelHook
-'         For Each Hook In mHookCollection
-'             Hook.NotifyMouseLeft
-'         Next Hook
-'     End Sub
-'
-'   Only hooks with a configured LeaveHandlerName and a True mIsHovered flag
-'   incur any routing cost. All others exit in the first two or three checks.
-'
-'   mIsHovered is cleared before the routing call so that a leave handler
-'   which itself triggers a MouseMove on another label cannot cause a
-'   recursive leave notification on this hook.
-'
-' UPDATED
-'   2026-05-03
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = _
-        "cDatePickerLabelHook.NotifyMouseLeft"
-
-    Dim RoutedLabelName         As String       'Label name snapshot
-    Dim RoutedLeaveHandler      As String       'Leave handler method name snapshot
-    Dim RoutedOwnerForm         As Object       'Owner form snapshot
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress leave-routing failures
-        On Error GoTo FailSafe
-
-'------------------------------------------------------------------------------
-' EXIT IF NOT INITIALIZED
-'------------------------------------------------------------------------------
-    'Exit when the hook has not been successfully initialized
-        If Not mIsInitialized Then Exit Sub
-
-'------------------------------------------------------------------------------
-' EXIT IF NO LEAVE HANDLER IS CONFIGURED
-'------------------------------------------------------------------------------
-    'Exit when this hook has no leave callback to route
-        If VBA.Len(mLeaveHandlerName) = 0 Then Exit Sub
-
-'------------------------------------------------------------------------------
-' EXIT IF THIS LABEL WAS NOT HOVERED
-'------------------------------------------------------------------------------
-    'Exit when the mouse was not over this label - nothing to notify
-        If Not mIsHovered Then Exit Sub
-
-'------------------------------------------------------------------------------
-' CLEAR HOVER FLAG
-'------------------------------------------------------------------------------
-    'Clear the hover flag before routing so a MouseMove triggered inside the
-    'leave handler cannot cause a recursive leave notification on this hook
-        mIsHovered = False
-
-'------------------------------------------------------------------------------
-' VALIDATE LABEL STATE
-'------------------------------------------------------------------------------
-    'Exit safely when the target label is unavailable
-        If mLabel Is Nothing Then Exit Sub
-    'Capture the label name before routing so the FailSafe always has context
-        RoutedLabelName = mLabel.Name
-
-'------------------------------------------------------------------------------
-' VALIDATE OWNER STATE
-'------------------------------------------------------------------------------
-    'Exit safely when the owner form is unavailable
-        If mOwnerForm Is Nothing Then Exit Sub
-    'Capture the owner form reference and handler name before routing
-        Set RoutedOwnerForm = mOwnerForm
-        RoutedLeaveHandler = mLeaveHandlerName
-
-'------------------------------------------------------------------------------
-' ROUTE LEAVE CALLBACK
-'------------------------------------------------------------------------------
-    'Route the leave callback to the owner form via the configured handler
-        CallByName RoutedOwnerForm, RoutedLeaveHandler, VbMethod, _
-            RoutedLabelName
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit after successful leave routing
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' FAIL-SAFE
-'------------------------------------------------------------------------------
-FailSafe:
-    'Write leave diagnostics without interrupting the UserForm.
-    'RoutedLabelName is captured before the routing call so this print always
-    'includes a non-empty label identity even when routing failed early.
-        Debug.Print PROC_NAME & " | Label=" & RoutedLabelName & _
-            " | LeaveHandler=" & RoutedLeaveHandler & " | Error=" & _
-            VBA.CStr(Err.Number) & " | " & Err.Description
 
     'Clear the suppressed error
         Err.Clear
@@ -1153,12 +887,8 @@ Private Sub Class_Terminate()
         mActionName = vbNullString
     'Clear the click handler method name
         mClickHandlerName = vbNullString
-    'Clear the leave handler method name
-        mLeaveHandlerName = vbNullString
     'Reset the hover mode to the safe inert value
         mHoverMode = DP_HOVER_NONE
-    'Clear the hover tracking flag
-        mIsHovered = False
     'Clear the initialization flag
         mIsInitialized = False
     'Clear any suppressed cleanup error
