@@ -13,6 +13,7 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
+
 '------------------------------------------------------------------------------
 ' MODULE: UF_DatePicker
 '------------------------------------------------------------------------------
@@ -455,9 +456,7 @@ Option Explicit
     Private Const DP_SETTINGS_CHECK_WINAPI_STYLE_CAPTION As String = "Use WinAPI styling" 'WinAPI styling CheckBox caption
 
     '-----------------------------DATE BOUNDS----------------------------------
-    Private Const DP_MIN_YEAR                           As Long = 100                    'Minimum supported display year
-    Private Const DP_MAX_YEAR                           As Long = 9999                   'Maximum supported display year
-    Private Const DP_YEAR_PANEL_MAX_START               As Long = 9988                   'Maximum 12-year panel start
+    Private Const DP_YEAR_PANEL_MAX_START               As Long = 9988                   'DP_MAX_YEAR - DP_PICKER_ITEM_COUNT + 1
 
 '------------------------------------------------------------------------------
 ' PRIVATE VARIABLES
