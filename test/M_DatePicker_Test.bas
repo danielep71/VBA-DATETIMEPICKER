@@ -152,10 +152,21 @@ Public Sub TST_DP_RunAll()
 '==============================================================================
 
 '------------------------------------------------------------------------------
+' BUILD TEST SHEET
+'------------------------------------------------------------------------------
+    'Reset counters and module state
+        TST_DP_ResetHarnessState
+    'Resolve the workbook that will receive regression sheets
+        Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+    'Buil template
+        DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
+        "Test Sheet"
+        
+'------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
     'Run the standard non-disruptive regression pack
-        TST_DP_RunAllInternal False
+        TST_DP_RunAllInternal True
 
 End Sub
 
@@ -397,19 +408,10 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
     'Enable controlled fatal handling
         On Error GoTo FatalHandler
-
-    'Reset counters and module state
-        TST_DP_ResetHarnessState
-
-    'Resolve the workbook that will receive regression sheets
-        Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
-
     'Capture whether a manager existed before the run
         mTST_DP_HadManager = Not (gDP_Manager Is Nothing)
-
     'Capture current DatePicker settings and transient state
         TST_DP_CaptureSettings SettingsSnapshot
-
     'Capture current Application state
         TST_DP_CaptureApplicationState AppSnapshot
 
@@ -418,16 +420,12 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
     'Prepare the Application state used by the harness
         TST_DP_PrepareApplicationForRun
-
     'Reset DatePicker UI artifacts before testing
         TST_DP_ResetDatePickerArtifacts
-
     'Prepare the result worksheet
         TST_DP_PrepareResultSheet mTST_DP_HostWorkbook
-
     'Prepare the scratch worksheet
         TST_DP_PrepareScratchSheet mTST_DP_HostWorkbook
-
     'Record the run header
         TST_DP_RecordInfo "Harness", "Start", _
             "IncludeUISmoke=" & VBA.CStr(IncludeUISmoke)
@@ -437,31 +435,22 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
     'Run environment and manager smoke checks
         TST_DP_RunSuiteSafe "Environment"
-
     'Run settings and persisted-state checks
         TST_DP_RunSuiteSafe "Settings"
-
     'Run date-policy checks
         TST_DP_RunSuiteSafe "DatePolicy"
-
     'Run holiday-policy callback checks
         TST_DP_RunSuiteSafe "HolidayPolicy"
-
     'Run caption helper checks
         TST_DP_RunSuiteSafe "Captions"
-
     'Run form bridge checks
         TST_DP_RunSuiteSafe "FormBridge"
-
     'Run worksheet write-back checks
         TST_DP_RunSuiteSafe "WriteBack"
-
     'Run grid-icon shape checks
         TST_DP_RunSuiteSafe "GridIcon"
-
     'Run manager public API checks
         TST_DP_RunSuiteSafe "Manager"
-
     'Run optional UserForm smoke checks when requested
         If IncludeUISmoke Then
             TST_DP_RunSuiteSafe "UISmoke"
@@ -472,6 +461,10 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
     'Write the final run summary
         TST_DP_WriteSummary
+'------------------------------------------------------------------------------
+' APPLY CONDITION FORMATTING
+'------------------------------------------------------------------------------
+    TST_DP_ApplyFailConditionalFormat mTST_DP_ResultSheet, mTST_DP_ResultSheet.Range("E5:E1000")
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -580,16 +573,12 @@ Private Sub TST_DP_ResetHarnessState()
 '------------------------------------------------------------------------------
     'Reset assertion counters
         mTST_DP_RunCount = 0
-
     'Reset pass counter
         mTST_DP_PassCount = 0
-
     'Reset fail counter
         mTST_DP_FailCount = 0
-
     'Reset result-row pointer
-        mTST_DP_NextResultRow = 2
-
+        mTST_DP_NextResultRow = 5
     'Reset current suite name
         mTST_DP_CurrentSuite = vbNullString
 
@@ -598,10 +587,8 @@ Private Sub TST_DP_ResetHarnessState()
 '------------------------------------------------------------------------------
     'Clear result sheet reference
         Set mTST_DP_ResultSheet = Nothing
-
     'Clear scratch sheet reference
         Set mTST_DP_ScratchSheet = Nothing
-
     'Clear host workbook reference
         Set mTST_DP_HostWorkbook = Nothing
 
@@ -667,7 +654,6 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 '------------------------------------------------------------------------------
     'Normalize the current suite name for diagnostics
         mTST_DP_CurrentSuite = SuiteName
-
     'Protect the harness from escaping suite failures
         On Error GoTo SuiteFail
 
@@ -786,7 +772,6 @@ Private Sub TST_DP_RunSuite_Environment()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "Environment"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
 
@@ -795,7 +780,6 @@ Private Sub TST_DP_RunSuite_Environment()
 '------------------------------------------------------------------------------
     'Ensure settings load successfully
         M_Settings_EnsureLoaded
-
     'Record successful settings load
         TST_DP_RecordPass "M_Settings_EnsureLoaded does not raise", vbNullString
 
@@ -1597,7 +1581,7 @@ Private Sub TST_DP_RunSuite_FormBridge()
         TST_DP_RecordPass "DP_Close is safe with no visible form", vbNullString
 
     'Refresh from an explicit scratch cell when no form may be loaded
-        M_FormBridge_RefreshFromCell mTST_DP_ScratchSheet.Range("A1")
+        M_FormBridge_RefreshFromCell mTST_DP_ScratchSheet.Range("C4")
 
     'Record successful no-form refresh
         TST_DP_RecordPass "M_FormBridge_RefreshFromCell is safe with explicit cell and no visible form", vbNullString
@@ -1682,68 +1666,68 @@ Private Sub TST_DP_RunSuite_WriteBack()
 ' DIRECT RANGE POPULATION
 '------------------------------------------------------------------------------
     'Clear the target range
-        mTST_DP_ScratchSheet.Range("B2:B4").ClearContents
+        mTST_DP_ScratchSheet.Range("D5:D6").ClearContents
 
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 5, 3)
 
     'Populate a contiguous range directly
         M_WriteBack_PopulateRange _
-            mTST_DP_ScratchSheet.Range("B2:B4"), _
+            mTST_DP_ScratchSheet.Range("D5:D6"), _
             DP_WriteAction_DatePicker
 
     'Assert the first cell was written
         TST_DP_AssertCellDateEquals "Direct range write B2", _
             VBA.DateSerial(2026, 5, 3), _
-            mTST_DP_ScratchSheet.Range("B2")
+            mTST_DP_ScratchSheet.Range("D5")
 
     'Assert the last cell was written
         TST_DP_AssertCellDateEquals "Direct range write B4", _
             VBA.DateSerial(2026, 5, 3), _
-            mTST_DP_ScratchSheet.Range("B4")
+            mTST_DP_ScratchSheet.Range("D6")
 
 '------------------------------------------------------------------------------
 ' DISCONTIGUOUS RANGE POPULATION
 '------------------------------------------------------------------------------
     'Clear the discontiguous test cells
-        mTST_DP_ScratchSheet.Range("C2:C4").ClearContents
+        mTST_DP_ScratchSheet.Range("C5:C7").ClearContents
 
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 6, 15)
 
     'Build a discontiguous target range
         Set UnionRange = Excel.Application.Union( _
-            mTST_DP_ScratchSheet.Range("C2"), _
-            mTST_DP_ScratchSheet.Range("C4"))
+            mTST_DP_ScratchSheet.Range("C5"), _
+            mTST_DP_ScratchSheet.Range("C7"))
 
     'Populate the discontiguous range directly
         M_WriteBack_PopulateRange UnionRange, DP_WriteAction_DatePicker
 
     'Assert the first discontiguous cell was written
-        TST_DP_AssertCellDateEquals "Discontiguous write C2", _
+        TST_DP_AssertCellDateEquals "Discontiguous write C5", _
             VBA.DateSerial(2026, 6, 15), _
-            mTST_DP_ScratchSheet.Range("C2")
+            mTST_DP_ScratchSheet.Range("C5")
 
     'Assert the second discontiguous cell was written
-        TST_DP_AssertCellDateEquals "Discontiguous write C4", _
+        TST_DP_AssertCellDateEquals "Discontiguous write C7", _
             VBA.DateSerial(2026, 6, 15), _
-            mTST_DP_ScratchSheet.Range("C4")
+            mTST_DP_ScratchSheet.Range("C7")
 
     'Assert the skipped middle cell remains blank
         TST_DP_AssertTrue "Discontiguous write leaves C3 blank", _
-            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("C3").Value)) = 0
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("C6").Value)) = 0
 
 '------------------------------------------------------------------------------
 ' SELECTION-BASED WRITE-BACK
 '------------------------------------------------------------------------------
     'Clear the selection-based target range
-        mTST_DP_ScratchSheet.Range("D2:D3").ClearContents
+        mTST_DP_ScratchSheet.Range("D5:D6").ClearContents
 
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 7, 20)
 
     'Select the target range
-        mTST_DP_ScratchSheet.Range("D2:D3").Select
+        mTST_DP_ScratchSheet.Range("D5:D6").Select
 
     'Apply DatePicker write-back to the current selection without table growth
         M_WriteBack_Apply DP_WriteAction_DatePicker, True
@@ -1751,28 +1735,28 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Assert the first selected cell was written
         TST_DP_AssertCellDateEquals "Selection write D2", _
             VBA.DateSerial(2026, 7, 20), _
-            mTST_DP_ScratchSheet.Range("D2")
+            mTST_DP_ScratchSheet.Range("D5")
 
     'Assert the second selected cell was written
         TST_DP_AssertCellDateEquals "Selection write D3", _
             VBA.DateSerial(2026, 7, 20), _
-            mTST_DP_ScratchSheet.Range("D3")
+            mTST_DP_ScratchSheet.Range("D6")
 
 '------------------------------------------------------------------------------
 ' TABLE COLUMN EXPANSION
 '------------------------------------------------------------------------------
     'Prepare the table source range
-        Set TableRange = mTST_DP_ScratchSheet.Range("F1:G4")
+        Set TableRange = mTST_DP_ScratchSheet.Range("F4:G7")
 
     'Clear the table source range
         TableRange.Clear
 
     'Write table headers
-        mTST_DP_ScratchSheet.Range("F1").Value = "ID"
-        mTST_DP_ScratchSheet.Range("G1").Value = "DateValue"
+        mTST_DP_ScratchSheet.Range("F4").Value = "ID"
+        mTST_DP_ScratchSheet.Range("G4").Value = "DateValue"
 
     'Write table IDs
-        mTST_DP_ScratchSheet.Range("F2:F4").Value = 1
+        mTST_DP_ScratchSheet.Range("F5:F7").Value = 1
 
     'Create the regression table
         Set TestTable = mTST_DP_ScratchSheet.ListObjects.Add( _
@@ -1787,20 +1771,20 @@ Private Sub TST_DP_RunSuite_WriteBack()
         gDP_WriteValue = VBA.DateSerial(2026, 8, 25)
 
     'Select one table data cell in the date column
-        mTST_DP_ScratchSheet.Range("G2").Select
+        mTST_DP_ScratchSheet.Range("G5").Select
 
     'Apply DatePicker write-back with table-column expansion enabled
         M_WriteBack_Apply DP_WriteAction_DatePicker, False
 
     'Assert the first table data cell was written
-        TST_DP_AssertCellDateEquals "Table-column expansion writes G2", _
+        TST_DP_AssertCellDateEquals "Table-column expansion writes G5", _
             VBA.DateSerial(2026, 8, 25), _
-            mTST_DP_ScratchSheet.Range("G2")
+            mTST_DP_ScratchSheet.Range("G5")
 
     'Assert the last table data cell was written
-        TST_DP_AssertCellDateEquals "Table-column expansion writes G4", _
+        TST_DP_AssertCellDateEquals "Table-column expansion writes G7", _
             VBA.DateSerial(2026, 8, 25), _
-            mTST_DP_ScratchSheet.Range("G4")
+            mTST_DP_ScratchSheet.Range("G7")
 
 '------------------------------------------------------------------------------
 ' INVALID WRITE ACTION
@@ -1813,16 +1797,12 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '------------------------------------------------------------------------------
     'Release the table reference
         Set TestTable = Nothing
-
     'Release the table range reference
         Set TableRange = Nothing
-
     'Release the union range reference
         Set UnionRange = Nothing
-
     'Release the target range reference
         Set TargetRange = Nothing
-
     'Exit after the suite succeeds
         Exit Sub
 
@@ -1896,16 +1876,12 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "GridIcon"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
-
     'Ensure the scratch sheet is active
         mTST_DP_ScratchSheet.Activate
-
     'Enable grid icon for this suite
         gDP_ShowGridIcon = True
-
     'Remove stale grid icons before the suite
         M_GridIcon_PurgeAll
 
@@ -1914,11 +1890,9 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '------------------------------------------------------------------------------
     'Resolve the embedded icon file path
         IconPath = M_GridIcon_EnsureEmbeddedIconFile()
-
     'Assert the embedded icon path is not blank
         TST_DP_AssertTrue "Embedded grid icon path is not blank", _
             VBA.LenB(IconPath) > 0
-
     'Assert the embedded icon file exists
         TST_DP_AssertTrue "Embedded grid icon file exists", _
             VBA.LenB(VBA.Dir$(IconPath, vbNormal)) > 0
@@ -1927,46 +1901,37 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' CREATE ICON
 '------------------------------------------------------------------------------
     'Create or move the grid icon beside B2
-        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("B2")
-
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
     'Assert the grid icon exists on the scratch sheet
         TST_DP_AssertTrue "Grid icon is created on eligible target", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-
     'Assert the grid icon is visible after create
         TST_DP_AssertTrue "Grid icon is visible after create", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-
     'Assert only one named grid icon exists in the host workbook
         TST_DP_AssertEqualsLong "Only one grid icon exists after create", _
             1, _
             TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
-
     'Capture the initial icon left position
         ShapeLeftBefore = mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Left
-
     'Capture the initial icon top position
         ShapeTopBefore = mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Top
 
 '------------------------------------------------------------------------------
 ' MOVE ICON
 '------------------------------------------------------------------------------
-    'Move the grid icon beside D5
-        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-
+    'Move the grid icon beside a different cell
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("F8")
     'Assert the grid icon still exists after move
         TST_DP_AssertTrue "Grid icon still exists after move", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-
     'Assert the grid icon is visible after move
         TST_DP_AssertTrue "Grid icon is visible after move", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-
     'Assert only one named grid icon exists after move
         TST_DP_AssertEqualsLong "Only one grid icon exists after move", _
             1, _
             TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
-
     'Assert the icon moved horizontally or vertically
         TST_DP_AssertTrue "Grid icon position changes after move", _
             (mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Left <> ShapeLeftBefore) Or _
@@ -1977,17 +1942,13 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '------------------------------------------------------------------------------
     'Remove the current grid icon
         M_GridIcon_Remove
-
     'Assert the grid icon no longer exists on the active scratch sheet
         TST_DP_AssertFalse "Grid icon is removed from active scratch sheet", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-
     'Create the icon again for purge testing
-        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("B2")
-
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
     'Purge all named grid icons
         M_GridIcon_PurgeAll
-
     'Assert no named grid icon remains in the host workbook
         TST_DP_AssertEqualsLong "Purge removes all grid icons", _
             0, _
@@ -1998,10 +1959,8 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '------------------------------------------------------------------------------
     'Disable grid icon feature directly
         gDP_ShowGridIcon = False
-
     'Attempt to show icon while disabled
-        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("B2")
-
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
     'Assert disabled feature does not leave an icon
         TST_DP_AssertFalse "Grid icon is not shown when feature is disabled", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -2019,7 +1978,6 @@ SuiteFail:
     'Record the suite-level failure
         TST_DP_RecordFail "Grid icon suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
     'Clear the suite error
         Err.Clear
 
@@ -2112,11 +2070,11 @@ Private Sub TST_DP_RunSuite_Manager()
 ' SHOULD_SHOWGRIDICON GATING
 '------------------------------------------------------------------------------
     'Prepare a date value cell
-        mTST_DP_ScratchSheet.Range("B10").Value = VBA.DateSerial(2026, 5, 3)
+        mTST_DP_ScratchSheet.Range("D10").Value = VBA.DateSerial(2026, 5, 3)
 
     'Assert date value cell is eligible
         TST_DP_AssertTrue "Should_ShowGridIcon accepts explicit date value cell", _
-            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("B10"))
+            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D10"))
 
     'Prepare a date-formatted blank cell
         mTST_DP_ScratchSheet.Range("B11").ClearContents
@@ -2127,22 +2085,22 @@ Private Sub TST_DP_RunSuite_Manager()
             Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("B11"))
 
     'Prepare a general blank cell
-        mTST_DP_ScratchSheet.Range("B12").ClearContents
-        mTST_DP_ScratchSheet.Range("B12").NumberFormat = "General"
+        mTST_DP_ScratchSheet.Range("D12").ClearContents
+        mTST_DP_ScratchSheet.Range("D12").NumberFormat = "General"
 
     'Assert general blank cell is not eligible
         TST_DP_AssertFalse "Should_ShowGridIcon rejects general blank cell", _
-            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("B12"))
+            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D12"))
 
     'Assert multi-cell range is not eligible at manager-gating level
         TST_DP_AssertFalse "Should_ShowGridIcon rejects multi-cell range", _
-            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("B10:B11"))
+            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D10:D11"))
 
 '------------------------------------------------------------------------------
 ' MERGED-CELL NORMALIZATION EXPECTATION
 '------------------------------------------------------------------------------
     'Prepare the merged area
-        Set MergedArea = mTST_DP_ScratchSheet.Range("B14:C15")
+        Set MergedArea = mTST_DP_ScratchSheet.Range("D14:E15")
 
     'Clear the merged area
         MergedArea.Clear
@@ -2155,7 +2113,7 @@ Private Sub TST_DP_RunSuite_Manager()
 
     'Assert the top-left cell of a merged area is eligible
         TST_DP_AssertTrue "Should_ShowGridIcon accepts top-left cell inside merged area", _
-            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("B14"))
+            Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D14"))
 
     'Unmerge the area after the assertion
         MergedArea.UnMerge
@@ -2801,11 +2759,9 @@ Private Sub TST_DP_RecordResult( _
     If ResultText = TST_DP_PASS_TEXT Or ResultText = TST_DP_FAIL_TEXT Then
         mTST_DP_RunCount = mTST_DP_RunCount + 1
     End If
-
     If ResultText = TST_DP_PASS_TEXT Then
         mTST_DP_PassCount = mTST_DP_PassCount + 1
     End If
-
     If ResultText = TST_DP_FAIL_TEXT Then
         mTST_DP_FailCount = mTST_DP_FailCount + 1
     End If
@@ -2823,18 +2779,16 @@ Private Sub TST_DP_RecordResult( _
 '------------------------------------------------------------------------------
 ' WRITE RESULT SHEET
 '------------------------------------------------------------------------------
-    If mTST_DP_ResultSheet Is Nothing Then
-        Exit Sub
-    End If
+    If mTST_DP_ResultSheet Is Nothing Then Exit Sub
 
     On Error GoTo ResultSheetFail
 
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 1).Value = mTST_DP_NextResultRow - 1
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 2).Value = VBA.Now
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 3).Value = ResultText
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 4).Value = SuiteName
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 5).Value = TestName
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 6).Value = Details
+    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 3).Value = mTST_DP_NextResultRow - 4
+    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 4).Value = VBA.Now
+    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 5).Value = ResultText
+    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 6).Value = SuiteName
+    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 7).Value = TestName
+    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 8).Value = Details
 
     mTST_DP_NextResultRow = mTST_DP_NextResultRow + 1
 
@@ -2875,15 +2829,15 @@ Private Sub TST_DP_WriteSummary()
         Exit Sub
     End If
 
-    mTST_DP_ResultSheet.Range("H1").Value = "SUMMARY"
-    mTST_DP_ResultSheet.Range("H2").Value = "Run"
-    mTST_DP_ResultSheet.Range("I2").Value = mTST_DP_RunCount
-    mTST_DP_ResultSheet.Range("H3").Value = "Passed"
-    mTST_DP_ResultSheet.Range("I3").Value = mTST_DP_PassCount
-    mTST_DP_ResultSheet.Range("H4").Value = "Failed"
-    mTST_DP_ResultSheet.Range("I4").Value = mTST_DP_FailCount
-    mTST_DP_ResultSheet.Range("H1:H4").Font.Bold = True
-    mTST_DP_ResultSheet.Columns("A:I").AutoFit
+    mTST_DP_ResultSheet.Range("J4").Value = "SUMMARY"
+    mTST_DP_ResultSheet.Range("J5").Value = "Run"
+    mTST_DP_ResultSheet.Range("K5").Value = mTST_DP_RunCount
+    mTST_DP_ResultSheet.Range("J6").Value = "Passed"
+    mTST_DP_ResultSheet.Range("K6").Value = mTST_DP_PassCount
+    mTST_DP_ResultSheet.Range("J7").Value = "Failed"
+    mTST_DP_ResultSheet.Range("K7").Value = mTST_DP_FailCount
+    mTST_DP_ResultSheet.Range("J4:J7").Font.Bold = True
+    mTST_DP_ResultSheet.Columns("C:K").AutoFit
 
 End Sub
 
@@ -2900,13 +2854,10 @@ Private Function TST_DP_GetHostWorkbook() As Excel.Workbook
 '==============================================================================
 '                             GET HOST WORKBOOK
 '==============================================================================
-
     On Error Resume Next
-
     If Not Excel.Application.ActiveWorkbook Is Nothing Then
         Set TST_DP_GetHostWorkbook = Excel.Application.ActiveWorkbook
     End If
-
     If TST_DP_GetHostWorkbook Is Nothing Then
         Set TST_DP_GetHostWorkbook = ThisWorkbook
     End If
@@ -2923,14 +2874,12 @@ Private Sub TST_DP_PrepareResultSheet(ByVal HostWorkbook As Excel.Workbook)
 '                           PREPARE RESULT SHEET
 '==============================================================================
 
-    TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_RESULT_SHEET_NAME
 
-    Set mTST_DP_ResultSheet = HostWorkbook.Worksheets.Add( _
-        After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
+    Set mTST_DP_ResultSheet = HostWorkbook.Worksheets(TST_DP_RESULT_SHEET_NAME)
 
     mTST_DP_ResultSheet.Name = TST_DP_RESULT_SHEET_NAME
 
-    mTST_DP_ResultSheet.Range("A1:F1").Value = Array( _
+    mTST_DP_ResultSheet.Range("C4:H4").Value = Array( _
         "#", _
         "Timestamp", _
         "Result", _
@@ -2938,13 +2887,12 @@ Private Sub TST_DP_PrepareResultSheet(ByVal HostWorkbook As Excel.Workbook)
         "Test", _
         "Details")
 
-    mTST_DP_ResultSheet.Range("A1:F1").Font.Bold = True
+    mTST_DP_ResultSheet.Range("C4:H4").Font.Bold = True
 
     mTST_DP_ResultSheet.Activate
-    mTST_DP_ResultSheet.Range("A2").Select
-    ActiveWindow.FreezePanes = True
+    mTST_DP_ResultSheet.Range("C5").Select
 
-    mTST_DP_NextResultRow = 2
+    mTST_DP_NextResultRow = 5
 
 End Sub
 
@@ -3285,58 +3233,282 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 '                           QUALIFIED MACRO NAME
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Returns a workbook-qualified and module-qualified macro name for
-'   Application.Run regression callbacks
+'   Returns a runnable callback macro name for Application.Run regression tests
 '
 ' WHY THIS EXISTS
-'   Holiday-policy regression tests call public callback functions through
+'   Holiday-policy regression tests validate callback dispatch through
 '   Application.Run
 '
-'   In some Excel/VBA contexts, workbook-level qualification alone may not
-'   resolve public functions reliably, while workbook + standard-module
-'   qualification is more explicit
+'   Callback resolution can vary depending on workbook qualification, module
+'   qualification, project state, and host workbook context
+'
+'   This helper probes supported callback-name formats and returns the first one
+'   that Excel can actually execute
 '
 ' INPUTS
 '   MacroName
 '     Public callback procedure name
 '
 ' RETURNS
-'   Workbook-qualified and module-qualified macro name
+'   First runnable callback reference
 '
 ' BEHAVIOR
 '   Trims the supplied macro name
-'   Escapes apostrophes in ThisWorkbook.Name
-'   Returns a callback name in the format:
-'     'WorkbookName.xlsm'!M_REGRESSION_DATEPICKER.CallbackName
+'   Builds workbook + module qualified, workbook-qualified, and unqualified
+'   callback-name candidates
+'   Tests each candidate through Excel.Application.Run
+'   Returns the first candidate that executes without raising a runtime error
 '
 ' ERROR POLICY
-'   Does not raise custom errors
-'   Lets native VBA string behavior apply
+'   Raises a descriptive runtime error when MacroName is blank or when no
+'   candidate callback reference can be executed
 '
 ' DEPENDENCIES
+'   Excel.Application.Run
 '   ThisWorkbook
 '   TST_DP_MODULE_NAME
-'   VBA.Replace
-'   VBA.Trim$
 '
 ' NOTES
-'   This helper is for the regression harness only
+'   This helper intentionally calls the callback once with a deterministic test
+'   date while resolving the runnable name
 '
-'   Keep TST_DP_MODULE_NAME aligned with the actual standard module name
+'   The regression callbacks used here are side-effect free
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-10
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' RETURN VALUE
+' DECLARE
 '------------------------------------------------------------------------------
-    'Return a workbook-qualified and module-qualified callback name
-        TST_DP_QualifiedMacroName = _
-            "'" & VBA.Replace(ThisWorkbook.Name, "'", "''") & "'!" & _
-            TST_DP_MODULE_NAME & "." & VBA.Trim$(MacroName)
+    Const PROC_NAME             As String = "TST_DP_QualifiedMacroName"
+
+    Dim NormalizedMacroName     As String       'Trimmed callback macro name
+    Dim WorkbookQualifier       As String       'Escaped workbook qualifier
+    Dim CandidateNames(1 To 3)  As String       'Candidate callback names
+    Dim CandidateIndex          As Long         'Candidate loop index
+    Dim CallbackResult          As Variant      'Callback probe result
+    Dim RunErrNumber            As Long         'Application.Run error number
+    Dim RunErrDescription       As String       'Application.Run error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Normalize the supplied macro name
+        NormalizedMacroName = VBA.Trim$(MacroName)
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Reject blank callback names
+        If VBA.LenB(NormalizedMacroName) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "MacroName cannot be blank"
+        End If
+
+'------------------------------------------------------------------------------
+' BUILD CANDIDATE NAMES
+'------------------------------------------------------------------------------
+    'Build the workbook qualifier
+        WorkbookQualifier = "'" & VBA.Replace(ThisWorkbook.Name, "'", "''") & "'!"
+    'Build workbook and module qualified callback name
+        CandidateNames(1) = WorkbookQualifier & TST_DP_MODULE_NAME & "." & NormalizedMacroName
+    'Build workbook-qualified callback name
+        CandidateNames(2) = WorkbookQualifier & NormalizedMacroName
+    'Build unqualified callback name
+        CandidateNames(3) = NormalizedMacroName
+
+'------------------------------------------------------------------------------
+' PROBE CANDIDATES
+'------------------------------------------------------------------------------
+    'Loop through candidate callback names
+        For CandidateIndex = LBound(CandidateNames) To UBound(CandidateNames)
+            'Suppress candidate probe errors
+                On Error Resume Next
+            'Clear any pending error before probing the candidate
+                Err.Clear
+            'Run the candidate callback with a deterministic date
+                CallbackResult = Excel.Application.Run( _
+                    CandidateNames(CandidateIndex), _
+                    VBA.DateSerial(2026, 1, 1))
+            'Capture probe error number
+                RunErrNumber = Err.Number
+            'Capture probe error description
+                RunErrDescription = Err.Description
+            'Clear the suppressed probe error
+                Err.Clear
+            'Restore controlled error handling
+                On Error GoTo ErrorHandler
+            'Return the first runnable callback name
+                If RunErrNumber = 0 Then
+                    TST_DP_QualifiedMacroName = CandidateNames(CandidateIndex)
+                    Exit Function
+                End If
+        Next CandidateIndex
+
+'------------------------------------------------------------------------------
+' RAISE RESOLUTION FAILURE
+'------------------------------------------------------------------------------
+    'Raise when no candidate could be executed
+        Err.Raise vbObjectError + 514, PROC_NAME, _
+            "Unable to resolve runnable callback macro name for '" & _
+            NormalizedMacroName & "'. Last Application.Run error: " & _
+            VBA.CStr(RunErrNumber) & " - " & RunErrDescription
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Regression callback-name resolution failed: " & Err.Description
 
 End Function
+Public Sub TST_DP_ApplyFailConditionalFormat( _
+    ByVal WS As Excel.Worksheet, _
+    ByVal TargetRange As Excel.Range)
 
+'
+'------------------------------------------------------------------------------
+'                       APPLY FAIL CONDITIONAL FORMAT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies FAIL conditional formatting to a supplied worksheet range
+'
+' WHY THIS EXISTS
+'   Conditional formatting should be applied directly to an explicit target range
+'   instead of relying on Select, Selection, ActiveCell, or recorded-macro state
+'
+' INPUTS
+'   WS
+'     Worksheet that owns the target range
+'
+'   TargetRange
+'     Range receiving the conditional-formatting rule
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Validates the supplied worksheet and range
+'   Validates that the range belongs to the supplied worksheet
+'   Adds a text-contains FAIL conditional-formatting rule
+'   Applies bold white font and dark red fill
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if inputs are missing, inconsistent, or
+'   conditional formatting cannot be applied
+'
+' DEPENDENCIES
+'   Excel object model
+'
+' NOTES
+'   This routine does not clear existing conditional-formatting rules
+'
+'   This routine does not select or activate any worksheet or range
+'
+' UPDATED
+'   2026-05-10
+'------------------------------------------------------------------------------
 
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ApplyFailConditionalFormat"
+    Const FAIL_TEXT             As String = "FAIL"
+    Const FAIL_BACK_COLOR       As Long = 192
 
+    Dim FailCondition           As Excel.FormatCondition    'Created conditional-formatting rule
+    Dim ErrorNumber             As Long                     'Captured error number
+    Dim ErrorDescription        As String                   'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject missing worksheet references
+        If WS Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, _
+                "WS cannot be Nothing"
+        End If
+
+    'Reject missing target ranges
+        If TargetRange Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, _
+                "TargetRange cannot be Nothing"
+        End If
+
+    'Reject ranges that do not belong to the supplied worksheet
+        If Not TargetRange.Worksheet Is WS Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "TargetRange must belong to the supplied worksheet"
+        End If
+
+'------------------------------------------------------------------------------
+' ADD CONDITIONAL FORMAT
+'------------------------------------------------------------------------------
+    'Add the FAIL text conditional-formatting rule
+        Set FailCondition = TargetRange.FormatConditions.Add( _
+            Type:=xlTextString, _
+            String:=FAIL_TEXT, _
+            TextOperator:=xlContains)
+
+    'Move the new rule to first priority
+        FailCondition.SetFirstPriority
+
+'------------------------------------------------------------------------------
+' APPLY FORMAT SETTINGS
+'------------------------------------------------------------------------------
+    With FailCondition.Font
+        .Bold = True
+        .Italic = False
+        .ThemeColor = xlThemeColorDark1
+        .TintAndShade = 0
+    End With
+
+    With FailCondition.Interior
+        .PatternColorIndex = xlAutomatic
+        .Color = FAIL_BACK_COLOR
+        .TintAndShade = 0
+    End With
+
+    'Allow lower-priority rules to continue evaluating
+        FailCondition.StopIfTrue = False
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set FailCondition = Nothing
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Release object references
+        Set FailCondition = Nothing
+    'Raise a descriptive error to the caller
+        Err.Raise ErrorNumber, PROC_NAME, _
+            "FAIL conditional-format application failed: " & ErrorDescription
+
+End Sub
