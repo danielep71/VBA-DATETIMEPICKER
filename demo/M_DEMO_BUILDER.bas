@@ -4040,7 +4040,7 @@ Private Function DEMO_Sheet_ColumnLetter( _
 '------------------------------------------------------------------------------
     Dim N                   As Long          'Working column index
     Dim R                   As Long          'Current base-26 remainder
-    Dim s                   As String        'Accumulated column text
+    Dim S                   As String        'Accumulated column text
 
 '------------------------------------------------------------------------------
 ' VALIDATE
@@ -4061,7 +4061,7 @@ Private Function DEMO_Sheet_ColumnLetter( _
     'Convert the numeric column index to Excel letter notation
         Do While N > 0
             R = (N - 1) Mod 26
-            s = Chr$(65 + R) & s
+            S = Chr$(65 + R) & S
             N = (N - 1) \ 26
         Loop
 
@@ -4069,7 +4069,7 @@ Private Function DEMO_Sheet_ColumnLetter( _
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
     'Return the resolved column letter
-        DEMO_Sheet_ColumnLetter = s
+        DEMO_Sheet_ColumnLetter = S
 
 End Function
 
@@ -4729,7 +4729,7 @@ Private Function DEMO_Btn_CaptureAppearance( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim s                   As tButtonAppearance   'Captured appearance snapshot
+    Dim S                   As tButtonAppearance   'Captured appearance snapshot
 
 '------------------------------------------------------------------------------
 ' CAPTURE SHAPE APPEARANCE
@@ -4737,36 +4737,36 @@ Private Function DEMO_Btn_CaptureAppearance( _
     With Shp
 
         'Capture fill appearance
-            s.FillVisible = .Fill.Visible
-            s.FillColor = .Fill.ForeColor.RGB
+            S.FillVisible = .Fill.Visible
+            S.FillColor = .Fill.ForeColor.RGB
 
         'Capture line appearance
-            s.LineVisible = .Line.Visible
+            S.LineVisible = .Line.Visible
 
-            If s.LineVisible = msoTrue Then
-                s.LineColor = .Line.ForeColor.RGB
-                s.LineWeight = .Line.Weight
+            If S.LineVisible = msoTrue Then
+                S.LineColor = .Line.ForeColor.RGB
+                S.LineWeight = .Line.Weight
             Else
-                s.LineColor = 0
-                s.LineWeight = 0!
+                S.LineColor = 0
+                S.LineWeight = 0!
             End If
 
         'Capture text appearance when text is present
             If .TextFrame2.HasText Then
-                s.TextColor = .TextFrame2.TextRange.Font.Fill.ForeColor.RGB
-                s.TextBold = .TextFrame2.TextRange.Font.Bold
-                s.TextSize = .TextFrame2.TextRange.Font.Size
+                S.TextColor = .TextFrame2.TextRange.Font.Fill.ForeColor.RGB
+                S.TextBold = .TextFrame2.TextRange.Font.Bold
+                S.TextSize = .TextFrame2.TextRange.Font.Size
             End If
 
         'Capture shadow appearance
-            s.ShadowVisible = .Shadow.Visible
-            s.ShadowBlur = .Shadow.Blur
-            s.ShadowOffsetX = .Shadow.OffsetX
-            s.ShadowOffsetY = .Shadow.OffsetY
+            S.ShadowVisible = .Shadow.Visible
+            S.ShadowBlur = .Shadow.Blur
+            S.ShadowOffsetX = .Shadow.OffsetX
+            S.ShadowOffsetY = .Shadow.OffsetY
 
         'Capture position
-            s.TopPos = .Top
-            s.LeftPos = .Left
+            S.TopPos = .Top
+            S.LeftPos = .Left
 
     End With
 
@@ -4774,7 +4774,7 @@ Private Function DEMO_Btn_CaptureAppearance( _
 ' ASSIGN RESULT
 '------------------------------------------------------------------------------
     'Return the captured appearance snapshot
-        DEMO_Btn_CaptureAppearance = s
+        DEMO_Btn_CaptureAppearance = S
 
 End Function
 
