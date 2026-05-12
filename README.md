@@ -126,8 +126,6 @@ The project is intentionally more than a visual widget. It includes manager-driv
 
 <img src="assets/datepicker-ingrid.png" alt="Date / Time Picker in-grid activation icon" />
 
-If you use different filenames, replace the paths above with your actual repository asset paths.
-
 ---
 
 ## 🏗️ Architecture
