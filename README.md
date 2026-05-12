@@ -108,11 +108,6 @@ The project is intentionally more than a visual widget. It includes manager-driv
 
 ## 📸 Screenshots
 
-<p align="left">
-  <img alt="Screenshots" src="https://img.shields.io/badge/screenshots-recommended-blue">
-  <img alt="Assets" src="https://img.shields.io/badge/assets-repo_local-lightgrey">
-  <img alt="Preview" src="https://img.shields.io/badge/preview-GitHub_ready-217346">
-</p>
 
 ### Main picker
 
