@@ -20,6 +20,7 @@
 
 ---
 
+
 ## ✨ Overview
 
 <p align="left">
@@ -120,6 +121,16 @@ The project is intentionally more than a visual widget. It includes manager-driv
 ### In-grid activation
 
 <img src="assets/datepicker-ingrid.png" alt="Date / Time Picker in-grid activation icon" />
+
+---
+
+## 🧩 Compatibility 
+
+- Microsoft Excel for Windows
+- Excel 2016 and later
+- Office 32-bit and 64-bit
+- VBA UserForms
+- No external runtime dependency
 
 ---
 
