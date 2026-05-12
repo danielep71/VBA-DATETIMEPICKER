@@ -81,9 +81,11 @@ The project is intentionally more than a visual widget. It includes manager-driv
 - 📌 **Modeless Date / Time Picker UserForm**  
   Keeps Excel usable while the picker remains open.
 
-- 🖱️ **In-grid activation icon**  
-  Shows a contextual worksheet shape next to eligible cells, with hide / move / reuse behavior for high-frequency selection changes.
-
+- 6x7 calendar grid
+- Month and year navigation
+- Multi-cell write-back support
+- Table-column friendly behavior
+  
 - 🧠 **Smart date-cell detection**  
   Can react to date-like values, date-formatted cells, and configured entry points.
 
@@ -105,6 +107,18 @@ The project is intentionally more than a visual widget. It includes manager-driv
 - 🧹 **Lifecycle cleanup**  
   Includes explicit cleanup paths for timers, UserForms, right-click menu entries, keyboard shortcuts, and in-grid worksheet icons.
 
+- 🖱️ **Optional In-grid activation icon**  
+  Shows a contextual worksheet shape next to eligible cells, with hide / move / reuse behavior for high-frequency selection changes.
+
+- Optional compact mode
+- Optional close after selection
+- Optional highlight weekends
+- optional first day of week
+- Optional live clock
+- Optional local names
+- Optional allow outside-month selection
+- Optional right-click integration
+  
 ---
 
 ## 📸 Screenshots
