@@ -65,10 +65,16 @@ The project is intentionally more than a visual widget. It includes manager-driv
 ## 🚀 Key features
 
 <p align="left">
-  <img alt="Modeless" src="https://img.shields.io/badge/modeless-supported-217346">
-  <img alt="In-grid icon" src="https://img.shields.io/badge/in--grid_icon-supported-blue">
-  <img alt="Keyboard" src="https://img.shields.io/badge/keyboard-navigation-orange">
-  <img alt="Settings" src="https://img.shields.io/badge/settings-in--form_panel-6f42c1">
+  <img alt="Modeless" src="https://img.shields.io/badge/Modeless-Supported-217346">
+  <img alt="In-grid icon" src="https://img.shields.io/badge/In--Grid_Icon-Supported-blue">
+  <img alt="Settings" src="https://img.shields.io/badge/Smart_cell_Detection-Supported-6f42c1">
+  <img alt="Keyboard" src="https://img.shields.io/badge/Keyboard_Navigation-Supported-orange">
+  <img alt="Settings" src="https://img.shields.io/badge/Repeated write--back-Supported-6f42c1">
+  <img alt="Settings" src="https://img.shields.io/badge/Settings-In--form_Panel-6f42c1">
+  <img alt="Settings" src="https://img.shields.io/badge/Today_and_Now_shortcuts-Supported-green">
+  <img alt="Settings" src="https://img.shields.io/badge/Ribbon_Integration-Supported-light blue">
+  <img alt="Settings" src="https://img.shields.io/badge/Demo_Workbook-Available-yellow">
+  <img alt="Settings" src="https://img.shields.io/badge/Regression_tests-Available-yellow">
 </p>
 
 - 📌 **Modeless Date / Time Picker UserForm**  
