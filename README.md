@@ -698,9 +698,8 @@ In a broader VBA engineering ecosystem, this repository can serve as the **date-
 ## 📚 Wiki
 
 <p align="left">
-  <img alt="Docs" src="https://img.shields.io/badge/docs-wiki-blue">
-  <img alt="Guidance" src="https://img.shields.io/badge/guidance-extended_notes-6f42c1">
-  <img alt="Examples" src="https://img.shields.io/badge/examples-coming_soon-lightgrey">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Wiki-blue">
+  <img alt="Guidance" src="https://img.shields.io/badge/Guidance-Extended_notes-6f42c1">
 </p>
 
 For additional examples, notes, and repository-level guidance, see the project wiki:
@@ -712,9 +711,7 @@ For additional examples, notes, and repository-level guidance, see the project w
 ## 🔧 Coding style
 
 <p align="left">
-  <img alt="Style" src="https://img.shields.io/badge/style-structured_VBA-217346">
-  <img alt="Headers" src="https://img.shields.io/badge/headers-purpose_blocks-blue">
-  <img alt="Comments" src="https://img.shields.io/badge/comments-above_code-orange">
+  <img alt="Style" src="https://img.shields.io/badge/Style-Structured_VBA-217346">
 </p>
 
 This repository follows a structured VBA style.
@@ -746,12 +743,11 @@ General conventions:
 ## 🤝 Contributing
 
 <p align="left">
-  <img alt="Contributions" src="https://img.shields.io/badge/contributions-welcome-brightgreen">
-  <img alt="Commits" src="https://img.shields.io/badge/commits-conventional-blue">
-  <img alt="Stability" src="https://img.shields.io/badge/stability-preserve_behavior-orange">
+  <img alt="Contributions" src="https://img.shields.io/badge/Contributions-Welcome-brightgreen">
+  <img alt="Commits" src="https://img.shields.io/badge/Commits-Conventional-blue">
+  <img alt="Stability" src="https://img.shields.io/badge/Stability-Preserve_behavior-orange">
 </p>
 
-Contributions are welcome.
 
 Please aim to:
 
@@ -775,50 +771,15 @@ Conventional Commit examples:
 
 <p align="left">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Use" src="https://img.shields.io/badge/use-see_LICENSE-blue">
 </p>
-
-This project is licensed under the terms in `LICENSE`.
 
 ---
 
 ## 👤 Author
 
 <p align="left">
-  <img alt="Maintainer" src="https://img.shields.io/badge/maintainer-Daniele_Penza-orange">
-  <img alt="GitHub" src="https://img.shields.io/badge/GitHub-danielep71-blue">
+  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele_Penza-orange">
 </p>
-
-Maintained by **Daniele Penza**.
 
 ---
-
-## 🏷️ Suggested GitHub topics
-
-<p align="left">
-  <img alt="Topics" src="https://img.shields.io/badge/topics-repository_discovery-blue">
-  <img alt="Excel" src="https://img.shields.io/badge/excel-vba-217346">
-  <img alt="UI" src="https://img.shields.io/badge/ui-datepicker-orange">
-</p>
-
-Suggested repository topics:
-
-```text
-excel
-vba
-excel-vba
-datepicker
-datetimepicker
-userform
-msforms
-calendar
-calendar-picker
-date-input
-excel-addin
-vba-library
-vba-tools
-vba-ui
-worksheet-tools
-enterprise-vba
-```
 
