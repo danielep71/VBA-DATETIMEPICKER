@@ -66,58 +66,121 @@ The project is intentionally more than a visual widget. It includes manager-driv
 ## 🚀 Key features
 
 <p align="left">
-  <img alt="Modeless" src="https://img.shields.io/badge/Modeless-Supported-217346">
-  <img alt="In-grid icon" src="https://img.shields.io/badge/In--Grid_Icon-Supported-217346">
-  <img alt="Settings" src="https://img.shields.io/badge/Smart_cell_Detection-Supported-217346">
-  <img alt="Keyboard" src="https://img.shields.io/badge/Keyboard_Navigation-Supported-217346">
-  <img alt="Settings" src="https://img.shields.io/badge/Repeated write--back-Supported-217346">
-  <img alt="Settings" src="https://img.shields.io/badge/Settings-In--form_Panel-6f42c1">
-  <img alt="Settings" src="https://img.shields.io/badge/Today_and_Now_shortcuts-Supported-217346">
-  <img alt="Settings" src="https://img.shields.io/badge/Ribbon_Integration-Supported-217346">
-  <img alt="Settings" src="https://img.shields.io/badge/Demo_Workbook-Available-orange">
-  <img alt="Settings" src="https://img.shields.io/badge/Regression_tests-Available-orange">
+  <img alt="Modeless UI" src="https://img.shields.io/badge/Modeless_UI-Supported-217346">
+  <img alt="Date and Time" src="https://img.shields.io/badge/Date_%2F_Time_Write--Back-Supported-217346">
+  <img alt="Smart Detection" src="https://img.shields.io/badge/Smart_Cell_Detection-Supported-217346">
+  <img alt="In-grid Icon" src="https://img.shields.io/badge/In--Grid_Icon-Supported-217346">
+  <img alt="Right Click" src="https://img.shields.io/badge/Right--Click_Menu-Optional-217346">
+  <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Keyboard_Shortcut-Optional-217346">
+  <img alt="Keyboard Navigation" src="https://img.shields.io/badge/Keyboard_Navigation-Supported-217346">
+  <img alt="Settings Panel" src="https://img.shields.io/badge/Settings-In--Form_Panel-6f42c1">
+  <img alt="Live Clock" src="https://img.shields.io/badge/Live_Clock-Optional-6f42c1">
+  <img alt="Compact Mode" src="https://img.shields.io/badge/Compact_Mode-Optional-6f42c1">
+  <img alt="Lifecycle Cleanup" src="https://img.shields.io/badge/Lifecycle_Cleanup-Built--In-orange">
+  <img alt="Demo Workbook" src="https://img.shields.io/badge/Demo_Workbook-Available-orange">
 </p>
 
-- 📌 **Modeless Date / Time Picker UserForm**  
-  Keeps Excel usable while the picker remains open.
+### 📌 Worksheet-friendly Date / Time input
 
-- 6x7 calendar grid
-- Month and year navigation
-- Multi-cell write-back support
-- Table-column friendly behavior
-  
-- 🧠 **Smart date-cell detection**  
-  Can react to date-like values, date-formatted cells, and configured entry points.
+The picker is designed for real Excel workflows, not only for isolated form demos.
 
-- 🔁 **Repeated write-back workflow**  
-  Supports efficient workflows where users select multiple target cells and write dates repeatedly.
+- 📅 **Date-only write-back** through the Today shortcut and calendar selection
+- 🕒 **Date-time write-back** through the Now shortcut
+- 📌 **Modeless UserForm**, so Excel remains usable while the picker is open
+- 🔁 **Repeated write-back workflow**, useful when users move across multiple target cells
+- 🧾 **Table-column friendly behavior**, suitable for structured data-entry ranges
 
-- ⚙️ **In-form settings panel**  
-  Settings are exposed inside the picker, with display, behavior, and integration pages.
+### 🧠 Smart activation and cell detection
 
-- ⌨️ **Mouse and keyboard navigation**  
-  Supports arrow keys, month/year navigation, Today, Now, Esc handling, and letter shortcuts.
+The DatePicker can be shown through multiple entry points and can react to worksheet context.
 
-- 🕒 **Today and Now shortcuts**  
-  Allows date-only write-back or date-time write-back with the current system time.
+- 🧠 Detects date-like values and date-formatted cells
+- 🖱️ Supports optional **right-click menu** integration
+- 🎯 Supports optional **in-grid activation icon** next to eligible cells
+- ⌨️ Supports optional **keyboard shortcut** fallback
+- 🧯 Prevents dead access configurations by preserving at least one practical entry path
 
-- 🧱 **Manager / UI / hook separation**  
-  Application events, UserForm rendering, and runtime label events are separated into focused components.
+### 🖱️ In-grid activation icon
 
-- 🧹 **Lifecycle cleanup**  
-  Includes explicit cleanup paths for timers, UserForms, right-click menu entries, keyboard shortcuts, and in-grid worksheet icons.
+The optional worksheet icon gives users a visible, contextual entry point directly in the grid.
 
-- 🖱️ **Optional In-grid activation icon**  
-  Shows a contextual worksheet shape next to eligible cells, with hide / move / reuse behavior for high-frequency selection changes.
+- 🎯 Appears near eligible cells
+- ⚡ Uses hide / move / reuse behavior for high-frequency selection changes
+- 🧹 Can be removed when the feature is disabled
+- 🧼 Can be purged during workbook cleanup, save, close, or reset paths
 
-- Optional compact mode
-- Optional close after selection
-- Optional highlight weekends
-- optional first day of week
-- Optional live clock
-- Optional local names
-- Optional allow outside-month selection
-- Optional right-click integration
+### 🗓️ Calendar rendering and navigation
+
+The picker uses a fixed and predictable calendar surface.
+
+- 🧱 Fixed **6 x 7 calendar grid**
+- ◀️ Previous / next month navigation
+- 🔼 Previous / next year navigation
+- 📆 Month picker overlay
+- 📅 Year picker overlay
+- 🎯 Today, selected-date, keyboard-date, outside-month, weekend, disabled, and hover visual states
+
+### ⌨️ Keyboard and mouse workflow
+
+The component supports both mouse-first and keyboard-first usage.
+
+- ⬅️ ➡️ ⬆️ ⬇️ Arrow-key day navigation
+- 📄 PageUp / PageDown month navigation
+- 🏁 Home / End navigation inside the displayed month
+- ✅ Enter / Space selection
+- ⎋ Esc close / overlay dismiss behavior
+- 🔤 Letter shortcuts for Month, Year, Today, and Now actions
+
+### ⚙️ In-form settings panel
+
+Settings are exposed inside the picker through a compact overlay panel.
+
+- 🖥️ **Display settings**
+  - first day of week
+  - local or fixed-English captions
+  - live clock
+  - compact layout
+  - weekend highlighting
+
+- 🧭 **Behavior settings**
+  - close after selection
+  - allow outside-month selection
+
+- 🔌 **Integration settings**
+  - right-click menu
+  - in-grid icon
+  - WinAPI styling
+
+### 🧱 Clean internal architecture
+
+The project separates responsibilities across focused components.
+
+- 🧠 `cDatePickerManager` handles Excel application events and lifecycle orchestration
+- 🖼️ `UF_DatePicker` handles the runtime UserForm, rendering, settings panel, and visual state
+- 🔗 `cDatePickerLabelHook` routes events from runtime-created labels
+- 🧰 `M_DatePicker` exposes the public API, settings, integration helpers, timers, and grid-icon infrastructure
+
+### 🧹 Lifecycle and cleanup discipline
+
+The DatePicker includes explicit cleanup paths for real workbook sessions.
+
+- ⏱️ Stops live-clock timers
+- 🧼 Closes loaded picker forms
+- 🧹 removes or purges in-grid icons
+- 🖱️ removes right-click menu entries
+- ⌨️ removes keyboard shortcut assignments
+- 🔁 repairs or restarts the manager when needed
+- 🛡️ keeps `Application.EnableEvents` aligned when ensuring the manager
+
+### 🏢 Enterprise-friendly VBA behavior
+
+The implementation is designed for controlled Excel environments.
+
+- 📦 No external installer required
+- 🧩 Importable `.bas`, `.cls`, and `.frm` source files
+- 🧠 Clear separation between UI, manager, hooks, and infrastructure
+- 🧪 Demo-friendly and regression-friendly structure
+- 🧾 Compatible with source-controlled VBA exports
   
 ---
 
