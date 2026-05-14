@@ -292,12 +292,10 @@ UserForm code-behind.
 
 ### `cDatePickerLabelHook.cls`
 
-cDatePickerLabelHook provides the lightweight WithEvents routing layer used
-by the DatePicker UserForm to handle Click and MouseMove events for
-runtime-created MSForms labels. 
 Runtime-created MSForms labels do not expose normal UserForm event
 procedures. A WithEvents class is required to capture their Click and
 MouseMove events.
+
 It is responsible for:
 
 - click routing for runtime-created MSForms labels
