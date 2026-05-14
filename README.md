@@ -231,7 +231,7 @@ flowchart LR
 
 ### `M_DatePicker.bas`
 
-Shared public API and infrastructure module responsible for:
+Provides the shared companion module for the DatePicker project
 
 - `DP_Start`, `DP_Stop`, `DP_Show`, `DP_Close`
 - `DP_Today`, `DP_Now`
@@ -246,7 +246,19 @@ Shared public API and infrastructure module responsible for:
 
 ### `cDatePickerManager.cls`
 
-Application-level controller responsible for:
+Provides the central Excel Application event manager for the DatePicker project
+
+The DatePicker uses several transient Excel / VBA UI surfaces:
+  - modeless runtime UserForm
+  - in-grid DatePicker icon
+  - workbook, worksheet, window, save, print, close, and activation events
+  - optional keyboard shortcut fallback
+
+Centralizing the Application event flow in one manager class keeps the
+project predictable, avoids duplicate event wiring, and prevents stale UI
+artifacts from surviving normal Excel context transitions
+
+The controller is responsible for:
 
 - Excel Application event hooks
 - selection-driven DatePicker refresh
@@ -256,7 +268,6 @@ Application-level controller responsible for:
 - high-frequency in-grid icon show / move / hide behavior
 - hard-boundary cleanup before save, print, close, or teardown
 
-The manager is intended to be an internal controller. If used only inside this VBA project, set the class `Instancing` property to **Private**.
 
 ### `UF_DatePicker.frm`
 
@@ -274,11 +285,20 @@ Dedicated UI layer responsible for:
 - live footer-clock display
 - keyboard navigation and shortcut routing
 
-The form uses the user-facing caption **Date / Time Picker**.
+The DatePicker form is built at runtime. This keeps layout, dynamic control creation, 
+label-event routing, calendar rendering, '   month/year navigation, footer shortcuts, 
+in-form settings, keyboard  navigation, and live-clock behavior centralized in one 
+UserForm code-behind.
 
 ### `cDatePickerLabelHook.cls`
 
-Lightweight `WithEvents` routing class responsible for:
+DatePickerLabelHook provides the lightweight WithEvents routing layer used
+by the DatePicker UserForm to handle Click and MouseMove events for
+runtime-created MSForms labels. 
+Runtime-created MSForms labels do not expose normal UserForm event
+procedures. A WithEvents class is required to capture their Click and
+MouseMove events.
+It is responsible for:
 
 - click routing for runtime-created MSForms labels
 - day-label hover routing
@@ -286,8 +306,6 @@ Lightweight `WithEvents` routing class responsible for:
 - picker-panel hover routing
 - footer-label hover routing
 - settings-panel hover routing
-
-The class intentionally avoids dead mouse-leave lifecycle code. Hover reset is centrally managed by the form through its hover trackers and `UserForm_MouseMove` cleanup path.
 
 ---
 
