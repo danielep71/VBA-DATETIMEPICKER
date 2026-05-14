@@ -286,13 +286,13 @@ Dedicated UI layer responsible for:
 - keyboard navigation and shortcut routing
 
 The DatePicker form is built at runtime. This keeps layout, dynamic control creation, 
-label-event routing, calendar rendering, '   month/year navigation, footer shortcuts, 
+label-event routing, calendar rendering, month/year navigation, footer shortcuts, 
 in-form settings, keyboard  navigation, and live-clock behavior centralized in one 
 UserForm code-behind.
 
 ### `cDatePickerLabelHook.cls`
 
-DatePickerLabelHook provides the lightweight WithEvents routing layer used
+cDatePickerLabelHook provides the lightweight WithEvents routing layer used
 by the DatePicker UserForm to handle Click and MouseMove events for
 runtime-created MSForms labels. 
 Runtime-created MSForms labels do not expose normal UserForm event
