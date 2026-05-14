@@ -20,6 +20,7 @@
 
 ---
 
+
 ## ✨ Overview
 
 <p align="left">
@@ -65,48 +66,126 @@ The project is intentionally more than a visual widget. It includes manager-driv
 ## 🚀 Key features
 
 <p align="left">
-  <img alt="Modeless" src="https://img.shields.io/badge/modeless-supported-217346">
-  <img alt="In-grid icon" src="https://img.shields.io/badge/in--grid_icon-supported-blue">
-  <img alt="Keyboard" src="https://img.shields.io/badge/keyboard-navigation-orange">
-  <img alt="Settings" src="https://img.shields.io/badge/settings-in--form_panel-6f42c1">
+  <img alt="Modeless UI" src="https://img.shields.io/badge/Modeless_UI-Supported-217346">
+  <img alt="Date and Time" src="https://img.shields.io/badge/Date_%2F_Time_Write--Back-Supported-217346">
+  <img alt="Smart Detection" src="https://img.shields.io/badge/Smart_Cell_Detection-Supported-217346">
+  <img alt="In-grid Icon" src="https://img.shields.io/badge/In--Grid_Icon-Supported-217346">
+  <img alt="Right Click" src="https://img.shields.io/badge/Right--Click_Menu-Optional-217346">
+  <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Keyboard_Shortcut-Optional-217346">
+  <img alt="Keyboard Navigation" src="https://img.shields.io/badge/Keyboard_Navigation-Supported-217346">
+  <img alt="Settings Panel" src="https://img.shields.io/badge/Settings-In--Form_Panel-6f42c1">
+  <img alt="Live Clock" src="https://img.shields.io/badge/Live_Clock-Optional-6f42c1">
+  <img alt="Compact Mode" src="https://img.shields.io/badge/Compact_Mode-Optional-6f42c1">
+  <img alt="Lifecycle Cleanup" src="https://img.shields.io/badge/Lifecycle_Cleanup-Built--In-orange">
+  <img alt="Demo Workbook" src="https://img.shields.io/badge/Demo_Workbook-Available-orange">
 </p>
 
-- 📌 **Modeless Date / Time Picker UserForm**  
-  Keeps Excel usable while the picker remains open.
+### 📌 Worksheet-friendly Date / Time input
 
-- 🖱️ **In-grid activation icon**  
-  Shows a contextual worksheet shape next to eligible cells, with hide / move / reuse behavior for high-frequency selection changes.
+The picker is designed for real Excel workflows, not only for isolated form demos.
 
-- 🧠 **Smart date-cell detection**  
-  Can react to date-like values, date-formatted cells, and configured entry points.
+- 📅 **Date-only write-back** through the Today shortcut and calendar selection
+- 🕒 **Date-time write-back** through the Now shortcut
+- 📌 **Modeless UserForm**, so Excel remains usable while the picker is open
+- 🔁 **Repeated write-back workflow**, useful when users move across multiple target cells
+- 🧾 **Table-column friendly behavior**, suitable for structured data-entry ranges
 
-- 🔁 **Repeated write-back workflow**  
-  Supports efficient workflows where users select multiple target cells and write dates repeatedly.
+### 🧠 Smart activation and cell detection
 
-- ⚙️ **In-form settings panel**  
-  Settings are exposed inside the picker, with display, behavior, and integration pages.
+The DatePicker can be shown through multiple entry points and can react to worksheet context.
 
-- ⌨️ **Mouse and keyboard navigation**  
-  Supports arrow keys, month/year navigation, Today, Now, Esc handling, and letter shortcuts.
+- 🧠 Detects date-like values and date-formatted cells
+- 🖱️ Supports optional **right-click menu** integration
+- 🎯 Supports optional **in-grid activation icon** next to eligible cells
+- ⌨️ Supports optional **keyboard shortcut** fallback
+- 🧯 Prevents dead access configurations by preserving at least one practical entry path
 
-- 🕒 **Today and Now shortcuts**  
-  Allows date-only write-back or date-time write-back with the current system time.
+### 🖱️ In-grid activation icon
 
-- 🧱 **Manager / UI / hook separation**  
-  Application events, UserForm rendering, and runtime label events are separated into focused components.
+The optional worksheet icon gives users a visible, contextual entry point directly in the grid.
 
-- 🧹 **Lifecycle cleanup**  
-  Includes explicit cleanup paths for timers, UserForms, right-click menu entries, keyboard shortcuts, and in-grid worksheet icons.
+- 🎯 Appears near eligible cells
+- ⚡ Uses hide / move / reuse behavior for high-frequency selection changes
+- 🧹 Can be removed when the feature is disabled
+- 🧼 Can be purged during workbook cleanup, save, close, or reset paths
 
+### 🗓️ Calendar rendering and navigation
+
+The picker uses a fixed and predictable calendar surface.
+
+- 🧱 Fixed **6 x 7 calendar grid**
+- ◀️ Previous / next month navigation
+- 🔼 Previous / next year navigation
+- 📆 Month picker overlay
+- 📅 Year picker overlay
+- 🎯 Today, selected-date, keyboard-date, outside-month, weekend, disabled, and hover visual states
+
+### ⌨️ Keyboard and mouse workflow
+
+The component supports both mouse-first and keyboard-first usage.
+
+- ⬅️ ➡️ ⬆️ ⬇️ Arrow-key day navigation
+- 📄 PageUp / PageDown month navigation
+- 🏁 Home / End navigation inside the displayed month
+- ✅ Enter / Space selection
+- ⎋ Esc close / overlay dismiss behavior
+- 🔤 Letter shortcuts for Month, Year, Today, and Now actions
+
+### ⚙️ In-form settings panel
+
+Settings are exposed inside the picker through a compact overlay panel.
+
+- 🖥️ **Display settings**
+  - first day of week
+  - local or fixed-English captions
+  - live clock
+  - compact layout
+  - weekend highlighting
+
+- 🧭 **Behavior settings**
+  - close after selection
+  - allow outside-month selection
+
+- 🔌 **Integration settings**
+  - right-click menu
+  - in-grid icon
+  - WinAPI styling
+
+### 🧱 Clean internal architecture
+
+The project separates responsibilities across focused components.
+
+- 🧠 `cDatePickerManager` handles Excel application events and lifecycle orchestration
+- 🖼️ `UF_DatePicker` handles the runtime UserForm, rendering, settings panel, and visual state
+- 🔗 `cDatePickerLabelHook` routes events from runtime-created labels
+- 🧰 `M_DatePicker` exposes the public API, settings, integration helpers, timers, and grid-icon infrastructure
+
+### 🧹 Lifecycle and cleanup discipline
+
+The DatePicker includes explicit cleanup paths for real workbook sessions.
+
+- ⏱️ Stops live-clock timers
+- 🧼 Closes loaded picker forms
+- 🧹 removes or purges in-grid icons
+- 🖱️ removes right-click menu entries
+- ⌨️ removes keyboard shortcut assignments
+- 🔁 repairs or restarts the manager when needed
+- 🛡️ keeps `Application.EnableEvents` aligned when ensuring the manager
+
+### 🏢 Enterprise-friendly VBA behavior
+
+The implementation is designed for controlled Excel environments.
+
+- 📦 No external installer required
+- 🧩 Importable `.bas`, `.cls`, and `.frm` source files
+- 🧠 Clear separation between UI, manager, hooks, and infrastructure
+- 🧪 Demo-friendly and regression-friendly structure
+- 🧾 Compatible with source-controlled VBA exports
+  
 ---
 
 ## 📸 Screenshots
 
-<p align="left">
-  <img alt="Screenshots" src="https://img.shields.io/badge/screenshots-recommended-blue">
-  <img alt="Assets" src="https://img.shields.io/badge/assets-repo_local-lightgrey">
-  <img alt="Preview" src="https://img.shields.io/badge/preview-GitHub_ready-217346">
-</p>
 
 ### Main picker
 
@@ -120,7 +199,15 @@ The project is intentionally more than a visual widget. It includes manager-driv
 
 <img src="assets/datepicker-ingrid.png" alt="Date / Time Picker in-grid activation icon" />
 
-If you use different filenames, replace the paths above with your actual repository asset paths.
+---
+
+## 🧩 Compatibility 
+
+- Microsoft Excel for Windows
+- Excel 2016 and later
+- Office 32-bit and 64-bit
+- VBA UserForms
+- No external runtime dependency
 
 ---
 
@@ -489,9 +576,9 @@ Date / Time Picker
 ## 🧭 Keyboard navigation
 
 <p align="left">
-  <img alt="Keyboard" src="https://img.shields.io/badge/keyboard-supported-217346">
-  <img alt="Navigation" src="https://img.shields.io/badge/navigation-arrow_keys-blue">
-  <img alt="Shortcuts" src="https://img.shields.io/badge/shortcuts-T_%2F_N_%2F_M_%2F_Y-orange">
+  <img alt="Keyboard" src="https://img.shields.io/badge/Keyboard-Supported-217346">
+  <img alt="Navigation" src="https://img.shields.io/badge/Navigation-Arrow_Keys-blue">
+  <img alt="Shortcuts" src="https://img.shields.io/badge/Shortcuts-T_%2F_N_%2F_M_%2F_Y-orange">
 </p>
 
 Typical keyboard behavior includes:
@@ -517,9 +604,8 @@ Letter shortcuts are ignored when Ctrl or Alt is pressed so the picker does not 
 ## 🧹 Runtime cleanup policy
 
 <p align="left">
-  <img alt="Cleanup" src="https://img.shields.io/badge/cleanup-explicit-blue">
-  <img alt="Grid Icon Policy" src="https://img.shields.io/badge/grid_icon-hide_%2F_remove_%2F_purge-6f42c1">
-  <img alt="Timers" src="https://img.shields.io/badge/timers-stopped_on_close-orange">
+  <img alt="Cleanup" src="https://img.shields.io/badge/Cleanup-Explicit-blue">
+  <img alt="Grid Icon Policy" src="https://img.shields.io/badge/Grid_Icon-Hide_%2F_Remove_%2F_Purge-6f42c1">
 </p>
 
 The project separates high-frequency UI cleanup from hard lifecycle cleanup:
@@ -540,9 +626,8 @@ This avoids flicker during normal selection changes while still keeping workbook
 ## 🪟 WinAPI behavior
 
 <p align="left">
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-optional_support-blue">
-  <img alt="WinAPI" src="https://img.shields.io/badge/WinAPI-optional_styling-6f42c1">
-  <img alt="Fallback" src="https://img.shields.io/badge/fallback-native_UserForm-lightgrey">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-Optional_support-blue">
+  <img alt="WinAPI" src="https://img.shields.io/badge/WinAPI-Optional_styling-6f42c1">
 </p>
 
 The picker supports optional Windows-specific behavior for a more polished UI.
@@ -599,9 +684,7 @@ Suggested validation areas:
 ## ✅ Test quick start
 
 <p align="left">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-compile_%2B_manual-blue">
-  <img alt="Regression" src="https://img.shields.io/badge/regression-checklist-6f42c1">
-  <img alt="Quality" src="https://img.shields.io/badge/quality-release_gate-217346">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook-blue">
 </p>
 
 Before releasing or tagging a version:
@@ -635,9 +718,7 @@ DP_Stop
 ## 🧯 Troubleshooting
 
 <p align="left">
-  <img alt="Troubleshooting" src="https://img.shields.io/badge/troubleshooting-runtime_blueprint-blue">
-  <img alt="Events" src="https://img.shields.io/badge/events-check_EnableEvents-orange">
-  <img alt="Forms" src="https://img.shields.io/badge/forms-include_FRX-6f42c1">
+  <img alt="Troubleshooting" src="https://img.shields.io/badge/Troubleshooting-Runtime_blueprint-blue">
 </p>
 
 | Symptom | Check |
@@ -656,9 +737,7 @@ DP_Stop
 ## 🧭 Roadmap
 
 <p align="left">
-  <img alt="Roadmap" src="https://img.shields.io/badge/roadmap-planned_enhancements-blue">
-  <img alt="Business Days" src="https://img.shields.io/badge/business_days-future-green">
-  <img alt="Framework" src="https://img.shields.io/badge/framework-integration-6f42c1">
+  <img alt="Roadmap" src="https://img.shields.io/badge/Roadmap-Planned_enhancements-blue">
 </p>
 
 Planned or possible future enhancements include:
@@ -667,8 +746,6 @@ Planned or possible future enhancements include:
 - 🧠 richer date-cell detection heuristics
 - 🧩 tighter integration with reusable date/calendar modules
 - 🎨 additional visual themes
-- 🧪 dedicated regression workbook
-- 📦 optional `.xlam` packaging
 - 🌐 improved localization options
 - 🖱️ richer in-grid trigger behavior
 
@@ -677,19 +754,11 @@ Planned or possible future enhancements include:
 ## 🌐 Part of a broader framework
 
 <p align="left">
-  <img alt="Framework" src="https://img.shields.io/badge/framework-Excel_VBA_Runtime_Framework-217346">
-  <img alt="Layer" src="https://img.shields.io/badge/layer-interaction_layer-6f42c1">
-  <img alt="Reusable" src="https://img.shields.io/badge/reusable-component-blue">
+  <img alt="Framework" src="https://img.shields.io/badge/Framework-Excel_VBA_Runtime_Framework-217346">
+  <img alt="Layer" src="https://img.shields.io/badge/Layer-Interaction_layer-6f42c1">
 </p>
 
-**VBA-DATETIMEPICKER** is intended to sit naturally alongside other reusable Excel VBA components, such as:
-
-- performance / execution managers
-- Excel UI controllers
-- demo builders
-- progress-bar components
-- calendar and date infrastructure
-- business-day and holiday-calendar engines
+**VBA-DATETIMEPICKER** is intended to sit naturally alongside other reusable Excel VBA components.
 
 In a broader VBA engineering ecosystem, this repository can serve as the **date-input / calendar UX component**.
 
@@ -698,9 +767,8 @@ In a broader VBA engineering ecosystem, this repository can serve as the **date-
 ## 📚 Wiki
 
 <p align="left">
-  <img alt="Docs" src="https://img.shields.io/badge/docs-wiki-blue">
-  <img alt="Guidance" src="https://img.shields.io/badge/guidance-extended_notes-6f42c1">
-  <img alt="Examples" src="https://img.shields.io/badge/examples-coming_soon-lightgrey">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Wiki-blue">
+  <img alt="Guidance" src="https://img.shields.io/badge/Guidance-Extended_notes-6f42c1">
 </p>
 
 For additional examples, notes, and repository-level guidance, see the project wiki:
@@ -712,9 +780,7 @@ For additional examples, notes, and repository-level guidance, see the project w
 ## 🔧 Coding style
 
 <p align="left">
-  <img alt="Style" src="https://img.shields.io/badge/style-structured_VBA-217346">
-  <img alt="Headers" src="https://img.shields.io/badge/headers-purpose_blocks-blue">
-  <img alt="Comments" src="https://img.shields.io/badge/comments-above_code-orange">
+  <img alt="Style" src="https://img.shields.io/badge/Style-Structured_VBA-217346">
 </p>
 
 This repository follows a structured VBA style.
@@ -746,12 +812,11 @@ General conventions:
 ## 🤝 Contributing
 
 <p align="left">
-  <img alt="Contributions" src="https://img.shields.io/badge/contributions-welcome-brightgreen">
-  <img alt="Commits" src="https://img.shields.io/badge/commits-conventional-blue">
-  <img alt="Stability" src="https://img.shields.io/badge/stability-preserve_behavior-orange">
+  <img alt="Contributions" src="https://img.shields.io/badge/Contributions-Welcome-brightgreen">
+  <img alt="Commits" src="https://img.shields.io/badge/Commits-Conventional-blue">
+  <img alt="Stability" src="https://img.shields.io/badge/Stability-Preserve_behavior-orange">
 </p>
 
-Contributions are welcome.
 
 Please aim to:
 
@@ -775,50 +840,15 @@ Conventional Commit examples:
 
 <p align="left">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Use" src="https://img.shields.io/badge/use-see_LICENSE-blue">
 </p>
-
-This project is licensed under the terms in `LICENSE`.
 
 ---
 
 ## 👤 Author
 
 <p align="left">
-  <img alt="Maintainer" src="https://img.shields.io/badge/maintainer-Daniele_Penza-orange">
-  <img alt="GitHub" src="https://img.shields.io/badge/GitHub-danielep71-blue">
+  <img alt="Maintainer" src="https://img.shields.io/badge/Maintainer-Daniele_Penza-orange">
 </p>
-
-Maintained by **Daniele Penza**.
 
 ---
-
-## 🏷️ Suggested GitHub topics
-
-<p align="left">
-  <img alt="Topics" src="https://img.shields.io/badge/topics-repository_discovery-blue">
-  <img alt="Excel" src="https://img.shields.io/badge/excel-vba-217346">
-  <img alt="UI" src="https://img.shields.io/badge/ui-datepicker-orange">
-</p>
-
-Suggested repository topics:
-
-```text
-excel
-vba
-excel-vba
-datepicker
-datetimepicker
-userform
-msforms
-calendar
-calendar-picker
-date-input
-excel-addin
-vba-library
-vba-tools
-vba-ui
-worksheet-tools
-enterprise-vba
-```
 
