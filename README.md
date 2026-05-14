@@ -17,6 +17,7 @@
 ---
 
 <img width="1280" height="640" alt="vba-datetimepicker-social-preview" src="https://github.com/user-attachments/assets/b7e70418-8a08-4b60-9e6c-602d322425be" />
+<img width="1536" height="1024" alt="datepicker-home2" src="https://github.com/user-attachments/assets/21bda6f0-d738-47b9-87f1-69f83c308ba7" />
 
 ---
 
