@@ -725,8 +725,9 @@ Before releasing or tagging a version:
 9. Test settings save and persistence.
 10. Test compact layout and normal layout.
 11. Test WinAPI styling enabled and disabled.
-12. Save, print-preview, and close the workbook to verify cleanup.
-13. Reopen the workbook and confirm startup is clean.
+12. Test Ribbon callbacks if RibbonX is included.
+13. Save, print-preview, and close the workbook to verify cleanup.
+14. Reopen the workbook and confirm startup is clean.
 
 Recommended Immediate Window checks:
 
@@ -756,6 +757,9 @@ DP_Stop
 | Borderless styling does not apply | Confirm `gDP_UseWinAPI = True` and platform support |
 | Settings appear stale | Open settings panel and use Save, or reload with `M_Settings_EnsureLoaded` |
 | Events were disabled by another macro | Run `DP_RepairRuntime` or `M_Picker_EnsureManager` |
+| Ribbon button does nothing | Confirm the RibbonX `onAction` name exactly matches the public VBA callback name |
+| Ribbon callback raises a compile error on `IRibbonControl` | Ensure the callback is in a standard module and the Office object library is available |
+| Demo Ribbon button fails | Confirm the workbook contains a worksheet named `DATE PICKER DEMO` |
 
 ---
 
@@ -773,6 +777,7 @@ Planned or possible future enhancements include:
 - 🎨 additional visual themes
 - 🌐 improved localization options
 - 🖱️ richer in-grid trigger behavior
+- 🎛️ richer RibbonX examples and optional Ribbon icon guidance
 
 ---
 
@@ -858,6 +863,8 @@ Conventional Commit examples:
 - `fix(manager): clean up stale in-grid icon on sheet change`
 - `docs(readme): expand installation instructions`
 - `refactor(hooks): simplify runtime label event routing`
+- `feat(ribbon): add DatePicker Ribbon callbacks`
+- `docs(ribbon): document RibbonX callback mapping`
 
 ---
 
