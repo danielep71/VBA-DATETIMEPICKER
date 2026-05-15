@@ -6,17 +6,17 @@
 </p>
 
 <p align="center">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Excel_VBA-217346">
-  <img alt="Office" src="https://img.shields.io/badge/office-32%2F64--bit-blue">
-  <img alt="Architecture" src="https://img.shields.io/badge/architecture-manager_driven-6f42c1">
-  <img alt="UI" src="https://img.shields.io/badge/UI-modeless_UserForm-00A3E0">
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
-  <img alt="Status" src="https://img.shields.io/badge/status-active_development-orange">
+  <img alt="Platform" src="https://img.shields.io/badge/Platform-Excel_VBA-217346">
+  <img alt="Office" src="https://img.shields.io/badge/Office-32%2F64--bit-blue">
+  <img alt="Architecture" src="https://img.shields.io/badge/Architecture-Manager_driven-6f42c1">
+  <img alt="UI" src="https://img.shields.io/badge/UI-Modeless_UserForm-00A3E0">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
+  <img alt="Status" src="https://img.shields.io/badge/Status-Active_development-orange">
 </p>
 
 ---
 
-<img width="1280" height="640" alt="vba-datetimepicker-social-preview" src="https://github.com/user-attachments/assets/b7e70418-8a08-4b60-9e6c-602d322425be" />
+<img width="1536" height="1024" alt="datepicker-home2" src="https://github.com/user-attachments/assets/21bda6f0-d738-47b9-87f1-69f83c308ba7" />
 
 ---
 
@@ -24,14 +24,11 @@
 ## ✨ Overview
 
 <p align="left">
-  <img alt="Component" src="https://img.shields.io/badge/component-Date_%2F_Time_Picker-217346">
-  <img alt="Layer" src="https://img.shields.io/badge/layer-interaction_layer-6f42c1">
-  <img alt="Excel UX" src="https://img.shields.io/badge/Excel_UX-worksheet_friendly-blue">
+  <img alt="Component" src="https://img.shields.io/badge/Component-Date_%2F_Time_Picker-217346">
+  <img alt="Excel UX" src="https://img.shields.io/badge/Excel_UX-Worksheet_friendly-blue">
 </p>
 
 **VBA-DATETIMEPICKER** is a modern, modular, and worksheet-friendly **Date / Time Picker for Excel VBA**.
-
-It is designed for developers who want a cleaner and more intuitive way to handle date input in Excel without forcing users to type dates manually or interact with rigid modal dialogs.
 
 The component provides a **modeless UserForm**, contextual worksheet integration, in-form settings, keyboard shortcuts, live-clock support, right-click access, and optional in-grid activation.
 
@@ -48,9 +45,9 @@ Built as part of a broader **Excel VBA Runtime Framework**, this project focuses
 ## ⭐ Why this exists
 
 <p align="left">
-  <img alt="Problem" src="https://img.shields.io/badge/problem-native_date_input-lightgrey">
-  <img alt="Goal" src="https://img.shields.io/badge/goal-modern_Excel_UX-brightgreen">
-  <img alt="Audience" src="https://img.shields.io/badge/audience-VBA_developers-blueviolet">
+  <img alt="Problem" src="https://img.shields.io/badge/Problem-Native_date_input-lightgrey">
+  <img alt="Goal" src="https://img.shields.io/badge/Goal-Modern_Excel_UX-brightgreen">
+  <img alt="Audience" src="https://img.shields.io/badge/Audience-VBA_developers_%2F_Excel_users-blueviolet">
 </p>
 
 Excel still powers an enormous number of business-critical workflows, but native date-entry UX is often poor.
@@ -234,7 +231,7 @@ flowchart LR
 
 ### `M_DatePicker.bas`
 
-Shared public API and infrastructure module responsible for:
+Provides the shared companion module for the DatePicker project
 
 - `DP_Start`, `DP_Stop`, `DP_Show`, `DP_Close`
 - `DP_Today`, `DP_Now`
@@ -249,7 +246,19 @@ Shared public API and infrastructure module responsible for:
 
 ### `cDatePickerManager.cls`
 
-Application-level controller responsible for:
+Provides the central Excel Application event manager for the DatePicker project
+
+The DatePicker uses several transient Excel / VBA UI surfaces:
+  - modeless runtime UserForm
+  - in-grid DatePicker icon
+  - workbook, worksheet, window, save, print, close, and activation events
+  - optional keyboard shortcut fallback
+
+Centralizing the Application event flow in one manager class keeps the
+project predictable, avoids duplicate event wiring, and prevents stale UI
+artifacts from surviving normal Excel context transitions
+
+The controller is responsible for:
 
 - Excel Application event hooks
 - selection-driven DatePicker refresh
@@ -259,7 +268,6 @@ Application-level controller responsible for:
 - high-frequency in-grid icon show / move / hide behavior
 - hard-boundary cleanup before save, print, close, or teardown
 
-The manager is intended to be an internal controller. If used only inside this VBA project, set the class `Instancing` property to **Private**.
 
 ### `UF_DatePicker.frm`
 
@@ -277,11 +285,18 @@ Dedicated UI layer responsible for:
 - live footer-clock display
 - keyboard navigation and shortcut routing
 
-The form uses the user-facing caption **Date / Time Picker**.
+The DatePicker form is built at runtime. This keeps layout, dynamic control creation, 
+label-event routing, calendar rendering, month/year navigation, footer shortcuts, 
+in-form settings, keyboard  navigation, and live-clock behavior centralized in one 
+UserForm code-behind.
 
 ### `cDatePickerLabelHook.cls`
 
-Lightweight `WithEvents` routing class responsible for:
+Runtime-created MSForms labels do not expose normal UserForm event
+procedures. A WithEvents class is required to capture their Click and
+MouseMove events.
+
+It is responsible for:
 
 - click routing for runtime-created MSForms labels
 - day-label hover routing
@@ -289,8 +304,6 @@ Lightweight `WithEvents` routing class responsible for:
 - picker-panel hover routing
 - footer-label hover routing
 - settings-panel hover routing
-
-The class intentionally avoids dead mouse-leave lifecycle code. Hover reset is centrally managed by the form through its hover trackers and `UserForm_MouseMove` cleanup path.
 
 ---
 
