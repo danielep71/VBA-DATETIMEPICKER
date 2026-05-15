@@ -65,6 +65,7 @@ The project is intentionally more than a visual widget. It includes manager-driv
 
 <p align="left">
   <img alt="Modeless UI" src="https://img.shields.io/badge/Modeless_UI-Supported-217346">
+  <img alt="Draggable Form" src="https://img.shields.io/badge/Borderless_Drag-Supported-217346">
   <img alt="Date and Time" src="https://img.shields.io/badge/Date_%2F_Time_Write--Back-Supported-217346">
   <img alt="Smart Detection" src="https://img.shields.io/badge/Smart_Cell_Detection-Supported-217346">
   <img alt="In-grid Icon" src="https://img.shields.io/badge/In--Grid_Icon-Supported-217346">
@@ -130,6 +131,16 @@ The component supports both mouse-first and keyboard-first usage.
 - ✅ Enter / Space selection
 - ⎋ Esc close / overlay dismiss behavior
 - 🔤 Letter shortcuts for Month, Year, Today, and Now actions
+
+### 🪟 Borderless draggable window
+
+The Date / Time Picker can run with a clean borderless visual style while still remaining movable by the user.
+
+- 🪟 Supports optional borderless UserForm styling
+- 🖱️ Allows the form to be moved from a custom header drag surface
+- 🧭 Keeps normal picker controls clickable while only the passive header area acts as the drag surface
+- 🛡️ Falls back safely when WinAPI support is unavailable
+- 🧩 Keeps drag behavior separated from calendar, settings, and label-click logic
 
 ### ⚙️ In-form settings panel
 
@@ -214,7 +225,7 @@ The implementation is designed for controlled Excel environments.
 ## 🏗️ Architecture
 
 <p align="left">
-  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Panager_%2B_form_%2B_hooks-6f42c1">
+  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Manager_%2B_form_%2B_hooks-6f42c1">
   <img alt="Events" src="https://img.shields.io/badge/Events-Application_level-blue">
   <img alt="Runtime UI" src="https://img.shields.io/badge/Runtime_UI-MSForms-orange">
 </p>
@@ -547,8 +558,9 @@ Ribbon callback procedures must remain `Public` and must be located in a standar
 <p align="left">
   <img alt="Entry" src="https://img.shields.io/badge/Entry_points-Multiple-217346">
   <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
-  <img alt="Context Menu" src="https://img.shields.io/badge/Context_Menu-Supported-blue">
-  <img alt="Grid Icon" src="https://img.shields.io/badge/Grid_icon-Supported-orange">
+  <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Ctrl_%2B_Shift_%2B_D-Supported-217346">
+  <img alt="Context Menu" src="https://img.shields.io/badge/Context_Menu-Supported-217346">
+  <img alt="Grid Icon" src="https://img.shields.io/badge/Grid_icon-Supported-217346">
 </p>
 
 The Date / Time Picker can be opened through several user-facing paths:
@@ -556,7 +568,7 @@ The Date / Time Picker can be opened through several user-facing paths:
 - Ribbon button through `Ribbon_ShowPicker`
 - right-click menu entry
 - in-grid icon next to eligible cells
-- keyboard shortcut fallback
+- keyboard shortcut fallback through `Ctrl + Shift + D`
 - direct macro call to `DP_Show`
 
 The project intentionally keeps `VBA_DATETIMEPICKER` as a stable internal command-bar tag / settings name, while user-facing captions should use:
@@ -657,10 +669,14 @@ For production use, wrap callbacks with controlled error handling and user-facin
   <img alt="Shortcuts" src="https://img.shields.io/badge/Shortcuts-T_%2F_N_%2F_M_%2F_Y-orange">
 </p>
 
+The picker can also be opened directly from Excel through the configured keyboard shortcut: Ctrl + Shift + D
+This shortcut is intended as a fallback entry point when the user does not want to rely on the right-click menu, Ribbon button, or in-grid icon.
+
 Typical keyboard behavior includes:
 
 | Key | Action |
 |---|---|
+| `Ctrl + Shift + D` | Open or refresh the Date / Time Picker from Excel |
 | `←` / `→` | Move one day backward / forward |
 | `↑` / `↓` | Move one week backward / forward |
 | `PageUp` / `PageDown` | Move one month backward / forward |
@@ -716,6 +732,10 @@ The intended policy is:
 | `M_Platform_ShouldUseWinAPI` | Capability plus user setting for optional styling |
 | `M_Window_RemoveTitleBar` | Uses the styling policy |
 | `M_Window_MoveFormToMouse` | Uses capability only, so positioning may still work when styling is disabled |
+| `M_Window_BeginUserFormDrag` | Starts native drag movement from a custom borderless form surface |
+
+When the native title bar is removed, the form can still be moved through a custom drag surface. In the default UI, this should be assigned only to a passive header area, not to active controls such as month, year, navigation arrows, or settings icons.
+This preserves the clean borderless look while keeping the UserForm practical in daily use.
 
 Disabling **Use WinAPI styling** should disable optional styling such as title-bar removal. It should not necessarily disable all safe Windows capability paths such as mouse-based positioning.
 
@@ -775,10 +795,11 @@ Before releasing or tagging a version:
 8. Test month and year navigation.
 9. Test settings save and persistence.
 10. Test compact layout and normal layout.
-11. Test WinAPI styling enabled and disabled.
-12. Test Ribbon callbacks if RibbonX is included.
-13. Save, print-preview, and close the workbook to verify cleanup.
-14. Reopen the workbook and confirm startup is clean.
+11. Test WinAPI styling enabled and disabled.- Test that `Ctrl + Shift + D` opens or refreshes the picker.
+12. Test that the borderless form can be moved from the custom header drag surface.
+13. Test Ribbon callbacks if RibbonX is included.
+14. Save, print-preview, and close the workbook to verify cleanup.
+15. Reopen the workbook and confirm startup is clean.
 
 Recommended Immediate Window checks:
 
