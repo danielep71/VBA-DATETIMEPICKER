@@ -10,6 +10,7 @@
   <img alt="Office" src="https://img.shields.io/badge/Office-32%2F64--bit-blue">
   <img alt="Architecture" src="https://img.shields.io/badge/Architecture-Manager_driven-6f42c1">
   <img alt="UI" src="https://img.shields.io/badge/UI-Modeless_UserForm-00A3E0">
+  <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
   <img alt="Status" src="https://img.shields.io/badge/Status-Active_development-orange">
 </p>
@@ -30,7 +31,7 @@
 
 **VBA-DATETIMEPICKER** is a modern, modular, and worksheet-friendly **Date / Time Picker for Excel VBA**.
 
-The component provides a **modeless UserForm**, contextual worksheet integration, in-form settings, keyboard shortcuts, live-clock support, right-click access, and optional in-grid activation.
+The component provides a **modeless UserForm**, contextual worksheet integration, in-form settings, keyboard shortcuts, live-clock support, right-click access, optional in-grid activation, and optional Ribbon callbacks.
 
 Built as part of a broader **Excel VBA Runtime Framework**, this project focuses on:
 
@@ -67,13 +68,14 @@ The project is intentionally more than a visual widget. It includes manager-driv
   <img alt="Date and Time" src="https://img.shields.io/badge/Date_%2F_Time_Write--Back-Supported-217346">
   <img alt="Smart Detection" src="https://img.shields.io/badge/Smart_Cell_Detection-Supported-217346">
   <img alt="In-grid Icon" src="https://img.shields.io/badge/In--Grid_Icon-Supported-217346">
-  <img alt="Right Click" src="https://img.shields.io/badge/Right--Click_Menu-Optional-217346">
-  <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Keyboard_Shortcut-Optional-217346">
+  <img alt="Right Click" src="https://img.shields.io/badge/Right--Click_Menu-Supported-217346">
+  <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Keyboard_Shortcut-Supported-217346">
+  <img alt="Ribbon Callbacks" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
   <img alt="Keyboard Navigation" src="https://img.shields.io/badge/Keyboard_Navigation-Supported-217346">
-  <img alt="Settings Panel" src="https://img.shields.io/badge/Settings-In--Form_Panel-6f42c1">
-  <img alt="Live Clock" src="https://img.shields.io/badge/Live_Clock-Optional-6f42c1">
-  <img alt="Compact Mode" src="https://img.shields.io/badge/Compact_Mode-Optional-6f42c1">
+  <img alt="Live Clock" src="https://img.shields.io/badge/Live_Clock-Supported-217346">
+  <img alt="Compact Mode" src="https://img.shields.io/badge/Compact_Mode-Supported-217346">
   <img alt="Lifecycle Cleanup" src="https://img.shields.io/badge/Lifecycle_Cleanup-Built--In-orange">
+  <img alt="Settings Panel" src="https://img.shields.io/badge/Settings-In--Form_Panel-orange">
   <img alt="Demo Workbook" src="https://img.shields.io/badge/Demo_Workbook-Available-orange">
 </p>
 
@@ -95,6 +97,7 @@ The DatePicker can be shown through multiple entry points and can react to works
 - 🖱️ Supports optional **right-click menu** integration
 - 🎯 Supports optional **in-grid activation icon** next to eligible cells
 - ⌨️ Supports optional **keyboard shortcut** fallback
+- 🎛️ Supports optional **Ribbon callbacks** for workbook or add-in Ribbon buttons
 - 🧯 Prevents dead access configurations by preserving at least one practical entry path
 
 ### 🖱️ In-grid activation icon
@@ -155,7 +158,7 @@ The project separates responsibilities across focused components.
 - 🧠 `cDatePickerManager` handles Excel application events and lifecycle orchestration
 - 🖼️ `UF_DatePicker` handles the runtime UserForm, rendering, settings panel, and visual state
 - 🔗 `cDatePickerLabelHook` routes events from runtime-created labels
-- 🧰 `M_DatePicker` exposes the public API, settings, integration helpers, timers, and grid-icon infrastructure
+- 🧰 `M_DatePicker` exposes the public API, settings, integration helpers, Ribbon callbacks, timers, and grid-icon infrastructure
 
 ### 🧹 Lifecycle and cleanup discipline
 
@@ -211,9 +214,9 @@ The implementation is designed for controlled Excel environments.
 ## 🏗️ Architecture
 
 <p align="left">
-  <img alt="Pattern" src="https://img.shields.io/badge/pattern-manager_%2B_form_%2B_hooks-6f42c1">
-  <img alt="Events" src="https://img.shields.io/badge/events-Application_level-blue">
-  <img alt="Runtime UI" src="https://img.shields.io/badge/runtime_UI-MSForms-orange">
+  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Panager_%2B_form_%2B_hooks-6f42c1">
+  <img alt="Events" src="https://img.shields.io/badge/Events-Application_level-blue">
+  <img alt="Runtime UI" src="https://img.shields.io/badge/Runtime_UI-MSForms-orange">
 </p>
 
 The project is organized around a clean separation of responsibilities.
@@ -226,7 +229,7 @@ flowchart LR
     Form --> Hooks[cDatePickerLabelHook]
     Hooks --> Form
     Module --> Settings[Registry-backed Settings]
-    Module --> UI[Context Menu / Keyboard / Grid Icon / Timer]
+    Module --> UI[Context Menu / Keyboard / Grid Icon / Ribbon / Timer]
 ```
 
 ### `M_DatePicker.bas`
@@ -343,9 +346,9 @@ This repo follows a few core principles:
 ## 📦 Repository structure
 
 <p align="left">
-  <img alt="Source" src="https://img.shields.io/badge/source-src%2F-blue">
-  <img alt="Forms" src="https://img.shields.io/badge/forms-.frm_%2B_.frx-orange">
-  <img alt="Demo" src="https://img.shields.io/badge/demo-workbook-lightgrey">
+  <img alt="Source" src="https://img.shields.io/badge/Source-src%2F-blue">
+  <img alt="Forms" src="https://img.shields.io/badge/Forms-.frm_%2B_.frx-orange">
+  <img alt="Demo" src="https://img.shields.io/badge/Demo-Workbook-lightgrey">
 </p>
 
 ```text
@@ -356,9 +359,11 @@ VBA-DATETIMEPICKER/
 │  ├─ classes/
 │  │  ├─ cDatePickerManager.cls
 │  │  └─ cDatePickerLabelHook.cls
-│  └─ forms/
-│     ├─ UF_DatePicker.frm
-│     └─ UF_DatePicker.frx
+│  ├─ forms/
+│  │  ├─ UF_DatePicker.frm
+│  │  └─ UF_DatePicker.frx
+│  └─ ribbon/
+│     └─ customUI.xml
 ├─ demo/
 │  └─ DatePicker Demo.xlsm
 ├─ assets/
@@ -369,9 +374,9 @@ VBA-DATETIMEPICKER/
 ├─ README.md
 └─ LICENSE
 ```
-
 > Important: if the exported UserForm references `UF_DatePicker.frx`, keep the `.frm` and `.frx` together in source control.
-
+> 
+> Ribbon support is callback-based. The VBA callbacks live in a standard module, while the Ribbon layout itself must be provided through RibbonX / `customUI.xml` in the workbook or add-in package.
 ---
 
 ## 🛠️ Installation
@@ -393,9 +398,10 @@ VBA-DATETIMEPICKER/
    - `UF_DatePicker.frm`
    - `UF_DatePicker.frx`, if referenced by the exported form
 4. Ensure the **Microsoft Forms 2.0 Object Library** is available.
-5. Add the workbook lifecycle calls shown below.
-6. Compile the VBA project.
-7. Save as `.xlsm`, `.xlsb`, or package into your preferred add-in/deployment format.
+5. If Ribbon callbacks are used, ensure the workbook or add-in includes the matching RibbonX `customUI.xml`.
+6. Add the workbook lifecycle calls shown below.
+7. Compile the VBA project.
+8. Save as `.xlsm`, `.xlsb`, or package into your preferred add-in/deployment format.
 
 ### Option 2 — Use the demo workbook
 
@@ -549,6 +555,9 @@ Primary public entry points are exposed through `M_DatePicker.bas`.
 | `M_ContextMenu_Update` | Synchronizes right-click menu integration with current settings |
 | `M_KeyboardShortcut_Update` | Synchronizes keyboard shortcut integration with current settings |
 | `M_GridIcon_PurgeAll` | Removes all DatePicker grid icons from open workbooks |
+| `Ribbon_ShowPicker` | Ribbon callback that opens or refreshes the Date / Time Picker |
+| `Ribbon_Reset` | Ribbon callback that repairs DatePicker runtime state |
+| `Ribbon_Demo` | Ribbon callback that activates the DatePicker demo worksheet |
 
 A normal consumer should usually call only:
 
@@ -560,19 +569,22 @@ DP_Stop
 ```
 
 The manager class should normally be treated as internal infrastructure rather than directly instantiated by workbook code.
+Ribbon callback procedures must remain `Public` and must be located in a standard VBA module because RibbonX `onAction` callbacks cannot call private procedures, class methods, or UserForm code-behind procedures directly.
 
 ---
 
 ## 🖱️ Entry points
 
 <p align="left">
-  <img alt="Entry" src="https://img.shields.io/badge/entry_points-multiple-217346">
-  <img alt="Context Menu" src="https://img.shields.io/badge/context_menu-supported-blue">
-  <img alt="Grid Icon" src="https://img.shields.io/badge/grid_icon-supported-orange">
+  <img alt="Entry" src="https://img.shields.io/badge/Entry_points-Multiple-217346">
+  <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
+  <img alt="Context Menu" src="https://img.shields.io/badge/Context_Menu-Supported-blue">
+  <img alt="Grid Icon" src="https://img.shields.io/badge/Grid_icon-Supported-orange">
 </p>
 
 The Date / Time Picker can be opened through several user-facing paths:
 
+- Ribbon button through `Ribbon_ShowPicker`
 - right-click menu entry
 - in-grid icon next to eligible cells
 - keyboard shortcut fallback
