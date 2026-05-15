@@ -431,59 +431,28 @@ Recommended `ThisWorkbook` pattern:
 Option Explicit
 
 Private Sub Workbook_Open()
-
-    On Error GoTo ErrorHandler
-
     DP_Start
-
-    Exit Sub
-
-ErrorHandler:
-    Debug.Print "ThisWorkbook.Workbook_Open" & _
-        " | Error=" & VBA.CStr(Err.Number) & _
-        " | " & Err.Description
-    Err.Clear
-
 End Sub
 
 Private Sub Workbook_BeforeClose(Cancel As Boolean)
-
-    On Error Resume Next
-
-    If Cancel Then Exit Sub
-
     DP_Stop
-
-    Err.Clear
-    On Error GoTo 0
-
 End Sub
 
 Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
-
-    On Error Resume Next
 
     If Cancel Then Exit Sub
 
     DP_Close
     M_GridIcon_PurgeAll
-
-    Err.Clear
-    On Error GoTo 0
 
 End Sub
 
 Private Sub Workbook_BeforePrint(Cancel As Boolean)
 
-    On Error Resume Next
-
     If Cancel Then Exit Sub
 
     DP_Close
     M_GridIcon_PurgeAll
-
-    Err.Clear
-    On Error GoTo 0
 
 End Sub
 ```
@@ -595,6 +564,88 @@ The project intentionally keeps `VBA_DATETIMEPICKER` as a stable internal comman
 ```text
 Date / Time Picker
 ```
+
+---
+
+## 🎛️ Ribbon integration
+
+<p align="left">
+  <img alt="Ribbon" src="https://img.shields.io/badge/RibbonX-Callback_ready-217346">
+  <img alt="Callbacks" src="https://img.shields.io/badge/Callbacks-Public_Sub-blue">
+  <img alt="Standard Module" src="https://img.shields.io/badge/Location-Standard_Module-orange">
+</p>
+
+The project can be exposed through Excel Ribbon buttons by mapping RibbonX `onAction` callbacks to public VBA procedures.
+
+Ribbon support is intentionally callback-based:
+
+- 🎛️ Ribbon layout belongs to the workbook / add-in RibbonX XML
+- 🧰 callback procedures live in a standard VBA module
+- 🧠 the callbacks delegate to the normal DatePicker public API
+- 🧹 runtime repair remains available through a dedicated Ribbon action
+- 📘 the demo worksheet can be opened from the Ribbon when included in the host workbook
+
+### Recommended callbacks
+
+| Callback | Purpose |
+|---|---|
+| `Ribbon_ShowPicker` | Opens or refreshes the Date / Time Picker |
+| `Ribbon_Reset` | Repairs DatePicker runtime state through `DP_RepairRuntime` |
+| `Ribbon_Demo` | Activates the `DATE PICKER DEMO` worksheet |
+
+### Example RibbonX mapping
+
+```xml
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon>
+    <tabs>
+      <tab idMso="TabHome">
+        <group id="grpDateTimePicker"
+               label="DateTime Picker">
+          <splitButton id="spbDateTimePicker" size="large">
+            <button id="btnShowPicker"
+                    label="Show Picker"
+                    image="DP_GridIcon_64"
+                    onAction="Ribbon_ShowPicker"/>
+
+            <menu id="mnuDateTimePicker"
+                  itemSize="large">
+              <button id="BtnMenu_Reset"
+                      label="Reset"
+                      image="reset"
+                      onAction="Ribbon_Reset"/>
+
+              <button id="BtnMenu_Demo"
+                      label="Demo"
+                      image="demo"
+                      onAction="Ribbon_Demo"/>
+
+            </menu>
+          </splitButton>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
+```
+
+### Callback implementation policy
+
+Ribbon callbacks should stay thin. They should not duplicate DatePicker logic.
+
+Recommended pattern:
+
+```vba
+Public Sub Ribbon_ShowPicker(ByVal Control As IRibbonControl)
+    DP_Show
+End Sub
+
+Public Sub Ribbon_Reset(ByVal Control As IRibbonControl)
+    DP_RepairRuntime
+End Sub
+```
+
+For production use, wrap callbacks with controlled error handling and user-facing diagnostics so Ribbon failures do not fail silently.
 
 ---
 
