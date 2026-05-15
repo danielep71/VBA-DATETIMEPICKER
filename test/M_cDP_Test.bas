@@ -1,10 +1,11 @@
 Attribute VB_Name = "M_cDP_Test"
+
 Option Explicit
 
 '
 '==============================================================================
-' MODULE: M_REGRESSION_DATEPICKER
-'------------------------------------------------------------------------------
+' MODULE: M_cDP_Test
+'==============================================================================
 ' PURPOSE
 '   Provides a regression harness for the VBA DatePicker project
 '
@@ -28,85 +29,110 @@ Option Explicit
 '   Creates and deletes a scratch worksheet named TST_DP_SCRATCH
 '
 '   Captures and restores DatePicker settings, transient DatePicker state, and
-'   selected Excel Application state
+'   selected Excel Application state before and after each run
 '
 ' ERROR POLICY
-'   The harness records individual assertion failures and continues where safe
+'   Individual assertion failures are recorded and the run continues
+'
+'   Suite-level failures are recorded by TST_DP_RunSuiteSafe and the harness
+'   continues with the next suite
 '
 '   A fatal harness failure is recorded, cleanup is attempted, and the original
 '   error is re-raised to the caller
 '
 ' DEPENDENCIES
-'   M_DATEPICKER
+'   M_DatePicker
 '   cDatePickerManager
 '   UF_DatePicker
+'   M_DEMO_BUILDER
 '   Excel object model
 '
 ' NOTES
-'   Before running this module, the DatePicker project must compile
+'   Before running this module, the DatePicker project must compile without
+'   errors
 '
-'   TST_DP_RunAll excludes disruptive UI smoke tests by default
+'   TST_DP_RunAll runs all non-disruptive suites without opening UF_DatePicker
 '
-'   TST_DP_RunAll_WithUISmoke opens the DatePicker form briefly and closes it
+'   TST_DP_RunAll_WithUISmoke additionally opens and closes UF_DatePicker as a
+'   minimal visual lifecycle check
+'
+'   TST_DP_HolidayCallback, TST_DP_HolidayCallbackNonBoolean, and
+'   TST_DP_HolidayCallbackError must remain Public so Application.Run can
+'   resolve them as holiday policy callbacks
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' PRIVATE CONSTANTS
 '------------------------------------------------------------------------------
-    Private Const TST_DP_RESULT_SHEET_NAME      As String = "TST_DP_RESULTS"   'Regression result worksheet name
-    Private Const TST_DP_SCRATCH_SHEET_NAME     As String = "TST_DP_SCRATCH"   'Regression scratch worksheet name
-    Private Const TST_DP_PASS_TEXT              As String = "PASS"             'Passed test marker
-    Private Const TST_DP_FAIL_TEXT              As String = "FAIL"             'Failed test marker
-    Private Const TST_DP_INFO_TEXT              As String = "INFO"             'Information marker
-    Private Const TST_DP_MODULE_NAME            As String = "M_REGRESSION_DATEPICKER" 'Regression standard module name
+    Private Const TST_DP_RESULT_SHEET_NAME  As String = "TST_DP_RESULTS"        'Regression result worksheet name
+    Private Const TST_DP_SCRATCH_SHEET_NAME As String = "TST_DP_SCRATCH"        'Regression scratch worksheet name
+    Private Const TST_DP_PASS_TEXT          As String = "PASS"                  'Passed test marker
+    Private Const TST_DP_FAIL_TEXT          As String = "FAIL"                  'Failed test marker
+    Private Const TST_DP_INFO_TEXT          As String = "INFO"                  'Information marker
+    Private Const TST_DP_MODULE_NAME        As String = "M_cDP_Test"            'This module name for callback resolution
+
+    'Result sheet layout
+    Private Const TST_DP_RESULT_FIRST_ROW   As Long = 5                         'First result data row on the result sheet
+    Private Const TST_DP_COL_SEQ            As Long = 3                         'Result sequence number column index
+    Private Const TST_DP_COL_TIMESTAMP      As Long = 4                         'Result timestamp column index
+    Private Const TST_DP_COL_RESULT         As Long = 5                         'Result marker column index
+    Private Const TST_DP_COL_SUITE          As Long = 6                         'Suite name column index
+    Private Const TST_DP_COL_TEST           As Long = 7                         'Test name column index
+    Private Const TST_DP_COL_DETAILS        As Long = 8                         'Details column index
+    Private Const TST_DP_COL_SUMMARY_LABEL  As Long = 10                        'Summary label column index
+    Private Const TST_DP_COL_SUMMARY_VALUE  As Long = 11                        'Summary value column index
+
+    'Conditional formatting
+    Private Const TST_DP_FAIL_BACK_COLOR    As Long = 192                       'FAIL cell background color
 
 '------------------------------------------------------------------------------
 ' PRIVATE TYPES
 '------------------------------------------------------------------------------
     Private Type TRegDPSettingsSnapshot
-        ShowRightClick             As Boolean    'Right-click feature setting
-        ShowGridIcon               As Boolean    'Grid-icon feature setting
-        FirstDayOfWeek             As Long       'First-day setting
-        UseLocalNames              As Boolean    'Local-name setting
-        ClockMode                  As Long       'Clock-mode setting
-        SizeMode                   As Long       'Size-mode setting
-        HighlightWeekends          As Boolean    'Weekend-highlight setting
-        AllowOutsideMonthSelection As Boolean    'Outside-month selection setting
-        CloseAfterSelection        As Boolean    'Close-after-selection setting
-        UseWinAPI                  As Boolean    'WinAPI setting
-        EnableKeyboardShortcut     As Boolean    'Keyboard shortcut setting
-        HolidayCallbackName        As String     'Holiday callback setting
-        WriteValue                 As Date       'Transient write value
-        InitialDate                As Date       'Transient initial date
-        HasInitialDate             As Boolean    'Transient initial-date flag
-        SelectedDate               As Date       'Transient selected date
-        HasSelectedDate            As Boolean    'Transient selected-date flag
+        ShowRightClick              As Boolean  'Right-click feature setting
+        ShowGridIcon                As Boolean  'Grid-icon feature setting
+        FirstDayOfWeek              As Long     'First-day setting
+        UseLocalNames               As Boolean  'Local-name setting
+        ClockMode                   As Long     'Clock-mode setting
+        SizeMode                    As Long     'Size-mode setting
+        HighlightWeekends           As Boolean  'Weekend-highlight setting
+        AllowOutsideMonthSelection  As Boolean  'Outside-month selection setting
+        CloseAfterSelection         As Boolean  'Close-after-selection setting
+        UseWinAPI                   As Boolean  'WinAPI setting
+        EnableKeyboardShortcut      As Boolean  'Keyboard shortcut setting
+        HolidayCallbackName         As String   'Holiday callback setting
+        WriteValue                  As Date     'Transient write value
+        InitialDate                 As Date     'Transient initial date
+        HasInitialDate              As Boolean  'Transient initial-date flag
+        SelectedDate                As Date     'Transient selected date
+        HasSelectedDate             As Boolean  'Transient selected-date flag
     End Type
 
     Private Type TRegDPApplicationSnapshot
-        ScreenUpdating             As Boolean    'Application.ScreenUpdating snapshot
-        EnableEvents               As Boolean    'Application.EnableEvents snapshot
-        DisplayAlerts              As Boolean    'Application.DisplayAlerts snapshot
-        CalculationMode            As Long       'Application.Calculation snapshot
-        StatusBarWasFalse          As Boolean    'True when StatusBar was Excel-owned
-        StatusBarText              As String     'StatusBar text snapshot
+        ScreenUpdating              As Boolean  'Application.ScreenUpdating snapshot
+        EnableEvents                As Boolean  'Application.EnableEvents snapshot
+        DisplayAlerts               As Boolean  'Application.DisplayAlerts snapshot
+        CalculationMode             As Long     'Application.Calculation snapshot
+        StatusBarWasFalse           As Boolean  'True when StatusBar was Excel-owned
+        StatusBarText               As String   'StatusBar text snapshot
     End Type
 
 '------------------------------------------------------------------------------
 ' PRIVATE STATE
 '------------------------------------------------------------------------------
-    Private mTST_DP_ResultSheet    As Excel.Worksheet  'Result worksheet used by the current run
-    Private mTST_DP_ScratchSheet   As Excel.Worksheet  'Scratch worksheet used by the current run
-    Private mTST_DP_HostWorkbook   As Excel.Workbook   'Workbook receiving test sheets
-    Private mTST_DP_NextResultRow  As Long             'Next result row
-    Private mTST_DP_RunCount       As Long             'Total assertions executed
-    Private mTST_DP_PassCount      As Long             'Total assertions passed
-    Private mTST_DP_FailCount      As Long             'Total assertions failed
-    Private mTST_DP_CurrentSuite   As String           'Current suite name
-    Private mTST_DP_HadManager     As Boolean          'True when a manager existed before the run
+    Private mTST_DP_ResultSheet     As Excel.Worksheet  'Result worksheet used by the current run
+    Private mTST_DP_ScratchSheet    As Excel.Worksheet  'Scratch worksheet used by the current run
+    Private mTST_DP_HostWorkbook    As Excel.Workbook   'Workbook receiving test sheets
+    Private mTST_DP_NextResultRow   As Long             'Next available result row on the result sheet
+    Private mTST_DP_RunCount        As Long             'Total assertions executed in the current run
+    Private mTST_DP_PassCount       As Long             'Total assertions passed in the current run
+    Private mTST_DP_FailCount       As Long             'Total assertions failed in the current run
+    Private mTST_DP_CurrentSuite    As String           'Suite name currently being executed
+    Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
+
 
 '
 '------------------------------------------------------------------------------
@@ -114,6 +140,7 @@ Option Explicit
 '                              PUBLIC ENTRY POINTS
 '
 '------------------------------------------------------------------------------
+'
 
 Public Sub TST_DP_RunAll()
 
@@ -125,7 +152,8 @@ Public Sub TST_DP_RunAll()
 '   Runs the full non-disruptive DatePicker regression pack
 '
 ' WHY THIS EXISTS
-'   This is the normal regression entry point for development and release checks
+'   This is the standard regression entry point for development and release
+'   validation checks that do not require UF_DatePicker to be opened
 '
 ' INPUTS
 '   None
@@ -134,39 +162,50 @@ Public Sub TST_DP_RunAll()
 '   Nothing
 '
 ' BEHAVIOR
-'   Runs environment, settings, policy, caption, form bridge, write-back,
-'   grid-icon, and manager tests without opening the DatePicker UserForm
+'   Runs environment, settings, date policy, holiday policy, caption, form
+'   bridge, write-back, grid-icon, and manager suites without opening
+'   UF_DatePicker
 '
 ' ERROR POLICY
 '   Delegates fatal handling and cleanup to TST_DP_RunAllInternal
 '
 ' DEPENDENCIES
 '   TST_DP_RunAllInternal
+'   DEMO_Sheet_BuildTemplate
+'   TST_DP_GetHostWorkbook
 '
 ' NOTES
-'   Use TST_DP_RunAll_WithUISmoke when you also want a brief UserForm open/close
-'   smoke test
+'   Use TST_DP_RunAll_WithUISmoke when a brief UF_DatePicker open/close check
+'   is also needed
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' BUILD TEST SHEET
+' RESET HARNESS STATE
 '------------------------------------------------------------------------------
-    'Reset counters and module state
+    'Reset module-level counters and object references before the run
         TST_DP_ResetHarnessState
-    'Resolve the workbook that will receive regression sheets
+
+'------------------------------------------------------------------------------
+' RESOLVE HOST WORKBOOK
+'------------------------------------------------------------------------------
+    'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
-    'Buil template
+
+'------------------------------------------------------------------------------
+' BUILD RESULT SHEET TEMPLATE
+'------------------------------------------------------------------------------
+    'Build the result sheet template before the run
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
-        "Test Sheet", , 5
-        
+            "Test Sheet", , TST_DP_RESULT_FIRST_ROW
+
 '------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
-    'Run the standard non-disruptive regression pack
-        TST_DP_RunAllInternal True
+    'Run the standard non-disruptive regression pack without UI smoke
+        TST_DP_RunAllInternal False
 
 End Sub
 
@@ -177,11 +216,12 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '                           RUN ALL WITH UI SMOKE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Runs the full DatePicker regression pack including a UserForm smoke test
+'   Runs the full DatePicker regression pack including a UF_DatePicker smoke
+'   test
 '
 ' WHY THIS EXISTS
-'   UI smoke testing is useful before a release, but it briefly opens the
-'   DatePicker form and is therefore separated from the default regression run
+'   UI smoke testing is useful before a release but briefly opens UF_DatePicker
+'   and is therefore separated from the default regression run
 '
 ' INPUTS
 '   None
@@ -190,28 +230,60 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '   Nothing
 '
 ' BEHAVIOR
-'   Runs the standard regression pack and then opens / closes UF_DatePicker
+'   Runs all non-disruptive suites and then opens / closes UF_DatePicker as a
+'   minimal visual lifecycle check
 '
 ' ERROR POLICY
 '   Delegates fatal handling and cleanup to TST_DP_RunAllInternal
 '
 ' DEPENDENCIES
 '   TST_DP_RunAllInternal
+'   DEMO_Sheet_BuildTemplate
+'   TST_DP_GetHostWorkbook
 '
 ' NOTES
-'   This routine is intentionally visible as a separate macro
+'   This routine is intentionally a distinct Public macro so it can be run
+'   separately from the Macro dialog
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
+
+'------------------------------------------------------------------------------
+' RESET HARNESS STATE
+'------------------------------------------------------------------------------
+    'Reset module-level counters and object references before the run
+        TST_DP_ResetHarnessState
+
+'------------------------------------------------------------------------------
+' RESOLVE HOST WORKBOOK
+'------------------------------------------------------------------------------
+    'Resolve the workbook that will receive the result and scratch sheets
+        Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+
+'------------------------------------------------------------------------------
+' BUILD RESULT SHEET TEMPLATE
+'------------------------------------------------------------------------------
+    'Build the result sheet template before the run
+        DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
+            "Test Sheet", , TST_DP_RESULT_FIRST_ROW
 
 '------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
-    'Run the regression pack with the optional UI smoke suite
+    'Run the regression pack with the UI smoke suite included
         TST_DP_RunAllInternal True
 
 End Sub
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                            PUBLIC CALLBACK STUBS
+'
+'------------------------------------------------------------------------------
+'
 
 Public Function TST_DP_HolidayCallback(ByVal CandidateDate As Date) As Boolean
 
@@ -223,36 +295,37 @@ Public Function TST_DP_HolidayCallback(ByVal CandidateDate As Date) As Boolean
 '   Provides a deterministic Boolean holiday callback for regression tests
 '
 ' WHY THIS EXISTS
-'   M_HolidayPolicy_IsHolidayDate calls user callbacks through Application.Run
-'   and needs a stable callback target during regression
+'   M_HolidayPolicy_IsHolidayDate dispatches user callbacks through
+'   Application.Run and requires a stable Public callback target during
+'   regression
 '
 ' INPUTS
 '   CandidateDate
 '     Candidate date supplied by the DatePicker holiday policy
 '
 ' RETURNS
-'   True only for 1 January 2026; otherwise False
+'   True only for 1 January 2026; False for all other dates
 '
 ' BEHAVIOR
 '   Compares the date-only component of CandidateDate to 1 January 2026
 '
 ' ERROR POLICY
-'   Raises no intentional errors
+'   Does not raise intentional errors
 '
 ' DEPENDENCIES
 '   None
 '
 ' NOTES
-'   This function must remain Public so Application.Run can call it
+'   This function must remain Public so Application.Run can resolve it
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' RETURN RESULT
 '------------------------------------------------------------------------------
-    'Return True only for the deterministic holiday date
+    'Return True only for the deterministic test holiday date
         TST_DP_HolidayCallback = _
             (VBA.DateValue(CandidateDate) = VBA.DateSerial(2026, 1, 1))
 
@@ -265,24 +338,25 @@ Public Function TST_DP_HolidayCallbackNonBoolean(ByVal CandidateDate As Date) As
 '                       TEST NON-BOOLEAN HOLIDAY CALLBACK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides a non-Boolean callback result for holiday-policy regression tests
+'   Provides a non-Boolean callback result for holiday policy regression tests
 '
 ' WHY THIS EXISTS
-'   M_HolidayPolicy_IsHolidayDate should accept only explicit Boolean callback
-'   results and ignore non-Boolean values
+'   M_HolidayPolicy_IsHolidayDate should ignore callback results that are not
+'   explicitly Boolean and return False rather than coercing a truthy string
 '
 ' INPUTS
 '   CandidateDate
 '     Candidate date supplied by the DatePicker holiday policy
 '
 ' RETURNS
-'   String value "TRUE"
+'   String value "TRUE" deliberately
 '
 ' BEHAVIOR
-'   Returns text rather than Boolean deliberately
+'   Returns a String rather than a Boolean to verify that the policy does not
+'   coerce the return value
 '
 ' ERROR POLICY
-'   Raises no intentional errors
+'   Does not raise intentional errors
 '
 ' DEPENDENCIES
 '   None
@@ -290,14 +364,16 @@ Public Function TST_DP_HolidayCallbackNonBoolean(ByVal CandidateDate As Date) As
 ' NOTES
 '   CandidateDate is intentionally unused
 '
+'   This function must remain Public so Application.Run can resolve it
+'
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' RETURN RESULT
+' RETURN NON-BOOLEAN RESULT
 '------------------------------------------------------------------------------
-    'Return a non-Boolean value deliberately
+    'Return a non-Boolean value deliberately to verify policy rejection
         TST_DP_HolidayCallbackNonBoolean = "TRUE"
 
 End Function
@@ -309,24 +385,24 @@ Public Function TST_DP_HolidayCallbackError(ByVal CandidateDate As Date) As Vari
 '                         TEST ERROR-VALUE HOLIDAY CALLBACK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Provides an Excel error value for holiday-policy regression tests
+'   Provides an Excel error value for holiday policy regression tests
 '
 ' WHY THIS EXISTS
 '   M_HolidayPolicy_IsHolidayDate should ignore callback results that are Excel
-'   error values and return False rather than treating them as holidays
+'   error values and return False rather than treating the error as a holiday
 '
 ' INPUTS
 '   CandidateDate
 '     Candidate date supplied by the DatePicker holiday policy
 '
 ' RETURNS
-'   CVErr(xlErrValue)
+'   CVErr(xlErrValue) deliberately
 '
 ' BEHAVIOR
-'   Returns an Excel error value deliberately without raising a VBA runtime error
+'   Returns an Excel error value without raising a VBA runtime error
 '
 ' ERROR POLICY
-'   Raises no intentional runtime errors
+'   Does not raise intentional runtime errors
 '
 ' DEPENDENCIES
 '   CVErr
@@ -335,17 +411,20 @@ Public Function TST_DP_HolidayCallbackError(ByVal CandidateDate As Date) As Vari
 ' NOTES
 '   CandidateDate is intentionally unused
 '
+'   This function must remain Public so Application.Run can resolve it
+'
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' RETURN ERROR VALUE
 '------------------------------------------------------------------------------
-    'Return an Excel error value deliberately
+    'Return an Excel error value deliberately to verify policy rejection
         TST_DP_HolidayCallbackError = CVErr(xlErrValue)
 
 End Function
+
 
 '
 '------------------------------------------------------------------------------
@@ -353,6 +432,7 @@ End Function
 '                               RUN ORCHESTRATION
 '
 '------------------------------------------------------------------------------
+'
 
 Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 
@@ -364,44 +444,58 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '   Coordinates one complete DatePicker regression run
 '
 ' WHY THIS EXISTS
-'   The harness must preserve user settings, isolate scratch workbook artifacts,
-'   restore Excel state, and continue through grouped suites where possible
+'   The harness must capture and restore user settings, isolate scratch
+'   worksheet artifacts, restore Excel Application state, and continue through
+'   grouped suites where individual failures are non-fatal
 '
 ' INPUTS
 '   IncludeUISmoke
-'     True to include the DatePicker form open/close smoke suite
+'     True to include the UF_DatePicker open / close smoke suite
+'     False to run only non-disruptive suites
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Captures state, prepares scratch assets, runs suites, writes summary, and
-'   restores state
+'   Captures DatePicker settings and Excel Application state, prepares the
+'   result and scratch worksheets, runs each suite through TST_DP_RunSuiteSafe,
+'   writes the run summary, and restores all captured state on exit
 '
 ' ERROR POLICY
-'   Records fatal harness failures, attempts cleanup, then re-raises the error
+'   Records fatal harness failures, attempts cleanup in CleanExit, then
+'   re-raises the original error to the caller
 '
 ' DEPENDENCIES
 '   All TST_DP_RunSuite_* routines
+'   TST_DP_CaptureSettings
+'   TST_DP_CaptureApplicationState
+'   TST_DP_PrepareApplicationForRun
+'   TST_DP_ResetDatePickerArtifacts
+'   TST_DP_PrepareResultSheet
+'   TST_DP_PrepareScratchSheet
+'   TST_DP_WriteSummary
+'   TST_DP_RestoreSettings
+'   TST_DP_RestoreManagerState
+'   TST_DP_RestoreApplicationState
 '
 ' NOTES
-'   This routine disables Application events during the run to reduce
-'   interference from workbook-level event handlers
+'   Application events are disabled during the run to reduce interference from
+'   workbook-level event handlers in the host workbook
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "TST_DP_RunAllInternal" 'Current procedure name
+    Const PROC_NAME         As String = "TST_DP_RunAllInternal"    'Current procedure name
 
-    Dim SettingsSnapshot        As TRegDPSettingsSnapshot           'DatePicker state snapshot
-    Dim AppSnapshot             As TRegDPApplicationSnapshot        'Excel Application state snapshot
-    Dim FatalNumber             As Long                             'Fatal error number
-    Dim FatalDescription        As String                           'Fatal error description
-    Dim HasFatalError           As Boolean                          'True when fatal error must be re-raised
+    Dim SettingsSnapshot    As TRegDPSettingsSnapshot               'DatePicker state snapshot
+    Dim AppSnapshot         As TRegDPApplicationSnapshot            'Excel Application state snapshot
+    Dim FatalNumber         As Long                                 'Fatal error number
+    Dim FatalDescription    As String                               'Fatal error description
+    Dim HasFatalError       As Boolean                              'True when a fatal error must be re-raised
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -412,15 +506,15 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         mTST_DP_HadManager = Not (gDP_Manager Is Nothing)
     'Capture current DatePicker settings and transient state
         TST_DP_CaptureSettings SettingsSnapshot
-    'Capture current Application state
+    'Capture current Excel Application state
         TST_DP_CaptureApplicationState AppSnapshot
 
 '------------------------------------------------------------------------------
 ' PREPARE ISOLATED RUN STATE
 '------------------------------------------------------------------------------
-    'Prepare the Application state used by the harness
+    'Prepare the Excel Application state for the regression run
         TST_DP_PrepareApplicationForRun
-    'Reset DatePicker UI artifacts before testing
+    'Reset transient DatePicker UI artifacts before testing
         TST_DP_ResetDatePickerArtifacts
     'Prepare the result worksheet
         TST_DP_PrepareResultSheet mTST_DP_HostWorkbook
@@ -437,21 +531,21 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "Environment"
     'Run settings and persisted-state checks
         TST_DP_RunSuiteSafe "Settings"
-    'Run date-policy checks
+    'Run date-selection policy checks
         TST_DP_RunSuiteSafe "DatePolicy"
-    'Run holiday-policy callback checks
+    'Run holiday callback dispatch and fail-safe checks
         TST_DP_RunSuiteSafe "HolidayPolicy"
-    'Run caption helper checks
+    'Run month and date caption helper checks
         TST_DP_RunSuiteSafe "Captions"
-    'Run form bridge checks
+    'Run form bridge state checks
         TST_DP_RunSuiteSafe "FormBridge"
     'Run worksheet write-back checks
         TST_DP_RunSuiteSafe "WriteBack"
-    'Run grid-icon shape checks
+    'Run in-grid icon lifecycle checks
         TST_DP_RunSuiteSafe "GridIcon"
-    'Run manager public API checks
+    'Run manager public API and target gating checks
         TST_DP_RunSuiteSafe "Manager"
-    'Run optional UserForm smoke checks when requested
+    'Run optional UF_DatePicker open / close smoke check when requested
         If IncludeUISmoke Then
             TST_DP_RunSuiteSafe "UISmoke"
         End If
@@ -459,12 +553,20 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
 ' WRITE SUMMARY
 '------------------------------------------------------------------------------
-    'Write the final run summary
+    'Write the run summary to the result sheet and Immediate Window
         TST_DP_WriteSummary
+
 '------------------------------------------------------------------------------
-' APPLY CONDITION FORMATTING
+' APPLY CONDITIONAL FORMATTING
 '------------------------------------------------------------------------------
-    TST_DP_ApplyFailConditionalFormat mTST_DP_ResultSheet, mTST_DP_ResultSheet.Range("E5:E1000")
+    'Apply FAIL conditional formatting to the result column
+        If Not mTST_DP_ResultSheet Is Nothing Then
+            TST_DP_ApplyFailConditionalFormat _
+                mTST_DP_ResultSheet, _
+                mTST_DP_ResultSheet.Range( _
+                    mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW, TST_DP_COL_RESULT), _
+                    mTST_DP_ResultSheet.Cells(1000, TST_DP_COL_RESULT))
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -482,13 +584,13 @@ CleanExit:
     'Restore DatePicker settings and transient state
         TST_DP_RestoreSettings SettingsSnapshot
 
-    'Restore the manager state according to the pre-run state
+    'Restore the manager state to its pre-run condition
         TST_DP_RestoreManagerState
 
-    'Restore the Application state
+    'Restore the Excel Application state
         TST_DP_RestoreApplicationState AppSnapshot
 
-    'Clear module object references
+    'Release module object references
         Set mTST_DP_ScratchSheet = Nothing
         Set mTST_DP_ResultSheet = Nothing
         Set mTST_DP_HostWorkbook = Nothing
@@ -499,7 +601,7 @@ CleanExit:
     'Restore normal error handling
         On Error GoTo 0
 
-    'Re-raise fatal harness errors after cleanup
+    'Re-raise fatal harness errors after cleanup is complete
         If HasFatalError Then
             Err.Raise FatalNumber, PROC_NAME, FatalDescription
         End If
@@ -520,7 +622,7 @@ FatalHandler:
     'Mark the fatal error for re-raise after cleanup
         HasFatalError = True
 
-    'Record the fatal harness failure when possible
+    'Record the fatal harness failure when the result sheet is available
         On Error Resume Next
         TST_DP_RecordResult TST_DP_FAIL_TEXT, _
             "Harness", _
@@ -529,7 +631,7 @@ FatalHandler:
         Err.Clear
         On Error GoTo 0
 
-    'Run shared cleanup
+    'Run shared cleanup and re-raise
         Resume CleanExit
 
 End Sub
@@ -544,7 +646,8 @@ Private Sub TST_DP_ResetHarnessState()
 '   Clears module-level counters and object references before a run
 '
 ' WHY THIS EXISTS
-'   Regression runs may be launched repeatedly in the same Excel session
+'   Regression runs may be launched repeatedly in the same Excel session and
+'   stale state from a previous run must not carry forward
 '
 ' INPUTS
 '   None
@@ -553,7 +656,8 @@ Private Sub TST_DP_ResetHarnessState()
 '   Nothing
 '
 ' BEHAVIOR
-'   Resets counters, current suite, result row, and object references
+'   Resets assertion counters, the current suite name, the result row pointer,
+'   and all module-level object references
 '
 ' ERROR POLICY
 '   Does not raise intentional errors
@@ -562,44 +666,46 @@ Private Sub TST_DP_ResetHarnessState()
 '   Module-level state
 '
 ' NOTES
-'   Object cleanup itself is handled by the orchestrator cleanup path
+'   Object cleanup is handled by the run orchestrator cleanup path
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' RESET COUNTERS
 '------------------------------------------------------------------------------
-    'Reset assertion counters
+    'Reset the total assertion counter
         mTST_DP_RunCount = 0
-    'Reset pass counter
+    'Reset the passed assertion counter
         mTST_DP_PassCount = 0
-    'Reset fail counter
+    'Reset the failed assertion counter
         mTST_DP_FailCount = 0
-    'Reset result-row pointer
-        mTST_DP_NextResultRow = 5
-    'Reset current suite name
+    'Reset the result row pointer to the first data row
+        mTST_DP_NextResultRow = TST_DP_RESULT_FIRST_ROW
+    'Reset the current suite name
         mTST_DP_CurrentSuite = vbNullString
 
 '------------------------------------------------------------------------------
 ' RESET REFERENCES
 '------------------------------------------------------------------------------
-    'Clear result sheet reference
+    'Clear the result sheet reference
         Set mTST_DP_ResultSheet = Nothing
-    'Clear scratch sheet reference
+    'Clear the scratch sheet reference
         Set mTST_DP_ScratchSheet = Nothing
-    'Clear host workbook reference
+    'Clear the host workbook reference
         Set mTST_DP_HostWorkbook = Nothing
 
 End Sub
 
+
 '
 '------------------------------------------------------------------------------
 '
-'                                  TEST SUITES
+'                                  SUITE RUNNER
 '
 '------------------------------------------------------------------------------
+'
 
 Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
@@ -612,47 +718,47 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 '
 ' WHY THIS EXISTS
 '   Individual suites already contain local error handlers. This wrapper adds a
-'   second boundary so Excel object-model errors, environment-specific failures,
-'   or unexpected project changes cannot abort the full regression run
+'   second boundary so unexpected project changes, Excel object-model errors, or
+'   environment-specific failures cannot abort the full regression run
 '
 ' INPUTS
 '   SuiteName
-'     Logical suite name to run
+'     Logical suite name to dispatch
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Dispatches the requested suite by name and records any escaping error as a
-'   suite-level failure before allowing the harness to continue
+'   Sets the current suite name, dispatches the requested suite by name through
+'   a Select Case block, and records any escaping error as a suite-level failure
+'   before allowing the harness to continue with the next suite
 '
 ' ERROR POLICY
-'   Best-effort
-'   Does not intentionally raise outward
+'   Best-effort. Records escaping suite failures without raising outward
 '
 ' DEPENDENCIES
-'   TST_DP_RunSuite_* routines
+'   All TST_DP_RunSuite_* routines
 '
 ' NOTES
-'   This wrapper is deliberately Select Case based so the suite routines can
-'   remain Private and do not need Application.Run
+'   The Select Case dispatch keeps suite routines Private and avoids relying on
+'   Application.Run for internal dispatch
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "TST_DP_RunSuiteSafe" 'Current procedure name
+    Const PROC_NAME         As String = "TST_DP_RunSuiteSafe"  'Current procedure name
 
-    Dim ErrorNumber             As Long                          'Captured suite error number
-    Dim ErrorDescription        As String                        'Captured suite error description
+    Dim ErrorNumber         As Long                             'Captured suite error number
+    Dim ErrorDescription    As String                           'Captured suite error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Normalize the current suite name for diagnostics
+    'Set the current suite name for recording context
         mTST_DP_CurrentSuite = SuiteName
     'Protect the harness from escaping suite failures
         On Error GoTo SuiteFail
@@ -660,8 +766,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 '------------------------------------------------------------------------------
 ' DISPATCH SUITE
 '------------------------------------------------------------------------------
-    'Run the requested suite
+    'Dispatch the requested suite by name
         Select Case VBA.UCase$(VBA.Trim$(SuiteName))
+
             Case "ENVIRONMENT"
                 TST_DP_RunSuite_Environment
 
@@ -693,7 +800,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RunSuite_UISmoke
 
             Case Else
-                TST_DP_RecordFail "Unknown suite", "SuiteName=" & SuiteName
+                TST_DP_RecordFail "Unknown suite name", "SuiteName=" & SuiteName
+
         End Select
 
 '------------------------------------------------------------------------------
@@ -729,17 +837,27 @@ SuiteFail:
 
 End Sub
 
+
+'
+'------------------------------------------------------------------------------
+'
+'                                  TEST SUITES
+'
+'------------------------------------------------------------------------------
+'
+
 Private Sub TST_DP_RunSuite_Environment()
 
 '
 '==============================================================================
-'                           RUN ENVIRONMENT SUITE
+'                           ENVIRONMENT SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates basic DatePicker infrastructure startup and platform helpers
 '
 ' WHY THIS EXISTS
-'   Later suites assume settings, manager creation, and platform helpers can run
+'   Later suites assume settings can be loaded, the manager can be created, and
+'   platform helpers return deterministic results
 '
 ' INPUTS
 '   None
@@ -748,7 +866,9 @@ Private Sub TST_DP_RunSuite_Environment()
 '   Nothing
 '
 ' BEHAVIOR
-'   Executes non-destructive environment checks
+'   Calls M_Settings_EnsureLoaded and M_Picker_EnsureManager and asserts that
+'   the global manager is instantiated, not busy after startup, and that
+'   platform helpers return Boolean values
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -758,13 +878,14 @@ Private Sub TST_DP_RunSuite_Environment()
 '   M_Picker_EnsureManager
 '   M_Platform_CanUseWinAPI
 '   M_Platform_ShouldUseWinAPI
+'   gDP_Manager
 '
 ' NOTES
-'   The manager may report Is_Hooked False only if Excel Application hook-up
-'   fails in the host environment
+'   The manager Is_Hooked check may report False when Excel is in a transient
+'   state; the assertion records the result without failing on that condition
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -776,48 +897,51 @@ Private Sub TST_DP_RunSuite_Environment()
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
-' SETTINGS AND MANAGER
+' SETTINGS LOAD
 '------------------------------------------------------------------------------
-    'Ensure settings load successfully
+    'Ensure settings load without raising
         M_Settings_EnsureLoaded
     'Record successful settings load
         TST_DP_RecordPass "M_Settings_EnsureLoaded does not raise", vbNullString
 
+'------------------------------------------------------------------------------
+' MANAGER CREATION
+'------------------------------------------------------------------------------
     'Ensure the global manager can be created
         M_Picker_EnsureManager
 
-    'Assert that the global manager exists
-        TST_DP_AssertTrue "Global manager is instantiated", Not (gDP_Manager Is Nothing)
+    'Assert that the global manager reference is populated
+        TST_DP_AssertTrue "Global manager is instantiated", _
+            Not (gDP_Manager Is Nothing)
 
     'Assert that the manager is not busy after startup
-        TST_DP_AssertFalse "Manager is not busy after startup", gDP_Manager.Is_Busy
+        TST_DP_AssertFalse "Manager is not busy after startup", _
+            gDP_Manager.Is_Busy
 
 '------------------------------------------------------------------------------
 ' PLATFORM HELPERS
 '------------------------------------------------------------------------------
-    'Call the platform capability helper
+    'Assert that the platform capability helper returns a Boolean result
         TST_DP_AssertBooleanResult "M_Platform_CanUseWinAPI returns Boolean", _
             M_Platform_CanUseWinAPI
 
-    'Call the effective WinAPI helper
+    'Assert that the effective WinAPI policy helper returns a Boolean result
         TST_DP_AssertBooleanResult "M_Platform_ShouldUseWinAPI returns Boolean", _
             M_Platform_ShouldUseWinAPI
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
+    'Record the suite-level failure and clear the error
         TST_DP_RecordFail "Environment suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -826,14 +950,14 @@ Private Sub TST_DP_RunSuite_Settings()
 
 '
 '==============================================================================
-'                           RUN SETTINGS SUITE
+'                           SETTINGS SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates public DatePicker settings accessors and setters
 '
 ' WHY THIS EXISTS
 '   Settings drive form rendering, manager behavior, shortcut integration,
-'   context-menu availability, grid-icon availability, and date-selection rules
+'   context-menu availability, grid-icon availability, and date selection rules
 '
 ' INPUTS
 '   None
@@ -842,8 +966,9 @@ Private Sub TST_DP_RunSuite_Settings()
 '   Nothing
 '
 ' BEHAVIOR
-'   Exercises valid settings, invalid setting rejection, text parsing, and
-'   access-path fallback normalization
+'   Exercises valid settings, invalid setting rejection, text parsing, access
+'   path dead-configuration fallback, WinAPI normalization, enum setting round
+'   trips, and holiday callback trimming
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -855,7 +980,7 @@ Private Sub TST_DP_RunSuite_Settings()
 '   Settings are restored by the outer harness cleanup path
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -863,128 +988,130 @@ Private Sub TST_DP_RunSuite_Settings()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "Settings"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' FIRST-DAY VALIDATION
 '------------------------------------------------------------------------------
-    'Assert vbSunday is supported
+    'Assert vbSunday is a supported first-day value
         TST_DP_AssertTrue "vbSunday is a valid first-day setting", _
             M_Settings_IsValidFirstDayOfWeek(vbSunday)
 
-    'Assert vbMonday is supported
+    'Assert vbMonday is a supported first-day value
         TST_DP_AssertTrue "vbMonday is a valid first-day setting", _
             M_Settings_IsValidFirstDayOfWeek(vbMonday)
 
-    'Assert zero is unsupported
+    'Assert zero is not a supported first-day value
         TST_DP_AssertFalse "0 is not a valid first-day setting", _
             M_Settings_IsValidFirstDayOfWeek(0)
 
-    'Assert Tuesday-style value is unsupported
+    'Assert Tuesday-style value is not a supported first-day value
         TST_DP_AssertFalse "3 is not a valid first-day setting", _
             M_Settings_IsValidFirstDayOfWeek(3)
 
-    'Assert Sunday text conversion
+    'Assert vbSunday converts to the expected text label
         TST_DP_AssertEqualsString "vbSunday converts to text", _
             "vbSunday", _
             M_Settings_FirstDayOfWeekToText(vbSunday)
 
-    'Assert Monday text conversion
+    'Assert vbMonday converts to the expected text label
         TST_DP_AssertEqualsString "vbMonday converts to text", _
             "vbMonday", _
             M_Settings_FirstDayOfWeekToText(vbMonday)
 
-    'Assert invalid first-day conversion raises
+    'Assert invalid first-day conversion raises a runtime error
         TST_DP_ExpectError_FirstDayToTextInvalid
 
 '------------------------------------------------------------------------------
 ' FIRST-DAY SETTERS
 '------------------------------------------------------------------------------
-    'Set Sunday as first day
+    'Set Sunday as the first day
         M_Settings_SetFirstDayOfWeek vbSunday
 
-    'Assert Sunday was stored
+    'Assert the Sunday setting was stored
         TST_DP_AssertEqualsLong "SetFirstDayOfWeek stores vbSunday", _
             vbSunday, _
             M_Settings_GetFirstDayOfWeek()
 
-    'Set Monday through text parser
+    'Set Monday through the text parser
         M_Settings_SetFirstDayOfWeekText "Monday"
 
-    'Assert Monday was stored
+    'Assert the Monday setting was stored
         TST_DP_AssertEqualsLong "SetFirstDayOfWeekText parses Monday", _
             vbMonday, _
             M_Settings_GetFirstDayOfWeek()
 
-    'Set Sunday through short text parser
+    'Set Sunday through the short text parser
         M_Settings_SetFirstDayOfWeekText "Sun"
 
-    'Assert Sunday was stored
+    'Assert the Sunday setting was stored
         TST_DP_AssertEqualsLong "SetFirstDayOfWeekText parses Sun", _
             vbSunday, _
             M_Settings_GetFirstDayOfWeek()
 
-    'Assert blank first-day text raises
+    'Assert blank first-day text raises a runtime error
         TST_DP_ExpectError_SetFirstDayBlank
 
-    'Assert unsupported first-day text raises
+    'Assert unsupported first-day text raises a runtime error
         TST_DP_ExpectError_SetFirstDayInvalidText
 
 '------------------------------------------------------------------------------
-' BOOLEAN SETTINGS
+' BOOLEAN DISPLAY SETTINGS
 '------------------------------------------------------------------------------
-    'Set local names on
+    'Enable local names
         M_Settings_SetUseLocalNames True
 
     'Assert local names setting is on
         TST_DP_AssertTrue "UseLocalNames can be enabled", _
             M_Settings_GetUseLocalNames()
 
-    'Set local names off
+    'Disable local names
         M_Settings_SetUseLocalNames False
 
     'Assert local names setting is off
         TST_DP_AssertFalse "UseLocalNames can be disabled", _
             M_Settings_GetUseLocalNames()
 
-    'Set outside-month selection on
-        M_Settings_SetAllowOutsideMonthSelection True
-
-    'Assert outside-month selection is on
-        TST_DP_AssertTrue "AllowOutsideMonthSelection can be enabled", _
-            M_Settings_GetAllowOutsideMonthSelection()
-
-    'Set outside-month selection off
-        M_Settings_SetAllowOutsideMonthSelection False
-
-    'Assert outside-month selection is off
-        TST_DP_AssertFalse "AllowOutsideMonthSelection can be disabled", _
-            M_Settings_GetAllowOutsideMonthSelection()
-
-    'Set weekend highlighting on
+    'Enable weekend highlighting
         M_Settings_SetHighlightWeekends True
 
     'Assert weekend highlighting is on
         TST_DP_AssertTrue "HighlightWeekends can be enabled", _
             M_Settings_GetHighlightWeekends()
 
-    'Set weekend highlighting off
+    'Disable weekend highlighting
         M_Settings_SetHighlightWeekends False
 
     'Assert weekend highlighting is off
         TST_DP_AssertFalse "HighlightWeekends can be disabled", _
             M_Settings_GetHighlightWeekends()
 
-    'Set close-after-selection on
+'------------------------------------------------------------------------------
+' BOOLEAN BEHAVIOR SETTINGS
+'------------------------------------------------------------------------------
+    'Enable outside-month selection
+        M_Settings_SetAllowOutsideMonthSelection True
+
+    'Assert outside-month selection is on
+        TST_DP_AssertTrue "AllowOutsideMonthSelection can be enabled", _
+            M_Settings_GetAllowOutsideMonthSelection()
+
+    'Disable outside-month selection
+        M_Settings_SetAllowOutsideMonthSelection False
+
+    'Assert outside-month selection is off
+        TST_DP_AssertFalse "AllowOutsideMonthSelection can be disabled", _
+            M_Settings_GetAllowOutsideMonthSelection()
+
+    'Enable close-after-selection
         M_Settings_SetCloseAfterSelection True
 
     'Assert close-after-selection is on
         TST_DP_AssertTrue "CloseAfterSelection can be enabled", _
             M_Settings_GetCloseAfterSelection()
 
-    'Set close-after-selection off
+    'Disable close-after-selection
         M_Settings_SetCloseAfterSelection False
 
     'Assert close-after-selection is off
@@ -992,7 +1119,7 @@ Private Sub TST_DP_RunSuite_Settings()
             M_Settings_GetCloseAfterSelection()
 
 '------------------------------------------------------------------------------
-' FEATURE SETTINGS
+' FEATURE SETTINGS AND ACCESS-PATH NORMALIZATION
 '------------------------------------------------------------------------------
     'Enable right-click access
         M_Settings_SetShowRightClick True
@@ -1022,9 +1149,11 @@ Private Sub TST_DP_RunSuite_Settings()
         TST_DP_AssertFalse "ShowGridIcon can be disabled", _
             M_Settings_GetShowGridIcon()
 
-    'Disable keyboard shortcut while other access paths are available
+    'Enable both contextual access paths before testing keyboard override
         M_Settings_SetShowRightClick True
         M_Settings_SetShowGridIcon True
+
+    'Disable keyboard shortcut while other access paths are enabled
         M_Settings_SetEnableKeyboardShortcut False
 
     'Assert keyboard shortcut can be disabled when other access paths exist
@@ -1038,15 +1167,15 @@ Private Sub TST_DP_RunSuite_Settings()
         TST_DP_AssertTrue "Keyboard shortcut can be enabled", _
             M_Settings_GetEnableKeyboardShortcut()
 
-    'Disable both visible/contextual access paths
+    'Disable both contextual access paths to trigger the dead-configuration guard
         M_Settings_SetShowRightClick False
         M_Settings_SetShowGridIcon False
 
-    'Assert keyboard access is forced on when both visible entry points are off
+    'Assert keyboard shortcut is forced on when both contextual paths are disabled
         TST_DP_AssertTrue "Keyboard shortcut is forced when right-click and grid icon are disabled", _
             M_Settings_GetEnableKeyboardShortcut()
 
-    'Restore feature settings for following suites
+    'Restore feature settings to working defaults for following suites
         M_Settings_SetShowRightClick True
         M_Settings_SetShowGridIcon True
         M_Settings_SetEnableKeyboardShortcut True
@@ -1054,29 +1183,29 @@ Private Sub TST_DP_RunSuite_Settings()
 '------------------------------------------------------------------------------
 ' WINAPI SETTING
 '------------------------------------------------------------------------------
-    'Disable WinAPI setting
+    'Disable WinAPI styling
         M_Settings_SetUseWinAPI False
 
-    'Assert WinAPI setting can be disabled
+    'Assert WinAPI styling can be disabled
         TST_DP_AssertFalse "UseWinAPI can be disabled", _
             M_Settings_GetUseWinAPI()
 
-    'Enable WinAPI setting according to platform capability
+    'Request WinAPI styling on
         M_Settings_SetUseWinAPI True
 
-    'Assert WinAPI setting is normalized to platform capability
+    'Assert WinAPI styling is normalized to platform capability
         TST_DP_AssertEqualsLong "UseWinAPI normalizes to platform capability", _
             VBA.CLng(M_Platform_CanUseWinAPI), _
             VBA.CLng(M_Settings_GetUseWinAPI())
 
 '------------------------------------------------------------------------------
-' ENUM SETTINGS
+' CLOCK MODE SETTING
 '------------------------------------------------------------------------------
     'Set static clock mode
         M_Settings_SetClockMode DP_ClockMode_Static
 
     'Assert static clock mode is stored
-        TST_DP_AssertEqualsLong "ClockMode can be static", _
+        TST_DP_AssertEqualsLong "ClockMode can be set to static", _
             DP_ClockMode_Static, _
             M_Settings_GetClockMode()
 
@@ -1084,18 +1213,21 @@ Private Sub TST_DP_RunSuite_Settings()
         M_Settings_SetClockMode DP_ClockMode_Live
 
     'Assert live clock mode is stored
-        TST_DP_AssertEqualsLong "ClockMode can be live", _
+        TST_DP_AssertEqualsLong "ClockMode can be set to live", _
             DP_ClockMode_Live, _
             M_Settings_GetClockMode()
 
-    'Assert unsupported clock mode raises
+    'Assert unsupported clock mode raises a runtime error
         TST_DP_ExpectError_SetInvalidClockMode
 
+'------------------------------------------------------------------------------
+' SIZE MODE SETTING
+'------------------------------------------------------------------------------
     'Set normal size mode
         M_Settings_SetSizeMode DP_SizeMode_Normal
 
     'Assert normal size mode is stored
-        TST_DP_AssertEqualsLong "SizeMode can be normal", _
+        TST_DP_AssertEqualsLong "SizeMode can be set to normal", _
             DP_SizeMode_Normal, _
             M_Settings_GetSizeMode()
 
@@ -1103,28 +1235,28 @@ Private Sub TST_DP_RunSuite_Settings()
         M_Settings_SetSizeMode DP_SizeMode_Compact
 
     'Assert compact size mode is stored
-        TST_DP_AssertEqualsLong "SizeMode can be compact", _
+        TST_DP_AssertEqualsLong "SizeMode can be set to compact", _
             DP_SizeMode_Compact, _
             M_Settings_GetSizeMode()
 
-    'Assert unsupported size mode raises
+    'Assert unsupported size mode raises a runtime error
         TST_DP_ExpectError_SetInvalidSizeMode
 
 '------------------------------------------------------------------------------
 ' HOLIDAY CALLBACK SETTING
 '------------------------------------------------------------------------------
-    'Set a trimmed holiday callback name
+    'Set a padded holiday callback name
         M_Settings_SetHolidayCallback "  TST_DP_HolidayCallback  "
 
-    'Assert the callback name was trimmed
-        TST_DP_AssertEqualsString "Holiday callback name is trimmed", _
+    'Assert the callback name is trimmed before storage
+        TST_DP_AssertEqualsString "Holiday callback name is trimmed on storage", _
             "TST_DP_HolidayCallback", _
             M_Settings_GetHolidayCallback()
 
     'Clear the holiday callback name
         M_Settings_SetHolidayCallback vbNullString
 
-    'Assert the callback name was cleared
+    'Assert the callback name can be cleared
         TST_DP_AssertEqualsString "Holiday callback name can be cleared", _
             vbNullString, _
             M_Settings_GetHolidayCallback()
@@ -1132,18 +1264,16 @@ Private Sub TST_DP_RunSuite_Settings()
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
+    'Record the suite-level failure and clear the error
         TST_DP_RecordFail "Settings suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1152,14 +1282,14 @@ Private Sub TST_DP_RunSuite_DatePolicy()
 
 '
 '==============================================================================
-'                           RUN DATE POLICY SUITE
+'                           DATE POLICY SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates DatePicker date-selection policy behavior
 '
 ' WHY THIS EXISTS
 '   The form grid, hover logic, keyboard navigation, and click handling must all
-'   agree on whether a calendar date can be selected
+'   agree on whether a given calendar date can be selected
 '
 ' INPUTS
 '   None
@@ -1168,7 +1298,7 @@ Private Sub TST_DP_RunSuite_DatePolicy()
 '   Nothing
 '
 ' BEHAVIOR
-'   Tests inside-month selection, outside-month allow / reject behavior, and
+'   Tests inside-month selection, outside-month allow and reject behavior, and
 '   invalid displayed period rejection
 '
 ' ERROR POLICY
@@ -1176,12 +1306,13 @@ Private Sub TST_DP_RunSuite_DatePolicy()
 '
 ' DEPENDENCIES
 '   M_DatePolicy_CanSelectDate
+'   gDP_AllowOutsideMonthSelection
 '
 ' NOTES
 '   Settings are restored by the outer harness cleanup path
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1189,68 +1320,65 @@ Private Sub TST_DP_RunSuite_DatePolicy()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "DatePolicy"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
-' OUTSIDE-MONTH ENABLED
+' OUTSIDE-MONTH SELECTION ENABLED
 '------------------------------------------------------------------------------
     'Enable outside-month selection for the first policy branch
         gDP_AllowOutsideMonthSelection = True
 
-    'Assert current-month date can be selected
+    'Assert a current-month date can be selected when outside-month is enabled
         TST_DP_AssertTrue "Current-month date is selectable when outside-month is enabled", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 5, 3), 2026, 5)
 
-    'Assert outside-month date can be selected
+    'Assert an outside-month date can be selected when outside-month is enabled
         TST_DP_AssertTrue "Outside-month date is selectable when outside-month is enabled", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 4, 30), 2026, 5)
 
 '------------------------------------------------------------------------------
-' OUTSIDE-MONTH DISABLED
+' OUTSIDE-MONTH SELECTION DISABLED
 '------------------------------------------------------------------------------
     'Disable outside-month selection for the second policy branch
         gDP_AllowOutsideMonthSelection = False
 
-    'Assert current-month date can still be selected
+    'Assert a current-month date can still be selected
         TST_DP_AssertTrue "Current-month date is selectable when outside-month is disabled", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 5, 3), 2026, 5)
 
-    'Assert outside-month date is rejected
+    'Assert an outside-month date is rejected
         TST_DP_AssertFalse "Outside-month date is rejected when outside-month is disabled", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 4, 30), 2026, 5)
 
 '------------------------------------------------------------------------------
 ' INVALID DISPLAY PERIODS
 '------------------------------------------------------------------------------
-    'Assert invalid month is rejected
+    'Assert month zero is rejected as an invalid display period
         TST_DP_AssertFalse "Display month 0 is rejected", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 5, 3), 2026, 0)
 
-    'Assert invalid month is rejected
+    'Assert month 13 is rejected as an invalid display period
         TST_DP_AssertFalse "Display month 13 is rejected", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 5, 3), 2026, 13)
 
-    'Assert invalid year is rejected
+    'Assert year 99 is rejected as an invalid display period
         TST_DP_AssertFalse "Display year 99 is rejected", _
             M_DatePolicy_CanSelectDate(VBA.DateSerial(2026, 5, 3), 99, 5)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
-        TST_DP_RecordFail "Date policy suite failed", _
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "DatePolicy suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1259,7 +1387,7 @@ Private Sub TST_DP_RunSuite_HolidayPolicy()
 
 '
 '==============================================================================
-'                           RUN HOLIDAY POLICY SUITE
+'                           HOLIDAY POLICY SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates optional holiday callback dispatch and fail-safe behavior
@@ -1275,22 +1403,24 @@ Private Sub TST_DP_RunSuite_HolidayPolicy()
 '   Nothing
 '
 ' BEHAVIOR
-'   Tests blank callback, Boolean callback, non-Boolean callback, missing
-'   callback, and Excel error callback-result behavior
+'   Tests blank callback, Boolean callback, non-Boolean callback result
+'   rejection, missing callback fail-safe, and Excel error callback result
+'   rejection
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
 '
 ' DEPENDENCIES
 '   M_HolidayPolicy_IsHolidayDate
-'   Application.Run
+'   TST_DP_QualifiedMacroName
+'   gDP_HolidayCallbackName
 '
 ' NOTES
-'   The callback name is assigned directly to avoid persisting test callback
-'   names through the settings setter
+'   The callback name is assigned directly to gDP_HolidayCallbackName to avoid
+'   persisting test callback names through the settings setter
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1298,76 +1428,76 @@ Private Sub TST_DP_RunSuite_HolidayPolicy()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "HolidayPolicy"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' BLANK CALLBACK
 '------------------------------------------------------------------------------
-    'Clear callback name
+    'Clear the holiday callback name
         gDP_HolidayCallbackName = vbNullString
 
-    'Assert blank callback returns False
+    'Assert a blank callback returns False without raising
         TST_DP_AssertFalse "Blank holiday callback returns False", _
             M_HolidayPolicy_IsHolidayDate(VBA.DateSerial(2026, 1, 1))
 
 '------------------------------------------------------------------------------
 ' BOOLEAN CALLBACK
 '------------------------------------------------------------------------------
-    'Set deterministic Boolean callback
+    'Set the deterministic Boolean callback
         gDP_HolidayCallbackName = TST_DP_QualifiedMacroName("TST_DP_HolidayCallback")
 
-    'Assert matching holiday returns True
-        TST_DP_AssertTrue "Boolean callback can return True", _
+    'Assert the holiday date returns True
+        TST_DP_AssertTrue "Boolean callback can return True for the holiday date", _
             M_HolidayPolicy_IsHolidayDate(VBA.DateSerial(2026, 1, 1))
 
-    'Assert non-matching holiday returns False
-        TST_DP_AssertFalse "Boolean callback can return False", _
+    'Assert a non-holiday date returns False
+        TST_DP_AssertFalse "Boolean callback can return False for a non-holiday date", _
             M_HolidayPolicy_IsHolidayDate(VBA.DateSerial(2026, 1, 2))
 
 '------------------------------------------------------------------------------
-' NON-BOOLEAN CALLBACK
+' NON-BOOLEAN CALLBACK RESULT
 '------------------------------------------------------------------------------
-    'Set non-Boolean callback
+    'Set the non-Boolean callback
         gDP_HolidayCallbackName = TST_DP_QualifiedMacroName("TST_DP_HolidayCallbackNonBoolean")
 
-    'Assert non-Boolean callback result is ignored
-        TST_DP_AssertFalse "Non-Boolean holiday callback is ignored", _
+    'Assert a non-Boolean callback result is ignored and returns False
+        TST_DP_AssertFalse "Non-Boolean holiday callback result is ignored", _
             M_HolidayPolicy_IsHolidayDate(VBA.DateSerial(2026, 1, 1))
 
 '------------------------------------------------------------------------------
-' MISSING AND ERROR-VALUE CALLBACKS
+' MISSING CALLBACK FAIL-SAFE
 '------------------------------------------------------------------------------
-    'Set missing callback name
-        gDP_HolidayCallbackName = "TST_DP_MissingHolidayCallback"
+    'Set a callback name that does not resolve to any public procedure
+        gDP_HolidayCallbackName = "TST_DP_MissingHolidayCallback_DoesNotExist"
 
-    'Assert missing callback is fail-safe
+    'Assert a missing callback is fail-safe and returns False
         TST_DP_AssertFalse "Missing holiday callback returns False", _
             M_HolidayPolicy_IsHolidayDate(VBA.DateSerial(2026, 1, 1))
 
-    'Set error-value callback name
+'------------------------------------------------------------------------------
+' EXCEL ERROR VALUE CALLBACK RESULT
+'------------------------------------------------------------------------------
+    'Set the Excel error value callback
         gDP_HolidayCallbackName = TST_DP_QualifiedMacroName("TST_DP_HolidayCallbackError")
 
-    'Assert Excel error callback result is ignored
-        TST_DP_AssertFalse "Excel error holiday callback result returns False", _
+    'Assert an Excel error callback result is ignored and returns False
+        TST_DP_AssertFalse "Excel error holiday callback result is ignored", _
             M_HolidayPolicy_IsHolidayDate(VBA.DateSerial(2026, 1, 1))
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
-        TST_DP_RecordFail "Holiday policy suite failed", _
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "HolidayPolicy suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1376,14 +1506,14 @@ Private Sub TST_DP_RunSuite_Captions()
 
 '
 '==============================================================================
-'                           RUN CAPTION SUITE
+'                           CAPTIONS SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates month and date caption helpers
 '
 ' WHY THIS EXISTS
-'   Captions are visible UI output and are sensitive to localization and helper
-'   refactoring
+'   Captions are visible UI output and are sensitive to localization changes
+'   and helper refactoring
 '
 ' INPUTS
 '   None
@@ -1392,21 +1522,24 @@ Private Sub TST_DP_RunSuite_Captions()
 '   Nothing
 '
 ' BEHAVIOR
-'   Tests fixed-English month captions, fixed-English date captions, local-name
-'   non-empty output, and invalid month rejection
+'   Tests fixed-English month short and full captions, fixed-English date
+'   captions, local-name non-empty output, and invalid month rejection
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
 '
 ' DEPENDENCIES
-'   M_Caption_* public helpers
+'   M_Caption_GetEnglishMonthShort
+'   M_Caption_GetEnglishMonthFull
+'   M_Caption_GetMonth
+'   M_Caption_GetDate
 '
 ' NOTES
-'   Localized month names are not asserted against a specific language because
-'   they depend on the host Office / Windows locale
+'   Localized month and date captions are not asserted against a specific
+'   language because their output depends on the host Office and Windows locale
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1414,81 +1547,81 @@ Private Sub TST_DP_RunSuite_Captions()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "Captions"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
-' ENGLISH MONTH CAPTIONS
+' ENGLISH SHORT MONTH CAPTIONS
 '------------------------------------------------------------------------------
-    'Assert short English January caption
+    'Assert the short English January caption
         TST_DP_AssertEqualsString "English short month 1 is JAN", _
             "JAN", _
             M_Caption_GetEnglishMonthShort(1)
 
-    'Assert short English December caption
+    'Assert the short English December caption
         TST_DP_AssertEqualsString "English short month 12 is DEC", _
             "DEC", _
             M_Caption_GetEnglishMonthShort(12)
 
-    'Assert full English January caption
+    'Assert an invalid short English month raises a runtime error
+        TST_DP_ExpectError_EnglishMonthShortInvalid
+
+'------------------------------------------------------------------------------
+' ENGLISH FULL MONTH CAPTIONS
+'------------------------------------------------------------------------------
+    'Assert the full English January caption
         TST_DP_AssertEqualsString "English full month 1 is JANUARY", _
             "JANUARY", _
             M_Caption_GetEnglishMonthFull(1)
 
-    'Assert full English December caption
+    'Assert the full English December caption
         TST_DP_AssertEqualsString "English full month 12 is DECEMBER", _
             "DECEMBER", _
             M_Caption_GetEnglishMonthFull(12)
 
-    'Assert fixed-English month helper output
+    'Assert an invalid full English month raises a runtime error
+        TST_DP_ExpectError_EnglishMonthFullInvalid
+
+'------------------------------------------------------------------------------
+' GETMONTH CAPTIONS
+'------------------------------------------------------------------------------
+    'Assert fixed-English GetMonth returns the expected uppercase full month
         TST_DP_AssertEqualsString "GetMonth fixed-English returns uppercase full month", _
             "MAY", _
             M_Caption_GetMonth(5, False)
 
+    'Assert local-name GetMonth returns a non-empty result
+        TST_DP_AssertTrue "GetMonth local caption is non-empty", _
+            VBA.Len(M_Caption_GetMonth(5, True)) > 0
+
+    'Assert an invalid GetMonth input raises a runtime error
+        TST_DP_ExpectError_GetMonthInvalid
+
 '------------------------------------------------------------------------------
-' DATE CAPTIONS
+' GETDATE CAPTIONS
 '------------------------------------------------------------------------------
-    'Assert fixed-English date caption
+    'Assert fixed-English GetDate returns the expected dd-MMM-yyyy format
         TST_DP_AssertEqualsString "GetDate fixed-English returns dd-MMM-yyyy", _
             "03-MAY-2026", _
             M_Caption_GetDate(VBA.DateSerial(2026, 5, 3), False)
 
-    'Assert local month caption is non-empty
-        TST_DP_AssertTrue "GetMonth local caption is non-empty", _
-            VBA.Len(M_Caption_GetMonth(5, True)) > 0
-
-    'Assert local date caption is non-empty
+    'Assert local-name GetDate returns a non-empty result
         TST_DP_AssertTrue "GetDate local caption is non-empty", _
             VBA.Len(M_Caption_GetDate(VBA.DateSerial(2026, 5, 3), True)) > 0
 
 '------------------------------------------------------------------------------
-' INVALID INPUTS
-'------------------------------------------------------------------------------
-    'Assert invalid short month raises
-        TST_DP_ExpectError_EnglishMonthShortInvalid
-
-    'Assert invalid full month raises
-        TST_DP_ExpectError_EnglishMonthFullInvalid
-
-    'Assert invalid GetMonth raises
-        TST_DP_ExpectError_GetMonthInvalid
-
-'------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
-        TST_DP_RecordFail "Caption suite failed", _
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "Captions suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1497,14 +1630,14 @@ Private Sub TST_DP_RunSuite_FormBridge()
 
 '
 '==============================================================================
-'                           RUN FORM BRIDGE SUITE
+'                           FORM BRIDGE SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates non-visual DatePicker form bridge state
 '
 ' WHY THIS EXISTS
-'   The form bridge transfers initial date state, refresh commands, and cleanup
-'   commands without forcing default UserForm creation unnecessarily
+'   The form bridge transfers the initial date, refresh commands, and cleanup
+'   commands without forcing UF_DatePicker to be loaded unnecessarily
 '
 ' INPUTS
 '   None
@@ -1513,8 +1646,8 @@ Private Sub TST_DP_RunSuite_FormBridge()
 '   Nothing
 '
 ' BEHAVIOR
-'   Tests initial-date consumption and explicit-cell no-form cleanup / refresh
-'   calls
+'   Tests initial-date consumption including the one-shot flag, second
+'   consumption returning False, and safe no-form bridge calls
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -1523,58 +1656,59 @@ Private Sub TST_DP_RunSuite_FormBridge()
 '   M_FormBridge_ConsumeInitialDate
 '   M_FormBridge_RefreshFromCell
 '   DP_Close
+'   gDP_InitialDate
+'   gDP_HasInitialDate
 '
 ' NOTES
 '   This suite does not open UF_DatePicker
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim InitialDate             As Date     'Consumed initial date
+    Dim ConsumedDate    As Date     'Date consumed from the initial-date bridge
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "FormBridge"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' INITIAL DATE CONSUMPTION
 '------------------------------------------------------------------------------
-    'Prepare initial-date bridge state
+    'Prepare the initial-date bridge value
         gDP_InitialDate = VBA.DateSerial(2026, 5, 3)
 
     'Mark the initial date as available
         gDP_HasInitialDate = True
 
-    'Assert initial date can be consumed
+    'Assert the initial date can be consumed
         TST_DP_AssertTrue "Initial date is consumed when available", _
-            M_FormBridge_ConsumeInitialDate(InitialDate)
+            M_FormBridge_ConsumeInitialDate(ConsumedDate)
 
-    'Assert consumed initial date is correct
+    'Assert the consumed date matches the bridge value
         TST_DP_AssertDateEquals "Consumed initial date matches bridge value", _
             VBA.DateSerial(2026, 5, 3), _
-            InitialDate
+            ConsumedDate
 
-    'Assert initial date flag was cleared after consumption
+    'Assert the initial-date flag was cleared after consumption
         TST_DP_AssertFalse "Initial date flag is cleared after consumption", _
             gDP_HasInitialDate
 
-    'Assert second consumption returns False
+    'Assert a second consumption returns False
         TST_DP_AssertFalse "Initial date cannot be consumed twice", _
-            M_FormBridge_ConsumeInitialDate(InitialDate)
+            M_FormBridge_ConsumeInitialDate(ConsumedDate)
 
 '------------------------------------------------------------------------------
 ' NO-FORM BRIDGE CALLS
 '------------------------------------------------------------------------------
-    'Close picker when no form may be loaded
+    'Close the picker when no form may be loaded
         DP_Close
 
     'Record successful close with no visible form
@@ -1584,23 +1718,22 @@ Private Sub TST_DP_RunSuite_FormBridge()
         M_FormBridge_RefreshFromCell mTST_DP_ScratchSheet.Range("C4")
 
     'Record successful no-form refresh
-        TST_DP_RecordPass "M_FormBridge_RefreshFromCell is safe with explicit cell and no visible form", vbNullString
+        TST_DP_RecordPass "M_FormBridge_RefreshFromCell is safe with no visible form", _
+            vbNullString
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
-        TST_DP_RecordFail "Form bridge suite failed", _
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "FormBridge suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1609,14 +1742,14 @@ Private Sub TST_DP_RunSuite_WriteBack()
 
 '
 '==============================================================================
-'                           RUN WRITE-BACK SUITE
+'                           WRITE-BACK SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates DatePicker worksheet write-back behavior
 '
 ' WHY THIS EXISTS
-'   The DatePicker must reliably populate single cells, ranges, discontiguous
-'   ranges, and table data columns
+'   The DatePicker must reliably populate single cells, contiguous ranges,
+'   discontiguous ranges, and table data columns
 '
 ' INPUTS
 '   None
@@ -1625,8 +1758,9 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '   Nothing
 '
 ' BEHAVIOR
-'   Tests direct range population, selection-based write-back, discontiguous
-'   range write-back, and table data-column expansion
+'   Tests direct contiguous range population, discontiguous range population,
+'   selection-based write-back, table data-column expansion, and unsupported
+'   write action rejection
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -1634,55 +1768,52 @@ Private Sub TST_DP_RunSuite_WriteBack()
 ' DEPENDENCIES
 '   M_WriteBack_PopulateRange
 '   M_WriteBack_Apply
+'   gDP_WriteValue
+'   mTST_DP_ScratchSheet
 '
 ' NOTES
-'   This suite uses the scratch worksheet only
+'   All write-back tests use the scratch worksheet only and leave no persistent
+'   state on the result sheet
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim TargetRange             As Excel.Range       'Target range under test
-    Dim TableRange              As Excel.Range       'Table range under test
-    Dim TestTable               As Excel.ListObject  'Regression test table
-    Dim UnionRange              As Excel.Range       'Discontiguous target range
+    Dim TargetRange     As Excel.Range       'Target range under test
+    Dim TableRange      As Excel.Range       'Source range for the test table
+    Dim TestTable       As Excel.ListObject  'Regression test ListObject
+    Dim UnionRange      As Excel.Range       'Discontiguous target range
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "WriteBack"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
-
-    'Ensure the scratch sheet is active for selection-based tests
+    'Activate the scratch sheet for selection-based tests
         mTST_DP_ScratchSheet.Activate
 
 '------------------------------------------------------------------------------
-' DIRECT RANGE POPULATION
+' DIRECT CONTIGUOUS RANGE POPULATION
 '------------------------------------------------------------------------------
-    'Clear the target range
+    'Clear the target cells
         mTST_DP_ScratchSheet.Range("D5:D6").ClearContents
-
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 5, 3)
-
-    'Populate a contiguous range directly
+    'Populate the contiguous range
         M_WriteBack_PopulateRange _
             mTST_DP_ScratchSheet.Range("D5:D6"), _
             DP_WriteAction_DatePicker
-
-    'Assert the first cell was written
-        TST_DP_AssertCellDateEquals "Direct range write B2", _
+    'Assert the first cell received the date
+        TST_DP_AssertCellDateEquals "Direct contiguous range write D5", _
             VBA.DateSerial(2026, 5, 3), _
             mTST_DP_ScratchSheet.Range("D5")
-
-    'Assert the last cell was written
-        TST_DP_AssertCellDateEquals "Direct range write B4", _
+    'Assert the second cell received the date
+        TST_DP_AssertCellDateEquals "Direct contiguous range write D6", _
             VBA.DateSerial(2026, 5, 3), _
             mTST_DP_ScratchSheet.Range("D6")
 
@@ -1691,30 +1822,24 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '------------------------------------------------------------------------------
     'Clear the discontiguous test cells
         mTST_DP_ScratchSheet.Range("C5:C7").ClearContents
-
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 6, 15)
-
-    'Build a discontiguous target range
+    'Build the discontiguous target range
         Set UnionRange = Excel.Application.Union( _
             mTST_DP_ScratchSheet.Range("C5"), _
             mTST_DP_ScratchSheet.Range("C7"))
-
-    'Populate the discontiguous range directly
+    'Populate the discontiguous range
         M_WriteBack_PopulateRange UnionRange, DP_WriteAction_DatePicker
-
-    'Assert the first discontiguous cell was written
-        TST_DP_AssertCellDateEquals "Discontiguous write C5", _
+    'Assert the first discontiguous cell received the date
+        TST_DP_AssertCellDateEquals "Discontiguous range write C5", _
             VBA.DateSerial(2026, 6, 15), _
             mTST_DP_ScratchSheet.Range("C5")
-
-    'Assert the second discontiguous cell was written
-        TST_DP_AssertCellDateEquals "Discontiguous write C7", _
+    'Assert the second discontiguous cell received the date
+        TST_DP_AssertCellDateEquals "Discontiguous range write C7", _
             VBA.DateSerial(2026, 6, 15), _
             mTST_DP_ScratchSheet.Range("C7")
-
     'Assert the skipped middle cell remains blank
-        TST_DP_AssertTrue "Discontiguous write leaves C3 blank", _
+        TST_DP_AssertTrue "Discontiguous range write leaves C6 blank", _
             VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("C6").Value)) = 0
 
 '------------------------------------------------------------------------------
@@ -1722,23 +1847,18 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '------------------------------------------------------------------------------
     'Clear the selection-based target range
         mTST_DP_ScratchSheet.Range("D5:D6").ClearContents
-
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 7, 20)
-
     'Select the target range
         mTST_DP_ScratchSheet.Range("D5:D6").Select
-
-    'Apply DatePicker write-back to the current selection without table growth
+    'Apply write-back to the current selection without table-column expansion
         M_WriteBack_Apply DP_WriteAction_DatePicker, True
-
-    'Assert the first selected cell was written
-        TST_DP_AssertCellDateEquals "Selection write D2", _
+    'Assert the first selected cell received the date
+        TST_DP_AssertCellDateEquals "Selection write-back D5", _
             VBA.DateSerial(2026, 7, 20), _
             mTST_DP_ScratchSheet.Range("D5")
-
-    'Assert the second selected cell was written
-        TST_DP_AssertCellDateEquals "Selection write D3", _
+    'Assert the second selected cell received the date
+        TST_DP_AssertCellDateEquals "Selection write-back D6", _
             VBA.DateSerial(2026, 7, 20), _
             mTST_DP_ScratchSheet.Range("D6")
 
@@ -1747,41 +1867,31 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '------------------------------------------------------------------------------
     'Prepare the table source range
         Set TableRange = mTST_DP_ScratchSheet.Range("F4:G7")
-
     'Clear the table source range
         TableRange.Clear
-
     'Write table headers
         mTST_DP_ScratchSheet.Range("F4").Value = "ID"
         mTST_DP_ScratchSheet.Range("G4").Value = "DateValue"
-
-    'Write table IDs
+    'Write table row IDs
         mTST_DP_ScratchSheet.Range("F5:F7").Value = 1
-
-    'Create the regression table
+    'Create the regression test table
         Set TestTable = mTST_DP_ScratchSheet.ListObjects.Add( _
             SourceType:=xlSrcRange, _
             Source:=TableRange, _
             XlListObjectHasHeaders:=xlYes)
-
-    'Name the regression table
+    'Name the regression test table
         TestTable.Name = "TST_DP_Table"
-
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 8, 25)
-
-    'Select one table data cell in the date column
+    'Select one data cell in the date column
         mTST_DP_ScratchSheet.Range("G5").Select
-
-    'Apply DatePicker write-back with table-column expansion enabled
+    'Apply write-back with table-column expansion enabled
         M_WriteBack_Apply DP_WriteAction_DatePicker, False
-
-    'Assert the first table data cell was written
+    'Assert the first table data cell received the date
         TST_DP_AssertCellDateEquals "Table-column expansion writes G5", _
             VBA.DateSerial(2026, 8, 25), _
             mTST_DP_ScratchSheet.Range("G5")
-
-    'Assert the last table data cell was written
+    'Assert the last table data cell received the date
         TST_DP_AssertCellDateEquals "Table-column expansion writes G7", _
             VBA.DateSerial(2026, 8, 25), _
             mTST_DP_ScratchSheet.Range("G7")
@@ -1789,21 +1899,18 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '------------------------------------------------------------------------------
 ' INVALID WRITE ACTION
 '------------------------------------------------------------------------------
-    'Assert unsupported write action raises
+    'Assert an unsupported write action raises a runtime error
         TST_DP_ExpectError_InvalidWriteAction
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
-    'Release the table reference
+    'Release object references
         Set TestTable = Nothing
-    'Release the table range reference
         Set TableRange = Nothing
-    'Release the union range reference
         Set UnionRange = Nothing
-    'Release the target range reference
         Set TargetRange = Nothing
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
@@ -1815,12 +1922,9 @@ SuiteFail:
         Set TableRange = Nothing
         Set UnionRange = Nothing
         Set TargetRange = Nothing
-
-    'Record the suite-level failure
-        TST_DP_RecordFail "Write-back suite failed", _
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "WriteBack suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1829,14 +1933,14 @@ Private Sub TST_DP_RunSuite_GridIcon()
 
 '
 '==============================================================================
-'                           RUN GRID ICON SUITE
+'                           GRID ICON SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates in-grid DatePicker icon creation, movement, removal, and purge
 '
 ' WHY THIS EXISTS
-'   The grid icon is a high-frequency worksheet shape and is sensitive to stale
-'   references, hidden shapes, deleted sheets, and movement logic
+'   The grid icon is a high-frequency worksheet shape that is sensitive to stale
+'   shape references, hidden shapes, deleted sheets, and movement logic
 '
 ' INPUTS
 '   None
@@ -1845,8 +1949,9 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '   Nothing
 '
 ' BEHAVIOR
-'   Creates / moves the icon on the scratch sheet, verifies single-shape reuse,
-'   removes it, and checks hard purge behavior
+'   Resolves the embedded icon file, creates the icon on the scratch sheet,
+'   asserts single-instance reuse after a move, removes it, creates it again
+'   for a hard purge check, and verifies disabled-feature behavior
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -1856,20 +1961,23 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '   M_GridIcon_Remove
 '   M_GridIcon_PurgeAll
 '   M_GridIcon_EnsureEmbeddedIconFile
+'   gDP_ShowGridIcon
+'   DP_GRID_ICON_NAME
 '
 ' NOTES
-'   This suite temporarily enables gDP_ShowGridIcon directly
+'   This suite temporarily enables gDP_ShowGridIcon directly to avoid
+'   triggering the settings setter side effects during the test
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim IconPath                As String       'Embedded icon file path
-    Dim ShapeLeftBefore         As Double       'Icon left position before move
-    Dim ShapeTopBefore          As Double       'Icon top position before move
+    Dim IconPath            As String   'Embedded icon file path
+    Dim ShapeLeftBefore     As Double   'Icon left position before the move
+    Dim ShapeTopBefore      As Double   'Icon top position before the move
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1878,11 +1986,11 @@ Private Sub TST_DP_RunSuite_GridIcon()
         mTST_DP_CurrentSuite = "GridIcon"
     'Enable suite-level error handling
         On Error GoTo SuiteFail
-    'Ensure the scratch sheet is active
+    'Activate the scratch sheet
         mTST_DP_ScratchSheet.Activate
-    'Enable grid icon for this suite
+    'Enable the grid icon feature for this suite
         gDP_ShowGridIcon = True
-    'Remove stale grid icons before the suite
+    'Purge any stale grid icons before the suite
         M_GridIcon_PurgeAll
 
 '------------------------------------------------------------------------------
@@ -1893,92 +2001,122 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Assert the embedded icon path is not blank
         TST_DP_AssertTrue "Embedded grid icon path is not blank", _
             VBA.LenB(IconPath) > 0
-    'Assert the embedded icon file exists
+    'Assert the embedded icon file exists on disk
         TST_DP_AssertTrue "Embedded grid icon file exists", _
             VBA.LenB(VBA.Dir$(IconPath, vbNormal)) > 0
 
 '------------------------------------------------------------------------------
 ' CREATE ICON
 '------------------------------------------------------------------------------
-    'Create or move the grid icon beside B2
+    'Restore ScreenUpdating so the drawing layer can settle before assertions
+    'M_GridIcon_Create sets Visible = msoFalse during construction then makes
+    'the shape visible at the very end under On Error Resume Next. With
+    'ScreenUpdating = False the final show step can silently fail, causing the
+    'visibility assertion to receive False even when creation succeeded.
+        Excel.Application.ScreenUpdating = True
+    'Create or move the grid icon beside the target cell
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+    'Allow the drawing layer to process the shape creation and visibility change
+        DoEvents
     'Assert the grid icon exists on the scratch sheet
-        TST_DP_AssertTrue "Grid icon is created on eligible target", _
+        TST_DP_AssertTrue "Grid icon is created beside an eligible target", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-    'Assert the grid icon is visible after create
-        TST_DP_AssertTrue "Grid icon is visible after create", _
-            TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+    'Assert the grid icon is visible after creation
+    'Use the public tracked reference rather than indexing by name to avoid a
+    'runtime error when a prior shape creation failure left no stable shape
+        If Not gDP_GridIconShape Is Nothing Then
+            TST_DP_AssertTrue "Grid icon is visible after creation", _
+                (gDP_GridIconShape.Visible = msoTrue)
+        Else
+            TST_DP_RecordFail "Grid icon is visible after creation", _
+                "gDP_GridIconShape is Nothing after ShowOrMove"
+        End If
     'Assert only one named grid icon exists in the host workbook
-        TST_DP_AssertEqualsLong "Only one grid icon exists after create", _
+        TST_DP_AssertEqualsLong "Only one grid icon exists after creation", _
             1, _
             TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
-    'Capture the initial icon left position
-        ShapeLeftBefore = mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Left
-    'Capture the initial icon top position
-        ShapeTopBefore = mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Top
+    'Capture the initial icon position from the tracked reference before the move
+        If Not gDP_GridIconShape Is Nothing Then
+            ShapeLeftBefore = gDP_GridIconShape.Left
+            ShapeTopBefore = gDP_GridIconShape.Top
+        End If
 
 '------------------------------------------------------------------------------
 ' MOVE ICON
 '------------------------------------------------------------------------------
-    'Move the grid icon beside a different cell
+    'Move the grid icon beside a different target cell
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("F8")
-    'Assert the grid icon still exists after move
+    'Allow the drawing layer to process the move
+        DoEvents
+    'Assert the grid icon still exists after the move
         TST_DP_AssertTrue "Grid icon still exists after move", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-    'Assert the grid icon is visible after move
-        TST_DP_AssertTrue "Grid icon is visible after move", _
-            TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-    'Assert only one named grid icon exists after move
+    'Assert the grid icon is visible after the move
+        If Not gDP_GridIconShape Is Nothing Then
+            TST_DP_AssertTrue "Grid icon is visible after move", _
+                (gDP_GridIconShape.Visible = msoTrue)
+        Else
+            TST_DP_RecordFail "Grid icon is visible after move", _
+                "gDP_GridIconShape is Nothing after move"
+        End If
+    'Assert only one named grid icon exists after the move
         TST_DP_AssertEqualsLong "Only one grid icon exists after move", _
             1, _
             TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
-    'Assert the icon moved horizontally or vertically
-        TST_DP_AssertTrue "Grid icon position changes after move", _
-            (mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Left <> ShapeLeftBefore) Or _
-            (mTST_DP_ScratchSheet.Shapes(DP_GRID_ICON_NAME).Top <> ShapeTopBefore)
+    'Assert the icon position changed using the tracked reference for both reads
+        If Not gDP_GridIconShape Is Nothing Then
+            TST_DP_AssertTrue "Grid icon position changes after move", _
+                (gDP_GridIconShape.Left <> ShapeLeftBefore) Or _
+                (gDP_GridIconShape.Top <> ShapeTopBefore)
+        End If
+    'Suppress ScreenUpdating for the remaining cleanup steps
+        Excel.Application.ScreenUpdating = False
 
 '------------------------------------------------------------------------------
-' REMOVE AND PURGE ICON
+' REMOVE ICON
 '------------------------------------------------------------------------------
-    'Remove the current grid icon
+    'Remove the active grid icon
         M_GridIcon_Remove
-    'Assert the grid icon no longer exists on the active scratch sheet
-        TST_DP_AssertFalse "Grid icon is removed from active scratch sheet", _
+    'Assert the grid icon no longer exists on the scratch sheet
+        TST_DP_AssertFalse "Grid icon is removed from the scratch sheet", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
-    'Create the icon again for purge testing
+
+'------------------------------------------------------------------------------
+' PURGE ALL ICONS
+'------------------------------------------------------------------------------
+    'Create the icon again for the purge test
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-    'Purge all named grid icons
+    'Purge all named grid icons from the host workbook
         M_GridIcon_PurgeAll
-    'Assert no named grid icon remains in the host workbook
-        TST_DP_AssertEqualsLong "Purge removes all grid icons", _
+    'Assert no named grid icon remains anywhere in the host workbook
+        TST_DP_AssertEqualsLong "PurgeAll removes all grid icons from the workbook", _
             0, _
             TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
 
 '------------------------------------------------------------------------------
 ' DISABLED FEATURE BEHAVIOR
 '------------------------------------------------------------------------------
-    'Disable grid icon feature directly
+    'Disable the grid icon feature directly
         gDP_ShowGridIcon = False
-    'Attempt to show icon while disabled
+    'Attempt to show the icon while the feature is disabled
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-    'Assert disabled feature does not leave an icon
-        TST_DP_AssertFalse "Grid icon is not shown when feature is disabled", _
+    'Assert no icon was created while the feature is disabled
+        TST_DP_AssertFalse "Grid icon is not shown when the feature is disabled", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Record the suite-level failure
-        TST_DP_RecordFail "Grid icon suite failed", _
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "GridIcon suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-    'Clear the suite error
         Err.Clear
 
 End Sub
@@ -1987,13 +2125,13 @@ Private Sub TST_DP_RunSuite_Manager()
 
 '
 '==============================================================================
-'                           RUN MANAGER SUITE
+'                           MANAGER SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Validates public cDatePickerManager behavior and target gating
 '
 ' WHY THIS EXISTS
-'   The manager is the central Application-event coordinator and should make
+'   The manager is the central Application-event coordinator and must make
 '   deterministic UI decisions for explicit target cells
 '
 ' INPUTS
@@ -2003,8 +2141,10 @@ Private Sub TST_DP_RunSuite_Manager()
 '   Nothing
 '
 ' BEHAVIOR
-'   Tests manager creation, picker state predicates, Should_ShowGridIcon gating,
-'   explicit selection-change handling, and reset behavior
+'   Tests manager creation, picker loaded and visible state predicates,
+'   Should_ShowGridIcon gating for date value cells, date-formatted cells,
+'   general blank cells, multi-cell ranges, and merged cells, selection-change
+'   handling for eligible and ineligible targets, and Reset_DatePickerUI
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -2012,146 +2152,126 @@ Private Sub TST_DP_RunSuite_Manager()
 ' DEPENDENCIES
 '   cDatePickerManager
 '   M_GridIcon_PurgeAll
+'   DP_Close
 '
 ' NOTES
-'   The ineligible-target assertion checks that no visible grid icon remains
-'
-'   This allows either implementation:
-'     - remove icon on ineligible selection
-'     - hide icon on ineligible selection for faster reuse
+'   The ineligible-target assertion checks that no visible grid icon remains,
+'   which allows either the remove or the hide implementation path
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Manager                 As cDatePickerManager   'Manager instance under test
-    Dim MergedArea              As Excel.Range          'Merged area under test
+    Dim Manager         As cDatePickerManager   'Manager instance under test
+    Dim MergedArea      As Excel.Range          'Merged area under test
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "Manager"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
-
     'Create a fresh manager instance for public API checks
         Set Manager = New cDatePickerManager
-
-    'Ensure the scratch sheet is active
+    'Activate the scratch sheet
         mTST_DP_ScratchSheet.Activate
-
-    'Remove stale grid icons before manager tests
+    'Purge stale grid icons before the manager tests
         M_GridIcon_PurgeAll
-
-    'Enable grid icon gating directly
+    'Enable grid icon gating for this suite
         gDP_ShowGridIcon = True
 
 '------------------------------------------------------------------------------
 ' STATE PREDICATES
 '------------------------------------------------------------------------------
-    'Assert new manager is not busy
+    'Assert a freshly created manager is not busy
         TST_DP_AssertFalse "New manager is not busy", Manager.Is_Busy
 
-    'Close picker before loaded / visible checks
+    'Close any loaded picker before the visible / loaded checks
         DP_Close
 
-    'Assert picker is not visible after close
-        TST_DP_AssertFalse "PickerVisible is False after DP_Close", Manager.PickerVisible
+    'Assert the picker is not visible after close
+        TST_DP_AssertFalse "PickerVisible is False after DP_Close", _
+            Manager.PickerVisible
 
-    'Assert picker is not loaded after close
-        TST_DP_AssertFalse "Is_PickerLoaded is False after DP_Close", Manager.Is_PickerLoaded
+    'Assert the picker is not loaded after close
+        TST_DP_AssertFalse "Is_PickerLoaded is False after DP_Close", _
+            Manager.Is_PickerLoaded
 
 '------------------------------------------------------------------------------
 ' SHOULD_SHOWGRIDICON GATING
 '------------------------------------------------------------------------------
-    'Prepare a date value cell
+    'Prepare a cell containing a date value
         mTST_DP_ScratchSheet.Range("D10").Value = VBA.DateSerial(2026, 5, 3)
-
-    'Assert date value cell is eligible
-        TST_DP_AssertTrue "Should_ShowGridIcon accepts explicit date value cell", _
+    'Assert a date value cell is eligible for the grid icon
+        TST_DP_AssertTrue "Should_ShowGridIcon accepts an explicit date value cell", _
             Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D10"))
 
     'Prepare a date-formatted blank cell
         mTST_DP_ScratchSheet.Range("B11").ClearContents
         mTST_DP_ScratchSheet.Range("B11").NumberFormat = "dd/mm/yyyy"
-
-    'Assert date-formatted blank cell is eligible
-        TST_DP_AssertTrue "Should_ShowGridIcon accepts date-formatted blank cell", _
+    'Assert a date-formatted blank cell is eligible for the grid icon
+        TST_DP_AssertTrue "Should_ShowGridIcon accepts a date-formatted blank cell", _
             Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("B11"))
 
-    'Prepare a general blank cell
+    'Prepare a general-format blank cell
         mTST_DP_ScratchSheet.Range("D12").ClearContents
         mTST_DP_ScratchSheet.Range("D12").NumberFormat = "General"
-
-    'Assert general blank cell is not eligible
-        TST_DP_AssertFalse "Should_ShowGridIcon rejects general blank cell", _
+    'Assert a general blank cell is not eligible for the grid icon
+        TST_DP_AssertFalse "Should_ShowGridIcon rejects a general blank cell", _
             Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D12"))
 
-    'Assert multi-cell range is not eligible at manager-gating level
-        TST_DP_AssertFalse "Should_ShowGridIcon rejects multi-cell range", _
+    'Assert a multi-cell range is not eligible for the grid icon
+        TST_DP_AssertFalse "Should_ShowGridIcon rejects a multi-cell range", _
             Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D10:D11"))
 
 '------------------------------------------------------------------------------
-' MERGED-CELL NORMALIZATION EXPECTATION
+' MERGED-CELL NORMALIZATION
 '------------------------------------------------------------------------------
     'Prepare the merged area
         Set MergedArea = mTST_DP_ScratchSheet.Range("D14:E15")
-
-    'Clear the merged area
+    'Clear and merge the test area
         MergedArea.Clear
-
-    'Merge the test area
         MergedArea.Merge
-
     'Format the merged area as date-like
         MergedArea.NumberFormat = "dd/mm/yyyy"
-
     'Assert the top-left cell of a merged area is eligible
-        TST_DP_AssertTrue "Should_ShowGridIcon accepts top-left cell inside merged area", _
+        TST_DP_AssertTrue "Should_ShowGridIcon accepts the top-left cell of a merged area", _
             Manager.Should_ShowGridIcon(mTST_DP_ScratchSheet.Range("D14"))
-
     'Unmerge the area after the assertion
         MergedArea.UnMerge
 
 '------------------------------------------------------------------------------
 ' SELECTION-CHANGE HANDLING
 '------------------------------------------------------------------------------
-    'Prepare a date value cell for selection-change handling
+    'Prepare a date value cell for the selection-change test
         mTST_DP_ScratchSheet.Range("E10").Value = VBA.DateSerial(2026, 9, 9)
-
-    'Handle selection change for an eligible target
+    'Handle a selection change to an eligible target cell
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E10")
-
     'Assert the manager created or showed the grid icon for the eligible target
-        TST_DP_AssertTrue "Handle_SelectionChange shows visible icon for eligible target", _
+        TST_DP_AssertTrue "Handle_SelectionChange shows a visible icon for an eligible target", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
 
-    'Prepare an ineligible target
+    'Prepare an ineligible general blank cell
         mTST_DP_ScratchSheet.Range("E11").ClearContents
         mTST_DP_ScratchSheet.Range("E11").NumberFormat = "General"
-
-    'Handle selection change for an ineligible target
+    'Handle a selection change to the ineligible target cell
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E11")
-
     'Assert no visible grid icon remains for the ineligible target
-        TST_DP_AssertFalse "Handle_SelectionChange leaves no visible icon for ineligible target", _
+        TST_DP_AssertFalse "Handle_SelectionChange leaves no visible icon for an ineligible target", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
 
 '------------------------------------------------------------------------------
 ' RESET BEHAVIOR
 '------------------------------------------------------------------------------
-    'Show the icon again for reset testing
+    'Show the icon again for the reset test
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E10")
-
     'Reset all DatePicker UI through the manager
         Manager.Reset_DatePickerUI
-
-    'Assert reset removed all grid icons
+    'Assert the reset removed all grid icons from the host workbook
         TST_DP_AssertEqualsLong "Reset_DatePickerUI purges all grid icons", _
             0, _
             TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
@@ -2161,11 +2281,8 @@ Private Sub TST_DP_RunSuite_Manager()
 '------------------------------------------------------------------------------
     'Release object references
         Set MergedArea = Nothing
-
-    'Release the test manager
         Set Manager = Nothing
-
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
@@ -2174,25 +2291,16 @@ Private Sub TST_DP_RunSuite_Manager()
 SuiteFail:
     'Suppress local cleanup errors
         On Error Resume Next
-
-    'Unmerge the merged area when needed
-        If Not MergedArea Is Nothing Then
-            MergedArea.UnMerge
-        End If
-
+    'Unmerge the merged area when still present
+        If Not MergedArea Is Nothing Then MergedArea.UnMerge
     'Release object references
         Set MergedArea = Nothing
         Set Manager = Nothing
-
-    'Record the suite-level failure
+    'Record the suite-level failure and clear the error
+        On Error GoTo 0
         TST_DP_RecordFail "Manager suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
-
-    'Restore normal error handling
-        On Error GoTo 0
 
 End Sub
 
@@ -2200,14 +2308,14 @@ Private Sub TST_DP_RunSuite_UISmoke()
 
 '
 '==============================================================================
-'                           RUN UI SMOKE SUITE
+'                           UI SMOKE SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Opens and closes UF_DatePicker as a minimal visual lifecycle smoke test
 '
 ' WHY THIS EXISTS
-'   Some integration failures only appear when the runtime form is loaded and
-'   initialized
+'   Some integration failures only surface when the runtime form is fully loaded
+'   and initialized; no other suite opens the form
 '
 ' INPUTS
 '   None
@@ -2216,23 +2324,26 @@ Private Sub TST_DP_RunSuite_UISmoke()
 '   Nothing
 '
 ' BEHAVIOR
-'   Opens the picker for a date cell, validates loaded / visible state, closes
-'   the picker, and validates that the form is no longer visible
+'   Activates a date cell on the scratch sheet, opens the picker through
+'   DP_Show, validates loaded and visible predicates, closes the picker through
+'   DP_Close, and validates that the picker is no longer visible
 '
 ' ERROR POLICY
-'   Records suite-level failures and continues
+'   Records suite-level failures and continues. Attempts DP_Close after any
+'   failure to ensure the form is not left open
 '
 ' DEPENDENCIES
 '   DP_Show
 '   DP_Close
-'   cDatePickerManager state predicates
+'   M_Picker_EnsureManager
+'   gDP_Manager
 '
 ' NOTES
-'   This suite briefly shows the UserForm and should be run manually before
-'   release, not necessarily on every development edit
+'   This suite briefly opens UF_DatePicker and should be run manually before a
+'   release rather than on every development edit
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2240,20 +2351,15 @@ Private Sub TST_DP_RunSuite_UISmoke()
 '------------------------------------------------------------------------------
     'Set the current suite name
         mTST_DP_CurrentSuite = "UISmoke"
-
     'Enable suite-level error handling
         On Error GoTo SuiteFail
-
-    'Ensure the scratch sheet is active
+    'Activate the scratch sheet
         mTST_DP_ScratchSheet.Activate
-
-    'Prepare the active cell with a deterministic date
+    'Prepare the target cell with a deterministic date value
         mTST_DP_ScratchSheet.Range("H2").Value = VBA.DateSerial(2026, 5, 3)
-
-    'Select the date cell
+    'Select the target date cell
         mTST_DP_ScratchSheet.Range("H2").Select
-
-    'Ensure manager infrastructure exists
+    'Ensure the manager infrastructure is available
         M_Picker_EnsureManager
 
 '------------------------------------------------------------------------------
@@ -2261,78 +2367,85 @@ Private Sub TST_DP_RunSuite_UISmoke()
 '------------------------------------------------------------------------------
     'Open the DatePicker form
         DP_Show
-
     'Allow modeless form events to process
         DoEvents
-
-    'Assert the picker is loaded
-        TST_DP_AssertTrue "DP_Show loads the picker", gDP_Manager.Is_PickerLoaded
-
+    'Assert the picker was loaded
+        TST_DP_AssertTrue "DP_Show loads the picker", _
+            gDP_Manager.Is_PickerLoaded
     'Assert the picker is visible
-        TST_DP_AssertTrue "DP_Show shows the picker", gDP_Manager.PickerVisible
+        TST_DP_AssertTrue "DP_Show makes the picker visible", _
+            gDP_Manager.PickerVisible
 
 '------------------------------------------------------------------------------
 ' CLOSE FORM
 '------------------------------------------------------------------------------
     'Close the DatePicker form
         DP_Close
-
     'Allow modeless form events to process
         DoEvents
-
-    'Assert the picker is no longer visible
-        TST_DP_AssertFalse "DP_Close hides the picker", gDP_Manager.PickerVisible
+    'Assert the picker is no longer visible after close
+        TST_DP_AssertFalse "DP_Close hides the picker", _
+            gDP_Manager.PickerVisible
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit after the suite succeeds
+    'Exit after the suite completes
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
-    'Suppress close failures
-        On Error Resume Next
-
     'Attempt to close the picker after a UI smoke failure
+        On Error Resume Next
         DP_Close
-
-    'Record the suite-level failure
-        TST_DP_RecordFail "UI smoke suite failed", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
-
-    'Clear the suite error
         Err.Clear
-
-    'Restore normal error handling
         On Error GoTo 0
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "UISmoke suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
 
 End Sub
 
+
 '
 '------------------------------------------------------------------------------
 '
-'                            EXPECTED-ERROR TESTS
+'                             EXPECTED-ERROR HELPERS
 '
 '------------------------------------------------------------------------------
+'
 
 Private Sub TST_DP_ExpectError_FirstDayToTextInvalid()
 
 '
 '==============================================================================
-'                     EXPECT ERROR FIRST DAY TO TEXT INVALID
+'                     EXPECT ERROR: FIRST-DAY TEXT CONVERSION INVALID
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Settings_FirstDayOfWeekToText 0
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with an invalid first-day value to trigger the expected error
+        M_Settings_FirstDayOfWeekToText 0
 
-    TST_DP_RecordFail "Invalid first-day conversion raises", "No error was raised"
-
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
+    'Record a failure when no error was raised
+        TST_DP_RecordFail "Invalid first-day conversion raises", "No error was raised"
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Invalid first-day conversion raises", Err.Description
     Err.Clear
@@ -2343,17 +2456,29 @@ Private Sub TST_DP_ExpectError_SetFirstDayBlank()
 
 '
 '==============================================================================
-'                       EXPECT ERROR SET FIRST DAY BLANK
+'                     EXPECT ERROR: SET FIRST DAY BLANK TEXT
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Settings_SetFirstDayOfWeekText vbNullString
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with a blank first-day text to trigger the expected error
+        M_Settings_SetFirstDayOfWeekText vbNullString
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Blank first-day text raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Blank first-day text raises", Err.Description
     Err.Clear
@@ -2364,17 +2489,29 @@ Private Sub TST_DP_ExpectError_SetFirstDayInvalidText()
 
 '
 '==============================================================================
-'                    EXPECT ERROR SET FIRST DAY INVALID TEXT
+'                     EXPECT ERROR: SET FIRST DAY UNSUPPORTED TEXT
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Settings_SetFirstDayOfWeekText "Wednesday"
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with an unsupported day name to trigger the expected error
+        M_Settings_SetFirstDayOfWeekText "Wednesday"
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Unsupported first-day text raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Unsupported first-day text raises", Err.Description
     Err.Clear
@@ -2385,17 +2522,29 @@ Private Sub TST_DP_ExpectError_SetInvalidClockMode()
 
 '
 '==============================================================================
-'                       EXPECT ERROR INVALID CLOCK MODE
+'                     EXPECT ERROR: INVALID CLOCK MODE
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Settings_SetClockMode 99
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with an unsupported clock mode value to trigger the expected error
+        M_Settings_SetClockMode 99
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Unsupported clock mode raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Unsupported clock mode raises", Err.Description
     Err.Clear
@@ -2406,17 +2555,29 @@ Private Sub TST_DP_ExpectError_SetInvalidSizeMode()
 
 '
 '==============================================================================
-'                        EXPECT ERROR INVALID SIZE MODE
+'                     EXPECT ERROR: INVALID SIZE MODE
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Settings_SetSizeMode 99
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with an unsupported size mode value to trigger the expected error
+        M_Settings_SetSizeMode 99
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Unsupported size mode raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Unsupported size mode raises", Err.Description
     Err.Clear
@@ -2427,17 +2588,29 @@ Private Sub TST_DP_ExpectError_EnglishMonthShortInvalid()
 
 '
 '==============================================================================
-'                   EXPECT ERROR ENGLISH MONTH SHORT INVALID
+'                     EXPECT ERROR: ENGLISH MONTH SHORT INVALID
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Caption_GetEnglishMonthShort 13
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with month 13 to trigger the expected error
+        M_Caption_GetEnglishMonthShort 13
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Invalid short English month raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Invalid short English month raises", Err.Description
     Err.Clear
@@ -2448,17 +2621,29 @@ Private Sub TST_DP_ExpectError_EnglishMonthFullInvalid()
 
 '
 '==============================================================================
-'                    EXPECT ERROR ENGLISH MONTH FULL INVALID
+'                     EXPECT ERROR: ENGLISH MONTH FULL INVALID
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Caption_GetEnglishMonthFull 0
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with month 0 to trigger the expected error
+        M_Caption_GetEnglishMonthFull 0
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Invalid full English month raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Invalid full English month raises", Err.Description
     Err.Clear
@@ -2469,17 +2654,29 @@ Private Sub TST_DP_ExpectError_GetMonthInvalid()
 
 '
 '==============================================================================
-'                         EXPECT ERROR GET MONTH INVALID
+'                     EXPECT ERROR: GETMONTH INVALID INPUT
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_Caption_GetMonth 99, False
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with month 99 to trigger the expected error
+        M_Caption_GetMonth 99, False
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Invalid GetMonth input raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Invalid GetMonth input raises", Err.Description
     Err.Clear
@@ -2490,33 +2687,45 @@ Private Sub TST_DP_ExpectError_InvalidWriteAction()
 
 '
 '==============================================================================
-'                       EXPECT ERROR INVALID WRITE ACTION
+'                     EXPECT ERROR: INVALID WRITE ACTION
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
     On Error GoTo ExpectedError
 
-    M_WriteBack_PopulateRange mTST_DP_ScratchSheet.Range("J2"), 99
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call with an unsupported write action value to trigger the expected error
+        M_WriteBack_PopulateRange mTST_DP_ScratchSheet.Range("J2"), 99
 
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
     TST_DP_RecordFail "Unsupported write action raises", "No error was raised"
-
     Exit Sub
 
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Unsupported write action raises", Err.Description
     Err.Clear
 
 End Sub
 
-'
-'------------------------------------------------------------------------------
-'
-'                              ASSERTION HELPERS
-'
-'------------------------------------------------------------------------------
 
-Private Sub TST_DP_AssertTrue( _
-    ByVal TestName As String, _
-    ByVal Condition As Boolean)
+'
+'------------------------------------------------------------------------------
+'
+'                               ASSERTION HELPERS
+'
+'------------------------------------------------------------------------------
+'
+
+Private Sub TST_DP_AssertTrue(ByVal TestName As String, ByVal Condition As Boolean)
 
 '
 '==============================================================================
@@ -2531,9 +2740,7 @@ Private Sub TST_DP_AssertTrue( _
 
 End Sub
 
-Private Sub TST_DP_AssertFalse( _
-    ByVal TestName As String, _
-    ByVal Condition As Boolean)
+Private Sub TST_DP_AssertFalse(ByVal TestName As String, ByVal Condition As Boolean)
 
 '
 '==============================================================================
@@ -2548,16 +2755,15 @@ Private Sub TST_DP_AssertFalse( _
 
 End Sub
 
-Private Sub TST_DP_AssertBooleanResult( _
-    ByVal TestName As String, _
-    ByVal BooleanValue As Boolean)
+Private Sub TST_DP_AssertBooleanResult(ByVal TestName As String, ByVal BooleanValue As Boolean)
 
 '
 '==============================================================================
 '                           ASSERT BOOLEAN RESULT
 '==============================================================================
 
-    TST_DP_RecordPass TestName, "Value=" & VBA.CStr(BooleanValue)
+    'Record the result and the Boolean value without asserting a specific polarity
+        TST_DP_RecordPass TestName, "Value=" & VBA.CStr(BooleanValue)
 
 End Sub
 
@@ -2631,20 +2837,24 @@ Private Sub TST_DP_AssertCellDateEquals( _
 '                         ASSERT CELL DATE EQUALS
 '==============================================================================
 
-    If TargetCell Is Nothing Then
-        TST_DP_RecordFail TestName, "TargetCell is Nothing"
-        Exit Sub
-    End If
+    'Reject a missing cell reference
+        If TargetCell Is Nothing Then
+            TST_DP_RecordFail TestName, "TargetCell is Nothing"
+            Exit Sub
+        End If
 
-    If Not VBA.IsDate(TargetCell.Value) Then
-        TST_DP_RecordFail TestName, _
-            "Cell value is not date-like: " & VBA.CStr(TargetCell.Value)
-        Exit Sub
-    End If
+    'Reject a non-date cell value
+        If Not VBA.IsDate(TargetCell.Value) Then
+            TST_DP_RecordFail TestName, _
+                "Cell value is not date-like: " & VBA.CStr(TargetCell.Value)
+            Exit Sub
+        End If
 
-    TST_DP_AssertDateEquals TestName, ExpectedDate, VBA.CDate(TargetCell.Value)
+    'Delegate to the date equality assertion
+        TST_DP_AssertDateEquals TestName, ExpectedDate, VBA.CDate(TargetCell.Value)
 
 End Sub
+
 
 '
 '------------------------------------------------------------------------------
@@ -2652,10 +2862,9 @@ End Sub
 '                                RESULT HELPERS
 '
 '------------------------------------------------------------------------------
+'
 
-Private Sub TST_DP_RecordPass( _
-    ByVal TestName As String, _
-    ByVal Details As String)
+Private Sub TST_DP_RecordPass(ByVal TestName As String, ByVal Details As String)
 
 '
 '==============================================================================
@@ -2666,9 +2875,7 @@ Private Sub TST_DP_RecordPass( _
 
 End Sub
 
-Private Sub TST_DP_RecordFail( _
-    ByVal TestName As String, _
-    ByVal Details As String)
+Private Sub TST_DP_RecordFail(ByVal TestName As String, ByVal Details As String)
 
 '
 '==============================================================================
@@ -2701,13 +2908,15 @@ Private Sub TST_DP_RecordResult( _
 
 '
 '==============================================================================
-'                             RECORD RESULT
+'                              RECORD RESULT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Records one regression result row
+'   Records one regression result row to the Immediate Window and to the result
+'   worksheet
 '
 ' WHY THIS EXISTS
-'   Result recording should never become the reason a regression run aborts
+'   Result recording must never become the reason a regression run aborts; this
+'   routine absorbs worksheet-write failures without re-raising
 '
 ' INPUTS
 '   ResultText
@@ -2717,98 +2926,120 @@ Private Sub TST_DP_RecordResult( _
 '     Logical suite name
 '
 '   TestName
-'     Test or diagnostic name
+'     Individual test or diagnostic name
 '
 '   Details
-'     Optional detail text
+'     Optional detail text for the result row
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Updates counters, writes to the Immediate Window, and writes to the result
-'   worksheet when available
+'   Updates assertion counters, writes a formatted line to the Immediate Window,
+'   and writes a result row to the result worksheet when it is available
 '
 ' ERROR POLICY
-'   Best-effort
-'   Worksheet-write failures are reported to the Immediate Window and do not
-'   raise outward
+'   Best-effort. Worksheet-write failures are reported to the Immediate Window
+'   and do not raise outward. The result sheet reference is cleared after a
+'   write failure to prevent repeated failures on the same broken sheet
 '
 ' DEPENDENCIES
 '   mTST_DP_ResultSheet
+'   mTST_DP_NextResultRow
 '
 ' NOTES
-'   This routine intentionally avoids recursive failure recording
+'   This routine does not record its own failures recursively
 '
 ' UPDATED
-'   2026-05-08
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "TST_DP_RecordResult" 'Current procedure name
+    Const PROC_NAME             As String = "TST_DP_RecordResult"   'Current procedure name
 
-    Dim ResultLine              As String       'Immediate Window result line
-    Dim RecordErrorNumber       As Long         'Captured result-write error number
-    Dim RecordErrorDescription  As String       'Captured result-write error description
+    Dim ResultLine              As String   'Immediate Window result line
+    Dim RecordErrorNumber       As Long     'Captured worksheet-write error number
+    Dim RecordErrorDescription  As String   'Captured worksheet-write error description
 
 '------------------------------------------------------------------------------
 ' UPDATE COUNTERS
 '------------------------------------------------------------------------------
-    If ResultText = TST_DP_PASS_TEXT Or ResultText = TST_DP_FAIL_TEXT Then
-        mTST_DP_RunCount = mTST_DP_RunCount + 1
-    End If
-    If ResultText = TST_DP_PASS_TEXT Then
-        mTST_DP_PassCount = mTST_DP_PassCount + 1
-    End If
-    If ResultText = TST_DP_FAIL_TEXT Then
-        mTST_DP_FailCount = mTST_DP_FailCount + 1
-    End If
+    'Increment the total assertion counter for PASS and FAIL results
+        If ResultText = TST_DP_PASS_TEXT Or ResultText = TST_DP_FAIL_TEXT Then
+            mTST_DP_RunCount = mTST_DP_RunCount + 1
+        End If
+    'Increment the passed assertion counter
+        If ResultText = TST_DP_PASS_TEXT Then
+            mTST_DP_PassCount = mTST_DP_PassCount + 1
+        End If
+    'Increment the failed assertion counter
+        If ResultText = TST_DP_FAIL_TEXT Then
+            mTST_DP_FailCount = mTST_DP_FailCount + 1
+        End If
 
 '------------------------------------------------------------------------------
 ' WRITE IMMEDIATE WINDOW
 '------------------------------------------------------------------------------
-    ResultLine = ResultText & _
-        " | " & SuiteName & _
-        " | " & TestName & _
-        IIf(VBA.Len(Details) > 0, " | " & Details, vbNullString)
-
-    Debug.Print ResultLine
+    'Build the Immediate Window result line
+        ResultLine = ResultText & _
+            " | " & SuiteName & _
+            " | " & TestName & _
+            IIf(VBA.Len(Details) > 0, " | " & Details, vbNullString)
+    'Write the result line to the Immediate Window
+        Debug.Print ResultLine
 
 '------------------------------------------------------------------------------
 ' WRITE RESULT SHEET
 '------------------------------------------------------------------------------
-    If mTST_DP_ResultSheet Is Nothing Then Exit Sub
+    'Exit when no result sheet is available
+        If mTST_DP_ResultSheet Is Nothing Then Exit Sub
 
-    On Error GoTo ResultSheetFail
+    'Attempt to write the result row
+        On Error GoTo ResultSheetFail
 
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 3).Value = mTST_DP_NextResultRow - 4
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 4).Value = VBA.Now
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 5).Value = ResultText
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 6).Value = SuiteName
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 7).Value = TestName
-    mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, 8).Value = Details
+    'Write the sequence number
+        mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, TST_DP_COL_SEQ).Value = _
+            mTST_DP_NextResultRow - TST_DP_RESULT_FIRST_ROW + 1
+    'Write the timestamp
+        mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, TST_DP_COL_TIMESTAMP).Value = VBA.Now
+    'Write the result marker
+        mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, TST_DP_COL_RESULT).Value = ResultText
+    'Write the suite name
+        mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, TST_DP_COL_SUITE).Value = SuiteName
+    'Write the test name
+        mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, TST_DP_COL_TEST).Value = TestName
+    'Write the details
+        mTST_DP_ResultSheet.Cells(mTST_DP_NextResultRow, TST_DP_COL_DETAILS).Value = Details
 
-    mTST_DP_NextResultRow = mTST_DP_NextResultRow + 1
+    'Advance the result row pointer
+        mTST_DP_NextResultRow = mTST_DP_NextResultRow + 1
 
-    On Error GoTo 0
+    'Restore normal error handling
+        On Error GoTo 0
 
-    Exit Sub
+    'Exit after successful recording
+        Exit Sub
 
+'------------------------------------------------------------------------------
+' RESULT SHEET FAIL
+'------------------------------------------------------------------------------
 ResultSheetFail:
-    RecordErrorNumber = Err.Number
-    RecordErrorDescription = Err.Description
-
-    Debug.Print TST_DP_INFO_TEXT & _
-        " | Harness | " & PROC_NAME & _
-        " | Result-sheet write skipped after error " & VBA.CStr(RecordErrorNumber) & _
-        " - " & RecordErrorDescription
-
-    Set mTST_DP_ResultSheet = Nothing
-
-    Err.Clear
-    On Error GoTo 0
+    'Capture the worksheet-write error
+        RecordErrorNumber = Err.Number
+        RecordErrorDescription = Err.Description
+    'Write the skip diagnostic to the Immediate Window
+        Debug.Print TST_DP_INFO_TEXT & _
+            " | Harness | " & PROC_NAME & _
+            " | Result-sheet write skipped after error " & VBA.CStr(RecordErrorNumber) & _
+            " - " & RecordErrorDescription
+    'Clear the result sheet reference to avoid repeated write failures
+        Set mTST_DP_ResultSheet = Nothing
+    'Clear the suppressed error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
 End Sub
 
@@ -2816,55 +3047,144 @@ Private Sub TST_DP_WriteSummary()
 
 '
 '==============================================================================
-'                             WRITE SUMMARY
+'                              WRITE SUMMARY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the run summary to the Immediate Window and to the result worksheet
+'
+' WHY THIS EXISTS
+'   A single consolidated summary at the end of the run makes it easy to
+'   determine the overall pass / fail status without scanning individual rows
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Records an INFO result with the total run, passed, and failed counts, then
+'   writes the same counts to fixed cells on the result sheet if available and
+'   auto-fits the result columns
+'
+' ERROR POLICY
+'   Best-effort. Worksheet-write failures are silently absorbed
+'
+' DEPENDENCIES
+'   TST_DP_RecordInfo
+'   mTST_DP_ResultSheet
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    TST_DP_RecordInfo "Harness", _
-        "Summary", _
-        "Run=" & VBA.CStr(mTST_DP_RunCount) & _
-        "; Passed=" & VBA.CStr(mTST_DP_PassCount) & _
-        "; Failed=" & VBA.CStr(mTST_DP_FailCount)
+'------------------------------------------------------------------------------
+' WRITE IMMEDIATE WINDOW SUMMARY
+'------------------------------------------------------------------------------
+    'Record the run summary as an INFO result
+        TST_DP_RecordInfo "Harness", "Summary", _
+            "Run=" & VBA.CStr(mTST_DP_RunCount) & _
+            "; Passed=" & VBA.CStr(mTST_DP_PassCount) & _
+            "; Failed=" & VBA.CStr(mTST_DP_FailCount)
 
-    If mTST_DP_ResultSheet Is Nothing Then
-        Exit Sub
-    End If
+'------------------------------------------------------------------------------
+' WRITE RESULT SHEET SUMMARY
+'------------------------------------------------------------------------------
+    'Exit when no result sheet is available
+        If mTST_DP_ResultSheet Is Nothing Then Exit Sub
 
-    mTST_DP_ResultSheet.Range("J4").Value = "SUMMARY"
-    mTST_DP_ResultSheet.Range("J5").Value = "Run"
-    mTST_DP_ResultSheet.Range("K5").Value = mTST_DP_RunCount
-    mTST_DP_ResultSheet.Range("J6").Value = "Passed"
-    mTST_DP_ResultSheet.Range("K6").Value = mTST_DP_PassCount
-    mTST_DP_ResultSheet.Range("J7").Value = "Failed"
-    mTST_DP_ResultSheet.Range("K7").Value = mTST_DP_FailCount
-    mTST_DP_ResultSheet.Range("J4:J7").Font.Bold = True
-    mTST_DP_ResultSheet.Columns("C:K").AutoFit
-    mTST_DP_ResultSheet.Columns("C:F").HorizontalAlignment = xlCenter
+    'Suppress summary-write failures
+        On Error Resume Next
+
+    'Write the summary labels and values
+        mTST_DP_ResultSheet.Cells(4, TST_DP_COL_SUMMARY_LABEL).Value = "SUMMARY"
+        mTST_DP_ResultSheet.Cells(5, TST_DP_COL_SUMMARY_LABEL).Value = "Run"
+        mTST_DP_ResultSheet.Cells(5, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_RunCount
+        mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_LABEL).Value = "Passed"
+        mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_PassCount
+        mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Value = "Failed"
+        mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_FailCount
+
+    'Bold the summary labels
+        mTST_DP_ResultSheet.Cells(4, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(5, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+
+    'Auto-fit the result and summary columns
+        mTST_DP_ResultSheet.Columns("C:K").AutoFit
+
+    'Centre-align the sequence, timestamp, result, and suite columns
+        mTST_DP_ResultSheet.Columns("C:F").HorizontalAlignment = xlCenter
+
+    'Clear any suppressed write error
+        Err.Clear
+
+    'Restore normal error handling
+        On Error GoTo 0
 
 End Sub
 
+
 '
 '------------------------------------------------------------------------------
 '
-'                             WORKBOOK HELPERS
+'                             WORKSHEET HELPERS
 '
 '------------------------------------------------------------------------------
+'
 
 Private Function TST_DP_GetHostWorkbook() As Excel.Workbook
 
 '
 '==============================================================================
 '                             GET HOST WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the workbook that will receive the result and scratch sheets
+'
+' WHY THIS EXISTS
+'   The harness must write result rows to a stable workbook reference and
+'   should prefer the ActiveWorkbook over ThisWorkbook to support use from an
+'   add-in context
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   ActiveWorkbook when available; ThisWorkbook as a fallback
+'
+' BEHAVIOR
+'   Attempts to resolve ActiveWorkbook with error suppression and falls back to
+'   ThisWorkbook when ActiveWorkbook is not available
+'
+' ERROR POLICY
+'   Best-effort. Returns Nothing only when both paths fail
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
-    On Error Resume Next
-    If Not Excel.Application.ActiveWorkbook Is Nothing Then
-        Set TST_DP_GetHostWorkbook = Excel.Application.ActiveWorkbook
-    End If
-    If TST_DP_GetHostWorkbook Is Nothing Then
-        Set TST_DP_GetHostWorkbook = ThisWorkbook
-    End If
 
-    Err.Clear
-    On Error GoTo 0
+'------------------------------------------------------------------------------
+' RESOLVE HOST WORKBOOK
+'------------------------------------------------------------------------------
+    'Suppress resolution failures
+        On Error Resume Next
+
+    'Attempt to use the active workbook
+        If Not Excel.Application.ActiveWorkbook Is Nothing Then
+            Set TST_DP_GetHostWorkbook = Excel.Application.ActiveWorkbook
+        End If
+
+    'Fall back to ThisWorkbook when ActiveWorkbook is unavailable
+        If TST_DP_GetHostWorkbook Is Nothing Then
+            Set TST_DP_GetHostWorkbook = ThisWorkbook
+        End If
+
+    'Clear any suppressed resolution error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
 End Function
 
@@ -2873,27 +3193,61 @@ Private Sub TST_DP_PrepareResultSheet(ByVal HostWorkbook As Excel.Workbook)
 '
 '==============================================================================
 '                           PREPARE RESULT SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves and initializes the result worksheet for the current run
+'
+' WHY THIS EXISTS
+'   The result sheet must exist before any result rows can be written, and its
+'   header row must be initialized before the first assertion fires
+'
+' INPUTS
+'   HostWorkbook
+'     Workbook that received the template sheet created by TST_DP_RunAll
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the result sheet by name, writes the header row, activates the
+'   sheet, and resets the result row pointer
+'
+' ERROR POLICY
+'   Raises a runtime error if the result sheet cannot be found
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' RESOLVE RESULT SHEET
+'------------------------------------------------------------------------------
+    'Resolve the result sheet from the host workbook
+        Set mTST_DP_ResultSheet = HostWorkbook.Worksheets(TST_DP_RESULT_SHEET_NAME)
 
-    Set mTST_DP_ResultSheet = HostWorkbook.Worksheets(TST_DP_RESULT_SHEET_NAME)
+'------------------------------------------------------------------------------
+' WRITE HEADER ROW
+'------------------------------------------------------------------------------
+    'Write the column headers
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_SEQ).Value = "#"
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_TIMESTAMP).Value = "Timestamp"
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_RESULT).Value = "Result"
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_SUITE).Value = "Suite"
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_TEST).Value = "Test"
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_DETAILS).Value = "Details"
+    'Bold the header row
+        mTST_DP_ResultSheet.Range( _
+            mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_SEQ), _
+            mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW - 1, TST_DP_COL_DETAILS)).Font.Bold = True
 
-    mTST_DP_ResultSheet.Name = TST_DP_RESULT_SHEET_NAME
-
-    mTST_DP_ResultSheet.Range("C4:H4").Value = Array( _
-        "#", _
-        "Timestamp", _
-        "Result", _
-        "Suite", _
-        "Test", _
-        "Details")
-
-    mTST_DP_ResultSheet.Range("C4:H4").Font.Bold = True
-
-    mTST_DP_ResultSheet.Activate
-    mTST_DP_ResultSheet.Range("C5").Select
-
-    mTST_DP_NextResultRow = 5
+'------------------------------------------------------------------------------
+' ACTIVATE AND RESET POINTER
+'------------------------------------------------------------------------------
+    'Activate the result sheet and select the first data cell
+        mTST_DP_ResultSheet.Activate
+        mTST_DP_ResultSheet.Cells(TST_DP_RESULT_FIRST_ROW, TST_DP_COL_SEQ).Select
+    'Reset the result row pointer
+        mTST_DP_NextResultRow = TST_DP_RESULT_FIRST_ROW
 
 End Sub
 
@@ -2902,17 +3256,56 @@ Private Sub TST_DP_PrepareScratchSheet(ByVal HostWorkbook As Excel.Workbook)
 '
 '==============================================================================
 '                           PREPARE SCRATCH SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Creates a clean scratch worksheet for the current regression run
+'
+' WHY THIS EXISTS
+'   Write-back, grid-icon, and manager suites require a live worksheet that
+'   can be freely modified and deleted without affecting any user data
+'
+' INPUTS
+'   HostWorkbook
+'     Workbook that will receive the scratch sheet
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Deletes any existing scratch sheet, creates a new one at the end of the
+'   workbook, names it, writes a header cell, and sets standard column widths
+'
+' ERROR POLICY
+'   Raises a runtime error if the scratch sheet cannot be created
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
+'------------------------------------------------------------------------------
+' DELETE EXISTING SCRATCH SHEET
+'------------------------------------------------------------------------------
+    'Delete any existing scratch sheet from a previous run
+        TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
 
-    Set mTST_DP_ScratchSheet = HostWorkbook.Worksheets.Add( _
-        After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
+'------------------------------------------------------------------------------
+' CREATE SCRATCH SHEET
+'------------------------------------------------------------------------------
+    'Add the scratch sheet at the end of the workbook
+        Set mTST_DP_ScratchSheet = HostWorkbook.Worksheets.Add( _
+            After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
 
-    mTST_DP_ScratchSheet.Name = TST_DP_SCRATCH_SHEET_NAME
-    mTST_DP_ScratchSheet.Range("A1").Value = "DatePicker regression scratch sheet"
-    mTST_DP_ScratchSheet.Columns("A:J").ColumnWidth = 16
-    mTST_DP_ScratchSheet.Activate
+'------------------------------------------------------------------------------
+' INITIALIZE SCRATCH SHEET
+'------------------------------------------------------------------------------
+    'Name the scratch sheet
+        mTST_DP_ScratchSheet.Name = TST_DP_SCRATCH_SHEET_NAME
+    'Write a header cell to identify the scratch sheet
+        mTST_DP_ScratchSheet.Range("A1").Value = "DatePicker regression scratch sheet"
+    'Set standard column widths for the scratch sheet
+        mTST_DP_ScratchSheet.Columns("A:J").ColumnWidth = 16
+    'Activate the scratch sheet
+        mTST_DP_ScratchSheet.Activate
 
 End Sub
 
@@ -2921,13 +3314,40 @@ Private Sub TST_DP_DeleteScratchSheet()
 '
 '==============================================================================
 '                            DELETE SCRATCH SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Deletes the scratch worksheet after the regression run
+'
+' WHY THIS EXISTS
+'   The scratch sheet is a transient test artifact and must not persist in the
+'   host workbook after the run completes
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Deletes the scratch sheet when the host workbook reference is available and
+'   the scratch sheet name can be found; clears the module-level reference
+'
+' ERROR POLICY
+'   Best-effort. Silently absorbs deletion failures
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    If Not mTST_DP_HostWorkbook Is Nothing Then
-        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
-    End If
-
-    Set mTST_DP_ScratchSheet = Nothing
+'------------------------------------------------------------------------------
+' DELETE AND RELEASE
+'------------------------------------------------------------------------------
+    'Delete the scratch sheet if the host workbook is available
+        If Not mTST_DP_HostWorkbook Is Nothing Then
+            TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
+        End If
+    'Release the module-level scratch sheet reference
+        Set mTST_DP_ScratchSheet = Nothing
 
 End Sub
 
@@ -2938,47 +3358,111 @@ Private Sub TST_DP_DeleteWorksheetIfExists( _
 '
 '==============================================================================
 '                        DELETE WORKSHEET IF EXISTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Deletes a named worksheet from a workbook when it exists
+'
+' WHY THIS EXISTS
+'   Repeated regression runs must remove stale scratch and result sheets from
+'   previous runs without raising an error when the sheet is absent
+'
+' INPUTS
+'   HostWorkbook
+'     Workbook to search for the named sheet
+'
+'   SheetName
+'     Name of the worksheet to delete
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the worksheet by name with error suppression, deletes it when
+'   found, and silently ignores the operation when the sheet does not exist or
+'   when it is the only remaining sheet in the workbook
+'
+' ERROR POLICY
+'   Best-effort. Silently absorbs all errors
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    Dim TargetSheet             As Excel.Worksheet     'Worksheet to delete
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetSheet     As Excel.Worksheet  'Worksheet to delete
 
-    If HostWorkbook Is Nothing Then
-        Exit Sub
-    End If
+'------------------------------------------------------------------------------
+' RESOLVE AND DELETE
+'------------------------------------------------------------------------------
+    'Exit when the host workbook is not available
+        If HostWorkbook Is Nothing Then Exit Sub
 
-    On Error Resume Next
+    'Suppress resolution and deletion errors
+        On Error Resume Next
 
-    Set TargetSheet = HostWorkbook.Worksheets(SheetName)
+    'Attempt to resolve the target sheet by name
+        Set TargetSheet = HostWorkbook.Worksheets(SheetName)
 
-    If Not TargetSheet Is Nothing Then
-        If HostWorkbook.Worksheets.Count > 1 Then
-            TargetSheet.Delete
+    'Delete the sheet when found and when the workbook has more than one sheet
+        If Not TargetSheet Is Nothing Then
+            If HostWorkbook.Worksheets.Count > 1 Then
+                TargetSheet.Delete
+            End If
         End If
-    End If
 
-    Set TargetSheet = Nothing
-
-    Err.Clear
-    On Error GoTo 0
+    'Release the sheet reference
+        Set TargetSheet = Nothing
+    'Clear any suppressed error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
 End Sub
 
+
 '
 '------------------------------------------------------------------------------
 '
-'                              STATE HELPERS
+'                               STATE HELPERS
 '
 '------------------------------------------------------------------------------
+'
 
 Private Sub TST_DP_CaptureSettings(ByRef Snapshot As TRegDPSettingsSnapshot)
 
 '
 '==============================================================================
 '                            CAPTURE SETTINGS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Captures all DatePicker settings and transient state into a snapshot
+'
+' WHY THIS EXISTS
+'   The regression harness must restore all settings after the run so user
+'   preferences are not permanently overwritten by test values
+'
+' INPUTS
+'   Snapshot
+'     Output TRegDPSettingsSnapshot populated by this routine
+'
+' RETURNS
+'   Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    M_Settings_EnsureLoaded
+'------------------------------------------------------------------------------
+' ENSURE SETTINGS ARE LOADED
+'------------------------------------------------------------------------------
+    'Ensure settings are in memory before capturing them
+        M_Settings_EnsureLoaded
 
+'------------------------------------------------------------------------------
+' CAPTURE SETTINGS STATE
+'------------------------------------------------------------------------------
     Snapshot.ShowRightClick = gDP_ShowRightClick
     Snapshot.ShowGridIcon = gDP_ShowGridIcon
     Snapshot.FirstDayOfWeek = gDP_FirstDayOfWeek
@@ -3004,8 +3488,28 @@ Private Sub TST_DP_RestoreSettings(ByRef Snapshot As TRegDPSettingsSnapshot)
 '
 '==============================================================================
 '                            RESTORE SETTINGS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores all DatePicker settings and transient state from a snapshot
+'
+' WHY THIS EXISTS
+'   Each regression run must leave settings in the same state as before the run
+'   so user preferences and integration state are not permanently changed
+'
+' INPUTS
+'   Snapshot
+'     TRegDPSettingsSnapshot captured before the run
+'
+' RETURNS
+'   Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' RESTORE SETTINGS STATE
+'------------------------------------------------------------------------------
     gDP_ShowRightClick = Snapshot.ShowRightClick
     gDP_ShowGridIcon = Snapshot.ShowGridIcon
     gDP_FirstDayOfWeek = Snapshot.FirstDayOfWeek
@@ -3024,13 +3528,19 @@ Private Sub TST_DP_RestoreSettings(ByRef Snapshot As TRegDPSettingsSnapshot)
     gDP_SelectedDate = Snapshot.SelectedDate
     gDP_HasSelectedDate = Snapshot.HasSelectedDate
 
-    M_Settings_Save
-    M_ContextMenu_Update
-    M_KeyboardShortcut_Update
-
-    If Not gDP_ShowGridIcon Then
-        M_GridIcon_Remove
-    End If
+'------------------------------------------------------------------------------
+' PERSIST AND SYNCHRONIZE
+'------------------------------------------------------------------------------
+    'Persist the restored settings to the registry
+        M_Settings_Save
+    'Synchronize the context menu with the restored settings
+        M_ContextMenu_Update
+    'Synchronize the keyboard shortcut with the restored settings
+        M_KeyboardShortcut_Update
+    'Remove the grid icon when the feature was disabled before the run
+        If Not gDP_ShowGridIcon Then
+            M_GridIcon_Remove
+        End If
 
 End Sub
 
@@ -3039,18 +3549,38 @@ Private Sub TST_DP_CaptureApplicationState(ByRef Snapshot As TRegDPApplicationSn
 '
 '==============================================================================
 '                         CAPTURE APPLICATION STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Captures selected Excel Application properties into a snapshot
+'
+' WHY THIS EXISTS
+'   The harness disables ScreenUpdating, EnableEvents, DisplayAlerts, and
+'   modifies the StatusBar during the run; all must be restored afterward
+'
+' INPUTS
+'   Snapshot
+'     Output TRegDPApplicationSnapshot populated by this routine
+'
+' RETURNS
+'   Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' CAPTURE APPLICATION STATE
+'------------------------------------------------------------------------------
     Snapshot.ScreenUpdating = Excel.Application.ScreenUpdating
     Snapshot.EnableEvents = Excel.Application.EnableEvents
     Snapshot.DisplayAlerts = Excel.Application.DisplayAlerts
     Snapshot.CalculationMode = Excel.Application.Calculation
-
-    Snapshot.StatusBarWasFalse = (VBA.VarType(Excel.Application.StatusBar) = vbBoolean)
-
-    If Not Snapshot.StatusBarWasFalse Then
-        Snapshot.StatusBarText = VBA.CStr(Excel.Application.StatusBar)
-    End If
+    'Detect whether the StatusBar is currently Excel-owned (False) or text-owned
+        Snapshot.StatusBarWasFalse = (VBA.VarType(Excel.Application.StatusBar) = vbBoolean)
+    'Capture the StatusBar text when it is text-owned
+        If Not Snapshot.StatusBarWasFalse Then
+            Snapshot.StatusBarText = VBA.CStr(Excel.Application.StatusBar)
+        End If
 
 End Sub
 
@@ -3059,8 +3589,28 @@ Private Sub TST_DP_PrepareApplicationForRun()
 '
 '==============================================================================
 '                       PREPARE APPLICATION FOR RUN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Sets the Excel Application state used by the regression harness during a run
+'
+' WHY THIS EXISTS
+'   Disabling ScreenUpdating, EnableEvents, and DisplayAlerts reduces
+'   interference from workbook-level event handlers and confirmation dialogs
+'   during the regression run
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' SET HARNESS APPLICATION STATE
+'------------------------------------------------------------------------------
     Excel.Application.ScreenUpdating = False
     Excel.Application.EnableEvents = False
     Excel.Application.DisplayAlerts = False
@@ -3073,18 +3623,34 @@ Private Sub TST_DP_RestoreApplicationState(ByRef Snapshot As TRegDPApplicationSn
 '
 '==============================================================================
 '                       RESTORE APPLICATION STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores the Excel Application state from a snapshot captured before the run
+'
+' INPUTS
+'   Snapshot
+'     TRegDPApplicationSnapshot captured before the run
+'
+' RETURNS
+'   Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
+'------------------------------------------------------------------------------
+' RESTORE APPLICATION STATE
+'------------------------------------------------------------------------------
     Excel.Application.Calculation = Snapshot.CalculationMode
     Excel.Application.DisplayAlerts = Snapshot.DisplayAlerts
     Excel.Application.EnableEvents = Snapshot.EnableEvents
     Excel.Application.ScreenUpdating = Snapshot.ScreenUpdating
-
-    If Snapshot.StatusBarWasFalse Then
-        Excel.Application.StatusBar = False
-    Else
-        Excel.Application.StatusBar = Snapshot.StatusBarText
-    End If
+    'Restore the StatusBar to its pre-run state
+        If Snapshot.StatusBarWasFalse Then
+            Excel.Application.StatusBar = False
+        Else
+            Excel.Application.StatusBar = Snapshot.StatusBarText
+        End If
 
 End Sub
 
@@ -3093,18 +3659,51 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
 '
 '==============================================================================
 '                        RESET DATEPICKER ARTIFACTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears all transient DatePicker UI artifacts before and after a run
+'
+' WHY THIS EXISTS
+'   Stale timers, open forms, context menu entries, keyboard shortcuts, and
+'   grid icons from a previous run or interrupted run must be cleared before
+'   testing begins and cleaned up after the run ends
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Calls each cleanup path behind On Error Resume Next so a failure in one
+'   path does not prevent the remaining cleanup steps from executing
+'
+' ERROR POLICY
+'   Best-effort. Silently absorbs all cleanup failures
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    On Error Resume Next
-
-    M_Timer_Stop
-    DP_Close
-    M_ContextMenu_Remove
-    M_KeyboardShortcut_Remove
-    M_GridIcon_PurgeAll
-
-    Err.Clear
-    On Error GoTo 0
+'------------------------------------------------------------------------------
+' RESET ALL ARTIFACTS
+'------------------------------------------------------------------------------
+    'Suppress individual cleanup failures
+        On Error Resume Next
+    'Stop the live-clock timer
+        M_Timer_Stop
+    'Close any loaded DatePicker form
+        DP_Close
+    'Remove the right-click menu entry
+        M_ContextMenu_Remove
+    'Remove the keyboard shortcut
+        M_KeyboardShortcut_Remove
+    'Purge all in-grid DatePicker icons
+        M_GridIcon_PurgeAll
+    'Clear any suppressed error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
 
 End Sub
 
@@ -3113,22 +3712,58 @@ Private Sub TST_DP_RestoreManagerState()
 '
 '==============================================================================
 '                         RESTORE MANAGER STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores the global DatePicker manager to its pre-run state
+'
+' WHY THIS EXISTS
+'   Suite tests create and destroy manager instances; the global manager
+'   reference must be restored to the state it was in before the run began
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Releases the current global manager reference and recreates it through
+'   M_Picker_EnsureManager only when a manager existed before the run
+'
+' ERROR POLICY
+'   Best-effort. Silently absorbs manager recreation failures
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    Set gDP_Manager = Nothing
+'------------------------------------------------------------------------------
+' RELEASE CURRENT MANAGER
+'------------------------------------------------------------------------------
+    'Release the current global manager reference
+        Set gDP_Manager = Nothing
 
-    If mTST_DP_HadManager Then
-        M_Picker_EnsureManager
-    End If
+'------------------------------------------------------------------------------
+' RECREATE MANAGER IF NEEDED
+'------------------------------------------------------------------------------
+    'Recreate the manager only when one existed before the run
+        If mTST_DP_HadManager Then
+            On Error Resume Next
+            M_Picker_EnsureManager
+            Err.Clear
+            On Error GoTo 0
+        End If
 
 End Sub
 
+
 '
 '------------------------------------------------------------------------------
 '
-'                              OBJECT HELPERS
+'                              SHAPE HELPERS
 '
 '------------------------------------------------------------------------------
+'
 
 Private Function TST_DP_ShapeExists( _
     ByVal TargetSheet As Excel.Worksheet, _
@@ -3137,26 +3772,41 @@ Private Function TST_DP_ShapeExists( _
 '
 '==============================================================================
 '                              SHAPE EXISTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns True when a named shape exists on a worksheet
+'
+' INPUTS
+'   TargetSheet - worksheet to search
+'   ShapeName   - shape name to locate
+'
+' RETURNS
+'   True when the shape exists; False otherwise or when the sheet is Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    Dim TargetShape             As Excel.Shape        'Resolved shape
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetShape     As Excel.Shape  'Resolved shape reference
 
-    TST_DP_ShapeExists = False
+'------------------------------------------------------------------------------
+' RESOLVE SHAPE
+'------------------------------------------------------------------------------
+    'Default to not found
+        TST_DP_ShapeExists = False
+    'Exit when the target sheet is not available
+        If TargetSheet Is Nothing Then Exit Function
 
-    If TargetSheet Is Nothing Then
-        Exit Function
-    End If
-
-    On Error Resume Next
-
-    Set TargetShape = TargetSheet.Shapes(ShapeName)
-
-    TST_DP_ShapeExists = Not (TargetShape Is Nothing)
-
-    Set TargetShape = Nothing
-
-    Err.Clear
-    On Error GoTo 0
+    'Attempt to resolve the shape by name
+        On Error Resume Next
+        Set TargetShape = TargetSheet.Shapes(ShapeName)
+        TST_DP_ShapeExists = Not (TargetShape Is Nothing)
+        Set TargetShape = Nothing
+        Err.Clear
+        On Error GoTo 0
 
 End Function
 
@@ -3167,28 +3817,43 @@ Private Function TST_DP_ShapeIsVisible( _
 '
 '==============================================================================
 '                            SHAPE IS VISIBLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns True when a named shape exists and is visible on a worksheet
+'
+' INPUTS
+'   TargetSheet - worksheet to search
+'   ShapeName   - shape name to check
+'
+' RETURNS
+'   True when the shape exists and Visible = msoTrue; False otherwise
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    Dim TargetShape             As Excel.Shape        'Resolved shape
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetShape     As Excel.Shape  'Resolved shape reference
 
-    TST_DP_ShapeIsVisible = False
+'------------------------------------------------------------------------------
+' RESOLVE VISIBILITY
+'------------------------------------------------------------------------------
+    'Default to not visible
+        TST_DP_ShapeIsVisible = False
+    'Exit when the target sheet is not available
+        If TargetSheet Is Nothing Then Exit Function
 
-    If TargetSheet Is Nothing Then
-        Exit Function
-    End If
-
-    On Error Resume Next
-
-    Set TargetShape = TargetSheet.Shapes(ShapeName)
-
-    If Not TargetShape Is Nothing Then
-        TST_DP_ShapeIsVisible = (TargetShape.Visible = msoTrue)
-    End If
-
-    Set TargetShape = Nothing
-
-    Err.Clear
-    On Error GoTo 0
+    'Attempt to resolve the shape and read its visibility
+        On Error Resume Next
+        Set TargetShape = TargetSheet.Shapes(ShapeName)
+        If Not TargetShape Is Nothing Then
+            TST_DP_ShapeIsVisible = (TargetShape.Visible = msoTrue)
+        End If
+        Set TargetShape = Nothing
+        Err.Clear
+        On Error GoTo 0
 
 End Function
 
@@ -3199,33 +3864,65 @@ Private Function TST_DP_CountNamedShapes( _
 '
 '==============================================================================
 '                            COUNT NAMED SHAPES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts all shapes with a given name across all worksheets in a workbook
+'
+' INPUTS
+'   HostWorkbook - workbook to search
+'   ShapeName    - shape name to count
+'
+' RETURNS
+'   Total count of matching shapes; 0 when the workbook is Nothing
+'
+' UPDATED
+'   2026-05-14
 '==============================================================================
 
-    Dim TargetSheet             As Excel.Worksheet     'Worksheet being inspected
-    Dim TargetShape             As Excel.Shape         'Shape being inspected
-    Dim ShapeCount              As Long                'Matched shape count
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetSheet     As Excel.Worksheet  'Worksheet being inspected
+    Dim TargetShape     As Excel.Shape      'Shape being inspected
+    Dim ShapeCount      As Long             'Running count of matching shapes
 
-    ShapeCount = 0
+'------------------------------------------------------------------------------
+' COUNT SHAPES
+'------------------------------------------------------------------------------
+    'Default to zero
+        ShapeCount = 0
+    'Exit when the host workbook is not available
+        If HostWorkbook Is Nothing Then
+            TST_DP_CountNamedShapes = 0
+            Exit Function
+        End If
 
-    If HostWorkbook Is Nothing Then
-        TST_DP_CountNamedShapes = 0
-        Exit Function
-    End If
+    'Iterate every worksheet and every shape in the workbook
+        For Each TargetSheet In HostWorkbook.Worksheets
+            For Each TargetShape In TargetSheet.Shapes
+                If VBA.StrComp(TargetShape.Name, ShapeName, vbBinaryCompare) = 0 Then
+                    ShapeCount = ShapeCount + 1
+                End If
+            Next TargetShape
+        Next TargetSheet
 
-    For Each TargetSheet In HostWorkbook.Worksheets
-        For Each TargetShape In TargetSheet.Shapes
-            If VBA.StrComp(TargetShape.Name, ShapeName, vbBinaryCompare) = 0 Then
-                ShapeCount = ShapeCount + 1
-            End If
-        Next TargetShape
-    Next TargetSheet
+    'Return the total count
+        TST_DP_CountNamedShapes = ShapeCount
 
-    TST_DP_CountNamedShapes = ShapeCount
-
-    Set TargetShape = Nothing
-    Set TargetSheet = Nothing
+    'Release object references
+        Set TargetShape = Nothing
+        Set TargetSheet = Nothing
 
 End Function
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                             CALLBACK RESOLUTION
+'
+'------------------------------------------------------------------------------
+'
 
 Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 
@@ -3238,27 +3935,23 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 '
 ' WHY THIS EXISTS
 '   Holiday-policy regression tests validate callback dispatch through
-'   Application.Run
-'
-'   Callback resolution can vary depending on workbook qualification, module
-'   qualification, project state, and host workbook context
-'
-'   This helper probes supported callback-name formats and returns the first one
-'   that Excel can actually execute
+'   Application.Run. Callback resolution varies depending on workbook
+'   qualification, module qualification, project state, and host workbook
+'   context. This helper probes supported callback-name formats and returns the
+'   first one that Excel can actually execute.
 '
 ' INPUTS
 '   MacroName
-'     Public callback procedure name
+'     Public callback procedure name without qualification
 '
 ' RETURNS
-'   First runnable callback reference
+'   First runnable callback reference string
 '
 ' BEHAVIOR
-'   Trims the supplied macro name
-'   Builds workbook + module qualified, workbook-qualified, and unqualified
-'   callback-name candidates
-'   Tests each candidate through Excel.Application.Run
-'   Returns the first candidate that executes without raising a runtime error
+'   Normalizes the supplied macro name, builds three candidate names (workbook
+'   + module qualified, workbook-qualified, and unqualified), probes each
+'   candidate through Excel.Application.Run, and returns the first candidate
+'   that executes without raising a runtime error
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error when MacroName is blank or when no
@@ -3271,12 +3964,11 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 '
 ' NOTES
 '   This helper intentionally calls the callback once with a deterministic test
-'   date while resolving the runnable name
-'
-'   The regression callbacks used here are side-effect free
+'   date while resolving the runnable name. The regression callbacks used here
+'   are side-effect free
 '
 ' UPDATED
-'   2026-05-10
+'   2026-05-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3284,11 +3976,11 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "TST_DP_QualifiedMacroName"
 
-    Dim NormalizedMacroName     As String       'Trimmed callback macro name
+    Dim NormalizedMacroName     As String       'Normalized callback macro name
     Dim WorkbookQualifier       As String       'Escaped workbook qualifier
-    Dim CandidateNames(1 To 3)  As String       'Candidate callback names
-    Dim CandidateIndex          As Long         'Candidate loop index
-    Dim CallbackResult          As Variant      'Callback probe result
+    Dim CandidateNames(1 To 3)  As String       'Candidate callback name variants
+    Dim CandidateIndex          As Long         'Current candidate index
+    Dim CallbackResult          As Variant      'Probe callback result
     Dim RunErrNumber            As Long         'Application.Run error number
     Dim RunErrDescription       As String       'Application.Run error description
 
@@ -3312,37 +4004,36 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 '------------------------------------------------------------------------------
 ' BUILD CANDIDATE NAMES
 '------------------------------------------------------------------------------
-    'Build the workbook qualifier
+    'Build the workbook qualifier with escaped single quotes
         WorkbookQualifier = "'" & VBA.Replace(ThisWorkbook.Name, "'", "''") & "'!"
-    'Build workbook and module qualified callback name
+    'Candidate 1: workbook and module qualified
         CandidateNames(1) = WorkbookQualifier & TST_DP_MODULE_NAME & "." & NormalizedMacroName
-    'Build workbook-qualified callback name
+    'Candidate 2: workbook qualified only
         CandidateNames(2) = WorkbookQualifier & NormalizedMacroName
-    'Build unqualified callback name
+    'Candidate 3: unqualified
         CandidateNames(3) = NormalizedMacroName
 
 '------------------------------------------------------------------------------
 ' PROBE CANDIDATES
 '------------------------------------------------------------------------------
-    'Loop through candidate callback names
+    'Test each candidate in order and return the first that succeeds
         For CandidateIndex = LBound(CandidateNames) To UBound(CandidateNames)
-            'Suppress candidate probe errors
+            'Suppress the probe error
                 On Error Resume Next
-            'Clear any pending error before probing the candidate
+            'Clear any pending error before probing
                 Err.Clear
-            'Run the candidate callback with a deterministic date
+            'Probe the candidate with a deterministic test date
                 CallbackResult = Excel.Application.Run( _
                     CandidateNames(CandidateIndex), _
                     VBA.DateSerial(2026, 1, 1))
-            'Capture probe error number
+            'Capture the probe result
                 RunErrNumber = Err.Number
-            'Capture probe error description
                 RunErrDescription = Err.Description
             'Clear the suppressed probe error
                 Err.Clear
             'Restore controlled error handling
                 On Error GoTo ErrorHandler
-            'Return the first runnable callback name
+            'Return the first candidate that executed without error
                 If RunErrNumber = 0 Then
                     TST_DP_QualifiedMacroName = CandidateNames(CandidateIndex)
                     Exit Function
@@ -3352,11 +4043,11 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 '------------------------------------------------------------------------------
 ' RAISE RESOLUTION FAILURE
 '------------------------------------------------------------------------------
-    'Raise when no candidate could be executed
+    'Raise a descriptive error when no candidate succeeded
         Err.Raise vbObjectError + 514, PROC_NAME, _
-            "Unable to resolve runnable callback macro name for '" & _
-            NormalizedMacroName & "'. Last Application.Run error: " & _
-            VBA.CStr(RunErrNumber) & " - " & RunErrDescription
+            "Unable to resolve runnable callback name for '" & NormalizedMacroName & _
+            "'. Last Application.Run error: " & VBA.CStr(RunErrNumber) & _
+            " - " & RunErrDescription
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -3370,23 +4061,35 @@ Private Function TST_DP_QualifiedMacroName(ByVal MacroName As String) As String
 ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, _
-            "Regression callback-name resolution failed: " & Err.Description
+            "Callback name resolution failed: " & Err.Description
 
 End Function
+
+
+'
+'------------------------------------------------------------------------------
+'
+'                          CONDITIONAL FORMATTING
+'
+'------------------------------------------------------------------------------
+'
+
 Public Sub TST_DP_ApplyFailConditionalFormat( _
     ByVal WS As Excel.Worksheet, _
     ByVal TargetRange As Excel.Range)
 
 '
-'------------------------------------------------------------------------------
+'==============================================================================
 '                       APPLY FAIL CONDITIONAL FORMAT
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Applies FAIL conditional formatting to a supplied worksheet range
+'   Applies a text-contains FAIL conditional formatting rule to a supplied
+'   worksheet range
 '
 ' WHY THIS EXISTS
-'   Conditional formatting should be applied directly to an explicit target range
-'   instead of relying on Select, Selection, ActiveCell, or recorded-macro state
+'   Conditional formatting should be applied to an explicit range reference
+'   rather than relying on Select, Selection, ActiveCell, or recorded-macro
+'   state, which changes between runs
 '
 ' INPUTS
 '   WS
@@ -3399,37 +4102,34 @@ Public Sub TST_DP_ApplyFailConditionalFormat( _
 '   Nothing
 '
 ' BEHAVIOR
-'   Validates the supplied worksheet and range
-'   Validates that the range belongs to the supplied worksheet
-'   Adds a text-contains FAIL conditional-formatting rule
-'   Applies bold white font and dark red fill
+'   Validates the supplied worksheet and range, confirms the range belongs to
+'   the worksheet, adds a text-contains FAIL rule at first priority, and
+'   applies bold white font with a dark red fill
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if inputs are missing, inconsistent, or
-'   conditional formatting cannot be applied
+'   Raises a descriptive runtime error if inputs are missing or inconsistent
 '
 ' DEPENDENCIES
 '   Excel object model
 '
 ' NOTES
-'   This routine does not clear existing conditional-formatting rules
+'   This routine does not clear existing conditional-formatting rules before
+'   adding the new rule
 '
 '   This routine does not select or activate any worksheet or range
 '
 ' UPDATED
-'   2026-05-10
-'------------------------------------------------------------------------------
+'   2026-05-14
+'==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_ApplyFailConditionalFormat"
-    Const FAIL_TEXT             As String = "FAIL"
-    Const FAIL_BACK_COLOR       As Long = 192
+    Const PROC_NAME         As String = "TST_DP_ApplyFailConditionalFormat"
 
-    Dim FailCondition           As Excel.FormatCondition    'Created conditional-formatting rule
-    Dim ErrorNumber             As Long                     'Captured error number
-    Dim ErrorDescription        As String                   'Captured error description
+    Dim FailCondition       As Excel.FormatCondition 'Created conditional-formatting rule
+    Dim ErrorNumber         As Long                  'Captured error number
+    Dim ErrorDescription    As String                'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3440,19 +4140,17 @@ Public Sub TST_DP_ApplyFailConditionalFormat( _
 '------------------------------------------------------------------------------
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
-    'Reject missing worksheet references
+    'Reject a missing worksheet reference
         If WS Is Nothing Then
             Err.Raise vbObjectError + 513, PROC_NAME, _
                 "WS cannot be Nothing"
         End If
-
-    'Reject missing target ranges
+    'Reject a missing target range reference
         If TargetRange Is Nothing Then
             Err.Raise vbObjectError + 514, PROC_NAME, _
                 "TargetRange cannot be Nothing"
         End If
-
-    'Reject ranges that do not belong to the supplied worksheet
+    'Reject a range that does not belong to the supplied worksheet
         If Not TargetRange.Worksheet Is WS Then
             Err.Raise vbObjectError + 515, PROC_NAME, _
                 "TargetRange must belong to the supplied worksheet"
@@ -3461,10 +4159,10 @@ Public Sub TST_DP_ApplyFailConditionalFormat( _
 '------------------------------------------------------------------------------
 ' ADD CONDITIONAL FORMAT
 '------------------------------------------------------------------------------
-    'Add the FAIL text conditional-formatting rule
+    'Add a text-contains FAIL rule to the target range
         Set FailCondition = TargetRange.FormatConditions.Add( _
             Type:=xlTextString, _
-            String:=FAIL_TEXT, _
+            String:=TST_DP_FAIL_TEXT, _
             TextOperator:=xlContains)
 
     'Move the new rule to first priority
@@ -3473,18 +4171,20 @@ Public Sub TST_DP_ApplyFailConditionalFormat( _
 '------------------------------------------------------------------------------
 ' APPLY FORMAT SETTINGS
 '------------------------------------------------------------------------------
-    With FailCondition.Font
-        .Bold = True
-        .Italic = False
-        .ThemeColor = xlThemeColorDark1
-        .TintAndShade = 0
-    End With
+    'Apply bold white font to FAIL cells
+        With FailCondition.Font
+            .Bold = True
+            .Italic = False
+            .ThemeColor = xlThemeColorDark1
+            .TintAndShade = 0
+        End With
 
-    With FailCondition.Interior
-        .PatternColorIndex = xlAutomatic
-        .Color = FAIL_BACK_COLOR
-        .TintAndShade = 0
-    End With
+    'Apply dark red fill to FAIL cells
+        With FailCondition.Interior
+            .PatternColorIndex = xlAutomatic
+            .Color = TST_DP_FAIL_BACK_COLOR
+            .TintAndShade = 0
+        End With
 
     'Allow lower-priority rules to continue evaluating
         FailCondition.StopIfTrue = False
@@ -3502,9 +4202,8 @@ CleanExit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Capture the original error number
+    'Capture the original error
         ErrorNumber = Err.Number
-    'Capture the original error description
         ErrorDescription = Err.Description
     'Release object references
         Set FailCondition = Nothing
@@ -3513,3 +4212,5 @@ ErrorHandler:
             "FAIL conditional-format application failed: " & ErrorDescription
 
 End Sub
+
+

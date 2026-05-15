@@ -239,13 +239,15 @@ Option Explicit
 
     Private Const WS_CAPTION                       As Long = &HC00000                    'Window caption style flag
     
-    Private Const DP_MIN_YEAR                      As Long = 100                         'Minimum supported DatePicker year
-    Private Const DP_MAX_YEAR                      As Long = 9999                        'Maximum supported DatePicker year
 
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
 '------------------------------------------------------------------------------
     Public Const DP_FORM_NAME                      As String = "UF_DatePicker"           'DatePicker UserForm name
+
+    Public Const DP_MIN_YEAR                       As Long = 100                         'Minimum supported DatePicker year
+    Public Const DP_MAX_YEAR                       As Long = 9999                        'Maximum supported DatePicker year
+
 
     Public Const DP_SETTINGS_APP_NAME              As String = "VBA_DATETIMEPICKER"      'Legacy registry application name
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
@@ -5186,14 +5188,17 @@ Public Sub M_Picker_EnsureManager()
 '   Nothing
 '
 ' BEHAVIOR
-'   Ensures persisted settings are loaded, creates the manager when missing, and
-'   recreates it when the existing manager is not hooked
+'   Ensures persisted settings are loaded, forces Excel events on, creates the
+'   manager when missing, and recreates it when the existing manager is not
+'   hooked
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if settings cannot be loaded or if the
-'   manager cannot be instantiated or re-instantiated
+'   Raises a descriptive runtime error if settings cannot be loaded, if Excel
+'   events cannot be enabled, or if the manager cannot be instantiated or
+'   re-instantiated
 '
 ' DEPENDENCIES
+'   Excel.Application.EnableEvents
 '   M_Settings_EnsureLoaded
 '   cDatePickerManager
 '   gDP_Manager
@@ -5204,8 +5209,15 @@ Public Sub M_Picker_EnsureManager()
 '   The Is_Hooked check prevents a stale manager object from silently disabling
 '   Application event handling
 '
+'   This routine intentionally forces Application.EnableEvents = True because
+'   a hooked manager cannot receive Excel Application callbacks while events are
+'   disabled
+'
+'   Do not call this routine inside a business macro that deliberately suppresses
+'   Excel events unless that macro is ready for events to be re-enabled
+'
 ' UPDATED
-'   2026-05-04
+'   2026-05-10
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -5230,6 +5242,17 @@ Public Sub M_Picker_EnsureManager()
     'Ensure persisted DatePicker settings are available before manager startup
         M_Settings_EnsureLoaded
 
+'------------------------------------------------------------------------------
+' ENABLE EXCEL EVENTS
+'------------------------------------------------------------------------------
+    'Ensure Excel events are enabled before validating or creating the manager
+        Excel.Application.EnableEvents = True
+    'Reject an environment where Excel events could not be re-enabled
+        If Not Excel.Application.EnableEvents Then
+            Err.Raise vbObjectError + 512, PROC_NAME, _
+                "Application.EnableEvents could not be re-enabled"
+        End If
+        
 '------------------------------------------------------------------------------
 ' RESOLVE MANAGER STATE
 '------------------------------------------------------------------------------
@@ -6067,6 +6090,104 @@ Public Sub DP_Close()
 
 End Sub
 
+Public Sub DP_Stop()
+
+'
+'------------------------------------------------------------------------------
+'                           STOP DATEPICKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stops DatePicker session-level integrations and clears transient UI artifacts
+'
+' WHY THIS EXISTS
+'   The DatePicker uses application-wide and workbook-level transient surfaces:
+'     - Excel Application event manager
+'     - right-click command-bar entries
+'     - keyboard shortcut assignment
+'     - modeless UserForm
+'     - live-clock timer
+'     - worksheet grid icon shapes
+'
+'   Workbook close / add-in unload must remove those artifacts explicitly so
+'   nothing survives after the host project is closed
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Releases the global DatePicker manager, removes right-click menu entries,
+'   removes the keyboard shortcut, closes the DatePicker form, stops timer
+'   activity, and purges in-grid icon shapes from open workbooks
+'
+' ERROR POLICY
+'   Best-effort teardown
+'
+'   Suppresses cleanup errors because workbook shutdown must not be interrupted
+'   by missing forms, missing command bars, protected sheets, or stale shapes
+'
+' DEPENDENCIES
+'   gDP_Manager
+'   M_ContextMenu_Remove
+'   M_KeyboardShortcut_Remove
+'   DP_Close
+'   M_Timer_Stop
+'   M_GridIcon_PurgeAll
+'
+' NOTES
+'   Releasing gDP_Manager triggers cDatePickerManager.Class_Terminate when the
+'   manager exists
+'
+'   M_ContextMenu_Remove is called explicitly because right-click menu ownership
+'   is not delegated to cDatePickerManager teardown
+'
+'   This routine is safe to call more than once
+'
+' UPDATED
+'   2026-05-10
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress shutdown errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' RELEASE MANAGER
+'------------------------------------------------------------------------------
+    'Release the Application event manager and trigger its teardown path
+        Set gDP_Manager = Nothing
+
+'------------------------------------------------------------------------------
+' REMOVE APPLICATION-WIDE ENTRY POINTS
+'------------------------------------------------------------------------------
+    'Remove DatePicker right-click command-bar entries
+        M_ContextMenu_Remove
+    'Remove the DatePicker keyboard shortcut assignment
+        M_KeyboardShortcut_Remove
+
+'------------------------------------------------------------------------------
+' CLEAR TRANSIENT UI
+'------------------------------------------------------------------------------
+    'Stop any active live-clock timer
+        M_Timer_Stop
+    'Close any loaded DatePicker form
+        DP_Close
+    'Purge all DatePicker grid icons from open workbooks
+        M_GridIcon_PurgeAll
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed teardown error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 
 '
