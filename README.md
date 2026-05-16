@@ -225,7 +225,7 @@ The implementation is designed for controlled Excel environments.
 ## 🏗️ Architecture
 
 <p align="left">
-  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Manager_%2B_form_%2B_hooks-6f42c1">
+  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Manager_%2B_Form_%2B_Hooks-6f42c1">
   <img alt="Events" src="https://img.shields.io/badge/Events-Application_level-blue">
   <img alt="Runtime UI" src="https://img.shields.io/badge/Runtime_UI-MSForms-orange">
 </p>
@@ -324,9 +324,9 @@ It is responsible for:
 ## 🧠 Design notes
 
 <p align="left">
-  <img alt="Design" src="https://img.shields.io/badge/design-Excel_first-217346">
-  <img alt="Safety" src="https://img.shields.io/badge/safety-defensive_cleanup-blue">
-  <img alt="Maintainability" src="https://img.shields.io/badge/maintainability-modular-6f42c1">
+  <img alt="Design" src="https://img.shields.io/badge/Design-Excel_first-217346">
+  <img alt="Safety" src="https://img.shields.io/badge/Safety-Defensive_cleanup-blue">
+  <img alt="Maintainability" src="https://img.shields.io/badge/Maintainability-Modular-6f42c1">
 </p>
 
 This repo follows a few core principles:
@@ -393,9 +393,9 @@ VBA-DATETIMEPICKER/
 ## 🛠️ Installation
 
 <p align="left">
-  <img alt="Install" src="https://img.shields.io/badge/install-import_files-217346">
-  <img alt="No Add-in Required" src="https://img.shields.io/badge/add--in-not_required-blue">
-  <img alt="VBE" src="https://img.shields.io/badge/VBE-import-orange">
+  <img alt="Install" src="https://img.shields.io/badge/Install-Import_Files-217346">
+  <img alt="No Add-in Required" src="https://img.shields.io/badge/Add--in-Not_Required-blue">
+  <img alt="VBE" src="https://img.shields.io/badge/VBE-Import-orange">
 </p>
 
 ### Option 1 — Import into an existing VBA project
@@ -429,9 +429,9 @@ Open the included demo workbook to:
 ## 🔁 Workbook lifecycle
 
 <p align="left">
-  <img alt="Lifecycle" src="https://img.shields.io/badge/lifecycle-open_%2F_save_%2F_print_%2F_close-blue">
-  <img alt="Startup" src="https://img.shields.io/badge/startup-DP_Start-217346">
-  <img alt="Shutdown" src="https://img.shields.io/badge/shutdown-DP_Stop-orange">
+  <img alt="Lifecycle" src="https://img.shields.io/badge/Lifecycle-Open_%2F_Save_%2F_Print_%2F_Close-blue">
+  <img alt="Startup" src="https://img.shields.io/badge/Startup-DP_Start-217346">
+  <img alt="Shutdown" src="https://img.shields.io/badge/Shutdown-DP_Stop-orange">
 </p>
 
 The workbook lifecycle should stay thin. Let `cDatePickerManager` own Application-level events, and use workbook events only to start and stop the component.
@@ -475,9 +475,9 @@ Do **not** duplicate worksheet `SelectionChange` logic in `ThisWorkbook`. The ma
 ## ⚙️ Configuration
 
 <p align="left">
-  <img alt="Settings" src="https://img.shields.io/badge/settings-registry_backed-6f42c1">
-  <img alt="Panel" src="https://img.shields.io/badge/panel-in--form-blue">
-  <img alt="Persistence" src="https://img.shields.io/badge/persistence-explicit_Save-217346">
+  <img alt="Settings" src="https://img.shields.io/badge/Settings-Registry_backed-6f42c1">
+  <img alt="Panel" src="https://img.shields.io/badge/Panel-In--form-blue">
+  <img alt="Persistence" src="https://img.shields.io/badge/Persistence-Explicit_Save-217346">
 </p>
 
 Settings are stored using VBA registry persistence under:
@@ -515,9 +515,9 @@ Typical settings include:
 ## 🧩 Public API
 
 <p align="left">
-  <img alt="API" src="https://img.shields.io/badge/API-public_entry_points-blue">
-  <img alt="Manager" src="https://img.shields.io/badge/manager-auto_bootstrap-217346">
-  <img alt="Write-back" src="https://img.shields.io/badge/write--back-date_%2F_datetime-orange">
+  <img alt="API" src="https://img.shields.io/badge/API-Public_entry_points-blue">
+  <img alt="Manager" src="https://img.shields.io/badge/Manager-Auto_bootstrap-217346">
+  <img alt="Write-back" src="https://img.shields.io/badge/Write--back-Date_%2F_Datetime-orange">
 </p>
 
 Primary public entry points are exposed through `M_DatePicker.bas`.
@@ -556,7 +556,7 @@ Ribbon callback procedures must remain `Public` and must be located in a standar
 ## 🖱️ Entry points
 
 <p align="left">
-  <img alt="Entry" src="https://img.shields.io/badge/Entry_points-Multiple-217346">
+  <img alt="Entry" src="https://img.shields.io/badge/Entry_points-Multiple-otange">
   <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
   <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Ctrl_%2B_Shift_%2B_D-Supported-217346">
   <img alt="Context Menu" src="https://img.shields.io/badge/Context_Menu-Supported-217346">
@@ -744,22 +744,21 @@ Disabling **Use WinAPI styling** should disable optional styling such as title-b
 ## 🧪 Demo quick start
 
 <p align="left">
-  <img alt="Demo" src="https://img.shields.io/badge/demo-DATE_PICKER_DEMO-217346">
-  <img alt="Validation" src="https://img.shields.io/badge/validation-manual_scenarios-blue">
-  <img alt="Single Cell" src="https://img.shields.io/badge/single--cell-tested-217346">
-  <img alt="Date Formats" src="https://img.shields.io/badge/date_formats-showcase-6f42c1">
-  <img alt="Multi Cell" src="https://img.shields.io/badge/multi--cell-write--back-orange">
-  <img alt="Tables" src="https://img.shields.io/badge/Excel_tables-supported-blue">
-  <img alt="Protected Sheets" src="https://img.shields.io/badge/protected_sheet-note-lightgrey">
+  <img alt="Demo" src="https://img.shields.io/badge/Demo-DATE_PICKER_DEMO-217346">
+  <img alt="Validation" src="https://img.shields.io/badge/Validation-Manual_Scenarios-blue">
+  <img alt="Single Cell" src="https://img.shields.io/badge/Single--cell-Tested-green">
+  <img alt="Date Formats" src="https://img.shields.io/badge/Date_Formats-Showcase-6f42c1">
+  <img alt="Multi Cell" src="https://img.shields.io/badge/Multi--Cell-Write--back-orange">
+  <img alt="Tables" src="https://img.shields.io/badge/Excel_Tables-Supported-green">
+  <img alt="Protected Sheets" src="https://img.shields.io/badge/Protected_Sheet-Note-lightgrey">
 </p>
 
 The demo workbook includes a dedicated worksheet named **`DATE PICKER DEMO`**.
 
-```md
+
 ### Demo worksheet
 
 <img src="assets/datepicker-demosheet.png" alt="Date / Time Picker demo worksheet" />
-```
 
 This sheet is designed as a practical validation surface for the Date / Time Picker. It is not only a visual showcase: it provides structured scenarios for testing cell eligibility, date and datetime formats, repeated write-back, multi-cell selection, and Excel Table behavior.
 
@@ -843,59 +842,92 @@ UserInterfaceOnly:=True is useful for allowing VBA operations while keeping norm
 
 Use the demo sheet to validate:
 
--single-cell date detection
--datetime write-back
--empty date-formatted cells
--pre-filled date and datetime cells
--rejection of non-date text cells
--formula results that return valid dates
--multiple display formats
--Today date-only write-back
--Now date-time write-back
--multi-cell write-back
--Excel Table date-entry behavior
--in-grid icon show / move / hide behavior
--right-click menu behavior
-Ribbon callback behavior
--Ctrl + Shift + D shortcut behavior
--settings persistence
--compact and normal layout behavior
--WinAPI enabled / disabled behavior
--runtime repair through DP_RepairRuntime
--manager repair through M_Picker_EnsureManager
+- single-cell date detection
+- datetime write-back
+- empty date-formatted cells
+- pre-filled date and datetime cells
+- rejection of non-date text cells
+- formula results that return valid dates
+- multiple display formats
+- Today date-only write-back
+- Now date-time write-back
+- multi-cell write-back
+- Excel Table date-entry behavior
+- in-grid icon show / move / hide behavior
+- right-click menu behavior
+- Ribbon callback behavior
+- Ctrl + Shift + D shortcut behavior
+- settings persistence
+- compact and normal layout behavior
+- WinAPI enabled / disabled behavior
+- runtime repair through DP_RepairRuntime
+- manager repair through M_Picker_EnsureManager
 
 
 ## ✅ Test quick start
 
 <p align="left">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook_%2B_Demo_Worksheet-blue">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Demo_Worksheet-blue">
+  <img alt="Shortcut" src="https://img.shields.io/badge/Ctrl_%2B_Shift_%2B_D-Supported-217346">
+  <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Optional-217346">
+  <img alt="Drag" src="https://img.shields.io/badge/Borderless_Drag-Supported-6f42c1">
 </p>
+
+Use this checklist before publishing a release or updating the demo workbook.
 
 1. Compile the VBA project.
 2. Run `DP_Start`.
 3. Confirm `Application.EnableEvents = True` after manager initialization.
-4. Select eligible and non-eligible cells.
-5. Confirm the in-grid icon shows, moves, hides, removes, and purges according to policy.
-6. Open the picker with `DP_Show`.
-7. Test day selection, Today, and Now.
-8. Test month and year navigation.
-9. Test settings save and persistence.
-10. Test compact layout and normal layout.
-11. Test WinAPI styling enabled and disabled.- Test that `Ctrl + Shift + D` opens or refreshes the picker.
-12. Test that the borderless form can be moved from the custom header drag surface.
-13. Test Ribbon callbacks if RibbonX is included.
-14. Save, print-preview, and close the workbook to verify cleanup.
-15. Reopen the workbook and confirm startup is clean.
+4. Open the `DATE PICKER DEMO` worksheet from the Ribbon Demo button, if RibbonX is included.
+5. Test the **Basic Single-Cell Scenarios** block:
+   - empty date-formatted cell
+   - pre-filled date
+   - pre-filled datetime
+   - empty general-format cell
+   - text cell
+   - formula returning date
+   - empty datetime-formatted cell
+6. Test the **Format Showcase** block across the listed date and datetime formats.
+7. Test the **Multi-Cell Selection** block and confirm repeated write-back behavior.
+8. Test the **Excel Table Demo** block and confirm table-column-friendly behavior.
+9. Select eligible and non-eligible cells.
+10. Confirm the in-grid icon shows, moves, hides, removes, and purges according to policy.
+11. Open the picker with `DP_Show`.
+12. Test day selection, Today, and Now.
+13. Test month and year navigation.
+14. Test settings save and persistence.
+15. Test compact layout and normal layout.
+16. Test WinAPI styling enabled and disabled.
+17. Test that `Ctrl + Shift + D` opens or refreshes the picker.
+18. Test that the borderless form can be moved from the custom header drag surface.
+19. Test Ribbon callbacks if RibbonX is included:
+   - Show Picker
+   - Repair Runtime
+   - Demo sheet toggle
+20. Test `DP_RepairRuntime` and confirm the runtime remains usable afterward.
+21. Test print-preview and workbook close to verify cleanup.
+22. Reopen the workbook and confirm startup is clean.
+23. Confirm the demo sheet is very hidden on workbook open and after workbook close.
+24. Confirm AutoSave / Save does not unexpectedly hide the demo sheet while the user is actively using it.
 
 Recommended Immediate Window checks:
 
 ```vba
 ? Application.EnableEvents
+
 DP_Start
 DP_Show
 DP_Close
+DP_RepairRuntime
 DP_Stop
+
+M_Picker_EnsureManager
+M_GridIcon_PurgeAll
+DP_DemoSheet_Show
+DP_DemoSheet_HideVeryHidden
 ```
+
+Ribbon callbacks require RibbonX and an IRibbonControl callback context. Test them by clicking the actual Ribbon buttons rather than calling the callback procedures directly from the Immediate Window.
 
 ---
 
