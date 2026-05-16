@@ -867,34 +867,67 @@ Use the demo sheet to validate:
 ## ✅ Test quick start
 
 <p align="left">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook_%2B_Demo_Worksheet-blue">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Demo_Worksheet-blue">
+  <img alt="Shortcut" src="https://img.shields.io/badge/Ctrl_%2B_Shift_%2B_D-Supported-217346">
+  <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Optional-217346">
+  <img alt="Drag" src="https://img.shields.io/badge/Borderless_Drag-Supported-6f42c1">
 </p>
+
+Use this checklist before publishing a release or updating the demo workbook.
 
 1. Compile the VBA project.
 2. Run `DP_Start`.
 3. Confirm `Application.EnableEvents = True` after manager initialization.
-4. Select eligible and non-eligible cells.
-5. Confirm the in-grid icon shows, moves, hides, removes, and purges according to policy.
-6. Open the picker with `DP_Show`.
-7. Test day selection, Today, and Now.
-8. Test month and year navigation.
-9. Test settings save and persistence.
-10. Test compact layout and normal layout.
-11. Test WinAPI styling enabled and disabled.- Test that `Ctrl + Shift + D` opens or refreshes the picker.
-12. Test that the borderless form can be moved from the custom header drag surface.
-13. Test Ribbon callbacks if RibbonX is included.
-14. Save, print-preview, and close the workbook to verify cleanup.
-15. Reopen the workbook and confirm startup is clean.
+4. Open the `DATE PICKER DEMO` worksheet from the Ribbon Demo button, if RibbonX is included.
+5. Test the **Basic Single-Cell Scenarios** block:
+   - empty date-formatted cell
+   - pre-filled date
+   - pre-filled datetime
+   - empty general-format cell
+   - text cell
+   - formula returning date
+   - empty datetime-formatted cell
+6. Test the **Format Showcase** block across the listed date and datetime formats.
+7. Test the **Multi-Cell Selection** block and confirm repeated write-back behavior.
+8. Test the **Excel Table Demo** block and confirm table-column-friendly behavior.
+9. Select eligible and non-eligible cells.
+10. Confirm the in-grid icon shows, moves, hides, removes, and purges according to policy.
+11. Open the picker with `DP_Show`.
+12. Test day selection, Today, and Now.
+13. Test month and year navigation.
+14. Test settings save and persistence.
+15. Test compact layout and normal layout.
+16. Test WinAPI styling enabled and disabled.
+17. Test that `Ctrl + Shift + D` opens or refreshes the picker.
+18. Test that the borderless form can be moved from the custom header drag surface.
+19. Test Ribbon callbacks if RibbonX is included:
+   - Show Picker
+   - Repair Runtime
+   - Demo sheet toggle
+20. Test `DP_RepairRuntime` and confirm the runtime remains usable afterward.
+21. Test print-preview and workbook close to verify cleanup.
+22. Reopen the workbook and confirm startup is clean.
+23. Confirm the demo sheet is very hidden on workbook open and after workbook close.
+24. Confirm AutoSave / Save does not unexpectedly hide the demo sheet while the user is actively using it.
 
 Recommended Immediate Window checks:
 
 ```vba
 ? Application.EnableEvents
+
 DP_Start
 DP_Show
 DP_Close
+DP_RepairRuntime
 DP_Stop
+
+M_Picker_EnsureManager
+M_GridIcon_PurgeAll
+DP_DemoSheet_Show
+DP_DemoSheet_HideVeryHidden
 ```
+
+Ribbon callbacks require RibbonX and an IRibbonControl callback context. Test them by clicking the actual Ribbon buttons rather than calling the callback procedures directly from the Immediate Window.
 
 ---
 
