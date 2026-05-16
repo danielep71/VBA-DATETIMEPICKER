@@ -744,38 +744,126 @@ Disabling **Use WinAPI styling** should disable optional styling such as title-b
 ## 🧪 Demo quick start
 
 <p align="left">
-  <img alt="Demo" src="https://img.shields.io/badge/demo-recommended-217346">
-  <img alt="Validation" src="https://img.shields.io/badge/validation-manual_%2B_regression-blue">
-  <img alt="Workbook" src="https://img.shields.io/badge/workbook-.xlsm-orange">
+  <img alt="Demo" src="https://img.shields.io/badge/demo-DATE_PICKER_DEMO-217346">
+  <img alt="Validation" src="https://img.shields.io/badge/validation-manual_scenarios-blue">
+  <img alt="Single Cell" src="https://img.shields.io/badge/single--cell-tested-217346">
+  <img alt="Date Formats" src="https://img.shields.io/badge/date_formats-showcase-6f42c1">
+  <img alt="Multi Cell" src="https://img.shields.io/badge/multi--cell-write--back-orange">
+  <img alt="Tables" src="https://img.shields.io/badge/Excel_tables-supported-blue">
+  <img alt="Protected Sheets" src="https://img.shields.io/badge/protected_sheet-note-lightgrey">
 </p>
 
-A good demo workbook should include:
+The demo workbook includes a dedicated worksheet named **`DATE PICKER DEMO`**.
 
-- sample empty date-entry cells
-- date-formatted input cells
-- cells containing existing dates
-- adjacent cells with non-date values
-- a compact-layout scenario
-- a right-click menu scenario
-- an in-grid icon scenario
-- Today and Now write-back examples
-- a settings walkthrough
-- cleanup checks before save, print, and close
+```md
+### Demo worksheet
 
-Suggested validation areas:
+<img src="assets/datepicker-demosheet.png" alt="Date / Time Picker demo worksheet" />
+```
 
-- selection-change behavior
-- workbook and worksheet activation handling
-- cleanup after UI close
-- month navigation
-- year navigation
-- outside-month selection policy
-- multi-cell or repeated write-back workflow
-- settings persistence
-- WinAPI enabled / disabled behavior
-- Application events repair through `M_Picker_EnsureManager` or `DP_RepairRuntime`
+This sheet is designed as a practical validation surface for the Date / Time Picker. It is not only a visual showcase: it provides structured scenarios for testing cell eligibility, date and datetime formats, repeated write-back, multi-cell selection, and Excel Table behavior.
 
----
+### 🧭 How to use the demo sheet
+
+1. Select a demo input cell.
+2. Invoke the Date / Time Picker using one of the available entry points:
+   - 🎛️ Ribbon button
+   - 🖱️ right-click menu
+   - 🎯 in-grid activation icon
+   - ⌨️ `Ctrl + Shift + D`
+   - 🧰 direct call to `DP_Show`
+3. Pick a date, use **Today**, or use **Now**.
+4. Validate the result against the expected behavior shown on the demo sheet.
+
+### 📌 Basic single-cell scenarios
+
+The left-hand scenario block validates the most common worksheet inputs:
+
+| Scenario | Expected behavior |
+|---|---|
+| Empty date-formatted cell | Positive — picker should be available |
+| Pre-filled date | Positive — picker should initialize from the existing date |
+| Pre-filled datetime | Positive — datetime handling should be preserved |
+| Empty general-format cell | Usually negative — general format should not automatically qualify |
+| Text cell | Negative — non-date text should not qualify |
+| Formula returning date | Positive — date-like formula result should qualify |
+| Empty datetime-formatted cell | Positive — formatted for date-time entry |
+
+### 🧾 Format showcase
+
+The format showcase validates that the picker recognizes common date and datetime display patterns, including:
+
+- `dd/mm/yyyy`
+- `dd-mmm-yyyy`
+- `dddd, dd mmmm yyyy`
+- `dd/mm/yyyy hh:mm`
+- `hh:mm:ss`
+- `mm/dd/yyyy`
+- `yyyy-mm-dd`
+
+This section is useful for checking whether the DatePicker detection logic behaves consistently across different date formats and local display conventions.
+
+### 🔁 Multi-cell selection
+
+The multi-cell section validates repeated write-back behavior across selected ranges.
+
+Typical checks include:
+
+- selecting a valid multi-cell input range
+- confirming that all eligible target cells receive the selected date
+- confirming that invalid or unsupported selections are rejected or ignored according to policy
+- testing repeated date entry without reopening the workbook
+
+### 📊 Excel Table demo
+
+The Excel Table section validates table-friendly behavior using structured business-style fields such as:
+
+- Trade Date
+- Settlement Date
+- Expiry Date
+- Timestamp
+
+This is useful for testing real data-entry workflows where the picker is used inside structured tables rather than isolated worksheet cells.
+
+### 🛡️ Protected-sheet note
+
+The in-grid DatePicker icon is implemented as a worksheet `Shape`.
+
+On protected sheets, the icon may not appear even when the target cell is unlocked. For the icon to remain available under sheet protection, the sheet protection settings must allow drawing objects.
+
+For example, protection should be configured consistently with:
+
+```vba
+DrawingObjects:=False
+UserInterfaceOnly:=True
+```
+UserInterfaceOnly:=True is useful for allowing VBA operations while keeping normal user protection active.
+
+✅ Suggested validation checklist
+
+Use the demo sheet to validate:
+
+-single-cell date detection
+-datetime write-back
+-empty date-formatted cells
+-pre-filled date and datetime cells
+-rejection of non-date text cells
+-formula results that return valid dates
+-multiple display formats
+-Today date-only write-back
+-Now date-time write-back
+-multi-cell write-back
+-Excel Table date-entry behavior
+-in-grid icon show / move / hide behavior
+-right-click menu behavior
+Ribbon callback behavior
+-Ctrl + Shift + D shortcut behavior
+-settings persistence
+-compact and normal layout behavior
+-WinAPI enabled / disabled behavior
+-runtime repair through DP_RepairRuntime
+-manager repair through M_Picker_EnsureManager
+
 
 ## ✅ Test quick start
 
