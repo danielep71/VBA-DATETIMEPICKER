@@ -115,6 +115,14 @@ Option Explicit
     
             Private Declare PtrSafe Function DrawMenuBar Lib "user32" ( _
                 ByVal hWnd As LongPtr) As Long
+                
+            Private Declare PtrSafe Function ReleaseCapture Lib "user32" () As Long
+
+            Private Declare PtrSafe Function SendMessage Lib "user32" Alias "SendMessageA" ( _
+                ByVal hWnd As LongPtr, _
+                ByVal wMsg As Long, _
+                ByVal wParam As LongPtr, _
+                ByVal lParam As LongPtr) As LongPtr
     
             #If Win64 Then
                 Private Declare PtrSafe Function GetWindowLongPtr Lib "user32" Alias "GetWindowLongPtrA" ( _
@@ -175,6 +183,14 @@ Option Explicit
                 ByVal hWnd As Long, _
                 ByVal nIndex As Long, _
                 ByVal dwNewLong As Long) As Long
+            
+            Private Declare Function ReleaseCapture Lib "user32" () As Long
+
+            Private Declare Function SendMessage Lib "user32" Alias "SendMessageA" ( _
+                ByVal hWnd As Long, _
+                ByVal wMsg As Long, _
+                ByVal wParam As Long, _
+                ByVal lParam As Long) As Long
         #End If
     #End If
 
@@ -238,7 +254,10 @@ Option Explicit
     Private Const DP_GRID_ICON_FORE_COLOR          As Long = vbWhite                     'Grid icon foreground color
 
     Private Const WS_CAPTION                       As Long = &HC00000                    'Window caption style flag
+    Private Const DP_DEMO_SHEET_NAME               As String = "DATE PICKER DEMO"        'Demo worksheet name
     
+    Private Const DP_WM_NCLBUTTONDOWN              As Long = &HA1                        'Non-client left-button down message
+    Private Const DP_HTCAPTION                     As Long = 2                          'Title-bar hit-test code
 
 '------------------------------------------------------------------------------
 ' PUBLIC CONSTANTS
@@ -9205,6 +9224,120 @@ CleanExit:
 #End If
 
 End Sub
+
+Public Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)
+
+'
+'------------------------------------------------------------------------------
+'                       BEGIN USERFORM DRAG
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Starts native Windows drag movement for a borderless UserForm
+'
+' WHY THIS EXISTS
+'   Removing the native title bar removes the normal Windows drag surface. This
+'   helper lets a runtime label, header banner, or other custom surface behave
+'   like the missing title bar
+'
+' INPUTS
+'   TargetForm
+'     UserForm instance to move
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the UserForm window handle from its Caption, releases current mouse
+'   capture, and sends a title-bar drag message to the UserForm window
+'
+' ERROR POLICY
+'   Best-effort helper
+'
+'   Silently exits when WinAPI capability is unavailable, when TargetForm is
+'   missing, or when the UserForm window handle cannot be resolved
+'
+' DEPENDENCIES
+'   M_Platform_CanUseWinAPI
+'   FindWindow
+'   ReleaseCapture
+'   SendMessage
+'   DP_WM_NCLBUTTONDOWN
+'   DP_HTCAPTION
+'
+' NOTES
+'   The UserForm Caption should remain stable and sufficiently unique while the
+'   form is open. The title bar may be hidden, but the Caption property can still
+'   be used internally to resolve the window handle
+'
+'   This routine uses capability only, not the optional styling setting. Mouse
+'   movement is safe on Windows even when optional WinAPI styling is disabled
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+#If Mac Then
+    'Exit because this helper is Windows-only
+        Exit Sub
+#Else
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    #If VBA7 Then
+        Dim FormHandle As LongPtr       'Resolved UserForm window handle
+    #Else
+        Dim FormHandle As Long          'Resolved UserForm window handle
+    #End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress drag helper errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Exit when WinAPI calls are not available
+        If Not M_Platform_CanUseWinAPI Then Exit Sub
+    'Exit when the target form reference is missing
+        If TargetForm Is Nothing Then Exit Sub
+
+'------------------------------------------------------------------------------
+' RESOLVE USERFORM WINDOW
+'------------------------------------------------------------------------------
+    'Resolve the standard VBA UserForm window handle
+        FormHandle = FindWindow("ThunderDFrame", VBA.CStr(TargetForm.Caption))
+    'Try the older UserForm window class when needed
+        If FormHandle = 0 Then
+            FormHandle = FindWindow("ThunderXFrame", VBA.CStr(TargetForm.Caption))
+        End If
+    'Exit when the UserForm window cannot be resolved
+        If FormHandle = 0 Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' START NATIVE DRAG
+'------------------------------------------------------------------------------
+    'Release current mouse capture
+        ReleaseCapture
+    'Ask Windows to move the form as if the title bar were being dragged
+        SendMessage FormHandle, DP_WM_NCLBUTTONDOWN, DP_HTCAPTION, 0
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Clear any suppressed drag error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+#End If
+
+End Sub
+
+
 #If VBA7 Then
 Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As LongPtr
 #Else
@@ -14221,4 +14354,775 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
             "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!" & NormalizedProcedureName
 
 End Function
+
+'
+'------------------------------------------------------------------------------
+'
+'                               RIBBON CALLBACKS
+'
+'------------------------------------------------------------------------------
+'
+
+
+
+Public Sub Ribbon_ShowPicker(ByVal Control As IRibbonControl)
+
+'
+'------------------------------------------------------------------------------
+'                           RIBBON SHOW PICKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Opens or refreshes the Date / Time Picker from a Ribbon button
+'
+' WHY THIS EXISTS
+'   RibbonX onAction callbacks require public procedures in a standard module.
+'   This routine provides a clean Ribbon entry point without exposing Ribbon
+'   logic inside the DatePicker manager, UserForm, or label-hook classes
+'
+' INPUTS
+'   Control
+'     Ribbon control that triggered the callback
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates DatePicker display to DP_Show
+'
+' ERROR POLICY
+'   Catches runtime errors and reports them through a user-facing message box
+'   so Ribbon callback failures do not fail silently
+'
+' DEPENDENCIES
+'   IRibbonControl
+'   DP_Show
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   The Control argument is required by the RibbonX callback signature even when
+'   this routine does not use it directly
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "Ribbon_ShowPicker"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' SHOW PICKER
+'------------------------------------------------------------------------------
+    'Open or refresh the Date / Time Picker
+        DP_Show
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Report the Ribbon callback failure
+        Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
+
+End Sub
+
+Public Sub Ribbon_Reset(ByVal Control As IRibbonControl)
+
+'
+'------------------------------------------------------------------------------
+'                           RIBBON RESET DATEPICKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Repairs the DatePicker runtime from a Ribbon button
+'
+' WHY THIS EXISTS
+'   A visible Ribbon repair action is useful when Excel events, transient UI,
+'   keyboard shortcuts, modeless form state, or in-grid icons need to be
+'   refreshed during a live workbook session
+'
+' INPUTS
+'   Control
+'     Ribbon control that triggered the callback
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates runtime repair to DP_RepairRuntime and displays a confirmation
+'   message when repair completes successfully
+'
+' ERROR POLICY
+'   Catches runtime errors and reports them through Ribbon_ReportError
+'
+' DEPENDENCIES
+'   IRibbonControl
+'   DP_RepairRuntime
+'   Ribbon_ReportInfo
+'   Ribbon_ReportError
+'
+' NOTES
+'   The Control argument is required by the RibbonX callback signature even when
+'   this routine does not use it directly
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "Ribbon_Reset"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REPAIR RUNTIME
+'------------------------------------------------------------------------------
+    'Repair DatePicker runtime state
+        DP_RepairRuntime
+
+'------------------------------------------------------------------------------
+' CONFIRM SUCCESS
+'------------------------------------------------------------------------------
+    'Report successful runtime repair to the user
+        Ribbon_ReportInfo _
+            "Date / Time Picker runtime repair completed successfully." & _
+            VBA.vbCrLf & VBA.vbCrLf & _
+            "You can now select a date cell or click Show Picker again."
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Report the Ribbon callback failure
+        Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
+
+End Sub
+
+
+Public Sub Ribbon_Demo(ByVal Control As IRibbonControl)
+
+'
+'------------------------------------------------------------------------------
+'                           RIBBON TOGGLE DEMO SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Shows or hides the DatePicker demo worksheet from a Ribbon button
+'
+' WHY THIS EXISTS
+'   The demo worksheet should normally remain very hidden during normal workbook
+'   use, but the user should be able to open and close it explicitly from the
+'   Ribbon without relying on save events or AutoSave-sensitive cleanup logic
+'
+' INPUTS
+'   Control
+'     Ribbon control that triggered the callback
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   If the demo sheet is currently visible, hides it using xlSheetVeryHidden
+'   If the demo sheet is currently hidden or very hidden, shows and activates it
+'
+' ERROR POLICY
+'   Catches runtime errors and reports them through Ribbon_ReportError
+'
+' DEPENDENCIES
+'   IRibbonControl
+'   ThisWorkbook
+'   DP_DEMO_SHEET_NAME
+'   DP_DemoSheet_Show
+'   DP_DemoSheet_HideVeryHidden
+'   Ribbon_ReportError
+'
+' NOTES
+'   The Control argument is required by the RibbonX callback signature even when
+'   this routine does not use it directly
+'
+'   This routine uses ThisWorkbook rather than ActiveWorkbook so the Ribbon
+'   callback always targets the DatePicker host workbook
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "Ribbon_Demo"
+
+    Dim DemoSheet   As Excel.Worksheet       'DatePicker demo worksheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RESOLVE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Retrieve the demo worksheet from the host workbook
+        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+
+'------------------------------------------------------------------------------
+' TOGGLE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Hide the demo sheet when it is already visible
+        If DemoSheet.Visible = xlSheetVisible Then
+            DP_DemoSheet_HideVeryHidden
+        Else
+            DP_DemoSheet_Show
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Report the Ribbon callback failure
+        Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
+
+End Sub
+
+
+Public Sub Ribbon_HideDemo(ByVal Control As IRibbonControl)
+
+'
+'------------------------------------------------------------------------------
+'                           RIBBON HIDE DEMO SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Hides the DatePicker demo worksheet from a Ribbon button
+'
+' WHY THIS EXISTS
+'   The demo sheet can be shown explicitly through the Ribbon. This companion
+'   action lets the user hide it again without relying on save events, which may
+'   be triggered automatically by AutoSave
+'
+' INPUTS
+'   Control
+'     Ribbon control that triggered the callback
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates demo-sheet hiding to DP_DemoSheet_HideVeryHidden
+'
+' ERROR POLICY
+'   Catches runtime errors and reports them through Ribbon_ReportError
+'
+' DEPENDENCIES
+'   IRibbonControl
+'   DP_DemoSheet_HideVeryHidden
+'   Ribbon_ReportError
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "Ribbon_HideDemo"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' HIDE DEMO
+'------------------------------------------------------------------------------
+    'Hide the demo worksheet
+        DP_DemoSheet_HideVeryHidden
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Report the Ribbon callback failure
+        Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
+
+End Sub
+Private Sub Ribbon_ReportError( _
+    ByVal ProcedureName As String, _
+    ByVal ErrorNumber As Long, _
+    ByVal ErrorDescription As String)
+
+'
+'------------------------------------------------------------------------------
+'                           REPORT RIBBON ERROR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports Ribbon callback failures consistently
+'
+' WHY THIS EXISTS
+'   Ribbon callbacks often fail silently or show poor diagnostics when errors
+'   are not handled explicitly. This helper gives the user a clear message and
+'   writes the same diagnostic to the Immediate Window
+'
+' INPUTS
+'   ProcedureName
+'     Name of the Ribbon callback that failed
+'
+'   ErrorNumber
+'     Captured runtime error number
+'
+'   ErrorDescription
+'     Captured runtime error description
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Builds a diagnostic message, writes it to the Immediate Window, and displays
+'   it in a message box
+'
+' ERROR POLICY
+'   Suppresses reporting errors so the error reporter cannot raise a secondary
+'   Ribbon callback failure
+'
+' DEPENDENCIES
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   Keep this helper private. RibbonX should call only the public callback
+'   procedures
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim MessageText As String       'User-facing diagnostic message
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress secondary reporting errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' BUILD MESSAGE
+'------------------------------------------------------------------------------
+    'Build the diagnostic message
+        MessageText = _
+            "Date / Time Picker Ribbon action failed." & VBA.vbCrLf & VBA.vbCrLf & _
+            "Procedure: " & ProcedureName & VBA.vbCrLf & _
+            "Error: " & VBA.CStr(ErrorNumber) & VBA.vbCrLf & _
+            "Description: " & ErrorDescription
+
+'------------------------------------------------------------------------------
+' REPORT MESSAGE
+'------------------------------------------------------------------------------
+    'Write the diagnostic message to the Immediate Window
+        Debug.Print MessageText
+
+    'Display the diagnostic message to the user
+        VBA.MsgBox MessageText, vbExclamation, DP_MSGBOX_TITLE
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed reporting error
+        Err.Clear
+
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
+
+
+Public Sub DP_DemoSheet_Show()
+
+'
+'------------------------------------------------------------------------------
+'                           SHOW DEMO SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Shows and activates the DatePicker demo worksheet
+'
+' WHY THIS EXISTS
+'   The demo worksheet is intentionally hidden during normal workbook startup
+'   and save lifecycle. A Ribbon action needs a controlled way to make it visible
+'   again for showcase or validation purposes
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the demo worksheet from ThisWorkbook, makes it visible, activates
+'   the workbook window when possible, and activates the demo sheet
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the demo worksheet cannot be resolved
+'   or activated
+'
+' DEPENDENCIES
+'   ThisWorkbook
+'   Excel.Worksheet
+'   DP_DEMO_SHEET_NAME
+'
+' NOTES
+'   Uses ThisWorkbook rather than ActiveWorkbook so the callback always targets
+'   the DatePicker host workbook
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "DP_DemoSheet_Show"
+
+    Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RESOLVE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Retrieve the demo worksheet from the host workbook
+        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+
+'------------------------------------------------------------------------------
+' SHOW DEMO SHEET
+'------------------------------------------------------------------------------
+    'Make the demo sheet visible
+        DemoSheet.Visible = xlSheetVisible
+
+'------------------------------------------------------------------------------
+' ACTIVATE HOST WORKBOOK WINDOW
+'------------------------------------------------------------------------------
+    'Suppress window activation errors for hidden or add-in-like contexts
+        On Error Resume Next
+    'Activate the first workbook window when available
+        If ThisWorkbook.Windows.Count > 0 Then ThisWorkbook.Windows(1).Activate
+    'Clear any suppressed window activation error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' ACTIVATE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Activate the demo worksheet
+        DemoSheet.Activate
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Unable to show the DatePicker demo sheet '" & DP_DEMO_SHEET_NAME & "'. " & Err.Description
+
+End Sub
+
+Public Sub DP_DemoSheet_HideVeryHidden()
+
+'
+'------------------------------------------------------------------------------
+'                       HIDE DEMO SHEET VERY HIDDEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Hides the DatePicker demo worksheet using xlSheetVeryHidden
+'
+' WHY THIS EXISTS
+'   The demo worksheet is useful for showcase and validation, but it should not
+'   remain visible in normal user workflows or be accidentally saved as the
+'   active workbook surface
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the demo worksheet, activates a safe visible non-demo worksheet
+'   when needed, and sets the demo worksheet to xlSheetVeryHidden
+'
+' ERROR POLICY
+'   Best-effort cleanup. Suppresses errors because workbook open, save, and
+'   close lifecycle should not be interrupted by a missing demo sheet, protected
+'   workbook structure, or unavailable workbook window
+'
+' DEPENDENCIES
+'   ThisWorkbook
+'   Excel.Worksheet
+'   DP_DEMO_SHEET_NAME
+'   DP_DemoSheet_GetSafeVisibleSheet
+'
+' NOTES
+'   Excel requires at least one visible worksheet. This routine therefore exits
+'   safely when no visible non-demo worksheet is available
+'
+'   Safe to call repeatedly
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
+    Dim SafeSheet       As Excel.Worksheet       'Visible non-demo worksheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress lifecycle cleanup errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' RESOLVE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Retrieve the demo worksheet from the host workbook
+        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+
+    'Exit if the demo worksheet is not available
+        If DemoSheet Is Nothing Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' EXIT IF ALREADY VERY HIDDEN
+'------------------------------------------------------------------------------
+    'Exit if the demo worksheet is already very hidden
+        If DemoSheet.Visible = xlSheetVeryHidden Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' HANDLE NON-VISIBLE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Convert ordinary hidden state to very hidden without changing active sheet
+        If DemoSheet.Visible <> xlSheetVisible Then
+            DemoSheet.Visible = xlSheetVeryHidden
+            GoTo CleanExit
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE SAFE VISIBLE SHEET
+'------------------------------------------------------------------------------
+    'Find a visible non-demo worksheet before hiding the demo worksheet
+        Set SafeSheet = DP_DemoSheet_GetSafeVisibleSheet(DemoSheet)
+
+    'Exit if no safe visible worksheet exists
+        If SafeSheet Is Nothing Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' MOVE ACTIVE SHEET WHEN NEEDED
+'------------------------------------------------------------------------------
+    'Activate the safe sheet when the demo sheet is currently active
+        If Excel.Application.ActiveSheet Is DemoSheet Then SafeSheet.Activate
+
+'------------------------------------------------------------------------------
+' HIDE DEMO SHEET
+'------------------------------------------------------------------------------
+    'Set the demo worksheet to very hidden
+        DemoSheet.Visible = xlSheetVeryHidden
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Clear any suppressed lifecycle error
+        Err.Clear
+
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
+Private Function DP_DemoSheet_GetSafeVisibleSheet( _
+    ByVal DemoSheet As Excel.Worksheet) As Excel.Worksheet
+
+'
+'------------------------------------------------------------------------------
+'                       GET SAFE VISIBLE SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns a visible non-demo worksheet that can remain visible while the demo
+'   worksheet is hidden
+'
+' WHY THIS EXISTS
+'   Excel does not allow all worksheets in a workbook to be hidden. Before the
+'   demo worksheet is made very hidden, the workbook must have another visible
+'   worksheet available
+'
+' INPUTS
+'   DemoSheet
+'     Demo worksheet that should be excluded from the search
+'
+' RETURNS
+'   First visible non-demo worksheet found in ThisWorkbook
+'   Nothing when no suitable worksheet exists
+'
+' BEHAVIOR
+'   Scans ThisWorkbook.Worksheets and returns the first visible worksheet that
+'   is not the supplied demo worksheet
+'
+' ERROR POLICY
+'   Best-effort lookup. Returns Nothing on error
+'
+' DEPENDENCIES
+'   ThisWorkbook
+'   Excel.Worksheet
+'
+' NOTES
+'   This helper does not create sheets and does not change visibility
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS As Excel.Worksheet       'Worksheet scan variable
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress lookup errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' FIND SAFE SHEET
+'------------------------------------------------------------------------------
+    'Loop through worksheets in the host workbook
+        For Each WS In ThisWorkbook.Worksheets
+            'Return the first visible worksheet that is not the demo sheet
+                If Not WS Is DemoSheet Then
+                    If WS.Visible = xlSheetVisible Then
+                        Set DP_DemoSheet_GetSafeVisibleSheet = WS
+                        Exit Function
+                    End If
+                End If
+        Next WS
+
+'------------------------------------------------------------------------------
+' FALLBACK
+'------------------------------------------------------------------------------
+    'Return Nothing when no safe visible sheet is available
+        Set DP_DemoSheet_GetSafeVisibleSheet = Nothing
+
+End Function
+
+Private Sub Ribbon_ReportInfo(ByVal MessageText As String)
+
+'
+'------------------------------------------------------------------------------
+'                           REPORT RIBBON INFO
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Displays a standard informational message for successful Ribbon actions
+'
+' WHY THIS EXISTS
+'   Some Ribbon actions, such as runtime repair, complete without a visible UI
+'   change. A confirmation message reassures the user that the action completed
+'
+' INPUTS
+'   MessageText
+'     Message to display to the user
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Writes the message to the Immediate Window and shows a standard information
+'   message box
+'
+' ERROR POLICY
+'   Suppresses reporting errors so the info reporter cannot raise a secondary
+'   Ribbon callback failure
+'
+' DEPENDENCIES
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   Keep this helper private. RibbonX should call only the public callbacks
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress secondary reporting errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' REPORT MESSAGE
+'------------------------------------------------------------------------------
+    'Write the message to the Immediate Window
+        Debug.Print MessageText
+
+    'Show the message to the user
+        VBA.MsgBox MessageText, vbInformation, DP_MSGBOX_TITLE
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed reporting error
+        Err.Clear
+
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
 
