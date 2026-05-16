@@ -1428,6 +1428,67 @@ ErrorHandler:
 
 End Sub
 
+Public Sub UF_Form_BeginDrag()
+
+'
+'------------------------------------------------------------------------------
+'                           BEGIN FORM DRAG
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Starts UserForm movement from a custom DatePicker drag surface
+'
+' WHY THIS EXISTS
+'   The DatePicker can run without a native title bar. A custom header surface
+'   therefore needs a public owner-form method that can be called by the runtime
+'   label hook when the user presses the left mouse button on a drag-enabled
+'   label
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates native drag behavior to M_Window_BeginUserFormDrag
+'
+' ERROR POLICY
+'   Best-effort UI behavior. Suppresses drag failures so form interaction is not
+'   interrupted if the window handle cannot be resolved
+'
+' DEPENDENCIES
+'   M_Window_BeginUserFormDrag
+'
+' NOTES
+'   This method is intentionally Public because cDatePickerLabelHook routes to it
+'   through CallByName
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress drag failures
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' BEGIN DRAG
+'------------------------------------------------------------------------------
+    'Start native UserForm drag movement
+        M_Window_BeginUserFormDrag Me
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed drag error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
 Private Sub UF_Form_ApplyEffectiveSize(ByVal TargetFormHeight As Single)
 
 '
@@ -2932,18 +2993,34 @@ Private Sub UF_Header_BuildLabels()
     Dim Lbl_PrevYear           As MSForms.Label                                   'Header previous-year label
     Dim Lbl_NextYear           As MSForms.Label                                   'Header next-year label
     Dim Lbl_HeaderSettings     As MSForms.Label                                   'Compact header settings label
+    Dim Lbl_HeaderBanner       As MSForms.Label                                   'Header banner drag surface
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
     'Reset header label click / hover hooks
         Set mHeaderLabelHooks = New Collection
-
     'Clear any stale header hover tracker before rebuilding labels
         mHoveredHeaderLabelName = vbNullString
+
+'------------------------------------------------------------------------------
+' REGISTER HEADER BANNER DRAG SURFACE
+'------------------------------------------------------------------------------
+    'Retrieve the header banner created by UF_Header_BuildBanner
+        Set Lbl_HeaderBanner = Me.Controls("Lbl_HeaderBanner")
+    'Create the header banner drag hook
+        Set LabelHook = New cDatePickerLabelHook
+    'Connect the header banner to form drag behavior only
+        LabelHook.Initialize _
+            OwnerForm:=Me, _
+            TargetLabel:=Lbl_HeaderBanner, _
+            ActionName:=vbNullString, _
+            HoverMode:="NONE", _
+            DragEnabled:=True
+    'Store the hook so that the MouseDown event remains alive
+        mHeaderLabelHooks.Add LabelHook, Lbl_HeaderBanner.Name
 
 '------------------------------------------------------------------------------
 ' ENSURE DISPLAY PERIOD
@@ -2965,7 +3042,6 @@ Private Sub UF_Header_BuildLabels()
 '------------------------------------------------------------------------------
     'Create or retrieve the header month label
         Set Lbl_HeaderMonth = UF_Ensure_Label("Lbl_HeaderMonth")
-
     'Apply layout and visual properties
         With Lbl_HeaderMonth
             .Caption = M_Caption_GetMonth(mDisplayMonth, gDP_UseLocalNames)
@@ -2983,10 +3059,8 @@ Private Sub UF_Header_BuildLabels()
             .Visible = True
             .ControlTipText = "Open Month Picker"
         End With
-
     'Create a clean month-label font object
         Set HeaderFont = CreateObject("StdFont")
-
     'Configure the month-label font explicitly
         With HeaderFont
             .Name = DP_FORM_FONT_NAME
@@ -2996,19 +3070,14 @@ Private Sub UF_Header_BuildLabels()
             .Underline = False
             .Strikethrough = False
         End With
-
     'Assign the clean font to the month label
         Set Lbl_HeaderMonth.Font = HeaderFont
-
     'Move the month label to the front
         Lbl_HeaderMonth.ZOrder 0
-
     'Create the month label click / hover hook
         Set LabelHook = New cDatePickerLabelHook
-
     'Connect the month label to the month-panel action
         LabelHook.Initialize Me, Lbl_HeaderMonth, "SHOW_MONTH_PANEL", "HEADER"
-
     'Store the hook so that the click / hover events remain alive
         mHeaderLabelHooks.Add LabelHook, Lbl_HeaderMonth.Name
 
