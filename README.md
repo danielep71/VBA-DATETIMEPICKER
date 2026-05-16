@@ -200,7 +200,7 @@ The implementation is designed for controlled Excel environments.
 
 ### Main picker
 
-<img src="assets/datepicker-main.png" alt="Date / Time Picker main UI" />
+
 
 ### Settings panel
 
