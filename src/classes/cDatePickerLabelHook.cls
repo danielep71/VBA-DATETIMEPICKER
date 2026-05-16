@@ -133,6 +133,8 @@ Attribute mLabel.VB_VarHelpID = -1
     Private mClickHandlerName           As String               'Normalized owner-form click handler method name
     Private mHoverMode                  As String               'Normalized hover behavior mode
     Private mIsInitialized              As Boolean              'True after successful initialization
+    
+    Private mDragEnabled                As Boolean              'True when MouseDown should start UserForm drag
 
 
 '
@@ -312,10 +314,13 @@ End Property
 ' PUBLIC METHODS
 '------------------------------------------------------------------------------
 
-Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
-    MSForms.Label, Optional ByVal ActionName As String = vbNullString, Optional _
-    ByVal HoverMode As String = "NONE", Optional ByVal ClickHandlerName As String = _
-    "UF_PickerPanel_HandleAction")
+Public Sub Initialize( _
+    ByVal OwnerForm As Object, _
+    ByVal TargetLabel As MSForms.Label, _
+    Optional ByVal ActionName As String = vbNullString, _
+    Optional ByVal HoverMode As String = "NONE", _
+    Optional ByVal ClickHandlerName As String = "UF_PickerPanel_HandleAction", _
+    Optional ByVal DragEnabled As Boolean = False)
 '
 '------------------------------------------------------------------------------
 '                           INITIALIZE LABEL HOOK
@@ -433,6 +438,8 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
         mHoverMode = DP_HOVER_NONE
     'Clear the initialization flag
         mIsInitialized = False
+    'Clear drag behavior flag
+        mDragEnabled = False
 
 '------------------------------------------------------------------------------
 ' VALIDATE REFERENCES
@@ -500,6 +507,8 @@ Public Sub Initialize(ByVal OwnerForm As Object, ByVal TargetLabel As _
     'Store the target label reference last so a partial failure cannot leave
     'a live event subscription pointing at stale state
         Set mLabel = TargetLabel
+    'Store the drag behavior flag
+        mDragEnabled = DragEnabled
     'Mark the hook as successfully initialized
         mIsInitialized = True
 
@@ -527,6 +536,8 @@ ErrorHandler:
         mActionName = vbNullString
     'Clear the click handler name
         mClickHandlerName = vbNullString
+    'Clear drag behavior flag
+        mDragEnabled = False
     'Reset hover mode to a safe value
         mHoverMode = DP_HOVER_NONE
     'Ensure the initialization flag is cleared
@@ -673,6 +684,95 @@ ErrorHandler:
         Err.Raise InnerErrNumber, PROC_NAME & " | Label=" & RoutedLabelName & _
             " | Action=" & RoutedActionName, "InnerSource=[" & InnerErrSource & _
             "] | InnerDescription=[" & InnerErrDescription & "]"
+
+End Sub
+
+Private Sub mLabel_MouseDown( _
+    ByVal Button As Integer, _
+    ByVal Shift As Integer, _
+    ByVal X As Single, _
+    ByVal Y As Single)
+
+'
+'------------------------------------------------------------------------------
+'                           LABEL MOUSE DOWN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Starts optional UserForm drag behavior from a runtime-created label
+'
+' WHY THIS EXISTS
+'   Borderless UserForms have no native title bar. Runtime-created labels used
+'   as custom header surfaces need a WithEvents route if they should behave as a
+'   draggable form surface
+'
+' INPUTS
+'   Button
+'     Standard MSForms mouse button state
+'
+'   Shift
+'     Standard MSForms shift-key state
+'
+'   X
+'     Mouse X position
+'
+'   Y
+'     Mouse Y position
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Exits unless the hook is initialized, drag behavior is enabled, and the left
+'   mouse button is pressed. Otherwise routes the drag request to the owner form
+'   through UF_Form_BeginDrag
+'
+' ERROR POLICY
+'   Best-effort drag routing. Suppresses errors so MouseDown cannot interrupt
+'   normal UserForm interaction
+'
+' DEPENDENCIES
+'   OwnerForm.UF_Form_BeginDrag
+'
+' NOTES
+'   Button, Shift, X, and Y are required by the MSForms MouseDown signature.
+'   Shift, X, and Y are intentionally not used by this routine
+'
+'   Only labels initialized with DragEnabled = True will trigger form movement
+'
+' UPDATED
+'   2026-05-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress drag-routing failures
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' EXIT IF DRAG IS NOT AVAILABLE
+'------------------------------------------------------------------------------
+    'Exit when the hook is not initialized
+        If Not mIsInitialized Then Exit Sub
+    'Exit when this label is not a drag surface
+        If Not mDragEnabled Then Exit Sub
+    'Exit unless the left mouse button started the event
+        If Button <> 1 Then Exit Sub
+    'Exit when the owner form reference is unavailable
+        If mOwnerForm Is Nothing Then Exit Sub
+
+'------------------------------------------------------------------------------
+' ROUTE DRAG REQUEST
+'------------------------------------------------------------------------------
+    'Ask the owner form to start native movement
+        CallByName mOwnerForm, "UF_Form_BeginDrag", VbMethod
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Clear any suppressed drag-routing error
+        Err.Clear
 
 End Sub
 
@@ -893,6 +993,8 @@ Private Sub Class_Terminate()
         mIsInitialized = False
     'Clear any suppressed cleanup error
         Err.Clear
+    'Clear drag behavior flag
+        mDragEnabled = False
     'Restore normal error handling
         On Error GoTo 0
 
