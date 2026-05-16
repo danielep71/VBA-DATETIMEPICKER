@@ -780,7 +780,7 @@ Suggested validation areas:
 ## ✅ Test quick start
 
 <p align="left">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook_%2B_Demow_Worksheet-blue">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook_%2B_Demo_Worksheet-blue">
 </p>
 
 1. Compile the VBA project.
@@ -839,7 +839,7 @@ DP_Stop
 Planned or possible future enhancements include:
 
 - 📆 business-day / holiday-calendar integration
-- Dark mode / custom color-fonts
+- 🌙 dark mode / custom color and font themes
 - 🧠 richer date-cell detection heuristics
 - 🧩 tighter integration with reusable date/calendar modules
 - 🎨 additional visual themes
