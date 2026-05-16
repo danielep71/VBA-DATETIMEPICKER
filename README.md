@@ -18,7 +18,6 @@
 ---
 
 <img width="1536" height="1024" alt="datepicker-home2" src="https://github.com/user-attachments/assets/21bda6f0-d738-47b9-87f1-69f83c308ba7" />
-<img src="assets/datepicker-main.png" alt="Date / Time Picker main" />
 
 ---
 
