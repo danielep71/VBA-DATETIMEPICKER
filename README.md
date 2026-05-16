@@ -202,10 +202,9 @@ The implementation is designed for controlled Excel environments.
 
 <img width="3063" height="1248" alt="image" src="https://github.com/user-attachments/assets/6340231e-e993-4289-9b45-9c548bf83cf9" />
 
-
 ### Settings panel
 
-<img src="assets/datepicker-settings.png" alt="Date / Time Picker settings panel" />
+<img width="3042" height="1238" alt="image" src="https://github.com/user-attachments/assets/e5749a62-2695-4dea-bdca-df4cab925ca8" />
 
 ### In-grid activation
 
