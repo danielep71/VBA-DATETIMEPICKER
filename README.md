@@ -744,22 +744,21 @@ Disabling **Use WinAPI styling** should disable optional styling such as title-b
 ## 🧪 Demo quick start
 
 <p align="left">
-  <img alt="Demo" src="https://img.shields.io/badge/demo-DATE_PICKER_DEMO-217346">
-  <img alt="Validation" src="https://img.shields.io/badge/validation-manual_scenarios-blue">
-  <img alt="Single Cell" src="https://img.shields.io/badge/single--cell-tested-217346">
-  <img alt="Date Formats" src="https://img.shields.io/badge/date_formats-showcase-6f42c1">
-  <img alt="Multi Cell" src="https://img.shields.io/badge/multi--cell-write--back-orange">
-  <img alt="Tables" src="https://img.shields.io/badge/Excel_tables-supported-blue">
-  <img alt="Protected Sheets" src="https://img.shields.io/badge/protected_sheet-note-lightgrey">
+  <img alt="Demo" src="https://img.shields.io/badge/Demo-DATE_PICKER_DEMO-217346">
+  <img alt="Validation" src="https://img.shields.io/badge/Validation-Manual_Scenarios-blue">
+  <img alt="Single Cell" src="https://img.shields.io/badge/Single--cell-Tested-green">
+  <img alt="Date Formats" src="https://img.shields.io/badge/Date_Formats-Showcase-6f42c1">
+  <img alt="Multi Cell" src="https://img.shields.io/badge/Multi--Cell-Write--back-orange">
+  <img alt="Tables" src="https://img.shields.io/badge/Excel_Tables-Supported-green">
+  <img alt="Protected Sheets" src="https://img.shields.io/badge/Protected_Sheet-Note-lightgrey">
 </p>
 
 The demo workbook includes a dedicated worksheet named **`DATE PICKER DEMO`**.
 
-```md
+
 ### Demo worksheet
 
 <img src="assets/datepicker-demosheet.png" alt="Date / Time Picker demo worksheet" />
-```
 
 This sheet is designed as a practical validation surface for the Date / Time Picker. It is not only a visual showcase: it provides structured scenarios for testing cell eligibility, date and datetime formats, repeated write-back, multi-cell selection, and Excel Table behavior.
 
@@ -843,26 +842,26 @@ UserInterfaceOnly:=True is useful for allowing VBA operations while keeping norm
 
 Use the demo sheet to validate:
 
--single-cell date detection
--datetime write-back
--empty date-formatted cells
--pre-filled date and datetime cells
--rejection of non-date text cells
--formula results that return valid dates
--multiple display formats
--Today date-only write-back
--Now date-time write-back
--multi-cell write-back
--Excel Table date-entry behavior
--in-grid icon show / move / hide behavior
--right-click menu behavior
-Ribbon callback behavior
--Ctrl + Shift + D shortcut behavior
--settings persistence
--compact and normal layout behavior
--WinAPI enabled / disabled behavior
--runtime repair through DP_RepairRuntime
--manager repair through M_Picker_EnsureManager
+- single-cell date detection
+- datetime write-back
+- empty date-formatted cells
+- pre-filled date and datetime cells
+- rejection of non-date text cells
+- formula results that return valid dates
+- multiple display formats
+- Today date-only write-back
+- Now date-time write-back
+- multi-cell write-back
+- Excel Table date-entry behavior
+- in-grid icon show / move / hide behavior
+- right-click menu behavior
+- Ribbon callback behavior
+- Ctrl + Shift + D shortcut behavior
+- settings persistence
+- compact and normal layout behavior
+- WinAPI enabled / disabled behavior
+- runtime repair through DP_RepairRuntime
+- manager repair through M_Picker_EnsureManager
 
 
 ## ✅ Test quick start
