@@ -1050,7 +1050,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     'Capture the last available worksheet row
         MaxRow = WS.Rows.Count
-
     'Capture the last available worksheet column
         MaxCol = WS.Columns.Count
 
@@ -1065,7 +1064,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                           "FreezeAtRow cannot exceed the worksheet last row."
             End If
         End If
-
     'Reject body-row requests beyond the worksheet last row
         If BodyRowTo > MaxRow Then
             Err.Raise vbObjectError + 2027, _
@@ -1078,55 +1076,46 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     'Resolve the trimmed content-column specification
         ContentText = Trim$(ContentColumns)
-
     'Reject a blank content-column specification
         If Len(ContentText) = 0 Then
             Err.Raise vbObjectError + 2021, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns cannot be blank."
         End If
-
     'Split the content-column specification
         ContentParts = Split(ContentText, ":")
-
     'Resolve the content-column range when a single column was supplied
         If UBound(ContentParts) = 0 Then
             ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
             ContentLastColIndex = ContentFirstColIndex
-
     'Resolve the content-column range when a standard two-part range was supplied
         ElseIf UBound(ContentParts) = 1 Then
             ContentFirstColIndex = WS.Range(Trim$(ContentParts(0)) & "1").Column
             ContentLastColIndex = WS.Range(Trim$(ContentParts(1)) & "1").Column
-
     'Reject invalid multi-part content-column specifications
         Else
             Err.Raise vbObjectError + 2022, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns must resolve to one column or one contiguous column range."
         End If
-
     'Normalize reversed content-column specifications
         If ContentLastColIndex < ContentFirstColIndex Then
             TmpColIndex = ContentFirstColIndex
             ContentFirstColIndex = ContentLastColIndex
             ContentLastColIndex = TmpColIndex
         End If
-
     'Reject content-column blocks that do not leave room for separator + hidden block
         If ContentLastColIndex > MaxCol - 2 Then
             Err.Raise vbObjectError + 2023, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns must leave room for a separator column and at least one hidden trailing column."
         End If
-
     'Reject content-column blocks that end before column B
         If ContentLastColIndex < 2 Then
             Err.Raise vbObjectError + 2024, _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "ContentColumns must extend at least through column B."
         End If
-
     'Resolve the normalized content-column address
         EffectiveContentColumns = DEMO_Sheet_ColumnLetter(ContentFirstColIndex) & ":" & _
                                   DEMO_Sheet_ColumnLetter(ContentLastColIndex)
@@ -1136,14 +1125,11 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     'Derive the separator column as the next column after the content block
         EffectiveSeparatorColIndex = ContentLastColIndex + 1
-
     'Derive the first hidden column as the column after the separator
         EffectiveHideFromColIndex = EffectiveSeparatorColIndex + 1
-
     'Resolve the effective separator-column address
         EffectiveSeparatorColumns = DEMO_Sheet_ColumnLetter(EffectiveSeparatorColIndex) & ":" & _
                                     DEMO_Sheet_ColumnLetter(EffectiveSeparatorColIndex)
-
     'Resolve the effective first hidden-column text
         EffectiveHideColumnsFrom = DEMO_Sheet_ColumnLetter(EffectiveHideFromColIndex)
 
@@ -1156,7 +1142,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                       "M_DEMO_BUILDER.DEMO_Sheet_BuildTemplate", _
                       "HideRowsFrom must be between 1 and the worksheet last row."
         End If
-
     'Reject scroll-area restriction requests that would leave no visible rows
         If RestrictScrollAreaToVisible Then
             If HideRowsFrom = 1 Then
@@ -1171,7 +1156,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     'Apply the standard tab color
         WS.Tab.Color = COLOR_SUBTITLE
-
     'Apply base cell formatting
         With WS.Cells
             .Interior.Pattern = xlNone
@@ -1189,19 +1173,14 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         If Len(Trim$(LeftMarginColumns)) > 0 Then
             WS.Columns(LeftMarginColumns).ColumnWidth = LeftMarginColumnWidth
         End If
-
     'Apply the configured main content-block widths
         WS.Columns(EffectiveContentColumns).ColumnWidth = ContentColumnWidth
-
     'Apply the derived separator-column width
         WS.Columns(EffectiveSeparatorColumns).ColumnWidth = SeparatorColumnWidth
-
     'Apply the configured title-row height
         WS.Rows(1).RowHeight = TitleRowHeight
-
     'Apply the configured subtitle-row height
         WS.Rows(2).RowHeight = SubTitleRowHeight
-
     'Apply the configured body-row height range
         WS.Rows(CStr(BodyRowFrom) & ":" & CStr(BodyRowTo)).RowHeight = BodyRowHeight
 
@@ -1210,7 +1189,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     'Resolve the title-band range from column B to the last content column
         Set TitleBandRange = WS.Range("B1:" & DEMO_Sheet_ColumnLetter(ContentLastColIndex) & "1")
-
     'Resolve the subtitle-band range from column B to the last content column
         Set SubTitleBandRange = WS.Range("B2:" & DEMO_Sheet_ColumnLetter(ContentLastColIndex) & "2")
 
@@ -1246,7 +1224,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         If HideRowsFrom < MaxRow Then
             WS.Rows(CStr(HideRowsFrom) & ":" & CStr(MaxRow)).Hidden = True
         End If
-
     'Hide all columns from the derived first hidden column to the final worksheet column
         If EffectiveHideFromColIndex <= MaxCol Then
             WS.Range(WS.Columns(EffectiveHideFromColIndex), WS.Columns(MaxCol)).EntireColumn.Hidden = True
@@ -1261,10 +1238,8 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         Else
             LastVisibleRow = MaxRow
         End If
-
     'Compute the last visible worksheet column
         LastVisibleCol = EffectiveHideFromColIndex - 1
-
     'Apply or clear the worksheet scroll area
         If RestrictScrollAreaToVisible Then
             ScrollAreaAddress = WS.Range(WS.Cells(1, 1), WS.Cells(LastVisibleRow, LastVisibleCol)).Address
@@ -1278,7 +1253,6 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '------------------------------------------------------------------------------
     'Apply window-level view settings only when the target workbook is active
         If Wb Is ActiveWorkbook Then
-
             'Capture the prior active-sheet / selection / scroll context on a best-effort basis
                 On Error Resume Next
                 Set PriorActiveSheet = ActiveSheet
@@ -1287,10 +1261,8 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                 PriorScrollColumn = ActiveWindow.ScrollColumn
                 HasPriorContext = Not PriorActiveSheet Is Nothing
                 On Error GoTo CleanFail
-
             'Activate the target sheet in the current window
                 WS.Activate
-
             'Apply active-window and application-level view settings
                 With ActiveWindow
                     .DisplayGridlines = Not HideGridlines
@@ -1298,9 +1270,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                     .DisplayHorizontalScrollBar = ShowHorizontalScrollBar
                     .DisplayVerticalScrollBar = ShowVerticalScrollBar
 
-                    If ZoomPercent <> 0 Then
-                        .Zoom = ZoomPercent
-                    End If
+                    If ZoomPercent <> 0 Then .Zoom = ZoomPercent
 
                     .FreezePanes = False
                     .SplitColumn = 0
@@ -1320,18 +1290,10 @@ Public Sub DEMO_Sheet_BuildTemplate( _
             'Restore the prior active-sheet / selection / scroll context on a best-effort basis
                 If HasPriorContext Then
                     On Error Resume Next
-
-                    If Not PriorActiveSheet Is Nothing Then
-                        PriorActiveSheet.Activate
-                    End If
-
-                    If Not PriorSelection Is Nothing Then
-                        PriorSelection.Select
-                    End If
-
+                    If Not PriorActiveSheet Is Nothing Then PriorActiveSheet.Activate
+                    If Not PriorSelection Is Nothing Then PriorSelection.Select
                     ActiveWindow.ScrollRow = PriorScrollRow
                     ActiveWindow.ScrollColumn = PriorScrollColumn
-
                     On Error GoTo CleanFail
                 End If
 
