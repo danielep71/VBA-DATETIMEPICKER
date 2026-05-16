@@ -225,7 +225,7 @@ The implementation is designed for controlled Excel environments.
 ## 🏗️ Architecture
 
 <p align="left">
-  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Manager_%2B_form_%2B_hooks-6f42c1">
+  <img alt="Pattern" src="https://img.shields.io/badge/Pattern-Manager_%2B_Form_%2B_Hooks-6f42c1">
   <img alt="Events" src="https://img.shields.io/badge/Events-Application_level-blue">
   <img alt="Runtime UI" src="https://img.shields.io/badge/Runtime_UI-MSForms-orange">
 </p>
@@ -324,9 +324,9 @@ It is responsible for:
 ## 🧠 Design notes
 
 <p align="left">
-  <img alt="Design" src="https://img.shields.io/badge/design-Excel_first-217346">
-  <img alt="Safety" src="https://img.shields.io/badge/safety-defensive_cleanup-blue">
-  <img alt="Maintainability" src="https://img.shields.io/badge/maintainability-modular-6f42c1">
+  <img alt="Design" src="https://img.shields.io/badge/Design-Excel_first-217346">
+  <img alt="Safety" src="https://img.shields.io/badge/Safety-Defensive_cleanup-blue">
+  <img alt="Maintainability" src="https://img.shields.io/badge/Maintainability-Modular-6f42c1">
 </p>
 
 This repo follows a few core principles:
@@ -393,9 +393,9 @@ VBA-DATETIMEPICKER/
 ## 🛠️ Installation
 
 <p align="left">
-  <img alt="Install" src="https://img.shields.io/badge/install-import_files-217346">
-  <img alt="No Add-in Required" src="https://img.shields.io/badge/add--in-not_required-blue">
-  <img alt="VBE" src="https://img.shields.io/badge/VBE-import-orange">
+  <img alt="Install" src="https://img.shields.io/badge/Install-Import_Files-217346">
+  <img alt="No Add-in Required" src="https://img.shields.io/badge/Add--in-Not_Required-blue">
+  <img alt="VBE" src="https://img.shields.io/badge/VBE-Import-orange">
 </p>
 
 ### Option 1 — Import into an existing VBA project
@@ -429,9 +429,9 @@ Open the included demo workbook to:
 ## 🔁 Workbook lifecycle
 
 <p align="left">
-  <img alt="Lifecycle" src="https://img.shields.io/badge/lifecycle-open_%2F_save_%2F_print_%2F_close-blue">
-  <img alt="Startup" src="https://img.shields.io/badge/startup-DP_Start-217346">
-  <img alt="Shutdown" src="https://img.shields.io/badge/shutdown-DP_Stop-orange">
+  <img alt="Lifecycle" src="https://img.shields.io/badge/Lifecycle-Open_%2F_Save_%2F_Print_%2F_Close-blue">
+  <img alt="Startup" src="https://img.shields.io/badge/Startup-DP_Start-217346">
+  <img alt="Shutdown" src="https://img.shields.io/badge/Shutdown-DP_Stop-orange">
 </p>
 
 The workbook lifecycle should stay thin. Let `cDatePickerManager` own Application-level events, and use workbook events only to start and stop the component.
@@ -475,9 +475,9 @@ Do **not** duplicate worksheet `SelectionChange` logic in `ThisWorkbook`. The ma
 ## ⚙️ Configuration
 
 <p align="left">
-  <img alt="Settings" src="https://img.shields.io/badge/settings-registry_backed-6f42c1">
-  <img alt="Panel" src="https://img.shields.io/badge/panel-in--form-blue">
-  <img alt="Persistence" src="https://img.shields.io/badge/persistence-explicit_Save-217346">
+  <img alt="Settings" src="https://img.shields.io/badge/Settings-Registry_backed-6f42c1">
+  <img alt="Panel" src="https://img.shields.io/badge/Panel-In--form-blue">
+  <img alt="Persistence" src="https://img.shields.io/badge/Persistence-Explicit_Save-217346">
 </p>
 
 Settings are stored using VBA registry persistence under:
@@ -515,9 +515,9 @@ Typical settings include:
 ## 🧩 Public API
 
 <p align="left">
-  <img alt="API" src="https://img.shields.io/badge/API-public_entry_points-blue">
-  <img alt="Manager" src="https://img.shields.io/badge/manager-auto_bootstrap-217346">
-  <img alt="Write-back" src="https://img.shields.io/badge/write--back-date_%2F_datetime-orange">
+  <img alt="API" src="https://img.shields.io/badge/API-Public_entry_points-blue">
+  <img alt="Manager" src="https://img.shields.io/badge/Manager-Auto_bootstrap-217346">
+  <img alt="Write-back" src="https://img.shields.io/badge/Write--back-Date_%2F_Datetime-orange">
 </p>
 
 Primary public entry points are exposed through `M_DatePicker.bas`.
@@ -556,7 +556,7 @@ Ribbon callback procedures must remain `Public` and must be located in a standar
 ## 🖱️ Entry points
 
 <p align="left">
-  <img alt="Entry" src="https://img.shields.io/badge/Entry_points-Multiple-217346">
+  <img alt="Entry" src="https://img.shields.io/badge/Entry_points-Multiple-otange">
   <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
   <img alt="Keyboard Shortcut" src="https://img.shields.io/badge/Ctrl_%2B_Shift_%2B_D-Supported-217346">
   <img alt="Context Menu" src="https://img.shields.io/badge/Context_Menu-Supported-217346">
