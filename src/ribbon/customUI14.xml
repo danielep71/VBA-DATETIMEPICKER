@@ -1,0 +1,31 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui">
+  <ribbon>
+    <tabs>
+      <tab idMso="TabHome">
+        <group id="grpDateTimePicker"
+               label="DateTime Picker">
+          <splitButton id="spbDateTimePicker" size="large">
+            <button id="btnShowPicker"
+                    label="Show Picker"
+                    image="DP_GridIcon_64"
+                    onAction="Ribbon_ShowPicker"/>
+
+            <menu id="mnuDateTimePicker"
+                  itemSize="large">
+              <button id="BtnMenu_Reset"
+                      label="Reset"
+                      image="reset"
+                      onAction="Ribbon_Reset"/>
+
+              <button id="BtnMenu_Demo"
+                      label="Demo"
+                      image="demo"
+                      onAction="Ribbon_Demo"/>
+
+            </menu>
+          </splitButton>
+        </group>
+      </tab>
+    </tabs>
+  </ribbon>
+</customUI>
