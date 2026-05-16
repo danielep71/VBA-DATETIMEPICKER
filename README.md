@@ -780,10 +780,8 @@ Suggested validation areas:
 ## ✅ Test quick start
 
 <p align="left">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook-blue">
+  <img alt="Tests" src="https://img.shields.io/badge/Tests-Compile_%2B_Manual_%2B_Testbook_%2B_Demow_Worksheet-blue">
 </p>
-
-Before releasing or tagging a version:
 
 1. Compile the VBA project.
 2. Run `DP_Start`.
@@ -815,9 +813,6 @@ DP_Stop
 
 ## 🧯 Troubleshooting
 
-<p align="left">
-  <img alt="Troubleshooting" src="https://img.shields.io/badge/Troubleshooting-Runtime_blueprint-blue">
-</p>
 
 | Symptom | Check |
 |---|---|
@@ -844,12 +839,11 @@ DP_Stop
 Planned or possible future enhancements include:
 
 - 📆 business-day / holiday-calendar integration
+- Dark mode / custom color-fonts
 - 🧠 richer date-cell detection heuristics
 - 🧩 tighter integration with reusable date/calendar modules
 - 🎨 additional visual themes
 - 🌐 improved localization options
-- 🖱️ richer in-grid trigger behavior
-- 🎛️ richer RibbonX examples and optional Ribbon icon guidance
 
 ---
 
@@ -869,8 +863,7 @@ In a broader VBA engineering ecosystem, this repository can serve as the **date-
 ## 📚 Wiki
 
 <p align="left">
-  <img alt="Docs" src="https://img.shields.io/badge/Docs-Wiki-blue">
-  <img alt="Guidance" src="https://img.shields.io/badge/Guidance-Extended_notes-6f42c1">
+  <img alt="Docs" src="https://img.shields.io/badge/Guidance-Extended_notes-blue">
 </p>
 
 For additional examples, notes, and repository-level guidance, see the project wiki:
@@ -911,39 +904,10 @@ General conventions:
 
 ---
 
-## 🤝 Contributing
-
-<p align="left">
-  <img alt="Contributions" src="https://img.shields.io/badge/Contributions-Welcome-brightgreen">
-  <img alt="Commits" src="https://img.shields.io/badge/Commits-Conventional-blue">
-  <img alt="Stability" src="https://img.shields.io/badge/Stability-Preserve_behavior-orange">
-</p>
-
-
-Please aim to:
-
-- preserve architectural clarity
-- keep external behavior stable unless change is justified
-- follow the project coding style
-- document meaningful changes
-- use clear commit messages
-- compile before submitting changes
-
-Conventional Commit examples:
-
-- `feat(ui): add compact settings layout`
-- `fix(manager): clean up stale in-grid icon on sheet change`
-- `docs(readme): expand installation instructions`
-- `refactor(hooks): simplify runtime label event routing`
-- `feat(ribbon): add DatePicker Ribbon callbacks`
-- `docs(ribbon): document RibbonX callback mapping`
-
----
-
 ## 📄 License
 
 <p align="left">
-  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
 </p>
 
 ---
