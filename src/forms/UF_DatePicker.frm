@@ -476,6 +476,8 @@ Option Explicit
     Private mHoveredPickerItemIndex                     As Long                         'Currently hovered picker item index
     Private mHoveredFooterActionName                    As String                       'Currently hovered footer action
     Private mHoveredSettingsPanelLabelName              As String                       'Currently hovered settings-panel label name
+    
+    Private mDayCellIndexMap                            As Object                       'Scripting.Dictionary: LabelName -> DayIndex
 
     '-----------------------------CONTROL CACHE--------------------------------
     Private mDayTextLabels(1 To DP_DAY_LABEL_COUNT)         As MSForms.Label            'Cached day text labels
@@ -1257,6 +1259,8 @@ Private Sub UserForm_Terminate()
         Set mDayFontWeekend = Nothing
     'Release cached footer Time value label
         Set mLbl_Time = Nothing
+    'Release the day-cell index map
+        Set mDayCellIndexMap = Nothing
 
 '------------------------------------------------------------------------------
 ' CLEAR HOVER STATE
@@ -4733,7 +4737,9 @@ Private Sub UF_DayGrid_Build()
         mHoveredDayLabelName = vbNullString
     'Clear the current day-cell hover index
         mHoveredDayCellIndex = 0
-
+    'Build the day-cell label-name to index map once
+        UF_DayGrid_BuildIndexMap
+        
 '------------------------------------------------------------------------------
 ' CREATE / FORMAT DAY CELLS
 '------------------------------------------------------------------------------
@@ -4767,10 +4773,8 @@ Private Sub UF_DayGrid_Build()
 '------------------------------------------------------------------------------
             'Create or retrieve the day background label
                 Set Lbl_DayBg = UF_Ensure_Label(BgControlName)
-
             'Cache the day background label for fast reuse
                 Set mDayBackLabels(Index) = Lbl_DayBg
-
             'Apply layout and visual properties to the day background label
                 With Lbl_DayBg
                     .Caption = vbNullString
@@ -4789,7 +4793,6 @@ Private Sub UF_DayGrid_Build()
                     .Enabled = True
                     .Visible = True
                 End With
-
             'Create the background-label event hook
                 Set LabelHook = New cDatePickerLabelHook
             'Connect the day background label to its routed action
@@ -4802,10 +4805,8 @@ Private Sub UF_DayGrid_Build()
 '------------------------------------------------------------------------------
             'Create or retrieve the day text label
                 Set Lbl_Day = UF_Ensure_Label(TextControlName)
-
             'Cache the day text label for fast reuse
                 Set mDayTextLabels(Index) = Lbl_Day
-
             'Apply layout and visual properties to the day text label
                 With Lbl_Day
                     .Caption = VBA.CStr(Index)
@@ -4824,7 +4825,6 @@ Private Sub UF_DayGrid_Build()
                     .Enabled = True
                     .Visible = True
                 End With
-
             'Create the text-label event hook
                 Set LabelHook = New cDatePickerLabelHook
             'Connect the day text label to its routed action
@@ -4854,6 +4854,74 @@ Private Sub UF_DayGrid_Build()
 ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, "Day grid creation failed: " & Err.Description
+
+End Sub
+
+Private Sub UF_DayGrid_BuildIndexMap()
+
+'
+'------------------------------------------------------------------------------
+'                           BUILD DAY GRID INDEX MAP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds the lookup map used to resolve day-label names to day-cell indexes
+'
+' WHY THIS EXISTS
+'   Day cells are represented by two runtime labels:
+'     - Lbl_Day1 to Lbl_Day42
+'     - Lbl_DayBg1 to Lbl_DayBg42
+'
+'   Hover and click routing need to resolve either label name to the same
+'   numeric day-cell index
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Creates a case-insensitive dictionary and maps both text-label and
+'   background-label names to their day-cell index
+'
+' ERROR POLICY
+'   Raises errors normally
+'
+' DEPENDENCIES
+'   Scripting.Dictionary through late binding
+'   DP_DAY_LABEL_COUNT
+'
+' NOTES
+'   This routine should be called once when the day grid is built, not inside
+'   the 42-cell creation loop
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Index       As Long     'Sequential day-cell index
+
+'------------------------------------------------------------------------------
+' INITIALIZE MAP
+'------------------------------------------------------------------------------
+    'Create the day-cell index map
+        Set mDayCellIndexMap = CreateObject("Scripting.Dictionary")
+    'Make label-name lookup case-insensitive
+        mDayCellIndexMap.CompareMode = vbTextCompare
+
+'------------------------------------------------------------------------------
+' POPULATE MAP
+'------------------------------------------------------------------------------
+    'Loop through all day-cell indexes
+        For Index = 1 To DP_DAY_LABEL_COUNT
+            'Map the day text label to the day-cell index
+                mDayCellIndexMap.Add "Lbl_Day" & VBA.CStr(Index), Index
+            'Map the day background label to the day-cell index
+                mDayCellIndexMap.Add "Lbl_DayBg" & VBA.CStr(Index), Index
+        Next Index
 
 End Sub
 
@@ -5177,8 +5245,13 @@ Public Sub UF_DayGrid_Populate( _
     Dim TrackingDate            As Date                 'Current date written to the grid
     Dim StartOfMonthDay         As Long                 'Weekday index of first month day
     Dim LabelIndex              As Long                 'Sequential day-cell index
-    Dim WeekdaySunBasis         As Long                 'Sunday-based weekday number
-    Dim IsWeekend               As Boolean              'True for Saturday or Sunday
+    
+    Dim CellDateOnly            As Date                 'Date-only value for the current grid cell
+    Dim TodayDateOnly           As Date                 'Current system date without time
+    Dim SelectedVisualDateOnly  As Date                 'Date-only selected visual date
+    Dim HasSelectedVisualDate   As Boolean              'True when selected visual date exists
+    Dim HighlightWeekends       As Boolean              'Cached weekend-highlight setting
+    
     Dim Lbl_Day                 As MSForms.Label        'Day text label control
     Dim Lbl_DayBg               As MSForms.Label        'Day background label control
 
@@ -5191,6 +5264,28 @@ Public Sub UF_DayGrid_Populate( _
         UF_DayGrid_EnsureCache
     'Ensure cached day-grid fonts are available
         UF_DayGrid_EnsureFonts
+       
+'------------------------------------------------------------------------------
+' CACHE RENDER SETTINGS
+'------------------------------------------------------------------------------
+    'Resolve today's date once for the full grid refresh
+        TodayDateOnly = VBA.Date
+    'Cache the weekend-highlight setting for the full grid refresh
+        HighlightWeekends = gDP_HighlightWeekends
+    'Use the keyboard date as the selected visual date when available
+        If mHasKeyboardDate Then
+            SelectedVisualDateOnly = VBA.DateSerial( _
+                VBA.Year(mKeyboardDate), _
+                VBA.Month(mKeyboardDate), _
+                VBA.Day(mKeyboardDate))
+            HasSelectedVisualDate = True
+        ElseIf gDP_HasSelectedDate Then
+            SelectedVisualDateOnly = VBA.DateSerial( _
+                VBA.Year(gDP_SelectedDate), _
+                VBA.Month(gDP_SelectedDate), _
+                VBA.Day(gDP_SelectedDate))
+            HasSelectedVisualDate = True
+        End If
 
 '------------------------------------------------------------------------------
 ' RESOLVE DISPLAY PERIOD
@@ -5275,8 +5370,10 @@ Public Sub UF_DayGrid_Populate( _
 '------------------------------------------------------------------------------
     'Loop through the visible calendar cells
         For LabelIndex = 1 To DP_DAY_LABEL_COUNT
+            'Resolve the date-only value represented by this cell
+                CellDateOnly = TrackingDate
             'Cache the date represented by this day cell
-                mDayCellDates(LabelIndex) = TrackingDate
+                mDayCellDates(LabelIndex) = CellDateOnly
             'Mark the cached day-cell date as available
                 mDayCellHasDate(LabelIndex) = True
             'Retrieve the cached day text label
@@ -5293,41 +5390,21 @@ Public Sub UF_DayGrid_Populate( _
                     Err.Raise vbObjectError + 519, PROC_NAME, _
                         "Cached day background label is missing for index " & VBA.CStr(LabelIndex)
                 End If
-            'Resolve Sunday-based weekday number for stable weekend detection
-                WeekdaySunBasis = VBA.Weekday(TrackingDate, vbSunday)
-            'Detect weekends independently from the displayed first-day setting
-                IsWeekend = _
-                    (WeekdaySunBasis = vbSaturday Or WeekdaySunBasis = vbSunday)
-            'Apply base visual state to the background label
-                With Lbl_DayBg
-                    .Caption = vbNullString
-                    .BackStyle = fmBackStyleOpaque
-                    .BackColor = DP_DAY_NORMAL_BACK_COLOR
-                    .BorderStyle = fmBorderStyleNone
-                    .BorderColor = DP_DAY_NORMAL_BACK_COLOR
-                    .SpecialEffect = fmSpecialEffectFlat
-                    .Visible = True
-                End With
-            'Apply base visual state to the text label
-                With Lbl_Day
-                    .Caption = VBA.CStr(VBA.Day(TrackingDate))
-                    .BackStyle = fmBackStyleTransparent
-                    .BackColor = DP_DAY_NORMAL_BACK_COLOR
-                    .BorderStyle = fmBorderStyleNone
-                    .BorderColor = DP_DAY_NORMAL_BACK_COLOR
-                    .SpecialEffect = fmSpecialEffectFlat
-                    .Visible = True
-                End With
-            'Apply date-driven visual state to the paired day cell
-                UF_DayCell_ApplyDateStateByIndex LabelIndex, TrackingDate
-            'Assign the cached weekend font when weekend highlighting is enabled
-                If gDP_HighlightWeekends And IsWeekend Then
-                    Set Lbl_Day.Font = mDayFontWeekend
-                Else
-                    Set Lbl_Day.Font = mDayFontNormal
-                End If
+            'Apply date-driven visual state using already-resolved labels
+                UF_DayCell_ApplyDateStateFast _
+                    CellDateOnly, _
+                    Lbl_Day, _
+                    Lbl_DayBg, _
+                    mDisplayYear, _
+                    mDisplayMonth, _
+                    TodayDateOnly, _
+                    HasSelectedVisualDate, _
+                    SelectedVisualDateOnly, _
+                    HighlightWeekends, _
+                    mDayFontNormal, _
+                    mDayFontWeekend
             'Advance to the next visible date
-                TrackingDate = VBA.DateAdd("d", 1, TrackingDate)
+                TrackingDate = TrackingDate + 1
         Next LabelIndex
 
 '------------------------------------------------------------------------------
@@ -5498,7 +5575,9 @@ Private Sub UF_DayGrid_ClearCache()
             'Clear the cached day background label
                 Set mDayBackLabels(Index) = Nothing
         Next Index
-
+    'Release the day-cell index map
+        Set mDayCellIndexMap = Nothing
+        
 '------------------------------------------------------------------------------
 ' EXIT
 '------------------------------------------------------------------------------
@@ -5525,16 +5604,12 @@ Private Sub UF_DayCell_ApplyDateStateByIndex( _
 '                       APPLY DAY CELL DATE STATE BY INDEX
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Applies the normal, outside-month, disabled, today, and selected-date visual
-'   state to one paired DatePicker day cell using its numeric index
+'   Applies date-driven visual state to one paired DatePicker day cell by index
 '
 ' WHY THIS EXISTS
-'   The original UF_DayCell_ApplyDateState resolves the day-cell index from a
-'   label name and then retrieves the paired controls from Me.Controls
-'
-'   During grid population, hover reset, and minimal keyboard refresh, the caller
-'   often already knows the day-cell index. This routine avoids repeated string
-'   parsing and repeated Controls collection lookups
+'   Some routines know only the day-cell index, not the resolved label
+'   references. This wrapper resolves the paired labels from cache and delegates
+'   rendering to the fast internal day-cell state routine
 '
 ' INPUTS
 '   DayIndex
@@ -5547,33 +5622,27 @@ Private Sub UF_DayCell_ApplyDateStateByIndex( _
 '   Nothing
 '
 ' BEHAVIOR
-'   Validates DayIndex, retrieves the paired text and background labels from the
-'   day-grid cache, restores the cache only if needed, resolves the date state,
-'   and applies the appropriate visual formatting
+'   Validates DayIndex, restores cached labels when needed, normalizes date
+'   inputs, resolves selected visual state, and delegates to
+'   UF_DayCell_ApplyDateStateFast
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if DayIndex is invalid, if cached labels
-'   are unavailable, or if the day cell cannot be formatted
+'   Raises a descriptive runtime error if DayIndex is invalid, cached labels
+'   cannot be resolved, or the day-cell state cannot be applied
 '
 ' DEPENDENCIES
 '   UF_DayGrid_EnsureCache
-'   M_DatePolicy_CanSelectDate
-'   gDP_HasSelectedDate
-'   gDP_SelectedDate
+'   UF_DayGrid_EnsureFonts
+'   UF_DayCell_ApplyDateStateFast
 '   mDayTextLabels
 '   mDayBackLabels
 '
 ' NOTES
-'   Selected-date formatting has priority over today formatting
-'
-'   This routine intentionally does not call ZOrder. Layering is established
-'   when the grid is built and should not be repeated during state refresh
-'
-'   The day-grid cache is not rebuilt on every call. It is rebuilt only when the
-'   requested label pair is missing
+'   This routine preserves the safer index-based API for hover reset and
+'   targeted refresh paths
 '
 ' UPDATED
-'   2026-05-02
+'   2026-05-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -5582,10 +5651,9 @@ Private Sub UF_DayCell_ApplyDateStateByIndex( _
     Const PROC_NAME             As String = "UF_DatePicker.UF_DayCell_ApplyDateStateByIndex"
 
     Dim CellDateOnly            As Date             'Date-only value represented by the cell
-    Dim IsOutsideMonth          As Boolean          'True for adjacent-month dates
-    Dim IsToday                 As Boolean          'True when CellDate is today
-    Dim IsSelected              As Boolean          'True when CellDate is selected
-    Dim IsSelectable            As Boolean          'True when the date can be selected
+    Dim TodayDateOnly           As Date             'Current system date without time
+    Dim SelectedVisualDateOnly  As Date             'Date-only selected visual date
+    Dim HasSelectedVisualDate   As Boolean          'True when selected visual date exists
     Dim CacheRefreshRequired    As Boolean          'True when cached labels must be rebuilt
     Dim Lbl_Text                As MSForms.Label    'Day text label
     Dim Lbl_Bg                  As MSForms.Label    'Day background label
@@ -5604,6 +5672,12 @@ Private Sub UF_DayCell_ApplyDateStateByIndex( _
             Err.Raise vbObjectError + 513, PROC_NAME, _
                 "DayIndex must be between 1 and " & VBA.CStr(DP_DAY_LABEL_COUNT)
         End If
+
+'------------------------------------------------------------------------------
+' ENSURE FONT CACHE
+'------------------------------------------------------------------------------
+    'Ensure cached day-grid fonts are available
+        UF_DayGrid_EnsureFonts
 
 '------------------------------------------------------------------------------
 ' RETRIEVE CACHED LABELS
@@ -5628,12 +5702,9 @@ Private Sub UF_DayCell_ApplyDateStateByIndex( _
         If Lbl_Bg Is Nothing Then CacheRefreshRequired = True
     'Rebuild missing cached references only when needed
         If CacheRefreshRequired Then
-            'Ensure cached day-label references are available
-                UF_DayGrid_EnsureCache
-            'Retrieve the cached day text label after cache refresh
-                Set Lbl_Text = mDayTextLabels(DayIndex)
-            'Retrieve the cached day background label after cache refresh
-                Set Lbl_Bg = mDayBackLabels(DayIndex)
+            UF_DayGrid_EnsureCache
+            Set Lbl_Text = mDayTextLabels(DayIndex)
+            Set Lbl_Bg = mDayBackLabels(DayIndex)
         End If
 
 '------------------------------------------------------------------------------
@@ -5651,88 +5722,47 @@ Private Sub UF_DayCell_ApplyDateStateByIndex( _
         End If
 
 '------------------------------------------------------------------------------
-' RESOLVE STATE
+' NORMALIZE DATES
 '------------------------------------------------------------------------------
     'Normalize the cell date to a date-only value
-        CellDateOnly = VBA.DateValue(CellDate)
-    'Resolve whether the cell belongs to an adjacent month
-        IsOutsideMonth = _
-            (VBA.Year(CellDateOnly) <> mDisplayYear Or VBA.Month(CellDateOnly) <> mDisplayMonth)
-    'Resolve whether the cell represents today
-        IsToday = (CellDateOnly = VBA.Date)
-    'Resolve whether the cell represents the keyboard-selected date
+        CellDateOnly = VBA.DateSerial(VBA.Year(CellDate), VBA.Month(CellDate), VBA.Day(CellDate))
+    'Resolve today's date once
+        TodayDateOnly = VBA.Date
+
+'------------------------------------------------------------------------------
+' RESOLVE SELECTED VISUAL DATE
+'------------------------------------------------------------------------------
+    'Use the keyboard date as the selected visual date when available
         If mHasKeyboardDate Then
-            IsSelected = (CellDateOnly = VBA.DateValue(mKeyboardDate))
+            SelectedVisualDateOnly = VBA.DateSerial( _
+                VBA.Year(mKeyboardDate), _
+                VBA.Month(mKeyboardDate), _
+                VBA.Day(mKeyboardDate))
+            HasSelectedVisualDate = True
         ElseIf gDP_HasSelectedDate Then
-            IsSelected = (CellDateOnly = VBA.DateValue(gDP_SelectedDate))
-        Else
-            IsSelected = False
-        End If
-    'Resolve whether the date can be selected
-        IsSelectable = M_DatePolicy_CanSelectDate(CellDateOnly, mDisplayYear, mDisplayMonth)
-
-'------------------------------------------------------------------------------
-' APPLY BACKGROUND BASE STATE
-'------------------------------------------------------------------------------
-    'Apply normal background state
-        With Lbl_Bg
-            .BackStyle = fmBackStyleOpaque
-            .BackColor = DP_DAY_NORMAL_BACK_COLOR
-            .ForeColor = DP_DAY_CURRENT_MONTH_FORE_COLOR
-            .BorderStyle = fmBorderStyleNone
-            .BorderColor = DP_DAY_NORMAL_BACK_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .Enabled = IsSelectable
-            .Visible = True
-        End With
-
-'------------------------------------------------------------------------------
-' APPLY TEXT BASE STATE
-'------------------------------------------------------------------------------
-    'Apply normal text state
-        With Lbl_Text
-            .BackStyle = fmBackStyleTransparent
-            .ForeColor = DP_DAY_CURRENT_MONTH_FORE_COLOR
-            .BorderStyle = fmBorderStyleNone
-            .BorderColor = DP_DAY_NORMAL_BACK_COLOR
-            .SpecialEffect = fmSpecialEffectFlat
-            .Enabled = IsSelectable
-            .Visible = True
-        End With
-
-'------------------------------------------------------------------------------
-' APPLY OUTSIDE-MONTH STATE
-'------------------------------------------------------------------------------
-    'Apply muted text for outside-month dates
-        If IsOutsideMonth Then
-            Lbl_Text.ForeColor = DP_DAY_OUTSIDE_MONTH_FORE_COLOR
+            SelectedVisualDateOnly = VBA.DateSerial( _
+                VBA.Year(gDP_SelectedDate), _
+                VBA.Month(gDP_SelectedDate), _
+                VBA.Day(gDP_SelectedDate))
+            HasSelectedVisualDate = True
         End If
 
 '------------------------------------------------------------------------------
-' APPLY TODAY STATE
+' APPLY FAST STATE
 '------------------------------------------------------------------------------
-    'Apply today background highlight when applicable
-        If IsToday Then
-            With Lbl_Bg
-                .BackColor = DP_DAY_TODAY_BACK_COLOR
-                .BorderStyle = fmBorderStyleSingle
-                .BorderColor = DP_DAY_TODAY_BORDER_COLOR
-            End With
-        End If
-
-'------------------------------------------------------------------------------
-' APPLY SELECTED STATE
-'------------------------------------------------------------------------------
-    'Apply selected-date highlight when applicable
-        If IsSelected Then
-            With Lbl_Bg
-                .BackColor = DP_DAY_SELECTED_BACK_COLOR
-                .BorderStyle = fmBorderStyleSingle
-                .BorderColor = DP_DAY_SELECTED_BACK_COLOR
-            End With
-            'Apply selected text formatting
-                Lbl_Text.ForeColor = DP_DAY_SELECTED_FORE_COLOR
-        End If
+    'Apply the day-cell state using already-resolved labels
+        UF_DayCell_ApplyDateStateFast _
+            CellDateOnly, _
+            Lbl_Text, _
+            Lbl_Bg, _
+            mDisplayYear, _
+            mDisplayMonth, _
+            TodayDateOnly, _
+            HasSelectedVisualDate, _
+            SelectedVisualDateOnly, _
+            gDP_HighlightWeekends, _
+            mDayFontNormal, _
+            mDayFontWeekend
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -5748,6 +5778,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Day-cell state application failed: " & Err.Description
 
 End Sub
+
 
 Private Sub UF_DayCell_RefreshVisibleDate(ByVal TargetDate As Date)
 
@@ -6084,6 +6115,237 @@ ErrorHandler:
 
 End Sub
 
+Private Sub UF_DayCell_ApplyDateStateFast( _
+    ByVal CellDateOnly As Date, _
+    ByVal Lbl_Text As MSForms.Label, _
+    ByVal Lbl_Bg As MSForms.Label, _
+    ByVal EffectiveDisplayYear As Long, _
+    ByVal EffectiveDisplayMonth As Long, _
+    ByVal TodayDateOnly As Date, _
+    ByVal HasSelectedVisualDate As Boolean, _
+    ByVal SelectedVisualDateOnly As Date, _
+    ByVal HighlightWeekends As Boolean, _
+    ByVal FontNormal As Object, _
+    ByVal FontWeekend As Object)
+
+'
+'------------------------------------------------------------------------------
+'                       APPLY DAY CELL DATE STATE FAST
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies date-driven visual state to one already-resolved paired day cell
+'
+' WHY THIS EXISTS
+'   UF_DayGrid_Populate already resolves the paired text and background labels
+'   while looping through the 42 visible day cells
+'
+'   Passing those references directly avoids repeated cache probing, repeated
+'   Controls lookups, and repeated label-pair resolution during full grid refresh
+'
+' INPUTS
+'   CellDateOnly
+'     Date-only value represented by the day cell
+'
+'   Lbl_Text
+'     Already-resolved day text label
+'
+'   Lbl_Bg
+'     Already-resolved day background label
+'
+'   EffectiveDisplayYear
+'     Displayed calendar year
+'
+'   EffectiveDisplayMonth
+'     Displayed calendar month
+'
+'   TodayDateOnly
+'     Current system date without time
+'
+'   HasSelectedVisualDate
+'     True when a selected / keyboard date should be rendered
+'
+'   SelectedVisualDateOnly
+'     Date-only selected / keyboard date when HasSelectedVisualDate is True
+'
+'   HighlightWeekends
+'     True when weekend labels should use the weekend font
+'
+'   FontNormal
+'     Cached normal day font
+'
+'   FontWeekend
+'     Cached weekend day font
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Applies base state, outside-month state, today state, selected state,
+'   selectable state, and optional weekend font state without resolving controls
+'
+' ERROR POLICY
+'   Raises descriptive runtime errors when required label references are missing
+'
+' DEPENDENCIES
+'   M_DatePolicy_CanSelectDate
+'   DatePicker day-grid visual constants
+'
+' NOTES
+'   This routine is intentionally private and assumes the caller has already
+'   resolved the correct paired labels
+'
+'   It does not call UF_DayGrid_EnsureCache and does not perform any ZOrder work
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "UF_DatePicker.UF_DayCell_ApplyDateStateFast"
+
+    Dim IsOutsideMonth      As Boolean      'True when the cell belongs to an adjacent month
+    Dim IsToday             As Boolean      'True when the cell represents today
+    Dim IsSelected          As Boolean      'True when the cell is the selected visual date
+    Dim IsSelectable        As Boolean      'True when the date can be selected
+    Dim WeekdaySunBasis     As Long         'Sunday-based weekday number
+    Dim IsWeekend           As Boolean      'True when the cell date is Saturday or Sunday
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE REFERENCES
+'------------------------------------------------------------------------------
+    'Reject a missing text label
+        If Lbl_Text Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "Lbl_Text cannot be Nothing"
+        End If
+    'Reject a missing background label
+        If Lbl_Bg Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "Lbl_Bg cannot be Nothing"
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE STATE
+'------------------------------------------------------------------------------
+    'Resolve whether the cell belongs to an adjacent month
+        IsOutsideMonth = _
+            (VBA.Year(CellDateOnly) <> EffectiveDisplayYear Or _
+             VBA.Month(CellDateOnly) <> EffectiveDisplayMonth)
+    'Resolve whether the cell represents today
+        IsToday = (CellDateOnly = TodayDateOnly)
+    'Resolve whether the cell represents the selected visual date
+        If HasSelectedVisualDate Then
+            IsSelected = (CellDateOnly = SelectedVisualDateOnly)
+        End If
+    'Resolve whether the date can be selected
+        IsSelectable = M_DatePolicy_CanSelectDate( _
+            CellDateOnly, _
+            EffectiveDisplayYear, _
+            EffectiveDisplayMonth)
+
+'------------------------------------------------------------------------------
+' APPLY BACKGROUND BASE STATE
+'------------------------------------------------------------------------------
+    'Apply normal background state
+        With Lbl_Bg
+            .Caption = vbNullString
+            .BackStyle = fmBackStyleOpaque
+            .BackColor = DP_DAY_NORMAL_BACK_COLOR
+            .ForeColor = DP_DAY_CURRENT_MONTH_FORE_COLOR
+            .BorderStyle = fmBorderStyleNone
+            .BorderColor = DP_DAY_NORMAL_BACK_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+            .Enabled = IsSelectable
+            .Visible = True
+        End With
+
+'------------------------------------------------------------------------------
+' APPLY TEXT BASE STATE
+'------------------------------------------------------------------------------
+    'Apply normal text state
+        With Lbl_Text
+            .Caption = VBA.CStr(VBA.Day(CellDateOnly))
+            .BackStyle = fmBackStyleTransparent
+            .BackColor = DP_DAY_NORMAL_BACK_COLOR
+            .ForeColor = DP_DAY_CURRENT_MONTH_FORE_COLOR
+            .BorderStyle = fmBorderStyleNone
+            .BorderColor = DP_DAY_NORMAL_BACK_COLOR
+            .SpecialEffect = fmSpecialEffectFlat
+            .Enabled = IsSelectable
+            .Visible = True
+        End With
+
+'------------------------------------------------------------------------------
+' APPLY WEEKEND FONT STATE
+'------------------------------------------------------------------------------
+    'Assign normal font unless weekend highlighting requires the weekend font
+        If HighlightWeekends Then
+            WeekdaySunBasis = VBA.Weekday(CellDateOnly, vbSunday)
+            IsWeekend = (WeekdaySunBasis = vbSaturday Or WeekdaySunBasis = vbSunday)
+
+            If IsWeekend Then
+                If Not FontWeekend Is Nothing Then Set Lbl_Text.Font = FontWeekend
+            Else
+                If Not FontNormal Is Nothing Then Set Lbl_Text.Font = FontNormal
+            End If
+        Else
+            If Not FontNormal Is Nothing Then Set Lbl_Text.Font = FontNormal
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY OUTSIDE-MONTH STATE
+'------------------------------------------------------------------------------
+    'Apply muted text for outside-month dates
+        If IsOutsideMonth Then
+            Lbl_Text.ForeColor = DP_DAY_OUTSIDE_MONTH_FORE_COLOR
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY TODAY STATE
+'------------------------------------------------------------------------------
+    'Apply today highlight when applicable
+        If IsToday Then
+            With Lbl_Bg
+                .BackColor = DP_DAY_TODAY_BACK_COLOR
+                .BorderStyle = fmBorderStyleSingle
+                .BorderColor = DP_DAY_TODAY_BORDER_COLOR
+            End With
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY SELECTED STATE
+'------------------------------------------------------------------------------
+    'Apply selected-date highlight when applicable
+        If IsSelected Then
+            With Lbl_Bg
+                .BackColor = DP_DAY_SELECTED_BACK_COLOR
+                .BorderStyle = fmBorderStyleSingle
+                .BorderColor = DP_DAY_SELECTED_BACK_COLOR
+            End With
+            'Apply selected text formatting
+                Lbl_Text.ForeColor = DP_DAY_SELECTED_FORE_COLOR
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, "Fast day-cell state application failed: " & Err.Description
+
+End Sub
 Private Sub UF_DayCell_HoverReset()
 
 '
@@ -6279,9 +6541,13 @@ FailSafe:
 
 End Sub
 
+'
 '------------------------------------------------------------------------------
-' SHARED HELPERS
+'
+'                               SHARED HELPERS
+'
 '------------------------------------------------------------------------------
+'
 
 Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As Long
 
@@ -6293,11 +6559,8 @@ Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As 
 '   Resolves the day-cell index from a DatePicker day label name
 '
 ' WHY THIS EXISTS
-'   Each calendar day cell is composed of two runtime labels:
-'     - Lbl_DayBg1 to Lbl_DayBg42
-'     - Lbl_Day1 to Lbl_Day42
-'
-'   Hovering or clicking either label must resolve to the same day-cell index
+'   Hovering or clicking either the day text label or the day background label
+'   must resolve to the same day-cell index
 '
 ' INPUTS
 '   LabelName
@@ -6305,106 +6568,66 @@ Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As 
 '
 ' RETURNS
 '   Day-cell index from 1 to DP_DAY_LABEL_COUNT
-'
-'   Zero when the label name is blank, unsupported, malformed, or outside the
-'   supported day-cell range
+'   Zero when the label name is blank, unsupported, or not mapped
 '
 ' BEHAVIOR
-'   Normalizes the supplied label name, checks the background-label prefix first,
-'   checks the text-label prefix second, extracts the numeric suffix, applies
-'   strict digit-only parsing, and returns the validated day-cell index
+'   Uses the prebuilt case-insensitive mDayCellIndexMap for constant-time lookup
 '
 ' ERROR POLICY
-'   Does not raise errors. Unsupported or malformed label names return zero
+'   Does not raise errors
 '
 ' DEPENDENCIES
+'   mDayCellIndexMap
 '   DP_DAY_LABEL_COUNT
 '
 ' NOTES
-'   The background-label prefix must be tested before the text-label prefix
-'   because Lbl_DayBg also starts with Lbl_Day
-'
-'   Matching is normalized with UCase$ so behavior is independent from
-'   Option Compare
+'   The map is built once by UF_DayGrid_BuildIndexMap
 '
 ' UPDATED
-'   2026-05-02
+'   2026-05-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const BG_PREFIX         As String = "LBL_DAYBG"     'Day background label prefix
-    Const TEXT_PREFIX       As String = "LBL_DAY"       'Day text label prefix
-
-    Dim EffectiveName       As String                   'Normalized day label name
-    Dim RawIndex            As String                   'Raw numeric suffix
-    Dim ParsedIndex         As Long                     'Parsed day-cell index
+    Dim EffectiveName       As String       'Trimmed label name
+    Dim ParsedIndex         As Long         'Mapped day-cell index
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Enable fail-safe parsing
+    'Enable fail-safe lookup
         On Error GoTo SafeExit
 
 '------------------------------------------------------------------------------
 ' NORMALIZE INPUT
 '------------------------------------------------------------------------------
     'Normalize the supplied label name
-        EffectiveName = VBA.UCase$(VBA.Trim$(LabelName))
-    'Return zero for empty label names
-        If VBA.Len(EffectiveName) = 0 Then
-            UF_DayCell_GetIndexFromLabelName = 0
-            Exit Function
-        End If
+        EffectiveName = VBA.Trim$(LabelName)
+    'Return zero when the supplied label name is blank
+        If VBA.Len(EffectiveName) = 0 Then Exit Function
 
 '------------------------------------------------------------------------------
-' RESOLVE INDEX FROM BACKGROUND LABEL
+' VALIDATE MAP STATE
 '------------------------------------------------------------------------------
-    'Resolve indexes from day background labels first
-        If VBA.Left$(EffectiveName, VBA.Len(BG_PREFIX)) = BG_PREFIX Then
-            'Extract the raw numeric suffix
-                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(BG_PREFIX) + 1)
-            'Return zero when the suffix is empty
-                If VBA.Len(RawIndex) = 0 Then Exit Function
-            'Return zero when the suffix is not strictly numeric
-                If RawIndex Like "*[!0-9]*" Then Exit Function
-            'Parse the day-cell index
-                ParsedIndex = VBA.CLng(RawIndex)
-            'Return zero when the index is outside the supported day-cell range
-                If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
-            'Return the validated day-cell index
-                UF_DayCell_GetIndexFromLabelName = ParsedIndex
-            'Exit after resolving the background label
-                Exit Function
-        End If
+    'Return zero when the day-cell index map is not available
+        If mDayCellIndexMap Is Nothing Then Exit Function
+    'Return zero when the label name is not mapped
+        If Not mDayCellIndexMap.Exists(EffectiveName) Then Exit Function
 
 '------------------------------------------------------------------------------
-' RESOLVE INDEX FROM TEXT LABEL
+' RESOLVE INDEX
 '------------------------------------------------------------------------------
-    'Resolve indexes from day text labels
-        If VBA.Left$(EffectiveName, VBA.Len(TEXT_PREFIX)) = TEXT_PREFIX Then
-            'Extract the raw numeric suffix
-                RawIndex = VBA.Mid$(EffectiveName, VBA.Len(TEXT_PREFIX) + 1)
-            'Return zero when the suffix is empty
-                If VBA.Len(RawIndex) = 0 Then Exit Function
-            'Return zero when the suffix is not strictly numeric
-                If RawIndex Like "*[!0-9]*" Then Exit Function
-            'Parse the day-cell index
-                ParsedIndex = VBA.CLng(RawIndex)
-            'Return zero when the index is outside the supported day-cell range
-                If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
-            'Return the validated day-cell index
-                UF_DayCell_GetIndexFromLabelName = ParsedIndex
-            'Exit after resolving the text label
-                Exit Function
-        End If
+    'Read the mapped day-cell index
+        ParsedIndex = VBA.CLng(mDayCellIndexMap(EffectiveName))
+    'Return zero when the mapped index is outside the supported range
+        If ParsedIndex < 1 Or ParsedIndex > DP_DAY_LABEL_COUNT Then Exit Function
 
 '------------------------------------------------------------------------------
-' RETURN FALLBACK
+' RETURN RESULT
 '------------------------------------------------------------------------------
-    'Return zero for unsupported day label names
-        UF_DayCell_GetIndexFromLabelName = 0
+    'Return the validated day-cell index
+        UF_DayCell_GetIndexFromLabelName = ParsedIndex
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6416,7 +6639,7 @@ Private Function UF_DayCell_GetIndexFromLabelName(ByVal LabelName As String) As 
 ' SAFE EXIT
 '------------------------------------------------------------------------------
 SafeExit:
-    'Return zero for malformed or oversized numeric suffixes
+    'Return zero for missing, unsupported, or invalid label mappings
         UF_DayCell_GetIndexFromLabelName = 0
 
 End Function

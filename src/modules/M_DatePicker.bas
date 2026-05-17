@@ -350,6 +350,14 @@ Option Explicit
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
     Private mDP_TimerIsRunning          As Boolean              'Timer running flag
     Private mDP_TimerProcedureName      As String               'Qualified OnTime timer procedure name
+    
+    Private mQualifiedMacroNameCache    As Object               'Scripting.Dictionary: ProcedureName -> qualified macro name
+    Private mQualifiedMacroWorkbookName As String               'Workbook name used by the qualified macro-name cache
+    
+    Private mDP_GridIconLastAnchorKey       As String           'Last grid-icon target key
+    Private mDP_GridIconLastLeft            As Double           'Last grid-icon left position
+    Private mDP_GridIconLastTop             As Double           'Last grid-icon top position
+    Private mDP_TimerProcedureWorkbookName  As String           'Workbook name used for cached timer callback
 
 '------------------------------------------------------------------------------
 ' EMBEDDED GRID ICON
@@ -5546,8 +5554,25 @@ Public Sub DP_Show()
         On Error GoTo ErrorHandler
     'Track the current step
         StepName = "Ensure manager"
+'------------------------------------------------------------------------------
+' ENSURE DATEPICKER INFRASTRUCTURE
+'------------------------------------------------------------------------------
+    'Track the current step
+        StepName = "Ensure manager"
     'Ensure DatePicker settings and manager infrastructure are available
         M_Picker_EnsureManager
+
+'------------------------------------------------------------------------------
+' REUSE EXISTING VISIBLE FORM
+'------------------------------------------------------------------------------
+    'Reuse the already-visible DatePicker form when possible
+        If M_FormBridge_TryReuseLoadedPickerFromActiveCell( _
+            FORM_MOUSE_OFFSET_XPX, _
+            FORM_MOUSE_OFFSET_YPX, _
+            FORM_CENTER_ON_MOUSE) Then
+            'Exit because the visible picker was refreshed instead of rebuilt
+                Exit Sub
+        End If
     'Default the initial date to today
         InitialDate = VBA.Date
     'Default selected-date availability to False
@@ -6197,6 +6222,12 @@ Public Sub DP_Stop()
         DP_Close
     'Purge all DatePicker grid icons from open workbooks
         M_GridIcon_PurgeAll
+
+'------------------------------------------------------------------------------
+' CLEAR CALLBACK CACHE
+'------------------------------------------------------------------------------
+    'Clear cached workbook-qualified callback names
+        M_GetQualifiedMacroName_ClearCache
 
 '------------------------------------------------------------------------------
 ' EXIT
@@ -7125,9 +7156,9 @@ Public Sub M_WriteBack_PopulateRange( _
 '     - discontiguous areas
 '     - a resolved table data column
 '
-'   This routine centralizes the final cell-level population logic so write-back
-'   behavior remains consistent across calendar-day selection, Today, Now,
-'   keyboard shortcuts, context-menu actions, and public macro entry points
+'   This routine centralizes the final population logic so write-back behavior
+'   remains consistent across calendar-day selection, Today, Now, keyboard
+'   shortcuts, context-menu actions, and public macro entry points
 '
 ' INPUTS
 '   oRange
@@ -7141,48 +7172,45 @@ Public Sub M_WriteBack_PopulateRange( _
 '
 ' BEHAVIOR
 '   Validates the target range and write action, resolves the DatePicker write
-'   value, writes the value cell by cell through M_WriteBack_TryWriteCell, counts
-'   protected locked cells and other failures, reports partial protected-cell
-'   skips once, logs partial non-lock failures to the Immediate Window, and
-'   raises an error when no cell was successfully written
+'   value, attempts a fast bulk write for multi-cell ranges, and falls back to
+'   safe cell-by-cell write-back when the bulk write cannot be completed
+'
+'   Protected locked cells may be skipped by the fallback path when at least one
+'   target cell is written successfully
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the target range is missing, the write
 '   action is unsupported, the write value cannot be resolved, or no cell can be
 '   written successfully
 '
-'   Protected locked cells may be skipped when at least one target cell is
-'   written successfully
-'
-'   Other cell-level failures may be suppressed by M_WriteBack_TryWriteCell when
-'   at least one target cell is written successfully, but they are logged for
-'   diagnostics
+'   Bulk-write failures are not raised directly because they are expected in
+'   mixed protected, validated, or partially writable ranges. The routine falls
+'   back to the existing per-cell write policy
 '
 ' DEPENDENCIES
 '   M_WriteBack_GetPickedValue
+'   M_WriteBack_TryBulkWriteRange
 '   M_WriteBack_TryWriteCell
 '   DP_MSGBOX_TITLE
 '
 ' NOTES
-'   This routine intentionally writes cell by cell instead of assigning the whole
-'   range in one operation
+'   Bulk write is used only as a fast path
 '
-'   Cell-by-cell write-back is slower for very large ranges but safer for
-'   protected sheets, locked cells, validation failures, and partially writable
-'   selections
+'   The fallback preserves the existing robust behavior for protected sheets,
+'   locked cells, validation failures, and partially writable selections
 '
-'   This routine assumes M_WriteBack_TryWriteCell increments LockedCount and
-'   FailedCount only when a cell is not written
+'   This routine intentionally uses Range.Value rather than Range.Value2 so VBA
+'   Date and DateTime values are written through Excel's normal date handling
 '
 ' UPDATED
-'   2026-05-03
+'   2026-05-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "M_WriteBack_PopulateRange"
-    
+
     Dim Cell            As Range            'Current target cell
     Dim LockedCount     As Long             'Protected locked cells skipped
     Dim FailedCount     As Long             'Other write failures suppressed
@@ -7196,7 +7224,6 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
     'Initialize diagnostic step
         HandlerStep = "Initialize"
 
@@ -7205,7 +7232,6 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Validate target range"
-
     'Reject missing target ranges
         If oRange Is Nothing Then
             Err.Raise vbObjectError + 513, PROC_NAME, "Target range cannot be Nothing"
@@ -7222,7 +7248,6 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve write value"
-
     'Resolve the value to write from the requested DatePicker action
         Select Case iType
             Case DP_WriteAction_DatePicker
@@ -7235,11 +7260,21 @@ Public Sub M_WriteBack_PopulateRange( _
         End Select
 
 '------------------------------------------------------------------------------
-' POPULATE TARGET CELLS
+' ATTEMPT FAST BULK WRITE
 '------------------------------------------------------------------------------
     'Track the current handler step
-        HandlerStep = "Populate target cells"
+        HandlerStep = "Attempt fast bulk write"
+    'Use the bulk path only when it can provide a meaningful benefit
+        If AttemptedCount > 1 Then
+            'Exit immediately when the fast bulk write succeeds
+                If M_WriteBack_TryBulkWriteRange(oRange, WriteValue) Then GoTo CleanExit
+        End If
 
+'------------------------------------------------------------------------------
+' FALL BACK TO SAFE CELL-BY-CELL WRITE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Populate target cells through safe fallback"
     'Loop through each target cell
         For Each Cell In oRange.Cells
             'Attempt to write the resolved value to the current cell
@@ -7251,7 +7286,6 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve write result"
-
     'Calculate the number of successfully written cells
         WrittenCount = AttemptedCount - LockedCount - FailedCount
     'Reject write-back attempts that did not write any cell
@@ -7301,6 +7335,111 @@ ErrorHandler:
             "DatePicker range population failed: " & Err.Description
 
 End Sub
+
+Private Function M_WriteBack_TryBulkWriteRange( _
+    ByVal TargetRange As Range, _
+    ByVal WriteValue As Variant) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           TRY BULK WRITE RANGE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Attempts to write one DatePicker value to an entire Excel range in one
+'   operation
+'
+' WHY THIS EXISTS
+'   Cell-by-cell write-back is robust but slow for large ranges, table columns,
+'   and multi-cell selections
+'
+'   A bulk write is much faster when the entire target is writable. When it is
+'   not writable, the caller can fall back to the safer per-cell path
+'
+' INPUTS
+'   TargetRange
+'     Excel range to populate
+'
+'   WriteValue
+'     DatePicker value to write
+'
+' RETURNS
+'   True when the bulk write succeeds
+'
+'   False when the range is missing, empty, protected, validated, partially
+'   unwritable, or otherwise cannot be written in one operation
+'
+' BEHAVIOR
+'   Validates the range reference, attempts one Range.Value assignment, and
+'   returns a Boolean success flag
+'
+' ERROR POLICY
+'   Safe-default helper
+'
+'   Does not raise outward. Any failure returns False so the caller can use the
+'   safe fallback path
+'
+' DEPENDENCIES
+'   Excel.Range
+'
+' NOTES
+'   This helper intentionally uses Range.Value rather than Range.Value2 so VBA
+'   Date and DateTime values are written through Excel's normal date handling
+'
+'   This helper does not suppress Application events. Event suppression is owned
+'   by M_WriteBack_Apply
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set safe default result
+        M_WriteBack_TryBulkWriteRange = False
+    'Enable safe-default error handling
+        On Error GoTo BulkWriteFail
+
+'------------------------------------------------------------------------------
+' VALIDATE TARGET RANGE
+'------------------------------------------------------------------------------
+    'Exit when no target range is supplied
+        If TargetRange Is Nothing Then Exit Function
+    'Exit when the target range has no cells
+        If TargetRange.Cells.CountLarge <= 0 Then Exit Function
+
+'------------------------------------------------------------------------------
+' APPLY BULK WRITE
+'------------------------------------------------------------------------------
+    'Write the DatePicker value to the whole target range in one operation
+        TargetRange.Value = WriteValue
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+    'Return success after the bulk write has completed
+        M_WriteBack_TryBulkWriteRange = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after successful bulk write
+        Exit Function
+
+'------------------------------------------------------------------------------
+' BULK WRITE FAIL
+'------------------------------------------------------------------------------
+BulkWriteFail:
+    'Suppress the bulk failure and let the caller fall back to cell-by-cell write
+        On Error Resume Next
+    'Return safe default
+        M_WriteBack_TryBulkWriteRange = False
+    'Clear the suppressed bulk-write error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Function
 Private Function M_WriteBack_TryWriteCell( _
     ByVal TargetCell As Range, _
     ByVal WriteValue As Variant, _
@@ -8260,6 +8399,106 @@ End Function
 '                                    TIMER
 '
 '------------------------------------------------------------------------------
+'
+
+Private Function M_Timer_GetProcedureName() As String
+
+'
+'------------------------------------------------------------------------------
+'                         TIMER GET PROCEDURE NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the cached workbook-qualified DatePicker timer procedure name
+'
+' WHY THIS EXISTS
+'   Application.OnTime needs a workbook-qualified callback name. Rebuilding the
+'   same qualified macro name on every timer tick is unnecessary.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Workbook-qualified M_Timer_Tick procedure name
+'
+' BEHAVIOR
+'   Reuses the cached procedure name when it was already built for the current
+'   ThisWorkbook.Name. Rebuilds it when the cache is empty or when the workbook
+'   name changed during the session.
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the qualified procedure name cannot be
+'   resolved
+'
+' DEPENDENCIES
+'   M_GetQualifiedMacroName
+'   ThisWorkbook.Name
+'
+' NOTES
+'   The workbook-name check protects Save As / rename scenarios during a live
+'   Excel session
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME                 As String = "M_Timer_GetProcedureName"
+    Const TIMER_TICK_PROCEDURE      As String = "M_Timer_Tick"
+
+    Dim CurrentWorkbookName         As String       'Current host workbook name
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RESOLVE CURRENT WORKBOOK NAME
+'------------------------------------------------------------------------------
+    'Read the current host workbook name
+        CurrentWorkbookName = VBA.CStr(ThisWorkbook.Name)
+
+'------------------------------------------------------------------------------
+' REBUILD CACHE WHEN NEEDED
+'------------------------------------------------------------------------------
+    'Rebuild the cached procedure name when empty or stale
+        If VBA.LenB(mDP_TimerProcedureName) = 0 _
+        Or VBA.StrComp(mDP_TimerProcedureWorkbookName, CurrentWorkbookName, vbBinaryCompare) <> 0 Then
+            'Build the workbook-qualified timer callback
+                mDP_TimerProcedureName = M_GetQualifiedMacroName(TIMER_TICK_PROCEDURE)
+            'Store the workbook name used for this cache entry
+                mDP_TimerProcedureWorkbookName = CurrentWorkbookName
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN PROCEDURE NAME
+'------------------------------------------------------------------------------
+    'Return the cached timer procedure name
+        M_Timer_GetProcedureName = mDP_TimerProcedureName
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Clear stale timer procedure cache
+        mDP_TimerProcedureName = vbNullString
+    'Clear stale workbook-name cache
+        mDP_TimerProcedureWorkbookName = vbNullString
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Timer procedure-name resolution failed: " & Err.Description
+
+End Function
+
 
 Public Sub M_Timer_ApplyClockMode()
 
@@ -8492,8 +8731,8 @@ Public Sub M_Timer_Start()
 ' RESOLVE TIMER PROCEDURE
 '------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
-        mDP_TimerProcedureName = M_GetQualifiedMacroName("M_Timer_Tick")
-
+        mDP_TimerProcedureName = M_Timer_GetProcedureName
+        
 '------------------------------------------------------------------------------
 ' MARK TIMER RUNNING
 '------------------------------------------------------------------------------
@@ -8533,8 +8772,6 @@ ErrorHandler:
         mDP_TimerIsRunning = False
     'Clear next tick time after scheduling failure
         mDP_NextTickTime = 0
-    'Clear timer procedure name after scheduling failure
-        mDP_TimerProcedureName = vbNullString
     'Re-raise the original error to the caller
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
@@ -8604,12 +8841,16 @@ Public Sub M_Timer_Stop()
 '------------------------------------------------------------------------------
 ' RESOLVE TIMER PROCEDURE NAME
 '------------------------------------------------------------------------------
-    'Build the timer procedure name if it is missing
-        If VBA.Len(mDP_TimerProcedureName) = 0 Then
-            mDP_TimerProcedureName = M_GetQualifiedMacroName("M_Timer_Tick")
-            NameErrNumber = Err.Number
-            NameErrDescription = Err.Description
-            Err.Clear
+    'Build the timer procedure name only when cancellation may need it
+        If mDP_TimerIsRunning Then
+            If mDP_NextTickTime <> 0 Then
+                If VBA.LenB(mDP_TimerProcedureName) = 0 Then
+                    mDP_TimerProcedureName = M_Timer_GetProcedureName
+                    NameErrNumber = Err.Number
+                    NameErrDescription = Err.Description
+                    Err.Clear
+                End If
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -8637,8 +8878,7 @@ Public Sub M_Timer_Stop()
         mDP_TimerIsRunning = False
     'Clear next tick time
         mDP_NextTickTime = 0
-    'Clear timer procedure name
-        mDP_TimerProcedureName = vbNullString
+    'Keep the cached timer procedure name for the next timer start
 
 '------------------------------------------------------------------------------
 ' DIAGNOSTICS
@@ -8776,8 +9016,8 @@ Public Sub M_Timer_Tick()
 ' RESOLVE TIMER PROCEDURE
 '------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
-        mDP_TimerProcedureName = M_GetQualifiedMacroName("M_Timer_Tick")
-
+        mDP_TimerProcedureName = M_Timer_GetProcedureName
+        
 '------------------------------------------------------------------------------
 ' CALCULATE NEXT TICK
 '------------------------------------------------------------------------------
@@ -9430,10 +9670,10 @@ Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As Long
         If Frm Is Nothing Then Exit Function
 
 '------------------------------------------------------------------------------
-' CHECK WINAPI POLICY
+' CHECK WINAPI CAPABILITY
 '------------------------------------------------------------------------------
-    'Exit when optional WinAPI-dependent behavior is disabled
-        If Not M_Platform_ShouldUseWinAPI Then Exit Function
+    'Exit when the current platform cannot use WinAPI calls
+        If Not M_Platform_CanUseWinAPI Then Exit Function
 
 '------------------------------------------------------------------------------
 ' READ FORM CAPTION
@@ -10893,6 +11133,314 @@ End Sub
 '
 
 
+
+Private Function M_GridIcon_BuildAnchorKey(ByVal AnchorCell As Excel.Range) As String
+
+'
+'------------------------------------------------------------------------------
+'                           BUILD GRID ICON ANCHOR KEY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds a stable key for the current grid-icon anchor cell
+'
+' WHY THIS EXISTS
+'   The in-grid icon can receive repeated selection-change refreshes for the same
+'   cell. A compact target key allows the high-frequency path to detect that the
+'   icon is already shown at the correct target and exit early.
+'
+' INPUTS
+'   AnchorCell
+'     Normalized one-cell anchor range
+'
+' RETURNS
+'   External cell address key, or vbNullString when the anchor cannot be resolved
+'
+' BEHAVIOR
+'   Returns the external A1 address of the supplied anchor cell
+'
+' ERROR POLICY
+'   Safe-default helper. Returns vbNullString on failure
+'
+' DEPENDENCIES
+'   Excel.Range.Address
+'
+' NOTES
+'   The caller is responsible for normalizing merged cells before calling this
+'   helper
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Return a safe default on failure
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Exit when no anchor cell is supplied
+        If AnchorCell Is Nothing Then Exit Function
+
+'------------------------------------------------------------------------------
+' RETURN ANCHOR KEY
+'------------------------------------------------------------------------------
+    'Return a workbook-qualified worksheet address
+        M_GridIcon_BuildAnchorKey = AnchorCell.Address( _
+            RowAbsolute:=False, _
+            ColumnAbsolute:=False, _
+            ReferenceStyle:=xlA1, _
+            External:=True)
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after successful key creation
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Return safe default
+        M_GridIcon_BuildAnchorKey = vbNullString
+
+End Function
+
+Private Sub M_GridIcon_ClearLastTarget()
+
+'
+'------------------------------------------------------------------------------
+'                         CLEAR GRID ICON LAST TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears the cached last grid-icon target
+'
+' WHY THIS EXISTS
+'   The same-target short-circuit must be invalidated when the tracked shape is
+'   deleted, purged, or found stale
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Clears the cached anchor key and cached icon position
+'
+' ERROR POLICY
+'   Does not raise errors
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' CLEAR CACHE
+'------------------------------------------------------------------------------
+    'Clear the cached anchor key
+        mDP_GridIconLastAnchorKey = vbNullString
+    'Clear the cached left position
+        mDP_GridIconLastLeft = 0#
+    'Clear the cached top position
+        mDP_GridIconLastTop = 0#
+
+End Sub
+
+Private Sub M_GridIcon_RememberTarget( _
+    ByVal AnchorKey As String, _
+    ByVal IconLeft As Double, _
+    ByVal IconTop As Double)
+
+'
+'------------------------------------------------------------------------------
+'                         REMEMBER GRID ICON TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stores the last successfully positioned grid-icon target
+'
+' WHY THIS EXISTS
+'   The cached target allows M_GridIcon_ShowOrMove to skip unnecessary shape
+'   property writes when Excel fires repeated refreshes for the same cell
+'
+' INPUTS
+'   AnchorKey
+'     Stable anchor-cell key
+'
+'   IconLeft
+'     Icon left position in points
+'
+'   IconTop
+'     Icon top position in points
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the supplied key and position when the key is not blank
+'
+' ERROR POLICY
+'   Does not raise errors
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' STORE CACHE
+'------------------------------------------------------------------------------
+    'Clear cache when the supplied key is blank
+        If VBA.LenB(AnchorKey) = 0 Then
+            M_GridIcon_ClearLastTarget
+            Exit Sub
+        End If
+
+    'Store the anchor key
+        mDP_GridIconLastAnchorKey = AnchorKey
+    'Store the icon left position
+        mDP_GridIconLastLeft = IconLeft
+    'Store the icon top position
+        mDP_GridIconLastTop = IconTop
+
+End Sub
+
+Private Function M_GridIcon_IsSameVisibleTarget( _
+    ByVal AnchorKey As String, _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByVal IconLeft As Double, _
+    ByVal IconTop As Double, _
+    ByVal IconSize As Double) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       GRID ICON IS SAME VISIBLE TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns whether the tracked grid icon is already visible at the requested
+'   target
+'
+' WHY THIS EXISTS
+'   SelectionChange can fire repeatedly while the DatePicker icon is already
+'   positioned correctly. In that case, moving the shape, resetting properties,
+'   and bringing it to front again is unnecessary work.
+'
+' INPUTS
+'   AnchorKey
+'     Stable anchor-cell key
+'
+'   TargetSheet
+'     Worksheet that should own the icon
+'
+'   IconLeft
+'     Expected icon left position
+'
+'   IconTop
+'     Expected icon top position
+'
+'   IconSize
+'     Expected icon width and height
+'
+' RETURNS
+'   True when the tracked icon is already valid, visible, and correctly placed
+'
+'   False otherwise
+'
+' BEHAVIOR
+'   Checks the cached target key first, then validates the tracked shape, parent
+'   worksheet, visibility, position, and size
+'
+' ERROR POLICY
+'   Safe-default predicate. Returns False and clears stale tracking state on
+'   failure
+'
+' DEPENDENCIES
+'   gDP_GridIconShape
+'   M_GridIcon_ClearLastTarget
+'
+' NOTES
+'   Position comparisons use a small tolerance to avoid point-rounding noise
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const POSITION_TOLERANCE    As Double = 0.05       'Point comparison tolerance
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Return safe default unless all checks pass
+        M_GridIcon_IsSameVisibleTarget = False
+    'Enable safe-default error handling
+        On Error GoTo SafeExit
+
+'------------------------------------------------------------------------------
+' VALIDATE CACHE
+'------------------------------------------------------------------------------
+    'Exit when the requested key is blank
+        If VBA.LenB(AnchorKey) = 0 Then Exit Function
+    'Exit when the target sheet is missing
+        If TargetSheet Is Nothing Then Exit Function
+    'Exit when the tracked icon is missing
+        If gDP_GridIconShape Is Nothing Then Exit Function
+    'Exit when the cached target key differs
+        If VBA.StrComp(mDP_GridIconLastAnchorKey, AnchorKey, vbBinaryCompare) <> 0 Then Exit Function
+    'Exit when the cached left position differs
+        If VBA.Abs(mDP_GridIconLastLeft - IconLeft) > POSITION_TOLERANCE Then Exit Function
+    'Exit when the cached top position differs
+        If VBA.Abs(mDP_GridIconLastTop - IconTop) > POSITION_TOLERANCE Then Exit Function
+
+'------------------------------------------------------------------------------
+' VALIDATE TRACKED SHAPE
+'------------------------------------------------------------------------------
+    'Exit when the tracked icon belongs to another worksheet
+        If Not (gDP_GridIconShape.Parent Is TargetSheet) Then Exit Function
+    'Exit when the tracked icon is hidden
+        If gDP_GridIconShape.Visible <> msoTrue Then Exit Function
+    'Exit when the tracked icon left position differs
+        If VBA.Abs(gDP_GridIconShape.Left - IconLeft) > POSITION_TOLERANCE Then Exit Function
+    'Exit when the tracked icon top position differs
+        If VBA.Abs(gDP_GridIconShape.Top - IconTop) > POSITION_TOLERANCE Then Exit Function
+    'Exit when the tracked icon width differs
+        If VBA.Abs(gDP_GridIconShape.Width - IconSize) > POSITION_TOLERANCE Then Exit Function
+    'Exit when the tracked icon height differs
+        If VBA.Abs(gDP_GridIconShape.Height - IconSize) > POSITION_TOLERANCE Then Exit Function
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+    'Return True because the existing visible icon already matches the target
+        M_GridIcon_IsSameVisibleTarget = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after successful validation
+        Exit Function
+
+'------------------------------------------------------------------------------
+' SAFE EXIT
+'------------------------------------------------------------------------------
+SafeExit:
+    'Suppress stale-shape cleanup errors
+        On Error Resume Next
+    'Clear the tracked shape reference
+        Set gDP_GridIconShape = Nothing
+    'Clear the cached target
+        M_GridIcon_ClearLastTarget
+    'Return safe default
+        M_GridIcon_IsSameVisibleTarget = False
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Function
+
 Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 
 '
@@ -10980,14 +11528,18 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     Const ICON_GAP              As Double = 5#                      'Gap between target cell and icon
     Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point" 'Grid icon alternative text
 
-    Dim AnchorCell              As Excel.Range       'Resolved anchor cell
     Dim TargetSheet             As Excel.Worksheet   'Worksheet receiving the icon
+    Dim AnchorCell              As Excel.Range       'Resolved anchor cell
+    Dim AnchorKey               As String            'Stable same-target cache key
+    
     Dim CandidateShape          As Excel.Shape       'Existing reusable icon candidate
     Dim IconLeft                As Double            'Icon left position
     Dim IconTop                 As Double            'Icon top position
+    Dim HasReusableIcon         As Boolean           'True when an existing shape can be moved
+    
     Dim MergeState              As Variant           'Target merge-state snapshot
     Dim CallbackMacroName       As String            'Workbook-qualified icon callback
-    Dim HasReusableIcon         As Boolean           'True when an existing shape can be moved
+    
     Dim HandlerStep             As String            'Current handler step for diagnostics
     Dim ErrorNumber             As Long              'Captured error number
     Dim ErrorDescription        As String            'Captured error description
@@ -11087,6 +11639,23 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
 
 '------------------------------------------------------------------------------
+' SHORT-CIRCUIT SAME TARGET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Check same-target grid icon"
+    'Build the stable anchor key
+        AnchorKey = M_GridIcon_BuildAnchorKey(AnchorCell)
+    'Exit when the tracked icon is already visible at the requested target
+        If M_GridIcon_IsSameVisibleTarget( _
+            AnchorKey, _
+            TargetSheet, _
+            IconLeft, _
+            IconTop, _
+            ICON_SIZE) Then
+            GoTo CleanExit
+        End If
+        
+'------------------------------------------------------------------------------
 ' RESOLVE CALLBACK MACRO
 '------------------------------------------------------------------------------
     'Track the current handler step
@@ -11183,6 +11752,8 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
             End With
             'Store the reusable icon reference
                 Set gDP_GridIconShape = CandidateShape
+            'Remember the successfully positioned target
+                M_GridIcon_RememberTarget AnchorKey, IconLeft, IconTop
             'Exit after moving the icon
                 GoTo CleanExit
         End If
@@ -11194,7 +11765,11 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Create icon"
     'Create the icon only when no reusable shape exists
         M_GridIcon_Create AnchorCell
-
+    'Remember the target when cold creation succeeded
+        If Not gDP_GridIconShape Is Nothing Then
+            M_GridIcon_RememberTarget AnchorKey, IconLeft, IconTop
+        End If
+        
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
@@ -11224,6 +11799,8 @@ FailSafe:
         On Error Resume Next
     'Clear invalid tracked references
         Set gDP_GridIconShape = Nothing
+    'Clear the cached last target after a grid-icon failure
+        M_GridIcon_ClearLastTarget
     'Fall back to cold-path creation when an anchor cell is available
         If Not AnchorCell Is Nothing Then
             M_GridIcon_Create AnchorCell
@@ -11717,6 +12294,11 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         Set gDP_GridIconShape = NewIconShape
     'Mark the new icon as safely promoted
         StableIconPromoted = True
+    'Remember the successfully promoted icon target
+        M_GridIcon_RememberTarget _
+            M_GridIcon_BuildAnchorKey(AnchorCell), _
+            IconLeft, _
+            IconTop
 
 '------------------------------------------------------------------------------
 ' SHOW FINAL ICON
@@ -12008,6 +12590,8 @@ Public Sub M_GridIcon_Remove()
         End If
     'Clear the tracked shape reference regardless of deletion result
         Set gDP_GridIconShape = Nothing
+    'Clear the cached last target
+        M_GridIcon_ClearLastTarget
 
 '------------------------------------------------------------------------------
 ' RESOLVE ACTIVE WORKSHEET
@@ -13323,6 +13907,8 @@ Public Sub M_GridIcon_PurgeAll()
         End If
     'Clear the tracked shape reference
         Set gDP_GridIconShape = Nothing
+    'Clear the cached last target
+        M_GridIcon_ClearLastTarget
 
 '------------------------------------------------------------------------------
 ' PURGE OPEN WORKBOOKS
@@ -13588,6 +14174,194 @@ FailSafe:
 
 End Function
 
+Private Function M_FormBridge_TryReuseLoadedPickerFromActiveCell( _
+    ByVal OffsetXPx As Long, _
+    ByVal OffsetYPx As Long, _
+    ByVal CenterOnMouse As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'               FORM BRIDGE TRY REUSE LOADED PICKER FROM ACTIVE CELL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Attempts to reuse an already-visible DatePicker form instead of unloading and
+'   rebuilding it
+'
+' WHY THIS EXISTS
+'   DP_Show currently unloads and rebuilds the UserForm every time it is called.
+'   That is robust, but slower than necessary when the picker is already visible.
+'
+'   Reusing the visible form avoids rebuilding runtime labels, hooks, panels,
+'   fonts, settings controls, and day-grid infrastructure.
+'
+' INPUTS
+'   OffsetXPx
+'     Horizontal mouse-position offset in pixels
+'
+'   OffsetYPx
+'     Vertical mouse-position offset in pixels
+'
+'   CenterOnMouse
+'     True to center the form on the mouse position before applying offsets
+'
+' RETURNS
+'   True when an already-visible picker was refreshed and reused
+'
+'   False when no reusable visible picker exists or when reuse failed
+'
+' BEHAVIOR
+'   Resolves an already-loaded DatePicker form without creating a default
+'   instance, exits when no visible picker exists, refreshes the visible picker
+'   from the current ActiveCell when available, reapplies clock mode, repositions
+'   the form near the mouse, and returns True
+'
+' ERROR POLICY
+'   Safe fallback helper
+'
+'   Does not raise outward. If reuse fails, returns False so DP_Show can continue
+'   through the existing unload / load path
+'
+' DEPENDENCIES
+'   DP_FORM_NAME
+'   M_FormBridge_GetLoadedForm
+'   M_FormBridge_RefreshFromCell
+'   M_Timer_ApplyClockMode
+'   M_Window_MoveFormToMouse
+'
+' NOTES
+'   This helper deliberately avoids direct UF_DatePicker references
+'
+'   The existing DP_Show cold-load path remains the fallback
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_FormBridge_TryReuseLoadedPickerFromActiveCell"
+
+    Dim LoadedForm          As Object           'Already-loaded DatePicker form instance
+    Dim ActiveCellRef       As Excel.Range      'Current ActiveCell reference
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+    Dim ErrorNumber         As Long             'Captured runtime error number
+    Dim ErrorDescription    As String           'Captured runtime error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set safe fallback result
+        M_FormBridge_TryReuseLoadedPickerFromActiveCell = False
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' RESOLVE LOADED FORM
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve loaded DatePicker form"
+    'Resolve the already-loaded DatePicker form without creating a default instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    'Exit when no DatePicker form is currently loaded
+        If LoadedForm Is Nothing Then GoTo CleanExit
+    'Exit when the DatePicker form is loaded but not visible
+        If Not VBA.CBool(LoadedForm.Visible) Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' RESOLVE ACTIVE CELL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve ActiveCell"
+    'Suppress ActiveCell resolution errors
+        On Error Resume Next
+    'Resolve the current ActiveCell
+        Set ActiveCellRef = Excel.Application.ActiveCell
+    'Clear any suppressed ActiveCell error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REFRESH VISIBLE FORM
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refresh visible picker from ActiveCell"
+    'Refresh the visible picker from the current ActiveCell when available
+        If Not ActiveCellRef Is Nothing Then
+            M_FormBridge_RefreshFromCell ActiveCellRef
+        End If
+
+'------------------------------------------------------------------------------
+' REAPPLY CLOCK MODE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply clock mode"
+    'Reapply clock mode in case timer state was stale or reset
+        M_Timer_ApplyClockMode
+
+'------------------------------------------------------------------------------
+' REPOSITION FORM
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Move visible picker to mouse"
+    'Suppress best-effort positioning errors
+        On Error Resume Next
+    'Move the visible picker close to the current mouse position
+        M_Window_MoveFormToMouse _
+            LoadedForm, _
+            OffsetXPx, _
+            OffsetYPx, _
+            CenterOnMouse
+    'Clear any suppressed positioning error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RETURN SUCCESS
+'------------------------------------------------------------------------------
+    'Return success because the existing visible picker was reused
+        M_FormBridge_TryReuseLoadedPickerFromActiveCell = True
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Suppress cleanup errors
+        On Error Resume Next
+    'Release the ActiveCell reference
+        Set ActiveCellRef = Nothing
+    'Release the loaded form reference
+        Set LoadedForm = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+    'Exit the function
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original error number
+        ErrorNumber = Err.Number
+    'Capture the original error description
+        ErrorDescription = Err.Description
+    'Return False so DP_Show can use the cold-load fallback path
+        M_FormBridge_TryReuseLoadedPickerFromActiveCell = False
+    'Write diagnostics without interrupting DP_Show
+        Debug.Print PROC_NAME & _
+            " | Step=" & HandlerStep & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Continue through cleanup
+        Resume CleanExit
+
+End Function
 Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 
 '
@@ -14284,12 +15058,13 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
 '   Returns a workbook-qualified macro name suitable for Excel callbacks
 '
 ' WHY THIS EXISTS
-'   Shape.OnAction, CommandBarButton.OnAction, Application.OnTime and
-'   Application.OnKey callbacks should resolve back to the workbook that contains
-'   this module
+'   Shape.OnAction, CommandBarButton.OnAction, Application.OnTime, Application.
+'   OnKey, and Ribbon-related callback paths should resolve back to the workbook
+'   that contains this module
 '
-'   Qualifying the callback with ThisWorkbook.Name avoids accidental resolution
-'   against another active workbook that may contain a same-named procedure
+'   This helper also caches resolved callback names because it is used by repeated
+'   UI integration paths such as grid-icon movement, timer scheduling, keyboard
+'   shortcut registration, and context-menu creation
 '
 ' INPUTS
 '   ProcedureName
@@ -14301,59 +15076,195 @@ Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As Strin
 ' BEHAVIOR
 '   Trims the supplied procedure name
 '   Rejects a blank procedure name
-'   Quotes ThisWorkbook.Name for Excel callback compatibility
-'   Escapes apostrophes in ThisWorkbook.Name by doubling them
-'   Appends the trimmed procedure name after the workbook qualifier
+'   Initializes a late-bound dictionary cache when needed
+'   Invalidates the cache automatically when ThisWorkbook.Name changes
+'   Returns a cached qualified name when available
+'   Otherwise builds, stores, and returns the qualified macro name
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error when ProcedureName is blank
-'   Does not suppress errors
+'   Raises a descriptive runtime error when ProcedureName is blank or when the
+'   callback name cannot be resolved
 '
 ' DEPENDENCIES
 '   ThisWorkbook
+'   Scripting.Dictionary through late binding
 '   VBA.Replace
 '   VBA.Trim$
 '
 ' NOTES
-'   The routine intentionally returns a workbook-level macro reference rather
-'   than a module-qualified reference for broad callback compatibility
-'
 '   Expected output format:
 '     'WorkbookName.xlsm'!ProcedureName
 '
+'   The workbook name is escaped by doubling apostrophes
+'
+'   The cache is workbook-name aware, so Save As / rename scenarios are handled
+'   without requiring a manual reset
+'
+'   The routine intentionally remains private because callers should not depend
+'   on the cache implementation
+'
 ' UPDATED
-'   2026-05-06
+'   2026-05-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "M_GetQualifiedMacroName"
+    Const PROC_NAME                 As String = "M_GetQualifiedMacroName"
 
-    Dim NormalizedProcedureName As String
-    
+    Dim NormalizedProcedureName     As String       'Trimmed callback procedure name
+    Dim CurrentWorkbookName         As String       'Current host workbook name
+    Dim QualifiedMacroName          As String       'Resolved workbook-qualified macro name
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Normalize the supplied procedure name once
-        NormalizedProcedureName = Trim$(ProcedureName)
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' VALIDATE INPUTS
+' NORMALIZE INPUT
 '------------------------------------------------------------------------------
+    'Normalize the supplied procedure name once
+        NormalizedProcedureName = VBA.Trim$(ProcedureName)
     'Reject an empty procedure name
-        If Len(NormalizedProcedureName) = 0 Then
-            Err.Raise vbObjectError + 513, PROC_NAME, "ProcedureName cannot be empty."
+        If VBA.Len(NormalizedProcedureName) = 0 Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "ProcedureName cannot be empty"
         End If
+
+'------------------------------------------------------------------------------
+' RESOLVE WORKBOOK NAME
+'------------------------------------------------------------------------------
+    'Read the current host workbook name
+        CurrentWorkbookName = VBA.CStr(ThisWorkbook.Name)
+    'Reject an empty workbook name
+        If VBA.Len(CurrentWorkbookName) = 0 Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "ThisWorkbook.Name cannot be empty"
+        End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE OR REFRESH CACHE
+'------------------------------------------------------------------------------
+    'Create the cache when it does not exist
+        If mQualifiedMacroNameCache Is Nothing Then
+            Set mQualifiedMacroNameCache = VBA.CreateObject("Scripting.Dictionary")
+            mQualifiedMacroNameCache.CompareMode = vbTextCompare
+            mQualifiedMacroWorkbookName = CurrentWorkbookName
+        End If
+    'Recreate the cache when the workbook name changed
+        If VBA.StrComp(mQualifiedMacroWorkbookName, CurrentWorkbookName, vbBinaryCompare) <> 0 Then
+            Set mQualifiedMacroNameCache = VBA.CreateObject("Scripting.Dictionary")
+            mQualifiedMacroNameCache.CompareMode = vbTextCompare
+            mQualifiedMacroWorkbookName = CurrentWorkbookName
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN CACHED VALUE
+'------------------------------------------------------------------------------
+    'Return the cached qualified macro name when available
+        If mQualifiedMacroNameCache.Exists(NormalizedProcedureName) Then
+            M_GetQualifiedMacroName = VBA.CStr(mQualifiedMacroNameCache(NormalizedProcedureName))
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' BUILD QUALIFIED NAME
+'------------------------------------------------------------------------------
+    'Build the workbook-qualified macro name
+        QualifiedMacroName = _
+            "'" & VBA.Replace(CurrentWorkbookName, "'", "''") & "'!" & NormalizedProcedureName
+
+'------------------------------------------------------------------------------
+' CACHE QUALIFIED NAME
+'------------------------------------------------------------------------------
+    'Store the resolved callback name for reuse
+        mQualifiedMacroNameCache.Add NormalizedProcedureName, QualifiedMacroName
 
 '------------------------------------------------------------------------------
 ' RETURN QUALIFIED NAME
 '------------------------------------------------------------------------------
-    'Return the workbook-qualified macro name
-        M_GetQualifiedMacroName = _
-            "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!" & NormalizedProcedureName
+    'Return the resolved callback name
+        M_GetQualifiedMacroName = QualifiedMacroName
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Qualified macro-name resolution failed: " & Err.Description
 
 End Function
+
+Private Sub M_GetQualifiedMacroName_ClearCache()
+
+'
+'------------------------------------------------------------------------------
+'                       CLEAR QUALIFIED MACRO NAME CACHE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears cached workbook-qualified macro names
+'
+' WHY THIS EXISTS
+'   Callback names are session-level helper values. They should be releasable
+'   during DatePicker teardown, runtime repair, or workbook lifecycle cleanup
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Releases the late-bound dictionary cache and clears the workbook-name marker
+'
+' ERROR POLICY
+'   Best-effort cleanup
+'
+'   Suppresses errors because cache cleanup should never interrupt workbook
+'   close, DatePicker stop, or runtime repair logic
+'
+' DEPENDENCIES
+'   mQualifiedMacroNameCache
+'   mQualifiedMacroWorkbookName
+'
+' NOTES
+'   The cache also self-invalidates when ThisWorkbook.Name changes, so this
+'   helper is cleanup-oriented rather than required for correctness
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress cleanup errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' CLEAR CACHE
+'------------------------------------------------------------------------------
+    'Release the qualified macro-name cache
+        Set mQualifiedMacroNameCache = Nothing
+    'Clear the cached workbook-name marker
+        mQualifiedMacroWorkbookName = vbNullString
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed cleanup error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
 
 '
 '------------------------------------------------------------------------------
