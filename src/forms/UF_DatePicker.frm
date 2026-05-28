@@ -471,7 +471,6 @@ Option Explicit
     Private mSettingsPanelHooks                         As Collection                   'Runtime settings-panel event hooks
 
     '-----------------------------HOVER STATE----------------------------------
-    Private mHoveredDayLabelName                        As String                       'Currently hovered day label name
     Private mHoveredDayCellIndex                        As Long                         'Currently hovered day-cell index
     Private mHoveredHeaderLabelName                     As String                       'Currently hovered header label name
     Private mHoveredPickerItemIndex                     As Long                         'Currently hovered picker item index
@@ -559,7 +558,6 @@ Private Sub UserForm_Initialize()
 '   UF_WeekdayRow_Build
 '   UF_DayGrid_Build
 '   UF_PickerPanel_Build
-'   UF_SettingsPanel_Build
 '   UF_Footer_Build
 '   UF_DayGrid_Populate
 '   M_Platform_ShouldUseWinAPI
@@ -621,8 +619,6 @@ Private Sub UserForm_Initialize()
         UF_DayGrid_Build
     'Create the hidden month/year picker panel
         UF_PickerPanel_Build
-    'Create the hidden settings panel
-        UF_SettingsPanel_Build
     'Create the footer banner and its labels
         UF_Footer_Build
 
@@ -1266,8 +1262,6 @@ Private Sub UserForm_Terminate()
 '------------------------------------------------------------------------------
 ' CLEAR HOVER STATE
 '------------------------------------------------------------------------------
-    'Clear the current day-label hover state
-        mHoveredDayLabelName = vbNullString
     'Clear the current day-cell hover index
         mHoveredDayCellIndex = 0
     'Clear the current header-label hover state
@@ -4734,8 +4728,6 @@ Private Sub UF_DayGrid_Build()
 '------------------------------------------------------------------------------
     'Create or reset the day-label hook collection
         Set mDayLabelHooks = New Collection
-    'Clear the current day-label hover state
-        mHoveredDayLabelName = vbNullString
     'Clear the current day-cell hover index
         mHoveredDayCellIndex = 0
     'Build the day-cell label-name to index map once
@@ -5216,7 +5208,6 @@ Public Sub UF_DayGrid_Populate( _
 ' DEPENDENCIES
 '   UF_DayGrid_EnsureCache
 '   UF_DayGrid_EnsureFonts
-'   UF_DayGrid_ClearDateCache
 '   M_Settings_IsValidFirstDayOfWeek
 '   M_Caption_GetMonth
 '   UF_DayCell_ApplyDateStateByIndex
@@ -5411,8 +5402,6 @@ Public Sub UF_DayGrid_Populate( _
 '------------------------------------------------------------------------------
 ' RESET HOVER STATE
 '------------------------------------------------------------------------------
-    'Clear any previous day-label hover state after repopulating the grid
-        mHoveredDayLabelName = vbNullString
     'Clear any previous day-cell hover index after repopulating the grid
         mHoveredDayCellIndex = 0
 
@@ -5431,85 +5420,7 @@ ErrorHandler:
 
 End Sub
 
-Private Sub UF_DayGrid_ClearDateCache()
 
-'
-'------------------------------------------------------------------------------
-'                         CLEAR DAY GRID DATE CACHE
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Clears the cached date state for all visible DatePicker day cells
-'
-' WHY THIS EXISTS
-'   The DatePicker stores the date represented by each visible day cell so hover,
-'   selection, keyboard refresh, and targeted visual updates do not need to read
-'   or parse the label Tag property repeatedly
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Clears mDayCellDates and mDayCellHasDate for all day-cell indexes
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the day-cell date cache cannot be
-'   cleared
-'
-' DEPENDENCIES
-'   mDayCellDates
-'   mDayCellHasDate
-'
-' NOTES
-'   This routine clears only cached date state, not cached label references
-'
-'   The explicit loop is intentional. It preserves array dimensions and is safe
-'   for both fixed-size arrays and already-dimensioned dynamic arrays
-'
-' UPDATED
-'   2026-05-02
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "UF_DatePicker.UF_DayGrid_ClearDateCache"
-
-    Dim Index           As Long         'Day-cell index
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' CLEAR CACHE
-'------------------------------------------------------------------------------
-    'Loop through all cached day-cell date slots
-        For Index = 1 To DP_DAY_LABEL_COUNT
-            'Clear the cached date
-                mDayCellDates(Index) = 0
-            'Mark the cached date as unavailable
-                mDayCellHasDate(Index) = False
-        Next Index
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Day grid date cache clearing failed: " & Err.Description
-
-End Sub
 
 Private Sub UF_DayGrid_ClearCache()
 
@@ -5545,8 +5456,7 @@ Private Sub UF_DayGrid_ClearCache()
 ' NOTES
 '   This routine does not delete controls
 '
-'   This routine does not clear cached day-cell date state. Date-state cleanup is
-'   handled separately by UF_DayGrid_ClearDateCache
+'   This routine does not clear cached day-cell date state.
 '
 '   The explicit loop is intentional. It preserves array dimensions and is safe
 '   for both fixed-size arrays and already-dimensioned dynamic arrays
@@ -6069,8 +5979,6 @@ Public Sub UF_DayCell_HoverApply(ByVal LabelName As String)
                 Lbl_Text.ForeColor = DP_DAY_SELECTED_FORE_COLOR
             'Store the current hovered day-cell index
                 mHoveredDayCellIndex = DayIndex
-            'Store the current hovered day-label name for compatibility
-                mHoveredDayLabelName = "Lbl_Day" & VBA.CStr(DayIndex)
             'Exit after applying selected hover state
                 Exit Sub
         End If
@@ -6098,8 +6006,6 @@ Public Sub UF_DayCell_HoverApply(ByVal LabelName As String)
 '------------------------------------------------------------------------------
     'Store the current hovered day-cell index
         mHoveredDayCellIndex = DayIndex
-    'Store the current hovered day-label name for compatibility
-        mHoveredDayLabelName = "Lbl_Day" & VBA.CStr(DayIndex)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6520,8 +6426,6 @@ Private Sub UF_DayCell_HoverReset()
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
 Clean_Exit:
-    'Clear the current hovered day-label name
-        mHoveredDayLabelName = vbNullString
     'Clear the current hovered day-cell index
         mHoveredDayCellIndex = 0
     'Exit the procedure
@@ -6533,8 +6437,6 @@ Clean_Exit:
 FailSafe:
     'Suppress secondary cleanup errors
         On Error Resume Next
-    'Clear the current hovered day-label name
-        mHoveredDayLabelName = vbNullString
     'Clear the current hovered day-cell index
         mHoveredDayCellIndex = 0
     'Restore normal error handling
@@ -13181,8 +13083,6 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
         If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover after selection
         If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
-    'Clear the legacy day-label hover tracker defensively
-        mHoveredDayLabelName = vbNullString
         
 '------------------------------------------------------------------------------
 ' REFRESH ONLY AFFECTED DAY CELLS
@@ -13211,7 +13111,6 @@ FailSafe:
         On Error Resume Next
 
     'Clear transient hover trackers
-        mHoveredDayLabelName = vbNullString
         mHoveredDayCellIndex = 0
         mHoveredHeaderLabelName = vbNullString
         mHoveredPickerItemIndex = 0
@@ -13423,8 +13322,6 @@ Public Sub UF_DP_RefreshFromExternalSelection( _
     'Track the current handler step
         HandlerStep = "Clear stored hover trackers"
 
-    'Clear the legacy day-label hover tracker defensively
-        mHoveredDayLabelName = vbNullString
     'Clear the day-cell hover tracker defensively
         mHoveredDayCellIndex = 0
     'Clear the header hover tracker defensively
