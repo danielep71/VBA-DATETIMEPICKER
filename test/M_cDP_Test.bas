@@ -1,4 +1,5 @@
 Attribute VB_Name = "M_cDP_Test"
+
 Option Explicit
 
 '
@@ -59,8 +60,19 @@ Option Explicit
 '   TST_DP_HolidayCallbackError must remain Public so Application.Run can
 '   resolve them as holiday policy callbacks
 '
+'   Production routines that end with On Error GoTo 0 (M_GridIcon_ShowOrMove,
+'   M_GridIcon_Remove, M_GridIcon_PurgeAll, M_GridIcon_EnsureEmbeddedIconFile,
+'   M_GridIcon_PreCreateHidden, DP_Close, DP_Stop, Handle_SelectionChange, and
+'   the access-path setters SetShowRightClick and SetShowGridIcon) kill the
+'   suite SuiteFail handler on return. Every call to those routines is
+'   immediately followed by On Error GoTo SuiteFail to re-arm the handler.
+'
+'   DP_RepairRuntime and M_Picker_SelectDate use On Error GoTo ErrorHandler and
+'   raise outward on failure; they do not reset the caller SuiteFail handler and
+'   therefore do not need re-arming.
+'
 ' UPDATED
-'   2026-05-14
+'   2026-05-26
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -536,6 +548,14 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "GridIcon"
     'Run manager public API and target gating checks
         TST_DP_RunSuiteSafe "Manager"
+    'Run DP_Start and DP_Stop lifecycle round-trip checks
+        TST_DP_RunSuiteSafe "LifecyclePair"
+    'Run DP_RepairRuntime behavior checks
+        TST_DP_RunSuiteSafe "RepairRuntime"
+    'Run M_GridIcon_PreCreateHidden startup optimization checks
+        TST_DP_RunSuiteSafe "PreCreateHidden"
+    'Run M_Picker_SelectDate write-back and state-management checks
+        TST_DP_RunSuiteSafe "SelectDate"
     'Run optional UF_DatePicker open / close smoke check when requested
         If IncludeUISmoke Then
             TST_DP_RunSuiteSafe "UISmoke"
@@ -771,6 +791,18 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "MANAGER"
                 TST_DP_RunSuite_Manager
+
+            Case "LIFECYCLEPAIR"
+                TST_DP_RunSuite_LifecyclePair
+
+            Case "REPAIRRUNTIME"
+                TST_DP_RunSuite_RepairRuntime
+
+            Case "PRECREATEHIDDEN"
+                TST_DP_RunSuite_PreCreateHidden
+            
+            Case "SELECTDATE"
+                TST_DP_RunSuite_SelectDate
 
             Case "UISMOKE"
                 TST_DP_RunSuite_UISmoke
@@ -1771,7 +1803,7 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Enable suite-level error handling
         On Error GoTo SuiteFail
     'Activate the scratch sheet for selection-based tests
-        mTST_DP_ScratchSheet.Activate
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
 '------------------------------------------------------------------------------
 ' DIRECT CONTIGUOUS RANGE POPULATION
@@ -1963,7 +1995,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Enable suite-level error handling
         On Error GoTo SuiteFail
     'Activate the scratch sheet
-        mTST_DP_ScratchSheet.Activate
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
     'Enable the grid icon feature for this suite
         gDP_ShowGridIcon = True
     'Purge any stale grid icons before the suite
@@ -2004,7 +2036,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Note: Visible=msoTrue is set inside M_GridIcon_Create under On Error Resume Next
     'while ScreenUpdating=False; on some Excel builds this silently fails and the shape
     'stays hidden until the next screen repaint. The tracked reference being set is the
-    'correct invariant to assert here — visible state is a rendering detail.
+    'correct invariant to assert here   visible state is a rendering detail.
         TST_DP_AssertTrue "Grid icon tracked reference is set after creation", _
             Not (gDP_GridIconShape Is Nothing)
     'Assert only one named grid icon exists in the host workbook
@@ -2159,7 +2191,7 @@ Private Sub TST_DP_RunSuite_Manager()
     'Create a fresh manager instance for public API checks
         Set Manager = New cDatePickerManager
     'Activate the scratch sheet
-        mTST_DP_ScratchSheet.Activate
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
     'Purge stale grid icons before the manager tests
     'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
@@ -2295,6 +2327,739 @@ SuiteFail:
 
 End Sub
 
+
+Private Sub TST_DP_RunSuite_LifecyclePair()
+
+'
+'==============================================================================
+'                           LIFECYCLE PAIR SUITE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates the DP_Start and DP_Stop lifecycle round-trip
+'
+' WHY THIS EXISTS
+'   DP_Stop was missing in earlier versions. This suite verifies that the
+'   start-stop cycle leaves a fully clean teardown state and that a second
+'   DP_Start after DP_Stop produces a live, working manager.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Calls DP_Stop and verifies teardown state, then calls DP_Start and verifies
+'   the manager is recreated with EnableEvents True, then calls DP_Stop again
+'   and verifies a clean second teardown.
+'
+' ERROR POLICY
+'   Records suite-level failures and continues.
+'   Attempts best-effort manager restoration after a failure so subsequent
+'   suites are not left without a working manager.
+'
+' DEPENDENCIES
+'   DP_Start
+'   DP_Stop
+'   M_Picker_EnsureManager
+'   gDP_Manager
+'   M_GridIcon_PurgeAll
+'   TST_DP_CountNamedShapes
+'
+' NOTES
+'   DP_Stop uses On Error Resume Next throughout and ends with On Error GoTo 0,
+'   which kills the SuiteFail handler on return. It is re-armed immediately
+'   after each DP_Stop call.
+'
+'   DP_Start uses On Error GoTo ErrorHandler and raises outward on failure.
+'   It does not reset the caller SuiteFail handler when it succeeds.
+'
+'   M_Picker_EnsureManager uses On Error GoTo ErrorHandler (raises outward)
+'   and does not reset the caller SuiteFail handler.
+'
+' UPDATED
+'   2026-05-26
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "LifecyclePair"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' FIRST STOP - TEARDOWN STATE
+'------------------------------------------------------------------------------
+    'Call DP_Stop to tear down the DatePicker runtime
+    'DP_Stop uses OERN and ends with On Error GoTo 0; re-arm immediately
+        DP_Stop
+        On Error GoTo SuiteFail
+
+    'Assert the global manager reference is released after DP_Stop
+        TST_DP_AssertTrue "Manager is Nothing after DP_Stop", _
+            (gDP_Manager Is Nothing)
+
+    'Assert no grid icons remain in the host workbook after DP_Stop
+        TST_DP_AssertEqualsLong "No grid icons remain after DP_Stop", _
+            0, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+'------------------------------------------------------------------------------
+' START AFTER STOP - RECOVERY
+'------------------------------------------------------------------------------
+    'Call DP_Start to recreate the DatePicker runtime
+    'DP_Start internally calls Handle_SelectionChange which ends with
+    'On Error GoTo 0, killing the SuiteFail handler. Re-arm immediately.
+        DP_Start
+        On Error GoTo SuiteFail
+
+    'Assert the manager is recreated after DP_Start
+        TST_DP_AssertFalse "Manager is instantiated after DP_Start", _
+            (gDP_Manager Is Nothing)
+
+    'Assert Application.EnableEvents is True after DP_Start
+        TST_DP_AssertTrue "Application.EnableEvents is True after DP_Start", _
+            Excel.Application.EnableEvents
+
+    'Assert the manager is not busy after DP_Start
+        If Not gDP_Manager Is Nothing Then
+            TST_DP_AssertFalse "Manager is not busy after DP_Start", _
+                gDP_Manager.Is_Busy
+        End If
+
+'------------------------------------------------------------------------------
+' SECOND STOP - IDEMPOTENT TEARDOWN
+'------------------------------------------------------------------------------
+    'Call DP_Stop a second time to verify idempotent behavior
+    'DP_Stop uses OERN and ends with On Error GoTo 0; re-arm immediately
+        DP_Stop
+        On Error GoTo SuiteFail
+
+    'Assert the manager is released again after the second DP_Stop
+        TST_DP_AssertTrue "Manager is Nothing after second DP_Stop", _
+            (gDP_Manager Is Nothing)
+
+    'Assert no grid icons remain after the second DP_Stop
+        TST_DP_AssertEqualsLong "No grid icons remain after second DP_Stop", _
+            0, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+    'Record that DP_Stop completed without raising after a second call
+        TST_DP_RecordPass "DP_Stop is idempotent", vbNullString
+
+'------------------------------------------------------------------------------
+' RESTORE MANAGER FOR SUBSEQUENT SUITES
+'------------------------------------------------------------------------------
+    'Recreate the manager so later suites have working infrastructure
+    'M_Picker_EnsureManager raises outward on failure; SuiteFail handler survives
+        M_Picker_EnsureManager
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "LifecyclePair suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Best-effort manager restoration after failure
+        On Error Resume Next
+        If gDP_Manager Is Nothing Then M_Picker_EnsureManager
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_RunSuite_RepairRuntime()
+
+'
+'==============================================================================
+'                           REPAIR RUNTIME SUITE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates DP_RepairRuntime behavior after disabled Excel events and after
+'   a simulated stale runtime state
+'
+' WHY THIS EXISTS
+'   DP_RepairRuntime addresses the most common real-world DatePicker failure
+'   mode: Application.EnableEvents = False left behind by an interrupted or
+'   poorly-written macro, which silently kills all manager event routing.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Disables Application.EnableEvents, verifies the disabled state, calls
+'   DP_RepairRuntime, and asserts that events are re-enabled, the manager is
+'   alive and not busy, and context-menu and keyboard-shortcut integration is
+'   synchronized.
+'
+'   Calls DP_RepairRuntime a second time against a healthy runtime to verify
+'   that the procedure is safe to call when nothing is actually broken.
+'
+' ERROR POLICY
+'   Records suite-level failures and continues.
+'   Always restores Application.EnableEvents in the SuiteFail handler so a
+'   failed repair call cannot leave Excel events disabled.
+'
+' DEPENDENCIES
+'   DP_RepairRuntime
+'   M_Picker_EnsureManager
+'   gDP_Manager
+'
+' NOTES
+'   DP_RepairRuntime uses On Error GoTo ErrorHandler and raises outward on
+'   its own failure path. However, it calls Handle_SelectionChange internally,
+'   and Handle_SelectionChange ends with On Error GoTo 0 in its CleanExit.
+'   This kills the SuiteFail handler inside DP_RepairRuntime's call stack.
+'   Re-arm On Error GoTo SuiteFail after every DP_RepairRuntime call.
+'
+'   The RepairRuntime suite re-enables Application.EnableEvents = True.
+'   Subsequent suites that call mTST_DP_ScratchSheet.Activate must
+'   temporarily disable events before the Activate call to prevent the
+'   live manager from firing SheetActivate or SelectionChange during the
+'   sheet switch, which would reset the SuiteFail handler unexpectedly.
+'
+'   The suite deliberately disables EnableEvents before calling DP_RepairRuntime.
+'   The harness has already set EnableEvents = False for its own operation.
+'   DP_RepairRuntime is expected to restore it to True.
+'   The harness's own PrepareApplicationForRun state will be restored by the
+'   cleanup path at the end of the run.
+'
+' UPDATED
+'   2026-05-26
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "RepairRuntime"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' SIMULATE DISABLED EVENTS
+'------------------------------------------------------------------------------
+    'Disable Excel events to simulate the failure condition DP_RepairRuntime
+    'is designed to recover from
+        Excel.Application.EnableEvents = False
+
+    'Assert EnableEvents is False before the repair call
+        TST_DP_AssertFalse "EnableEvents is False before repair", _
+            Excel.Application.EnableEvents
+
+'------------------------------------------------------------------------------
+' CALL DP_REPAIRRUNTIME
+'------------------------------------------------------------------------------
+    'Call DP_RepairRuntime to repair the DatePicker runtime
+    'DP_RepairRuntime raises outward on its own failure path.
+    'However it calls Handle_SelectionChange internally, which ends with
+    'On Error GoTo 0 in its CleanExit, killing the SuiteFail handler.
+    'Re-arm the handler after DP_RepairRuntime returns.
+        DP_RepairRuntime
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' ASSERT REPAIRED STATE
+'------------------------------------------------------------------------------
+    'Assert EnableEvents was re-enabled by DP_RepairRuntime
+        TST_DP_AssertTrue "EnableEvents is True after DP_RepairRuntime", _
+            Excel.Application.EnableEvents
+
+    'Assert the manager is alive after repair
+        TST_DP_AssertFalse "Manager is instantiated after DP_RepairRuntime", _
+            (gDP_Manager Is Nothing)
+
+    'Assert the manager is not busy after repair
+        If Not gDP_Manager Is Nothing Then
+            TST_DP_AssertFalse "Manager is not busy after DP_RepairRuntime", _
+                gDP_Manager.Is_Busy
+        End If
+
+'------------------------------------------------------------------------------
+' IDEMPOTENT CALL - HEALTHY RUNTIME
+'------------------------------------------------------------------------------
+    'Call DP_RepairRuntime again against an already healthy runtime
+    'Handle_SelectionChange inside DP_RepairRuntime ends with On Error GoTo 0;
+    're-arm the handler after the call.
+        DP_RepairRuntime
+        On Error GoTo SuiteFail
+
+    'Assert EnableEvents is still True after the second repair call
+        TST_DP_AssertTrue "EnableEvents is True after second DP_RepairRuntime", _
+            Excel.Application.EnableEvents
+
+    'Assert the manager is still alive after the second repair call
+        TST_DP_AssertFalse "Manager is still instantiated after second DP_RepairRuntime", _
+            (gDP_Manager Is Nothing)
+
+    'Record that DP_RepairRuntime completed without raising on a healthy runtime
+        TST_DP_RecordPass "DP_RepairRuntime is safe when runtime is already healthy", _
+            vbNullString
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "RepairRuntime suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Always restore EnableEvents in case the repair call itself failed
+        On Error Resume Next
+        Excel.Application.EnableEvents = True
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_RunSuite_PreCreateHidden()
+
+'
+'==============================================================================
+'                           PRE-CREATE HIDDEN SUITE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates M_GridIcon_PreCreateHidden startup optimization behavior
+'
+' WHY THIS EXISTS
+'   M_GridIcon_PreCreateHidden pre-creates the grid icon during DP_Start and
+'   hides it so the high-frequency SelectionChange path can move and show an
+'   already-created shape instead of creating one on demand. If pre-creation
+'   fails, leaves the shape visible, or creates duplicate shapes, the
+'   SelectionChange path degrades to on-demand creation, losing the
+'   startup-latency benefit.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Enables the grid icon feature via setter, purges stale icons, calls
+'   M_GridIcon_PreCreateHidden, and asserts that:
+'     - the tracked reference is set after pre-creation
+'     - the shape exists on the scratch sheet with the expected name
+'     - the shape is hidden (Visible = msoFalse) immediately after pre-creation
+'     - calling M_GridIcon_PreCreateHidden again is safe and does not create a
+'       duplicate shape
+'
+'   Then disables the grid icon feature via setter, purges again, calls
+'   M_GridIcon_PreCreateHidden, and asserts that no shape was created.
+'
+' ERROR POLICY
+'   Records suite-level failures and continues.
+'
+' DEPENDENCIES
+'   M_GridIcon_PreCreateHidden
+'   M_GridIcon_PurgeAll
+'   M_Settings_SetShowGridIcon
+'   gDP_GridIconShape
+'   DP_GRID_ICON_NAME
+'   TST_DP_ShapeExists
+'   TST_DP_CountNamedShapes
+'
+' NOTES
+'   M_GridIcon_PreCreateHidden uses On Error Resume Next throughout and ends
+'   with On Error GoTo 0, which kills the SuiteFail handler on return.
+'   It is re-armed immediately after every call.
+'
+'   M_GridIcon_PurgeAll also ends with On Error GoTo 0; re-armed after each call.
+'
+'   The setter M_Settings_SetShowGridIcon internally calls M_GridIcon_Remove
+'   and M_KeyboardShortcut_Update, both of which end with On Error GoTo 0.
+'   It is re-armed after each setter call.
+'
+'   ScreenUpdating is set True before pre-creation because M_GridIcon_Create
+'   captures PreviousScreenUpdating. With ScreenUpdating = False the final
+'   shape show step may silently fail on some Excel builds. The tracked
+'   reference being set is the correct invariant to assert; Visible state is
+'   a rendering detail that this suite does not assert.
+'
+' UPDATED
+'   2026-05-26
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "PreCreateHidden"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Disable Excel events because the live manager may still be active after
+    'RepairRuntime and should not interfere with this controlled grid-icon test
+        Excel.Application.EnableEvents = False
+    'Reject a missing scratch worksheet before using it as the explicit anchor
+        If mTST_DP_ScratchSheet Is Nothing Then
+            Err.Raise vbObjectError + 513, _
+                "TST_DP_RunSuite_PreCreateHidden", _
+                "Scratch worksheet is not available"
+        End If
+    'Ensure the scratch worksheet is visible without activating it
+        If mTST_DP_ScratchSheet.Visible <> xlSheetVisible Then
+            mTST_DP_ScratchSheet.Visible = xlSheetVisible
+        End If
+
+'------------------------------------------------------------------------------
+' PREPARE FEATURE STATE
+'------------------------------------------------------------------------------
+    'Enable the grid icon feature via setter
+    'M_Settings_SetShowGridIcon calls M_GridIcon_Remove and
+    'M_KeyboardShortcut_Update which both end with On Error GoTo 0; re-arm
+        M_Settings_SetShowGridIcon True
+        On Error GoTo SuiteFail
+
+    'Purge any stale grid icons before the suite
+    'M_GridIcon_PurgeAll ends with On Error GoTo 0; re-arm immediately
+        M_GridIcon_PurgeAll
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' PRE-CREATE ON ELIGIBLE CELL
+'------------------------------------------------------------------------------
+    'Restore ScreenUpdating so M_GridIcon_Create captures True as its
+    'PreviousScreenUpdating and restores it on exit
+        Excel.Application.ScreenUpdating = True
+    'Pre-create the grid icon using the scratch-sheet anchor cell
+    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+    'Suppress ScreenUpdating for remaining cleanup steps
+        Excel.Application.ScreenUpdating = False
+    'Allow the drawing layer to settle after pre-creation
+        DoEvents
+
+    'Assert the tracked reference is set after pre-creation
+        TST_DP_AssertFalse "Tracked reference is set after PreCreateHidden", _
+            (gDP_GridIconShape Is Nothing)
+
+    'Assert the shape exists on the scratch sheet with the expected name
+        TST_DP_AssertTrue "Shape exists on scratch sheet after PreCreateHidden", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+
+    'Assert the shape is hidden after pre-creation using the tracked reference
+    'Note: gDP_GridIconShape.Visible = msoFalse is the correct invariant here.
+    'M_GridIcon_PreCreateHidden explicitly sets Visible = msoFalse after creation.
+    'The shape was never shown, so the msoFalse state does not depend on
+    'ScreenUpdating behavior.
+        If Not gDP_GridIconShape Is Nothing Then
+            TST_DP_AssertTrue "Shape is hidden (Visible=msoFalse) after PreCreateHidden", _
+                (gDP_GridIconShape.Visible = msoFalse)
+        End If
+
+'------------------------------------------------------------------------------
+' IDEMPOTENT SECOND CALL
+'------------------------------------------------------------------------------
+    'Call M_GridIcon_PreCreateHidden again when a shape already exists
+    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+
+    'Assert only one shape exists after the second pre-create call
+        TST_DP_AssertEqualsLong "PreCreateHidden is idempotent when shape already exists", _
+            1, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+    'Record that PreCreateHidden completed without raising on a second call
+        TST_DP_RecordPass "PreCreateHidden does not raise on a second call", vbNullString
+
+'------------------------------------------------------------------------------
+' DISABLED FEATURE BEHAVIOR
+'------------------------------------------------------------------------------
+    'Purge before the disabled test to ensure a clean state
+    'M_GridIcon_PurgeAll ends with On Error GoTo 0; re-arm immediately
+        M_GridIcon_PurgeAll
+        On Error GoTo SuiteFail
+
+    'Disable the grid icon feature via setter
+    'M_Settings_SetShowGridIcon calls removal routines ending with GoTo 0; re-arm
+        M_Settings_SetShowGridIcon False
+        On Error GoTo SuiteFail
+
+    'Call M_GridIcon_PreCreateHidden while the feature is disabled
+    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+
+    'Assert no shape was created while the feature is disabled
+        TST_DP_AssertFalse "PreCreateHidden creates no shape when feature is disabled", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+
+'------------------------------------------------------------------------------
+' RESTORE FEATURE STATE FOR SUBSEQUENT SUITES
+'------------------------------------------------------------------------------
+    'Re-enable the grid icon feature via setter
+    'M_Settings_SetShowGridIcon calls removal routines ending with GoTo 0; re-arm
+        M_Settings_SetShowGridIcon True
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "PreCreateHidden suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_SelectDate()
+
+'
+'==============================================================================
+'                           SELECT DATE SUITE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates M_Picker_SelectDate write-back, state capture, rollback, and
+'   lifecycle behavior
+'
+' WHY THIS EXISTS
+'   M_Picker_SelectDate is the centralized write-back entry point for all
+'   day-label clicks. Its correctness directly determines whether dates are
+'   written reliably, whether state is stored only after a successful write,
+'   whether previous state is restored on failure, and whether the configured
+'   CloseAfterSelection behavior is honoured.
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Tests:
+'     - successful write-back to a single selected cell
+'     - gDP_HasSelectedDate is True only after successful write-back
+'     - gDP_SelectedDate matches the written date-only value
+'     - gDP_WriteValue is set to the date-only component before write-back
+'     - repeated write-back to the same cell with a different date
+'     - zero date rejection raises a runtime error
+'     - NoTableGrow = True path does not expand table-column selection
+'     - CloseAfterSelection = True path completes without raising
+'     - CloseAfterSelection = False path completes without raising
+'
+' ERROR POLICY
+'   Records suite-level failures and continues.
+'
+' DEPENDENCIES
+'   M_Picker_SelectDate
+'   M_Settings_SetCloseAfterSelection
+'   M_Settings_GetCloseAfterSelection
+'   gDP_HasSelectedDate
+'   gDP_SelectedDate
+'   gDP_WriteValue
+'   mTST_DP_ScratchSheet
+'
+' NOTES
+'   M_Picker_SelectDate uses On Error GoTo ErrorHandler and raises outward on
+'   failure. It does not reset the caller SuiteFail handler when it succeeds.
+'   No re-arm is needed after M_Picker_SelectDate calls.
+'
+'   M_Settings_SetCloseAfterSelection only calls M_Settings_Save internally.
+'   M_Settings_Save uses GoTo ErrorHandler and raises outward; it does not
+'   reset the SuiteFail handler. No re-arm is needed after setter calls.
+'
+'   gDP_WriteValue, gDP_HasSelectedDate, and gDP_SelectedDate are read directly
+'   after calls to verify transient state. No public getters exist for these
+'   transient fields. Direct reads are the correct approach for these.
+'
+'   The target cell is selected before each M_Picker_SelectDate call so that
+'   M_WriteBack_Apply uses the correct Excel selection as its write target.
+'
+' UPDATED
+'   2026-05-26
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetCell      As Excel.Range   'Write-back target cell
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "SelectDate"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Disable events before Activate for the same reason as PreCreateHidden:
+    'the manager is live and would fire on sheet switch
+        Excel.Application.EnableEvents = False
+    'Activate the scratch sheet
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+
+    'Prepare the write-back target cell
+        Set TargetCell = mTST_DP_ScratchSheet.Range("K2")
+    'Clear any previous value in the target cell
+        TargetCell.ClearContents
+    'Select the target cell so M_WriteBack_Apply uses it
+        TargetCell.Select
+
+    'Clear transient state before the suite
+        gDP_HasSelectedDate = False
+        gDP_SelectedDate = 0
+        gDP_WriteValue = 0
+
+    'Configure CloseAfterSelection = False via setter so no form lifecycle
+    'path attempts to close a form that was never opened
+        M_Settings_SetCloseAfterSelection False
+
+'------------------------------------------------------------------------------
+' SUCCESSFUL WRITE-BACK
+'------------------------------------------------------------------------------
+    'Select the target cell before the first SelectDate call
+        TargetCell.Select
+    'Call M_Picker_SelectDate with a valid date
+    'M_Picker_SelectDate raises outward on failure; SuiteFail handler survives
+        M_Picker_SelectDate VBA.DateSerial(2026, 5, 3)
+
+    'Assert the cell received the date
+        TST_DP_AssertCellDateEquals "SelectDate writes the date to the target cell", _
+            VBA.DateSerial(2026, 5, 3), TargetCell
+
+    'Assert gDP_HasSelectedDate is True after successful write-back
+        TST_DP_AssertTrue "HasSelectedDate is True after SelectDate succeeds", _
+            gDP_HasSelectedDate
+
+    'Assert gDP_SelectedDate matches the written date-only value
+        TST_DP_AssertDateEquals "gDP_SelectedDate matches the written date", _
+            VBA.DateSerial(2026, 5, 3), gDP_SelectedDate
+
+    'Assert gDP_WriteValue was set to the date-only component
+        TST_DP_AssertDateEquals "gDP_WriteValue is set to the date-only value", _
+            VBA.DateSerial(2026, 5, 3), VBA.CDate(gDP_WriteValue)
+
+'------------------------------------------------------------------------------
+' REPEATED WRITE-BACK
+'------------------------------------------------------------------------------
+    'Select the target cell before the second SelectDate call
+        TargetCell.Select
+    'Call M_Picker_SelectDate with a different date to verify repeated write-back
+    'M_Picker_SelectDate raises outward on failure; SuiteFail handler survives
+        M_Picker_SelectDate VBA.DateSerial(2026, 12, 31)
+
+    'Assert the cell was updated with the new date
+        TST_DP_AssertCellDateEquals "SelectDate supports repeated write-back", _
+            VBA.DateSerial(2026, 12, 31), TargetCell
+
+    'Assert gDP_SelectedDate was updated after the second write-back
+        TST_DP_AssertDateEquals "gDP_SelectedDate is updated after repeated write-back", _
+            VBA.DateSerial(2026, 12, 31), gDP_SelectedDate
+
+'------------------------------------------------------------------------------
+' ZERO DATE REJECTION
+'------------------------------------------------------------------------------
+    'Assert that M_Picker_SelectDate raises when passed a zero date
+        TST_DP_ExpectError_SelectDateZero
+
+'------------------------------------------------------------------------------
+' NOTABLEGROW = TRUE PATH
+'------------------------------------------------------------------------------
+    'Select the target cell before the NoTableGrow call
+        TargetCell.Select
+    'Call M_Picker_SelectDate with NoTableGrow = True
+    'This verifies the parameter is accepted and write-back still succeeds
+    'M_Picker_SelectDate raises outward on failure; SuiteFail handler survives
+        M_Picker_SelectDate VBA.DateSerial(2026, 3, 15), True
+
+    'Assert the cell received the date when NoTableGrow = True
+        TST_DP_AssertCellDateEquals "SelectDate writes correctly with NoTableGrow = True", _
+            VBA.DateSerial(2026, 3, 15), TargetCell
+
+'------------------------------------------------------------------------------
+' CLOSEAFTERSELECTION = TRUE PATH
+'------------------------------------------------------------------------------
+    'Set CloseAfterSelection = True via setter
+        M_Settings_SetCloseAfterSelection True
+
+    'Assert the setting was stored
+        TST_DP_AssertTrue "CloseAfterSelection is True after setter", _
+            M_Settings_GetCloseAfterSelection()
+
+    'Select the target cell before the CloseAfterSelection call
+        TargetCell.Select
+    'Call M_Picker_SelectDate; it will attempt DP_Close after write-back
+    'DP_Close is safe to call when no form is loaded
+    'M_Picker_SelectDate raises outward on failure; SuiteFail handler survives
+        M_Picker_SelectDate VBA.DateSerial(2026, 6, 1)
+
+    'Assert the cell received the date with CloseAfterSelection = True
+        TST_DP_AssertCellDateEquals "SelectDate writes correctly with CloseAfterSelection = True", _
+            VBA.DateSerial(2026, 6, 1), TargetCell
+
+    'Record that CloseAfterSelection = True path completed without raising
+        TST_DP_RecordPass "SelectDate with CloseAfterSelection = True does not raise", _
+            vbNullString
+
+'------------------------------------------------------------------------------
+' CLOSEAFTERSELECTION = FALSE PATH
+'------------------------------------------------------------------------------
+    'Restore CloseAfterSelection = False via setter
+        M_Settings_SetCloseAfterSelection False
+
+    'Select the target cell before the CloseAfterSelection = False call
+        TargetCell.Select
+    'Call M_Picker_SelectDate; it will call M_FormBridge_AfterSuccessfulSelection
+    'which is best-effort and safe to call when no form is loaded
+    'M_Picker_SelectDate raises outward on failure; SuiteFail handler survives
+        M_Picker_SelectDate VBA.DateSerial(2026, 7, 4)
+
+    'Assert the cell received the date with CloseAfterSelection = False
+        TST_DP_AssertCellDateEquals "SelectDate writes correctly with CloseAfterSelection = False", _
+            VBA.DateSerial(2026, 7, 4), TargetCell
+
+    'Record that CloseAfterSelection = False path completed without raising
+        TST_DP_RecordPass "SelectDate with CloseAfterSelection = False does not raise", _
+            vbNullString
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set TargetCell = Nothing
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Release object references
+        Set TargetCell = Nothing
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "SelectDate suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
 Private Sub TST_DP_RunSuite_UISmoke()
 
 '
@@ -2345,7 +3110,7 @@ Private Sub TST_DP_RunSuite_UISmoke()
     'Enable suite-level error handling
         On Error GoTo SuiteFail
     'Activate the scratch sheet
-        mTST_DP_ScratchSheet.Activate
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
     'Prepare the target cell with a deterministic date value
         mTST_DP_ScratchSheet.Range("H2").Value = VBA.DateSerial(2026, 5, 3)
     'Select the target date cell
@@ -2670,6 +3435,40 @@ Private Sub TST_DP_ExpectError_GetMonthInvalid()
 '------------------------------------------------------------------------------
 ExpectedError:
     TST_DP_RecordPass "Invalid GetMonth input raises", Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ExpectError_SelectDateZero()
+
+'
+'==============================================================================
+'                     EXPECT ERROR: SELECT DATE ZERO VALUE
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo ExpectedError
+
+'------------------------------------------------------------------------------
+' INVOKE EXPECTED ERROR
+'------------------------------------------------------------------------------
+    'Call M_Picker_SelectDate with a zero date to trigger the expected error
+        M_Picker_SelectDate 0
+
+'------------------------------------------------------------------------------
+' RECORD MISSING ERROR
+'------------------------------------------------------------------------------
+    'Record a failure when no error was raised
+        TST_DP_RecordFail "Zero date raises in M_Picker_SelectDate", "No error was raised"
+    Exit Sub
+
+'------------------------------------------------------------------------------
+' EXPECTED ERROR
+'------------------------------------------------------------------------------
+ExpectedError:
+    TST_DP_RecordPass "Zero date raises in M_Picker_SelectDate", Err.Description
     Err.Clear
 
 End Sub
@@ -3135,45 +3934,63 @@ Private Function TST_DP_GetHostWorkbook() As Excel.Workbook
 '   Returns the workbook that will receive the result and scratch sheets
 '
 ' WHY THIS EXISTS
-'   The harness must write result rows to a stable workbook reference and
-'   should prefer the ActiveWorkbook over ThisWorkbook to support use from an
-'   add-in context
+'   The regression harness should normally test the workbook that contains the
+'   DatePicker project. When the project is hosted in an add-in or hidden
+'   workbook, the active workbook is used as the practical worksheet host.
 '
 ' INPUTS
 '   None
 '
 ' RETURNS
-'   ActiveWorkbook when available; ThisWorkbook as a fallback
-'
-' BEHAVIOR
-'   Attempts to resolve ActiveWorkbook with error suppression and falls back to
-'   ThisWorkbook when ActiveWorkbook is not available
+'   ThisWorkbook when it has a visible workbook window
+'   ActiveWorkbook when ThisWorkbook has no visible window
+'   ThisWorkbook as final fallback
 '
 ' ERROR POLICY
-'   Best-effort. Returns Nothing only when both paths fail
+'   Best-effort. Returns Nothing only when all paths fail
 '
 ' UPDATED
-'   2026-05-14
+'   2026-05-26
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' RESOLVE HOST WORKBOOK
+' INITIALIZE
 '------------------------------------------------------------------------------
-    'Suppress resolution failures
+    'Suppress workbook-resolution failures
         On Error Resume Next
 
-    'Attempt to use the active workbook
-        If Not Excel.Application.ActiveWorkbook Is Nothing Then
-            Set TST_DP_GetHostWorkbook = Excel.Application.ActiveWorkbook
+'------------------------------------------------------------------------------
+' PREFER THISWORKBOOK WHEN VISIBLE
+'------------------------------------------------------------------------------
+    'Use ThisWorkbook when it has a visible Excel window
+        If ThisWorkbook.Windows.Count > 0 Then
+            Set TST_DP_GetHostWorkbook = ThisWorkbook
         End If
 
+'------------------------------------------------------------------------------
+' FALL BACK TO ACTIVEWORKBOOK
+'------------------------------------------------------------------------------
+    'Use ActiveWorkbook when ThisWorkbook is not a visible workbook host
+        If TST_DP_GetHostWorkbook Is Nothing Then
+            If Not Excel.Application.ActiveWorkbook Is Nothing Then
+                Set TST_DP_GetHostWorkbook = Excel.Application.ActiveWorkbook
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' FINAL FALLBACK
+'------------------------------------------------------------------------------
     'Fall back to ThisWorkbook when ActiveWorkbook is unavailable
         If TST_DP_GetHostWorkbook Is Nothing Then
             Set TST_DP_GetHostWorkbook = ThisWorkbook
         End If
 
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
     'Clear any suppressed resolution error
         Err.Clear
+
     'Restore normal error handling
         On Error GoTo 0
 
@@ -3297,6 +4114,123 @@ Private Sub TST_DP_PrepareScratchSheet(ByVal HostWorkbook As Excel.Workbook)
         mTST_DP_ScratchSheet.Columns("A:J").ColumnWidth = 16
     'Activate the scratch sheet
         mTST_DP_ScratchSheet.Activate
+
+End Sub
+
+Private Sub TST_DP_ActivateWorksheetForTest(ByVal TargetSheet As Excel.Worksheet)
+
+'
+'==============================================================================
+'                       ACTIVATE WORKSHEET FOR TEST
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Activates a worksheet safely for selection-based regression tests
+'
+' WHY THIS EXISTS
+'   Some tests need Application.Selection to point to a cell on the scratch
+'   worksheet. Direct Worksheet.Activate can fail when the parent workbook window
+'   is not active, when events are enabled, or when Excel is in a transient UI
+'   state after manager repair or runtime cleanup.
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet to activate
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Validates the worksheet reference, disables Excel events, makes the sheet
+'   visible, activates the parent workbook window when possible, and activates
+'   the target worksheet.
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if activation cannot be completed
+'
+' UPDATED
+'   2026-05-26
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TST_DP_ActivateWorksheetForTest"
+
+    Dim HostWorkbook    As Excel.Workbook       'Parent workbook of the target sheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUTS
+'------------------------------------------------------------------------------
+    'Reject a missing worksheet reference
+        If TargetSheet Is Nothing Then
+            Err.Raise vbObjectError + 513, PROC_NAME, "TargetSheet cannot be Nothing"
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE PARENT WORKBOOK
+'------------------------------------------------------------------------------
+    'Resolve the parent workbook
+        Set HostWorkbook = TargetSheet.Parent
+    'Reject a missing parent workbook
+        If HostWorkbook Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "TargetSheet parent workbook is not available"
+        End If
+
+'------------------------------------------------------------------------------
+' DISABLE EVENTS
+'------------------------------------------------------------------------------
+    'Disable Excel events before workbook or worksheet activation
+        Excel.Application.EnableEvents = False
+
+'------------------------------------------------------------------------------
+' ENSURE SHEET IS VISIBLE
+'------------------------------------------------------------------------------
+    'Make the target sheet visible before activation
+        If TargetSheet.Visible <> xlSheetVisible Then
+            TargetSheet.Visible = xlSheetVisible
+        End If
+
+'------------------------------------------------------------------------------
+' ACTIVATE WORKBOOK WINDOW
+'------------------------------------------------------------------------------
+    'Activate the parent workbook window when one is available
+        If HostWorkbook.Windows.Count > 0 Then
+            HostWorkbook.Windows(1).Activate
+        Else
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Parent workbook has no visible window"
+        End If
+
+'------------------------------------------------------------------------------
+' ACTIVATE WORKSHEET
+'------------------------------------------------------------------------------
+    'Activate the requested worksheet
+        TargetSheet.Activate
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set HostWorkbook = Nothing
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Release object references
+        Set HostWorkbook = Nothing
+    'Raise a descriptive activation error
+        Err.Raise Err.Number, PROC_NAME, _
+            "Worksheet activation for test failed: " & Err.Description
 
 End Sub
 
@@ -4212,6 +5146,8 @@ ErrorHandler:
             "FAIL conditional-format application failed: " & ErrorDescription
 
 End Sub
+
+
 
 
 
