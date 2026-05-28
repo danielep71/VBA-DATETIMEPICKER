@@ -5341,6 +5341,158 @@ ErrorHandler:
 
 End Sub
 
+Public Sub DP_Preload()
+
+'
+'------------------------------------------------------------------------------
+'                           PRELOAD DATEPICKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Loads the DatePicker UserForm once and keeps it hidden for fast later display
+'
+' WHY THIS EXISTS
+'   The first UserForm load is the slowest DatePicker interaction because the
+'   runtime controls, hooks, fonts, settings panel, picker panel, and calendar
+'   grid are created during UserForm_Initialize
+'
+'   Preloading the form during workbook startup moves that cost away from the
+'   first user click so Ribbon, keyboard, right-click, and in-grid activation feel
+'   immediate
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Ensures DatePicker settings and manager infrastructure are available
+'   Exits when a DatePicker form is already loaded
+'   Initializes bridge state from today's date
+'   Loads UF_DatePicker while hidden
+'   Keeps the loaded form hidden
+'   Stops any live-clock timer after preload so hidden forms do not keep ticking
+'
+' ERROR POLICY
+'   Best-effort startup optimization
+'   Does not raise outward
+'   Writes diagnostics to the Immediate Window when preload fails
+'
+' DEPENDENCIES
+'   M_Picker_EnsureManager
+'   M_FormBridge_GetLoadedForm
+'   M_Timer_Stop
+'   UF_DatePicker
+'   DP_FORM_NAME
+'
+' NOTES
+'   This routine is an optimization only
+'
+'   DP_Show must still work if this preload routine was never called or failed
+'
+'   The form is loaded but not shown, so UserForm_Activate does not run
+'
+'   The visible-positioning logic remains inside DP_Show
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "DP_Preload"
+
+    Dim LoadedForm      As Object       'Already-loaded DatePicker form instance
+    Dim ErrorNumber     As Long         'Captured preload error number
+    Dim ErrorDescription As String      'Captured preload error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress preload failures through the fail-safe path
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' ENSURE RUNTIME
+'------------------------------------------------------------------------------
+    'Ensure settings and manager infrastructure are available
+        M_Picker_EnsureManager
+
+'------------------------------------------------------------------------------
+' EXIT IF ALREADY LOADED
+'------------------------------------------------------------------------------
+    'Resolve an already-loaded DatePicker form without creating a new instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    'Exit when the DatePicker form is already loaded
+        If Not LoadedForm Is Nothing Then GoTo CleanExit
+
+'------------------------------------------------------------------------------
+' INITIALIZE BRIDGE STATE
+'------------------------------------------------------------------------------
+    'Use today as the preload display date
+        gDP_InitialDate = VBA.Date
+    'Mark the preload initial date as available
+        gDP_HasInitialDate = True
+    'Clear selected-date state during preload
+        gDP_SelectedDate = 0
+    'Mark selected-date state as unavailable during preload
+        gDP_HasSelectedDate = False
+
+'------------------------------------------------------------------------------
+' LOAD FORM HIDDEN
+'------------------------------------------------------------------------------
+    'Load the DatePicker form while keeping it hidden
+        Load UF_DatePicker
+    'Resolve the loaded form after initialization
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    'Hide the form defensively when it was loaded successfully
+        If Not LoadedForm Is Nothing Then LoadedForm.Hide
+
+'------------------------------------------------------------------------------
+' STOP HIDDEN TIMER
+'------------------------------------------------------------------------------
+    'Stop timer activity after preload because the form is not visible yet
+        M_Timer_Stop
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release local object reference
+        Set LoadedForm = Nothing
+    'Clear non-fatal preload errors
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
+FailSafe:
+    'Capture the preload error number
+        ErrorNumber = Err.Number
+    'Capture the preload error description
+        ErrorDescription = Err.Description
+    'Suppress cleanup errors
+        On Error Resume Next
+    'Stop timer activity if preload partially initialized it
+        M_Timer_Stop
+    'Release local object reference
+        Set LoadedForm = Nothing
+    'Write preload diagnostics without blocking workbook open
+        Debug.Print PROC_NAME & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Clear the handled preload error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
 Public Sub DP_Start()
 
 '
@@ -5624,71 +5776,57 @@ Public Sub DP_Show()
         If Not HasCellDate Then InitialDate = VBA.Date
 
 '------------------------------------------------------------------------------
-' RESET EXISTING FORM INSTANCE
+' RESOLVE EXISTING FORM INSTANCE
 '------------------------------------------------------------------------------
     'Track the current step
-        StepName = "Unload existing DatePicker"
-    'Unload any existing DatePicker instance so Initialize runs again
-        M_FormBridge_UnloadLoadedPicker
+        StepName = "Resolve existing DatePicker form"
+    'Resolve an already-loaded DatePicker form without forcing default-instance creation
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
 
 '------------------------------------------------------------------------------
 ' STORE FORM BRIDGE STATE
 '------------------------------------------------------------------------------
     'Track the current step
         StepName = "Store bridge state"
-    'Store the initial date for the next UF_DatePicker instance
+    'Store the initial date for the next refresh or form instance
         gDP_InitialDate = InitialDate
     'Mark the initial date as available
         gDP_HasInitialDate = True
     'Store selected-date state when ActiveCell contains a valid date
         If HasCellDate Then
-            'Store the selected date
-                gDP_SelectedDate = InitialDate
-            'Mark the selected date as available
-                gDP_HasSelectedDate = True
+            gDP_SelectedDate = InitialDate
+            gDP_HasSelectedDate = True
         Else
-            'Clear the selected date
-                gDP_SelectedDate = 0
-            'Mark the selected date as unavailable
-                gDP_HasSelectedDate = False
+            gDP_SelectedDate = 0
+            gDP_HasSelectedDate = False
         End If
 
 '------------------------------------------------------------------------------
-' LOAD FORM INSTANCE
+' LOAD FORM ONLY WHEN NEEDED
 '------------------------------------------------------------------------------
-    'Track the current step
-        StepName = "Load UF_DatePicker"
-    'Load the DatePicker form while it is still hidden
-        Load UF_DatePicker
-    'Track the current step
-        StepName = "Resolve loaded DatePicker form"
-    'Resolve the loaded DatePicker form instance
-        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
-    'Fallback to the default instance if the bridge did not resolve it
-        If LoadedForm Is Nothing Then Set LoadedForm = UF_DatePicker
-    'Reject unresolved DatePicker form instance
+    'Load the DatePicker form only when no reusable instance exists
         If LoadedForm Is Nothing Then
-            Err.Raise vbObjectError + 513, PROC_NAME, _
-                "Unable to resolve loaded DatePicker form instance"
+            'Track the current step
+                StepName = "Load UF_DatePicker"
+            'Load the DatePicker form while it is still hidden
+                Load UF_DatePicker
+            'Track the current step
+                StepName = "Resolve loaded DatePicker form"
+            'Resolve the loaded DatePicker form instance
+                Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+            'Fallback to the default instance if the bridge did not resolve it
+                If LoadedForm Is Nothing Then Set LoadedForm = UF_DatePicker
+            'Reject unresolved DatePicker form instance
+                If LoadedForm Is Nothing Then
+                    Err.Raise vbObjectError + 513, PROC_NAME, _
+                        "Unable to resolve loaded DatePicker form instance"
+                End If
+        Else
+            'Track the current step
+                StepName = "Refresh reused DatePicker form"
+            'Refresh the already-loaded form from the current ActiveCell context
+                LoadedForm.UF_DP_RefreshFromExternalSelection InitialDate, HasCellDate
         End If
-
-'------------------------------------------------------------------------------
-' PRE-POSITION HIDDEN FORM
-'------------------------------------------------------------------------------
-    'Track the current step
-        StepName = "Pre-position hidden form"
-    'Suppress best-effort pre-show positioning errors
-        On Error Resume Next
-    'Move the hidden loaded form close to the current mouse position before first paint
-        M_Window_MoveFormToMouse _
-            LoadedForm, _
-            FORM_MOUSE_OFFSET_XPX, _
-            FORM_MOUSE_OFFSET_YPX, _
-            FORM_CENTER_ON_MOUSE
-    'Clear any suppressed positioning error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
 ' SHOW FORM
@@ -6134,6 +6272,88 @@ Public Sub DP_Close()
 
 End Sub
 
+Public Sub DP_Hide()
+
+'
+'------------------------------------------------------------------------------
+'                           HIDE DATEPICKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Hides the DatePicker form without unloading it
+'
+' WHY THIS EXISTS
+'   Preloaded / reusable UserForm mode should keep the runtime controls alive so
+'   subsequent DatePicker launches are immediate
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stops live-clock timer activity and hides the already-loaded picker form
+'   without unloading it
+'
+' ERROR POLICY
+'   Best-effort UI cleanup
+'   Suppresses errors because hiding should not interrupt the user workflow
+'
+' DEPENDENCIES
+'   M_Timer_Stop
+'   M_FormBridge_GetLoadedForm
+'   DP_FORM_NAME
+'
+' NOTES
+'   Use DP_Hide when you want fast reuse
+'
+'   Use DP_Close when you want to unload and release the form
+'
+' UPDATED
+'   2026-05-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LoadedForm      As Object        'Loaded DatePicker form instance
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress hide errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' STOP TIMER
+'------------------------------------------------------------------------------
+    'Stop live-clock timer while the form is hidden
+        M_Timer_Stop
+
+'------------------------------------------------------------------------------
+' HIDE FORM
+'------------------------------------------------------------------------------
+    'Retrieve the loaded DatePicker form instance
+        Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    'Hide the form when it is loaded
+        If Not LoadedForm Is Nothing Then LoadedForm.Hide
+
+'------------------------------------------------------------------------------
+' RELEASE REFERENCES
+'------------------------------------------------------------------------------
+    'Release the local loaded-form reference
+        Set LoadedForm = Nothing
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+    'Clear any suppressed hide error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+End Sub
+
 Public Sub DP_Stop()
 
 '
@@ -6437,8 +6657,8 @@ Public Sub M_Picker_SelectDate( _
         On Error Resume Next
     'Close the DatePicker after successful selection when configured
         If gDP_CloseAfterSelection Then
-            'Close the DatePicker form
-                DP_Close
+            'Hide the DatePicker form
+                DP_Hide
         Else
             'Refresh the open DatePicker form after successful selection
                 M_FormBridge_AfterSuccessfulSelection SelectedDateOnly
@@ -6495,7 +6715,7 @@ Public Sub DP_Today()
 '   user to select a day from the calendar grid
 '
 '   Today should follow the same write-back, selected-state, rollback, and
-'   close-or-refresh lifecycle used by normal day-cell selection
+'   hide-or-refresh lifecycle used by normal day-cell selection
 '
 ' INPUTS
 '   None
@@ -6520,8 +6740,12 @@ Public Sub DP_Today()
 '   M_Picker_SelectDate so Today, calendar-day clicks, and other date-only
 '   selection paths remain behaviorally consistent
 '
+'   When close-after-selection is enabled, the final visual lifecycle is now
+'   handled by DP_Hide inside M_Picker_SelectDate so the preloaded form remains
+'   available for fast reuse
+'
 ' UPDATED
-'   2026-05-03
+'   2026-05-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -6563,6 +6787,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "DatePicker Today command failed: " & Err.Description
 
 End Sub
+
 Public Sub DP_Now()
 
 '
@@ -6690,8 +6915,8 @@ Public Sub DP_Now()
         On Error Resume Next
     'Close the DatePicker after successful write-back when configured
         If gDP_CloseAfterSelection Then
-            'Close the DatePicker form
-                DP_Close
+            'Hide the DatePicker form
+                DP_Hide
         Else
             'Refresh the open DatePicker form using the date-only part
                 M_FormBridge_AfterSuccessfulSelection NowDate
@@ -15276,7 +15501,7 @@ End Sub
 
 
 
-Public Sub Ribbon_ShowPicker(ByVal Control As IRibbonControl)
+Public Sub Ribbon_ShowPicker(ByVal control As IRibbonControl)
 
 '
 '------------------------------------------------------------------------------
@@ -15349,7 +15574,7 @@ ErrorHandler:
 
 End Sub
 
-Public Sub Ribbon_Reset(ByVal Control As IRibbonControl)
+Public Sub Ribbon_Reset(ByVal control As IRibbonControl)
 
 '
 '------------------------------------------------------------------------------
@@ -15433,7 +15658,7 @@ ErrorHandler:
 End Sub
 
 
-Public Sub Ribbon_Demo(ByVal Control As IRibbonControl)
+Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 
 '
 '------------------------------------------------------------------------------
@@ -15503,11 +15728,14 @@ Public Sub Ribbon_Demo(ByVal Control As IRibbonControl)
 ' TOGGLE DEMO SHEET
 '------------------------------------------------------------------------------
     'Hide the demo sheet when it is already visible
-        If DemoSheet.Visible = xlSheetVisible Then
-            DP_DemoSheet_HideVeryHidden
-        Else
-            DP_DemoSheet_Show
-        End If
+        With DemoSheet
+            If .Visible = xlSheetVisible Then
+                DP_DemoSheet_HideVeryHidden
+            Else
+                .Visible = xlSheetVisible
+                .Activate
+            End If
+        End With
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -15525,7 +15753,7 @@ ErrorHandler:
 End Sub
 
 
-Public Sub Ribbon_HideDemo(ByVal Control As IRibbonControl)
+Public Sub Ribbon_HideDemo(ByVal control As IRibbonControl)
 
 '
 '------------------------------------------------------------------------------
@@ -15592,6 +15820,7 @@ ErrorHandler:
         Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
 
 End Sub
+
 Private Sub Ribbon_ReportError( _
     ByVal ProcedureName As String, _
     ByVal ErrorNumber As Long, _
@@ -16036,4 +16265,6 @@ Private Sub Ribbon_ReportInfo(ByVal MessageText As String)
         On Error GoTo 0
 
 End Sub
+
+
 
