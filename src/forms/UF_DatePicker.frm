@@ -14,6 +14,7 @@ Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
 
+
 '------------------------------------------------------------------------------
 ' MODULE: UF_DatePicker
 '------------------------------------------------------------------------------
@@ -834,8 +835,8 @@ Private Sub UserForm_KeyDown( _
     Dim LetterShortcutAllowed   As Boolean                              'True when letter shortcuts may be routed
     Dim ActionHandled           As Boolean                              'True when the pressed key was handled
     
-    Dim SettingsPanel           As MSForms.Control                      'Settings panel control reference
-    Dim PickerPanel             As MSForms.Control                      'Picker panel control reference
+    Dim SettingsPanel           As MSForms.control                      'Settings panel control reference
+    Dim PickerPanel             As MSForms.control                      'Picker panel control reference
     Dim SettingsPanelVisible    As Boolean                              'True when settings panel is visible
     Dim PickerPanelVisible      As Boolean                              'True when picker panel is visible
 
@@ -2099,7 +2100,7 @@ Private Sub UF_KeyboardDate_Set(ByVal NewKeyboardDate As Date)
     Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
     Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
 
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim ExistingControl         As MSForms.control          'Control resolved by picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
     Dim PreviousDate            As Date                     'Previous keyboard-selected date
     Dim HasPreviousDate         As Boolean                  'True when previous keyboard date exists
@@ -2355,7 +2356,7 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
     Dim SelectedValue           As Long                             'Selected month or year value
     Dim RawItemIndex            As String                           'Raw item index text
     Dim RawTagValue             As String                           'Raw label Tag value
-    Dim ExistingControl         As MSForms.Control                  'Existing control using the picker-panel name
+    Dim ExistingControl         As MSForms.control                  'Existing control using the picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame                    'Reusable picker panel
     Dim SelectedDate            As Date                             'Selected date from clicked day label
     Dim Lbl_SelectedItem        As MSForms.Label                    'Selected picker item text label
@@ -3487,7 +3488,7 @@ Private Sub UF_Header_MoveMonth(ByVal MonthOffset As Long)
     Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
     Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
 
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim ExistingControl         As MSForms.control          'Control resolved by picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
     Dim NewDisplayDate          As Date                     'New first day of displayed month
     Dim NewDisplayYear          As Long                     'New displayed year
@@ -3736,7 +3737,7 @@ Private Sub UF_Header_MoveYear(ByVal YearOffset As Long)
     Const PICKER_MODE_NONE      As Long = 0                 'No picker-panel mode
     Const PICKER_MODE_YEARS     As Long = 2                 'Year picker-panel mode
 
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim ExistingControl         As MSForms.control          'Control resolved by picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
     
     Dim NewDisplayYear          As Long                     'New displayed year
@@ -4018,7 +4019,7 @@ Public Sub UF_Header_HoverApply(ByVal LabelName As String)
     Dim NormalizedLabelName     As String               'Uppercase label name used for routing
     Dim TargetLabelName         As String               'Canonical target label name
     
-    Dim ExistingControl         As MSForms.Control      'Control resolved by name
+    Dim ExistingControl         As MSForms.control      'Control resolved by name
     Dim Lbl_Header              As MSForms.Label        'Hovered header label
 
 '------------------------------------------------------------------------------
@@ -8200,7 +8201,7 @@ Private Sub UF_PickerPanel_Build()
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_Build"
     
-    Dim ExistingControl     As MSForms.Control              'Existing control using the picker-panel name
+    Dim ExistingControl     As MSForms.control              'Existing control using the picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame                'Reusable picker panel
     Dim LabelHook           As cDatePickerLabelHook         'Runtime click / hover hook
     Dim Index               As Long                         'Picker item index
@@ -8461,7 +8462,7 @@ Private Sub UF_PickerPanel_EnsureCache()
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_EnsureCache"
     
     Dim Index               As Long                 'Picker-panel item index
-    Dim ExistingControl     As MSForms.Control      'Existing control using the picker-panel name
+    Dim ExistingControl     As MSForms.control      'Existing control using the picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame        'Reusable picker panel
     Dim TextControlName     As String               'Runtime picker text label name
     Dim BgControlName       As String               'Runtime picker background label name
@@ -8696,7 +8697,7 @@ Private Sub UF_PickerPanel_ShowMonths()
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_ShowMonths"
 
-    Dim ExistingControl     As MSForms.Control          'Existing control using the picker-panel name
+    Dim ExistingControl     As MSForms.control          'Existing control using the picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame            'Reusable picker panel
     Dim Lbl_Item            As MSForms.Label            'Picker item text label
     Dim Lbl_ItemBg          As MSForms.Label            'Picker item background label
@@ -8914,7 +8915,7 @@ Private Sub UF_PickerPanel_ShowYears()
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_ShowYears"
 
-    Dim ExistingControl     As MSForms.Control      'Existing control using the picker-panel name
+    Dim ExistingControl     As MSForms.control      'Existing control using the picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame        'Reusable picker panel
 
 '------------------------------------------------------------------------------
@@ -9826,7 +9827,7 @@ Private Sub UF_Settings_Show()
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_Settings_Show"
 
-    Dim ExistingControl     As MSForms.Control      'Existing picker-panel control
+    Dim ExistingControl     As MSForms.control      'Existing picker-panel control
     Dim Fra_PickerPanel     As MSForms.Frame        'Reusable picker panel
 
 '------------------------------------------------------------------------------
@@ -9965,7 +9966,7 @@ Private Sub UF_SettingsPanel_Build()
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsPanel_Build"   'Current procedure name
 
-    Dim ExistingControl         As MSForms.Control                                  'Existing control using the settings-panel name
+    Dim ExistingControl         As MSForms.control                                  'Existing control using the settings-panel name
     Dim Fra_Settings            As MSForms.Frame                                    'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage                                'Settings MultiPage control
     
@@ -10538,7 +10539,7 @@ Private Sub UF_SettingsPanel_Show()
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_SettingsPanel_Show"
     
-    Dim ExistingControl     As MSForms.Control              'Existing control resolved by name
+    Dim ExistingControl     As MSForms.control              'Existing control resolved by name
     Dim Fra_Settings        As MSForms.Frame                'Reusable settings panel
     Dim Fra_PickerPanel     As MSForms.Frame                'Reusable picker panel
     Dim Mp_Settings         As MSForms.MultiPage            'Settings MultiPage control
@@ -10741,7 +10742,7 @@ Private Sub UF_SettingsPanel_Save()
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsPanel_Save"
 
-    Dim ExistingControl         As MSForms.Control              'Existing control resolved by name
+    Dim ExistingControl         As MSForms.control              'Existing control resolved by name
     Dim Fra_Settings            As MSForms.Frame                'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage            'Settings MultiPage
     Dim Pge_Display             As MSForms.Page                 'Display settings page
@@ -11268,7 +11269,7 @@ Private Sub UF_SettingsPanel_Hide()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ExistingControl     As MSForms.Control      'Control resolved by settings-panel name
+    Dim ExistingControl     As MSForms.control      'Control resolved by settings-panel name
     Dim Fra_Settings        As MSForms.Frame        'Reusable settings panel
 
 '------------------------------------------------------------------------------
@@ -11372,7 +11373,7 @@ Public Sub UF_SettingsPanel_HoverApply(ByVal LabelName As String)
     Dim RawLabelName            As String               'Trimmed label name supplied by caller
     Dim NormalizedLabelName     As String               'Uppercase label name used for routing
     Dim TargetLabelName         As String               'Canonical target label name
-    Dim ExistingControl         As MSForms.Control      'Existing control resolved by name
+    Dim ExistingControl         As MSForms.control      'Existing control resolved by name
     Dim Fra_Settings            As MSForms.Frame        'Reusable settings panel
     Dim Lbl_Target              As MSForms.Label        'Hovered settings label
 
@@ -11680,7 +11681,7 @@ Private Sub UF_SettingsPanel_RefreshCaptions()
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsPanel_RefreshCaptions"
 
-    Dim ExistingControl         As MSForms.Control          'Control resolved by name
+    Dim ExistingControl         As MSForms.control          'Control resolved by name
     Dim Fra_Settings            As MSForms.Frame            'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage        'Settings MultiPage
     
@@ -12206,7 +12207,7 @@ Private Sub UF_SettingsPanel_SelectPage(ByVal PageIndex As Long)
     Const SETTINGS_PAGE_FIRST   As Long = 0                 'First supported settings page index
     Const SETTINGS_PAGE_LAST    As Long = 2                 'Last supported settings page index
 
-    Dim ExistingControl         As MSForms.Control          'Control resolved by name
+    Dim ExistingControl         As MSForms.control          'Control resolved by name
     Dim Fra_Settings            As MSForms.Frame            'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage        'Settings MultiPage
 
@@ -12370,7 +12371,7 @@ Private Sub UF_SettingsTabs_RefreshVisualState( _
     Const SETTINGS_PAGE_FIRST   As Long = 0                     'First supported settings page index
     Const SETTINGS_PAGE_LAST    As Long = 2                     'Last supported settings page index
 
-    Dim ExistingControl         As MSForms.Control              'Control resolved by name
+    Dim ExistingControl         As MSForms.control              'Control resolved by name
     Dim Fra_Settings            As MSForms.Frame                'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage            'Settings MultiPage
     Dim Lbl_TabDisplay          As MSForms.Label                'Display tab label
@@ -13111,7 +13112,7 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_DP_AfterSuccessfulSelection"
 
-    Dim ExistingControl         As MSForms.Control          'Control resolved by picker-panel name
+    Dim ExistingControl         As MSForms.control          'Control resolved by picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
     
     Dim PreviousDate            As Date                     'Previously selected keyboard date
@@ -13291,7 +13292,7 @@ Public Sub UF_DP_RefreshFromExternalSelection( _
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_DP_RefreshFromExternalSelection"
 
-    Dim ExistingControl     As MSForms.Control      'Control resolved by picker-panel name
+    Dim ExistingControl     As MSForms.control      'Control resolved by picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame        'Reusable picker panel
     
     Dim DisplayDate         As Date                 'Date used to resolve displayed month
@@ -13522,7 +13523,7 @@ Public Sub UF_DP_RefreshSettings()
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_DP_RefreshSettings"
 
-    Dim ExistingControl     As MSForms.Control      'Control resolved by name
+    Dim ExistingControl     As MSForms.control      'Control resolved by name
     Dim Lbl_Today           As MSForms.Label        'Footer Today value label
     
     Dim HandlerStep         As String               'Current handler step for diagnostics
@@ -13691,7 +13692,7 @@ Public Sub UF_DP_UpdateLiveClock()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim ExistingControl     As MSForms.Control      'Control resolved by name
+    Dim ExistingControl     As MSForms.control      'Control resolved by name
     Dim NewTimeCaption      As String               'Current formatted time caption
 
 '------------------------------------------------------------------------------
@@ -13816,7 +13817,7 @@ Private Function UF_Ensure_Label(ByVal ControlName As String) As MSForms.Label
 
     Dim EffectiveName       As String               'Normalized control name
     
-    Dim ExistingControl     As MSForms.Control      'Existing runtime control
+    Dim ExistingControl     As MSForms.control      'Existing runtime control
     Dim Lbl                 As MSForms.Label        'Target label control
 
 '------------------------------------------------------------------------------
@@ -13954,7 +13955,7 @@ Private Function UF_Ensure_FrameLabel( _
 
     Dim EffectiveName       As String               'Normalized control name
     
-    Dim ExistingControl     As MSForms.Control      'Existing frame control
+    Dim ExistingControl     As MSForms.control      'Existing frame control
     Dim Lbl                 As MSForms.Label        'Target label control
 
 '------------------------------------------------------------------------------
@@ -14096,7 +14097,7 @@ Private Function UF_Ensure_FrameMultiPage( _
 
     Dim EffectiveName       As String                   'Normalized control name
     
-    Dim ExistingControl     As MSForms.Control          'Existing frame control
+    Dim ExistingControl     As MSForms.control          'Existing frame control
     Dim Mp                  As MSForms.MultiPage        'Target MultiPage control
 
 '------------------------------------------------------------------------------
@@ -14241,7 +14242,7 @@ Private Function UF_Ensure_PageLabel( _
 
     Dim EffectiveName       As String               'Normalized control name
     
-    Dim ExistingControl     As MSForms.Control      'Existing page control
+    Dim ExistingControl     As MSForms.control      'Existing page control
     Dim Lbl                 As MSForms.Label        'Target label control
 
 '------------------------------------------------------------------------------
@@ -14386,7 +14387,7 @@ Private Function UF_Ensure_PageComboBox( _
 
     Dim EffectiveName       As String               'Normalized control name
     
-    Dim ExistingControl     As MSForms.Control      'Existing page control
+    Dim ExistingControl     As MSForms.control      'Existing page control
     Dim Cbo                 As MSForms.ComboBox     'Target ComboBox control
 
 '------------------------------------------------------------------------------
@@ -14531,7 +14532,7 @@ Private Function UF_Ensure_PageCheckBox( _
 
     Dim EffectiveName       As String                   'Normalized control name
     
-    Dim ExistingControl     As MSForms.Control          'Existing page control
+    Dim ExistingControl     As MSForms.control          'Existing page control
     Dim Chk                 As MSForms.CheckBox         'Target CheckBox control
 
 '------------------------------------------------------------------------------
