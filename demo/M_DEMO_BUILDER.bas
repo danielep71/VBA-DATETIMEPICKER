@@ -1276,7 +1276,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
                     .SplitColumn = 0
 
                     If IsFrozenPane Then
-                        .SplitRow = FreezeAtRow - 1
+                        '.SplitRow = FreezeAtRow - 1
                         WS.Range("A" & CStr(FreezeAtRow)).Select
                         .FreezePanes = True
                     Else
