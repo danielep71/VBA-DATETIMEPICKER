@@ -35,23 +35,43 @@ jobs:
 
           mkdir -p data
 
-      - name: Collect GitHub traffic
+      - name: Collect GitHub traffic, referrers and paths
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN || github.token }}
         run: |
-          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+          curl -fsSL \
+               -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
-               https://api.github.com/repos/${{ github.repository }}/traffic/views \
+               -H "X-GitHub-Api-Version: 2022-11-28" \
+               "https://api.github.com/repos/${{ github.repository }}/traffic/views?per=day" \
                > /tmp/views.json
 
-          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+          curl -fsSL \
+               -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
-               https://api.github.com/repos/${{ github.repository }}/traffic/clones \
+               -H "X-GitHub-Api-Version: 2022-11-28" \
+               "https://api.github.com/repos/${{ github.repository }}/traffic/clones?per=day" \
                > /tmp/clones.json
 
-          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+          curl -fsSL \
+               -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
-               https://api.github.com/repos/${{ github.repository }} \
+               -H "X-GitHub-Api-Version: 2022-11-28" \
+               "https://api.github.com/repos/${{ github.repository }}/traffic/popular/referrers" \
+               > /tmp/referrers.json
+
+          curl -fsSL \
+               -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               -H "X-GitHub-Api-Version: 2022-11-28" \
+               "https://api.github.com/repos/${{ github.repository }}/traffic/popular/paths" \
+               > /tmp/paths.json
+
+          curl -fsSL \
+               -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               -H "X-GitHub-Api-Version: 2022-11-28" \
+               "https://api.github.com/repos/${{ github.repository }}" \
                > /tmp/repo.json
 
           python3 << 'PY'
@@ -60,87 +80,256 @@ jobs:
           import os
           from datetime import datetime, timezone
 
-          views = json.load(open("/tmp/views.json", encoding="utf-8"))
-          clones = json.load(open("/tmp/clones.json", encoding="utf-8"))
-          repo = json.load(open("/tmp/repo.json", encoding="utf-8"))
+          def load_json(path):
+              with open(path, "r", encoding="utf-8") as f:
+                  return json.load(f)
 
-          row = {
-              "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "views": views.get("count", 0),
-              "unique_views": views.get("uniques", 0),
-              "clones": clones.get("count", 0),
-              "unique_clones": clones.get("uniques", 0),
+          def read_csv(path):
+              if not os.path.exists(path):
+                  return []
+              with open(path, "r", newline="", encoding="utf-8") as f:
+                  return list(csv.DictReader(f))
+
+          def write_csv(path, rows, fieldnames):
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, "w", newline="", encoding="utf-8") as f:
+                  writer = csv.DictWriter(f, fieldnames=fieldnames)
+                  writer.writeheader()
+                  writer.writerows(rows)
+
+          def upsert_rows(path, new_rows, fieldnames, key_fields):
+              existing = read_csv(path)
+              new_keys = {tuple(str(row[k]) for k in key_fields) for row in new_rows}
+              kept = [
+                  row for row in existing
+                  if tuple(str(row.get(k, "")) for k in key_fields) not in new_keys
+              ]
+              combined = kept + new_rows
+              combined.sort(key=lambda r: tuple(str(r.get(k, "")) for k in key_fields))
+              write_csv(path, combined, fieldnames)
+
+          views = load_json("/tmp/views.json")
+          clones = load_json("/tmp/clones.json")
+          referrers = load_json("/tmp/referrers.json")
+          paths = load_json("/tmp/paths.json")
+          repo = load_json("/tmp/repo.json")
+
+          if "views" not in views or "count" not in views:
+              raise RuntimeError("Unexpected views API response")
+          if "clones" not in clones or "count" not in clones:
+              raise RuntimeError("Unexpected clones API response")
+          if not isinstance(referrers, list):
+              raise RuntimeError("Unexpected referrers API response")
+          if not isinstance(paths, list):
+              raise RuntimeError("Unexpected popular paths API response")
+          if "stargazers_count" not in repo:
+              raise RuntimeError("Unexpected repository API response")
+
+          now = datetime.now(timezone.utc)
+          snapshot_date = now.date().isoformat()
+          snapshot_datetime = now.isoformat(timespec="seconds")
+
+          traffic_row = {
+              "snapshot_date": snapshot_date,
+              "snapshot_datetime_utc": snapshot_datetime,
+              "views_14d": views.get("count", 0),
+              "unique_views_14d": views.get("uniques", 0),
+              "clones_14d": clones.get("count", 0),
+              "unique_clones_14d": clones.get("uniques", 0),
               "stars": repo.get("stargazers_count", 0),
               "forks": repo.get("forks_count", 0),
               "watchers": repo.get("subscribers_count", 0),
               "open_issues": repo.get("open_issues_count", 0)
           }
 
-          file_name = "data/traffic.csv"
-          exists = os.path.exists(file_name)
+          upsert_rows(
+              "data/traffic.csv",
+              [traffic_row],
+              list(traffic_row.keys()),
+              ["snapshot_date"]
+          )
 
-          with open(file_name, "a", newline="", encoding="utf-8") as f:
-              writer = csv.DictWriter(f, fieldnames=row.keys())
-              if not exists:
-                  writer.writeheader()
-              writer.writerow(row)
+          daily = {}
+
+          for item in views.get("views", []):
+              d = item.get("timestamp", "")[:10]
+              daily.setdefault(d, {
+                  "date": d,
+                  "views": 0,
+                  "unique_views": 0,
+                  "clones": 0,
+                  "unique_clones": 0
+              })
+              daily[d]["views"] = item.get("count", 0)
+              daily[d]["unique_views"] = item.get("uniques", 0)
+
+          for item in clones.get("clones", []):
+              d = item.get("timestamp", "")[:10]
+              daily.setdefault(d, {
+                  "date": d,
+                  "views": 0,
+                  "unique_views": 0,
+                  "clones": 0,
+                  "unique_clones": 0
+              })
+              daily[d]["clones"] = item.get("count", 0)
+              daily[d]["unique_clones"] = item.get("uniques", 0)
+
+          daily_rows = list(daily.values())
+
+          upsert_rows(
+              "data/traffic_daily.csv",
+              daily_rows,
+              ["date", "views", "unique_views", "clones", "unique_clones"],
+              ["date"]
+          )
+
+          referrer_rows = []
+
+          for item in referrers:
+              referrer_rows.append({
+                  "snapshot_date": snapshot_date,
+                  "referrer": item.get("referrer", ""),
+                  "count": item.get("count", 0),
+                  "uniques": item.get("uniques", 0)
+              })
+
+          existing_referrers = read_csv("data/referrers.csv")
+          existing_referrers = [
+              row for row in existing_referrers
+              if row.get("snapshot_date") != snapshot_date
+          ]
+
+          write_csv(
+              "data/referrers.csv",
+              existing_referrers + referrer_rows,
+              ["snapshot_date", "referrer", "count", "uniques"]
+          )
+
+          path_rows = []
+
+          for item in paths:
+              path_rows.append({
+                  "snapshot_date": snapshot_date,
+                  "path": item.get("path", ""),
+                  "title": item.get("title", ""),
+                  "count": item.get("count", 0),
+                  "uniques": item.get("uniques", 0)
+              })
+
+          existing_paths = read_csv("data/popular_paths.csv")
+          existing_paths = [
+              row for row in existing_paths
+              if row.get("snapshot_date") != snapshot_date
+          ]
+
+          write_csv(
+              "data/popular_paths.csv",
+              existing_paths + path_rows,
+              ["snapshot_date", "path", "title", "count", "uniques"]
+          )
           PY
 
       - name: Commit traffic history
         run: |
-          git add data/traffic.csv
-          git commit -m "Update traffic history" || echo "No traffic changes to commit"
+          git add data/traffic.csv data/traffic_daily.csv data/referrers.csv data/popular_paths.csv
+          git commit -m "Update traffic history with referrers and paths" || echo "No traffic changes to commit"
           git push origin traffic-history
 
-      - name: Create alert issue on spike
+      - name: Create alert issue on spike or new referrer
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN || github.token }}
         run: |
           python3 << 'PY'
           import csv
           import subprocess
           import sys
 
-          rows = list(csv.DictReader(open("data/traffic.csv", encoding="utf-8")))
+          def read_csv(path):
+              with open(path, "r", newline="", encoding="utf-8") as f:
+                  return list(csv.DictReader(f))
 
-          if len(rows) < 2:
+          traffic = read_csv("data/traffic.csv")
+
+          if len(traffic) < 2:
               sys.exit(0)
 
-          prev = rows[-2]
-          cur = rows[-1]
+          prev = traffic[-2]
+          cur = traffic[-1]
 
-          for k in ["views", "unique_views", "clones", "unique_clones", "stars", "forks"]:
+          for k in ["views_14d", "unique_views_14d", "clones_14d", "unique_clones_14d", "stars", "forks"]:
               prev[k] = int(prev[k])
               cur[k] = int(cur[k])
 
-          views_spike = cur["views"] >= max(prev["views"] * 2, prev["views"] + 100)
-          clones_spike = cur["clones"] >= max(prev["clones"] * 2, prev["clones"] + 10)
+          current_date = cur["snapshot_date"]
+          previous_date = prev["snapshot_date"]
+
+          referrers = read_csv("data/referrers.csv")
+          paths = read_csv("data/popular_paths.csv")
+
+          current_referrers = [r for r in referrers if r["snapshot_date"] == current_date]
+          previous_referrers = [r for r in referrers if r["snapshot_date"] == previous_date]
+
+          previous_referrer_names = {r["referrer"] for r in previous_referrers}
+
+          new_referrers = [
+              r for r in current_referrers
+              if r["referrer"] not in previous_referrer_names and int(r["count"]) >= 10
+          ]
+
+          current_paths = [p for p in paths if p["snapshot_date"] == current_date]
+
+          views_spike = cur["views_14d"] >= max(prev["views_14d"] * 2, prev["views_14d"] + 100)
+          clones_spike = cur["clones_14d"] >= max(prev["clones_14d"] * 2, prev["clones_14d"] + 10)
           stars_spike = cur["stars"] > prev["stars"]
 
-          if not (views_spike or clones_spike or stars_spike):
+          if not (views_spike or clones_spike or stars_spike or new_referrers):
               sys.exit(0)
 
-          body = f"""
-          Automated traffic alert for vba-datetimepicker.
+          referrer_lines = "\n".join(
+              f"- {r['referrer']}: {r['count']} views, {r['uniques']} unique"
+              for r in current_referrers[:10]
+          ) or "- No referrers available"
 
-          Current:
-          - Views: {cur["views"]} vs {prev["views"]}
-          - Unique views: {cur["unique_views"]} vs {prev["unique_views"]}
-          - Clones: {cur["clones"]} vs {prev["clones"]}
-          - Unique clones: {cur["unique_clones"]} vs {prev["unique_clones"]}
+          path_lines = "\n".join(
+              f"- {p['path']}: {p['count']} views, {p['uniques']} unique"
+              for p in current_paths[:10]
+          ) or "- No popular paths available"
+
+          new_referrer_lines = "\n".join(
+              f"- {r['referrer']}: {r['count']} views, {r['uniques']} unique"
+              for r in new_referrers
+          ) or "- No new referrer above threshold"
+
+          body = f"""
+          Automated traffic alert for VBA-DateTimePicker.
+
+          Current 14-day snapshot:
+          - Views: {cur["views_14d"]} vs {prev["views_14d"]}
+          - Unique views: {cur["unique_views_14d"]} vs {prev["unique_views_14d"]}
+          - Clones: {cur["clones_14d"]} vs {prev["clones_14d"]}
+          - Unique clones: {cur["unique_clones_14d"]} vs {prev["unique_clones_14d"]}
           - Stars: {cur["stars"]} vs {prev["stars"]}
           - Forks: {cur["forks"]} vs {prev["forks"]}
 
+          New referrers:
+          {new_referrer_lines}
+
+          Current top referrers:
+          {referrer_lines}
+
+          Current popular paths:
+          {path_lines}
+
           Suggested checks:
           1. Go to Insights > Traffic
-          2. Check top referrers
-          3. Check top content
-          4. Check whether a blog, forum, GitHub repo, Reddit, or StackOverflow page mentioned the project
+          2. Check whether one of the referrers is a blog, forum, Reddit, StackOverflow, GitHub project, or newsletter
+          3. Check which README section, release, screenshot, or source file is attracting traffic
           """
 
           subprocess.run([
               "gh", "issue", "create",
-              "--title", "Traffic alert: vba-datetimepicker",
+              "--title", "Traffic alert: referrers or paths changed",
               "--body", body
           ], check=False)
           PY
