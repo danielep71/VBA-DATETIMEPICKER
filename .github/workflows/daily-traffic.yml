@@ -1,0 +1,140 @@
+name: Daily traffic export
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  traffic:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout traffic branch
+        uses: actions/checkout@v4
+        with:
+          ref: traffic-history
+          fetch-depth: 0
+        continue-on-error: true
+
+      - name: Initialize branch if missing
+        run: |
+          if [ ! -d ".git" ]; then
+            git clone https://github.com/${{ github.repository }} .
+          fi
+          git checkout traffic-history || git checkout --orphan traffic-history
+          git rm -rf . || true
+
+      - name: Collect GitHub traffic
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p data
+
+          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/repos/${{ github.repository }}/traffic/views \
+               > views.json
+
+          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/repos/${{ github.repository }}/traffic/clones \
+               > clones.json
+
+          curl -s -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/repos/${{ github.repository }} \
+               > repo.json
+
+          python3 << 'PY'
+          import csv, json, os
+          from datetime import datetime, timezone
+
+          views = json.load(open("views.json"))
+          clones = json.load(open("clones.json"))
+          repo = json.load(open("repo.json"))
+
+          row = {
+              "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+              "views": views.get("count", 0),
+              "unique_views": views.get("uniques", 0),
+              "clones": clones.get("count", 0),
+              "unique_clones": clones.get("uniques", 0),
+              "stars": repo.get("stargazers_count", 0),
+              "forks": repo.get("forks_count", 0),
+              "watchers": repo.get("subscribers_count", 0),
+              "open_issues": repo.get("open_issues_count", 0)
+          }
+
+          file_name = "data/traffic.csv"
+          exists = os.path.exists(file_name)
+
+          with open(file_name, "a", newline="", encoding="utf-8") as f:
+              writer = csv.DictWriter(f, fieldnames=row.keys())
+              if not exists:
+                  writer.writeheader()
+              writer.writerow(row)
+          PY
+
+      - name: Commit traffic history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/traffic.csv
+          git commit -m "Update traffic history" || echo "No changes"
+          git push origin traffic-history
+
+      - name: Create alert issue on spike
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 << 'PY'
+          import csv, subprocess, sys
+
+          rows = list(csv.DictReader(open("data/traffic.csv", encoding="utf-8")))
+
+          if len(rows) < 2:
+              sys.exit(0)
+
+          prev = rows[-2]
+          cur = rows[-1]
+
+          for k in ["views", "unique_views", "clones", "unique_clones", "stars", "forks"]:
+              prev[k] = int(prev[k])
+              cur[k] = int(cur[k])
+
+          views_spike = cur["views"] >= max(prev["views"] * 2, prev["views"] + 100)
+          clones_spike = cur["clones"] >= max(prev["clones"] * 2, prev["clones"] + 10)
+          stars_spike = cur["stars"] > prev["stars"]
+
+          if not (views_spike or clones_spike or stars_spike):
+              sys.exit(0)
+
+          body = f"""
+          Automated traffic alert for vba-datetimepicker.
+
+          Current:
+          - Views: {cur["views"]} vs {prev["views"]}
+          - Unique views: {cur["unique_views"]} vs {prev["unique_views"]}
+          - Clones: {cur["clones"]} vs {prev["clones"]}
+          - Unique clones: {cur["unique_clones"]} vs {prev["unique_clones"]}
+          - Stars: {cur["stars"]} vs {prev["stars"]}
+          - Forks: {cur["forks"]} vs {prev["forks"]}
+
+          Suggested checks:
+          1. Go to Insights > Traffic
+          2. Check top referrers
+          3. Check top content
+          4. See whether a blog, forum, GitHub repo, Reddit, or StackOverflow page mentioned the project
+          """
+
+          subprocess.run([
+              "gh", "issue", "create",
+              "--title", "Traffic alert: vba-datetimepicker",
+              "--body", body
+          ], check=False)
+          PY
