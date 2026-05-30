@@ -14,49 +14,55 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout traffic branch
+      - name: Checkout main branch
         uses: actions/checkout@v4
         with:
-          ref: traffic-history
           fetch-depth: 0
-        continue-on-error: true
 
-      - name: Initialize branch if missing
+      - name: Prepare traffic-history branch
         run: |
-          if [ ! -d ".git" ]; then
-            git clone https://github.com/${{ github.repository }} .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin traffic-history:traffic-history || true
+
+          if git show-ref --verify --quiet refs/heads/traffic-history; then
+            git checkout traffic-history
+          else
+            git checkout --orphan traffic-history
+            git rm -rf . || true
           fi
-          git checkout traffic-history || git checkout --orphan traffic-history
-          git rm -rf . || true
+
+          mkdir -p data
 
       - name: Collect GitHub traffic
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p data
-
           curl -s -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
                https://api.github.com/repos/${{ github.repository }}/traffic/views \
-               > views.json
+               > /tmp/views.json
 
           curl -s -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
                https://api.github.com/repos/${{ github.repository }}/traffic/clones \
-               > clones.json
+               > /tmp/clones.json
 
           curl -s -H "Authorization: Bearer $GH_TOKEN" \
                -H "Accept: application/vnd.github+json" \
                https://api.github.com/repos/${{ github.repository }} \
-               > repo.json
+               > /tmp/repo.json
 
           python3 << 'PY'
-          import csv, json, os
+          import csv
+          import json
+          import os
           from datetime import datetime, timezone
 
-          views = json.load(open("views.json"))
-          clones = json.load(open("clones.json"))
-          repo = json.load(open("repo.json"))
+          views = json.load(open("/tmp/views.json", encoding="utf-8"))
+          clones = json.load(open("/tmp/clones.json", encoding="utf-8"))
+          repo = json.load(open("/tmp/repo.json", encoding="utf-8"))
 
           row = {
               "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -82,10 +88,8 @@ jobs:
 
       - name: Commit traffic history
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/traffic.csv
-          git commit -m "Update traffic history" || echo "No changes"
+          git commit -m "Update traffic history" || echo "No traffic changes to commit"
           git push origin traffic-history
 
       - name: Create alert issue on spike
@@ -93,7 +97,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 << 'PY'
-          import csv, subprocess, sys
+          import csv
+          import subprocess
+          import sys
 
           rows = list(csv.DictReader(open("data/traffic.csv", encoding="utf-8")))
 
@@ -129,7 +135,7 @@ jobs:
           1. Go to Insights > Traffic
           2. Check top referrers
           3. Check top content
-          4. See whether a blog, forum, GitHub repo, Reddit, or StackOverflow page mentioned the project
+          4. Check whether a blog, forum, GitHub repo, Reddit, or StackOverflow page mentioned the project
           """
 
           subprocess.run([
