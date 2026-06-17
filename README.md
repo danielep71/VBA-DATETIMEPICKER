@@ -394,7 +394,7 @@ VBA-DATETIMEPICKER/
 
 <p align="left">
   <img alt="Install" src="https://img.shields.io/badge/Install-Import_Files-217346">
-  <img alt="No Add-in Required" src="https://img.shields.io/badge/Add--in-Not_Required-blue">
+  <img alt="Add-in Available" src="https://img.shields.io/badge/Add--in-.xlam_available-6f42c1">
   <img alt="VBE" src="https://img.shields.io/badge/VBE-Import-orange">
 </p>
 
@@ -423,6 +423,17 @@ Open the included demo workbook to:
 - test settings persistence
 - test right-click, keyboard, and in-grid icon entry points
 - use the demo as a starting point for integration
+
+### Option 3 — Install the prebuilt add-in (`.xlam`)
+
+For end users who just want the picker available across Excel, without touching VBA source:
+
+1. Download **`DATETIMEPICKER.xlam`** from the [latest release](https://github.com/danielep71/vba-datetimepicker/releases/latest).
+2. Right-click the file → **Properties** → tick **Unblock** → **OK** (clears the downloaded-from-internet block).
+3. In Excel: **File → Options → Add-ins → Manage: Excel Add-ins → Go… → Browse…**, select the `.xlam`, and enable it.
+4. The Date / Time Picker is then available through its Ribbon button, right-click entry, and `Ctrl + Shift + D`.
+
+> The add-in suits personal, cross-workbook use. To **embed** the picker inside a workbook you redistribute to others, use Option 1 so the code travels with your file.
 
 ---
 
@@ -528,6 +539,8 @@ Primary public entry points are exposed through `M_DatePicker.bas`.
 | `DP_Stop` | Stops runtime integrations and clears transient UI artifacts |
 | `DP_Show` | Opens or refreshes the Date / Time Picker for the active target context |
 | `DP_Close` | Closes the picker and stops form-level runtime activity |
+| `DP_Preload` | Loads and hides the picker once so the first open is instant; failures are suppressed through a fail-safe path |
+| `DP_Hide` | Hides the picker while keeping it loaded for fast reuse, unlike `DP_Close` which tears it down |
 | `DP_Today` | Writes today’s date to the current target |
 | `DP_Now` | Writes today’s date with the current system time to the current target |
 | `DP_RepairRuntime` | Repairs runtime state, including event enablement and manager recreation |
