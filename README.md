@@ -12,7 +12,7 @@
   <img alt="UI" src="https://img.shields.io/badge/UI-Modeless_UserForm-00A3E0">
   <img alt="Ribbon" src="https://img.shields.io/badge/Ribbon_Callbacks-Supported-217346">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green">
-  <img alt="Status" src="https://img.shields.io/badge/Status-Active_development-orange">
+  <img alt="Status" src="https://img.shields.io/badge/Status-Final-green">
 </p>
 
 ---
