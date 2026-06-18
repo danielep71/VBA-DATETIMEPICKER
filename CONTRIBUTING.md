@@ -168,8 +168,8 @@ command-bar tag) unchanged — they exist for backward compatibility.
 ## 🧪 Testing
 
 <p align="left">
-  <img alt="Harness" src="https://img.shields.io/badge/harness-M__cDP__Test-217346">
-  <img alt="Entry" src="https://img.shields.io/badge/entry-TST__DP__RunAll-blue">
+  <img alt="Harness" src="https://img.shields.io/badge/Harness-M__cDP__Test-217346">
+  <img alt="Entry" src="https://img.shields.io/badge/Entry-TST__DP__RunAll-blue">
 </p>
 
 Import `test/M_cDP_Test.bas` and run the suite before submitting:
@@ -191,7 +191,7 @@ a scratch sheet (`TST_DP_SCRATCH`) is created and removed automatically.
 ## 📚 Documentation expectations
 
 <p align="left">
-  <img alt="Docs" src="https://img.shields.io/badge/docs-kept_in_sync-6f42c1">
+  <img alt="Docs" src="https://img.shields.io/badge/Docs-Kept_in_sync-6f42c1">
 </p>
 
 Documentation is part of the change, not a follow-up. When your change affects a
@@ -209,7 +209,7 @@ This mirrors the docs-sync step in the **Release-Checklist** wiki page.
 ## 📦 What not to commit
 
 <p align="left">
-  <img alt="Excluded" src="https://img.shields.io/badge/excluded-binaries_and_locks-red">
+  <img alt="Excluded" src="https://img.shields.io/badge/Excluded-Binaries_and_Locks-red">
 </p>
 
 - The built **`DATETIMEPICKER.xlam`** — it is a binary artifact published only as
@@ -223,7 +223,7 @@ This mirrors the docs-sync step in the **Release-Checklist** wiki page.
 ## 🚀 Submitting changes
 
 <p align="left">
-  <img alt="PR" src="https://img.shields.io/badge/PR-small_and_focused-217346">
+  <img alt="PR" src="https://img.shields.io/badge/PR-Small_and_focused-217346">
 </p>
 
 1. Fork the repository and create a branch for your change.
