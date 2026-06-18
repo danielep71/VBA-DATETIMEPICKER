@@ -48,7 +48,7 @@ Report privately through either:
 - email the maintainer at:
 
 ```text
-danielep71#gmail.com
+danielep71@gmail.com
 ```
 
 Helpful details to include:
