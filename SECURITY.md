@@ -53,10 +53,10 @@ danielep71@gmail.com
 
 Helpful details to include:
 
-- affected version (`v1.1.0`, etc.) and Excel version / bitness / OS
-- a clear description of the issue and its impact
-- minimal reproduction steps
-- any suggested remediation, if you have one
+- Affected version (`v1.1.0`, etc.) and Excel version / bitness / OS
+- A clear description of the issue and its impact
+- Minimal reproduction steps
+- Any suggested remediation, if you have one
 
 ---
 
@@ -69,10 +69,10 @@ Helpful details to include:
 This is a solo-maintained project, so responses are best-effort rather than
 guaranteed within a fixed window. You can expect:
 
-- acknowledgement of your report,
-- an assessment of validity and severity,
-- a fix in a new release when a valid issue is confirmed,
-- credit in the release notes if you would like it.
+- Acknowledgement of your report,
+- An assessment of validity and severity,
+- A fix in a new release when a valid issue is confirmed,
+- Credit in the release notes if you would like it.
 
 Please allow reasonable time for a fix before any public disclosure.
 
@@ -87,18 +87,18 @@ Please allow reasonable time for a fix before any public disclosure.
 
 **In scope**
 
-- the VBA source under `src/` (module, classes, form, ribbon)
-- the published `DATETIMEPICKER.xlam` add-in
-- registry use under the `VBA_DATETIMEPICKER` app name
-- the WinAPI declarations used for window styling and positioning
-- worksheet write-back behavior
+- The VBA source under `src/` (module, classes, form, ribbon)
+- The published `DATETIMEPICKER.xlam` add-in
+- Registry use under the `VBA_DATETIMEPICKER` app name
+- The WinAPI declarations used for window styling and positioning
+- Worksheet write-back behavior
 
 **Out of scope**
 
 - Microsoft Excel, Office, Windows, or the VBA runtime themselves
-- issues that require the user to disable Excel macro security or run untrusted
+- Issues that require the user to disable Excel macro security or run untrusted
   code unrelated to this project
-- copies of the add-in obtained from anywhere other than the official Releases
+- Copies of the add-in obtained from anywhere other than the official Releases
   page
 
 ---
