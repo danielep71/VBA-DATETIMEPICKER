@@ -1,9 +1,9 @@
 # 🧭 Code of Conduct
 
 <p align="left">
-  <img alt="Scope" src="https://img.shields.io/badge/applies_to-everyone-217346">
-  <img alt="Spaces" src="https://img.shields.io/badge/spaces-issues_PRs_discussions-blue">
-  <img alt="Enforcement" src="https://img.shields.io/badge/enforcement-maintainer-6f42c1">
+  <img alt="Scope" src="https://img.shields.io/badge/Applies_to-Everyone-217346">
+  <img alt="Spaces" src="https://img.shields.io/badge/Spaces-Issues_PRs_discussions-blue">
+  <img alt="Enforcement" src="https://img.shields.io/badge/Enforcement-Maintainer-6f42c1">
 </p>
 
 This project is a small, focused open-source effort. The goal of this Code of
@@ -16,7 +16,7 @@ bugs, proposing changes, and asking questions.
 ## 🤝 Our pledge
 
 <p align="left">
-  <img alt="Pledge" src="https://img.shields.io/badge/pledge-respect_and_inclusion-217346">
+  <img alt="Pledge" src="https://img.shields.io/badge/Pledge-Respect_and_inclusion-217346">
 </p>
 
 Everyone who participates — by opening an issue, submitting a pull request,
@@ -29,7 +29,7 @@ identity, or personal characteristics.
 ## ✅ Expected behavior
 
 <p align="left">
-  <img alt="Standards" src="https://img.shields.io/badge/standards-be_constructive-blue">
+  <img alt="Standards" src="https://img.shields.io/badge/Standards-Be_constructive-blue">
 </p>
 
 - Be respectful and assume good faith.
@@ -44,7 +44,7 @@ identity, or personal characteristics.
 ## 🚫 Unacceptable behavior
 
 <p align="left">
-  <img alt="Prohibited" src="https://img.shields.io/badge/prohibited-harassment-red">
+  <img alt="Prohibited" src="https://img.shields.io/badge/Prohibited-Harassment-red">
 </p>
 
 - Personal attacks, insults, or derogatory comments.
@@ -58,7 +58,7 @@ identity, or personal characteristics.
 ## 🛠️ Scope
 
 <p align="left">
-  <img alt="Where" src="https://img.shields.io/badge/where-project_spaces-217346">
+  <img alt="Where" src="https://img.shields.io/badge/Where-Project_spaces-217346">
 </p>
 
 This Code of Conduct applies to all project spaces — the repository, issues,
@@ -70,14 +70,14 @@ where someone is representing the project in public.
 ## 📣 Reporting
 
 <p align="left">
-  <img alt="Report" src="https://img.shields.io/badge/report-privately-orange">
+  <img alt="Report" src="https://img.shields.io/badge/Report-Privately-orange">
 </p>
 
 If you experience or witness unacceptable behavior, please report it **privately**
 to the maintainer rather than in a public thread. Contact:
 
 ```text
-[add your contact email here]
+danielep71@gmail.com
 ```
 
 Reports will be handled discreetly. Please include what happened, where, and any
