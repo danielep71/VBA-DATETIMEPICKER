@@ -980,19 +980,6 @@ Planned or possible future enhancements include:
 
 ---
 
-## 🌐 Part of a broader framework
-
-<p align="left">
-  <img alt="Framework" src="https://img.shields.io/badge/Framework-Excel_VBA_Runtime_Framework-217346">
-  <img alt="Layer" src="https://img.shields.io/badge/Layer-Interaction_layer-6f42c1">
-</p>
-
-**VBA-DATETIMEPICKER** is intended to sit naturally alongside other reusable Excel VBA components.
-
-In a broader VBA engineering ecosystem, this repository can serve as the **date-input / calendar UX component**.
-
----
-
 ## 📚 Wiki
 
 <p align="left">
@@ -1034,6 +1021,26 @@ General conventions:
 - explicit cleanup / fail-safe logic where appropriate
 - stable external behavior unless a change is deliberate and documented
 - production-quality code intended for real Excel environments
+
+---
+
+## 🙏 Acknowledgements & prior art
+
+<p align="left">
+  <img alt="Inspired by" src="https://img.shields.io/badge/Inspired_by-Sam_Rad's_DatePicker-blueviolet">
+  <img alt="Implementation" src="https://img.shields.io/badge/Implementation-Independent_%2F_from_scratch-brightgreen">
+</p>
+
+`VBA-DATETIMEPICKER` was inspired by [Sam Radakovitz's Excel Date Picker](http://samradapps.com/datepicker),
+whose modeless, in-grid approach I admired and used as a reference for the experience I wanted to build.
+
+This is an **independent, open-source reimplementation** written from scratch, with different goals:
+
+- **Open source (MIT)** — full VBA source, published and importable, rather than a compiled add-in
+- **Embeddable** — import the source so the picker travels inside your workbook; no per-machine install
+- **Developer-oriented** — a documented `DP_*` public API, a regression test harness, and a full wiki
+
+Credit also to the wider VBA community's date-picker tradition for showing what's achievable in pure VBA.
 
 ---
 
