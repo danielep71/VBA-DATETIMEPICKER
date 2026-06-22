@@ -15,6 +15,10 @@
   <img alt="Status" src="https://img.shields.io/badge/Status-Final-green">
 </p>
 
+<p align="center">
+  <b>🔒 No add-in • No install • No admin rights — just import the source; the picker lives inside your workbook.</b>
+</p>
+
 ---
 
 <img width="1536" height="1024" alt="datepicker-home2" src="https://github.com/user-attachments/assets/21bda6f0-d738-47b9-87f1-69f83c308ba7" />
@@ -50,6 +54,17 @@ Built as part of a broader **Excel VBA Runtime Framework**, this project focuses
   <img alt="Goal" src="https://img.shields.io/badge/Goal-Modern_Excel_UX-brightgreen">
   <img alt="Audience" src="https://img.shields.io/badge/Audience-VBA_developers_%2F_Excel_users-blueviolet">
 </p>
+
+**Built for locked-down environments.** This project exists because of a specific, very common
+problem: on company-managed computers you often can't install anything — no admin rights, no
+add-ins, no approved IT request in time. Most Excel date pickers are distributed as installable
+add-ins, which makes them a non-starter for many corporate users and breaks shared workbooks for
+anyone who doesn't have the add-in.
+
+`VBA-DATETIMEPICKER` takes the opposite approach: it's plain VBA source you import directly into a
+workbook. If you can run macros, you can use it — no installation, no admin rights, nothing to
+deploy, and nothing for colleagues to install when you share the file. The picker travels inside
+the workbook itself.
 
 Excel still powers an enormous number of business-critical workflows, but native date-entry UX is often poor.
 
@@ -398,6 +413,8 @@ VBA-DATETIMEPICKER/
   <img alt="VBE" src="https://img.shields.io/badge/VBE-Import-orange">
 </p>
 
+> **Which path is for you?** On a managed machine where you can't install add-ins — no admin rights, IT-controlled Excel — use the **source-import path (Option 1)**: it needs no installation and no special permissions, so if you can run macros, you can use it. The **add-in (Option 3)** is a convenience for users who *can* install Excel add-ins and want the picker available across every workbook without importing the source each time.
+
 ### Option 1 — Import into an existing VBA project
 
 1. Open the target workbook in Excel.
@@ -433,7 +450,7 @@ For end users who just want the picker available across Excel, without touching 
 3. In Excel: **File → Options → Add-ins → Manage: Excel Add-ins → Go… → Browse…**, select the `.xlam`, and enable it.
 4. The Date / Time Picker is then available through its Ribbon button, right-click entry, and `Ctrl + Shift + D`.
 
-> The add-in suits personal, cross-workbook use. To **embed** the picker inside a workbook you redistribute to others, use Option 1 so the code travels with your file.
+> **Requires the ability to install Excel add-ins.** On a locked-down machine (no admin rights, IT-managed Excel) this option won't be available — use the source-import path (Option 1) instead, which needs no installation. The add-in suits users who *can* install it and want the picker in every workbook; to redistribute the picker inside a shared workbook, also use Option 1 so the code travels with the file.
 
 ---
 
