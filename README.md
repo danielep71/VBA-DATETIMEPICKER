@@ -37,7 +37,7 @@
 
 The component provides a **modeless UserForm**, contextual worksheet integration, in-form settings, keyboard shortcuts, live-clock support, right-click access, optional in-grid activation, and optional Ribbon callbacks.
 
-Built as part of a broader **Excel VBA Runtime Framework**, this project focuses on:
+This project focuses on:
 
 - 📅 better date and date-time entry UX in Excel
 - 🧩 modular, maintainable VBA architecture
