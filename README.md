@@ -1032,23 +1032,6 @@ Tracked in [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
 
 ---
 
-## 🧭 Roadmap
-
-<p align="left">
-  <img alt="Roadmap" src="https://img.shields.io/badge/Roadmap-Planned_enhancements-blue">
-</p>
-
-Planned or possible future enhancements include:
-
-- 📆 business-day / holiday-calendar integration
-- 🌙 dark mode / custom color and font themes
-- 🧠 richer date-cell detection heuristics
-- 🧩 tighter integration with reusable date/calendar modules
-- 🎨 additional visual themes
-- 🌐 improved localization options
-
----
-
 ## 📚 Wiki
 
 <p align="left">
