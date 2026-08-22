@@ -43,6 +43,69 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ---
 
+## [Unreleased]
+
+> Targeting `v1.2.0`
+
+### ➕ Added
+
+- Added `demo/M_DP_DEMO.bas`, which builds the demo worksheet from code. The
+  demo previously existed only as content inside `demo/DATEPICKER.xlsm`:
+  `demo/M_DEMO_BUILDER.bas` is a toolkit of primitives, and nothing in the
+  repository called them to produce the DatePicker demo. A change to the demo
+  therefore appeared in a pull request as a binary diff and nothing else.
+
+  Two entry points — `DP_Demo_CreateDemoSheet` builds or rebuilds,
+  `DP_Demo_EnsureDemoSheet` returns the sheet and builds only when it is
+  missing. Both take an optional target workbook and default to
+  `ActiveWorkbook`.
+
+  The Excel Table section is a real `ListObject` rather than a formatted range.
+  A formatted range would not exercise the table write-back path, which is the
+  reason that section exists. Its Expiry Date column is deliberately empty:
+  selecting one of those cells is the shortest route to observing the
+  write-scope behaviour described in
+  [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
+
+### 🐛 Fixed
+
+- Fixed the demo-sheet routines resolving their worksheet from `ThisWorkbook`.
+  Four routines did so — `Ribbon_Demo`, `DP_DemoSheet_Show`,
+  `DP_DemoSheet_HideVeryHidden` and `DP_DemoSheet_GetSafeVisibleSheet` — and
+  their headers recorded the choice as deliberate, which it was for an embedded
+  copy. In the `.xlam` it is wrong: `ThisWorkbook` is the add-in, which has no
+  worksheets, so the Ribbon **Demo** button raised subscript-out-of-range on
+  every click.
+
+  A new private resolver decides the host workbook once, so the four routines
+  cannot disagree about which workbook they are operating on. Embedded, it
+  returns `ThisWorkbook` and behaviour is unchanged. As an add-in, it returns
+  the first open workbook already holding the demo sheet, and adds a new
+  workbook when none does.
+
+  The add-in deliberately does not build into whichever workbook happens to be
+  active. Adding an unrequested sheet to a user's live workbook is a worse
+  outcome than opening a new one.
+  ([#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23))
+
+### 🔗 Compatibility
+
+- No public procedure was added, removed or renamed in `src/`.
+- `DP_Demo_CreateDemoSheet` and `DP_Demo_EnsureDemoSheet` are new, and live in
+  `demo/`. Versioning covers the public VBA API of the component in `src/`;
+  `demo/` is example material that ships as a workbook.
+- Embedded behaviour is unchanged. The add-in gains a Demo button that works.
+
+### ⚠️ Note on the add-in
+
+Building the demo from the add-in requires `M_DP_DEMO.bas` and
+`M_DEMO_BUILDER.bas` to be present in the `.xlam`, which adds roughly 6,500
+lines of demo-construction code to a component whose purpose is a date picker.
+That is a deliberate trade for a working Demo button; the alternative was
+hiding the button when running as an add-in.
+
+---
+
 ## [1.1.1] - 2026-08-22
 
 > 🩹 **Patch** · correctness and disclosure release · public API unchanged

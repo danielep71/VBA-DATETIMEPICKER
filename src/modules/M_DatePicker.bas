@@ -15700,7 +15700,7 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   callback always targets the DatePicker host workbook
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -15708,6 +15708,7 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '------------------------------------------------------------------------------
     Const PROC_NAME As String = "Ribbon_Demo"
 
+    Dim HostBook    As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet   As Excel.Worksheet       'DatePicker demo worksheet
 
 '------------------------------------------------------------------------------
@@ -15717,10 +15718,23 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' RESOLVE HOST WORKBOOK
+'------------------------------------------------------------------------------
+    'Resolve the workbook that should hold the demo sheet, creating one when the
+    'component runs as an add-in and no open workbook already holds it
+        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(True)
+
+    'Reject the case where no host workbook could be resolved
+        If HostBook Is Nothing Then
+            Err.Raise vbObjectError + 540, PROC_NAME, _
+                "No workbook is available to hold the demo sheet."
+        End If
+
+'------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Retrieve the demo worksheet from the host workbook
-        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+    'Build the demo sheet on first use, then return it
+        Set DemoSheet = DP_Demo_EnsureDemoSheet(HostBook)
 
 '------------------------------------------------------------------------------
 ' TOGGLE DEMO SHEET
@@ -15949,7 +15963,7 @@ Public Sub DP_DemoSheet_Show()
 '   the DatePicker host workbook
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -15957,6 +15971,7 @@ Public Sub DP_DemoSheet_Show()
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "DP_DemoSheet_Show"
 
+    Dim HostBook        As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
 
 '------------------------------------------------------------------------------
@@ -15968,8 +15983,17 @@ Public Sub DP_DemoSheet_Show()
 '------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Retrieve the demo worksheet from the host workbook
-        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+    'Resolve the workbook that holds the demo sheet
+        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(False)
+
+    'Reject the case where no open workbook holds a demo sheet
+        If HostBook Is Nothing Then
+            Err.Raise vbObjectError + 541, PROC_NAME, _
+                "No open workbook contains the demo sheet '" & DP_DEMO_SHEET_NAME & "'."
+        End If
+
+    'Retrieve the demo worksheet from the resolved workbook
+        Set DemoSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' SHOW DEMO SHEET
@@ -15982,8 +16006,8 @@ Public Sub DP_DemoSheet_Show()
 '------------------------------------------------------------------------------
     'Suppress window activation errors for hidden or add-in-like contexts
         On Error Resume Next
-    'Activate the first workbook window when available
-        If ThisWorkbook.Windows.Count > 0 Then ThisWorkbook.Windows(1).Activate
+    'Activate the first window of the workbook holding the demo sheet
+        If HostBook.Windows.Count > 0 Then HostBook.Windows(1).Activate
     'Clear any suppressed window activation error
         Err.Clear
     'Restore controlled error handling
@@ -16053,12 +16077,13 @@ Public Sub DP_DemoSheet_HideVeryHidden()
 '   Safe to call repeatedly
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Dim HostBook        As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
     Dim SafeSheet       As Excel.Worksheet       'Visible non-demo worksheet
 
@@ -16071,8 +16096,14 @@ Public Sub DP_DemoSheet_HideVeryHidden()
 '------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Retrieve the demo worksheet from the host workbook
-        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+    'Resolve the workbook that holds the demo sheet
+        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(False)
+
+    'Exit if no open workbook holds a demo sheet
+        If HostBook Is Nothing Then GoTo CleanExit
+
+    'Retrieve the demo worksheet from the resolved workbook
+        Set DemoSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
 
     'Exit if the demo worksheet is not available
         If DemoSheet Is Nothing Then GoTo CleanExit
@@ -16125,6 +16156,129 @@ CleanExit:
 
 End Sub
 
+Private Function DP_DemoSheet_ResolveHostWorkbook( _
+    ByVal CreateWhenMissing As Boolean) As Excel.Workbook
+
+'
+'------------------------------------------------------------------------------
+'                       RESOLVE DEMO HOST WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the workbook that holds, or should hold, the DatePicker demo sheet
+'
+' WHY THIS EXISTS
+'   The demo routines previously resolved the sheet from ThisWorkbook. That is
+'   correct when the component is embedded in the demo workbook and wrong when it
+'   is loaded as an add-in, where ThisWorkbook is the add-in and has no
+'   worksheets at all
+'
+'   Centralizing the decision keeps the four demo routines in agreement about
+'   which workbook they are operating on
+'
+' INPUTS
+'   CreateWhenMissing
+'     True to add a new workbook when running as an add-in and no open workbook
+'     already holds the demo sheet
+'
+' RETURNS
+'   Workbook that holds or will hold the demo sheet, or Nothing
+'
+' BEHAVIOR
+'   Returns ThisWorkbook when the component is embedded
+'
+'   When running as an add-in, returns the first open workbook that already holds
+'   the demo sheet. Adds a new workbook when none does and CreateWhenMissing is
+'   True. Otherwise returns Nothing
+'
+' ERROR POLICY
+'   Safe default. Returns Nothing rather than raising when no workbook can be
+'   resolved, so lifecycle cleanup paths can exit quietly
+'
+' DEPENDENCIES
+'   DP_DEMO_SHEET_NAME
+'
+' NOTES
+'   The add-in deliberately does not build the demo into whichever workbook
+'   happens to be active. Adding an unrequested sheet to a user's live workbook
+'   is a worse outcome than opening a new one
+'
+'   An add-in, a workbook with protected structure, and a workbook already
+'   holding the demo are all distinguished here rather than left to fail later
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CandidateBook   As Excel.Workbook       'Workbook scan variable
+    Dim ProbeSheet      As Excel.Worksheet      'Demo sheet probe
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Return the safe default unless a workbook can be resolved
+        Set DP_DemoSheet_ResolveHostWorkbook = Nothing
+    'Suppress resolution errors through the local fail-safe path
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' EMBEDDED DEPLOYMENT
+'------------------------------------------------------------------------------
+    'Use the host workbook when the component is embedded in one
+        If Not ThisWorkbook.IsAddin Then
+            Set DP_DemoSheet_ResolveHostWorkbook = ThisWorkbook
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' REUSE AN OPEN DEMO WORKBOOK
+'------------------------------------------------------------------------------
+    'Return the first open workbook that already holds the demo sheet
+        For Each CandidateBook In Excel.Application.Workbooks
+            'Skip add-ins, which cannot hold a worksheet
+                If Not CandidateBook.IsAddin Then
+                    'Probe for the demo sheet without raising when it is absent
+                        Set ProbeSheet = Nothing
+                        On Error Resume Next
+                        Set ProbeSheet = CandidateBook.Worksheets(DP_DEMO_SHEET_NAME)
+                        Err.Clear
+                        On Error GoTo FailSafe
+                    'Return the workbook that already holds the demo sheet
+                        If Not ProbeSheet Is Nothing Then
+                            Set DP_DemoSheet_ResolveHostWorkbook = CandidateBook
+                            Exit Function
+                        End If
+                End If
+        Next CandidateBook
+
+'------------------------------------------------------------------------------
+' CREATE A DEMO WORKBOOK
+'------------------------------------------------------------------------------
+    'Exit with the safe default when the caller does not want one created
+        If Not CreateWhenMissing Then Exit Function
+
+    'Add a workbook to hold the demo rather than writing into the user's own
+        Set DP_DemoSheet_ResolveHostWorkbook = Excel.Application.Workbooks.Add
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the fail-safe handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
+FailSafe:
+    'Return the safe default
+        Set DP_DemoSheet_ResolveHostWorkbook = Nothing
+    'Clear the suppressed resolution error
+        Err.Clear
+
+End Function
+
 Private Function DP_DemoSheet_GetSafeVisibleSheet( _
     ByVal DemoSheet As Excel.Worksheet) As Excel.Worksheet
 
@@ -16164,7 +16318,7 @@ Private Function DP_DemoSheet_GetSafeVisibleSheet( _
 '   This helper does not create sheets and does not change visibility
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -16181,8 +16335,8 @@ Private Function DP_DemoSheet_GetSafeVisibleSheet( _
 '------------------------------------------------------------------------------
 ' FIND SAFE SHEET
 '------------------------------------------------------------------------------
-    'Loop through worksheets in the host workbook
-        For Each WS In ThisWorkbook.Worksheets
+    'Loop through worksheets in the workbook that owns the demo sheet
+        For Each WS In DemoSheet.Parent.Worksheets
             'Return the first visible worksheet that is not the demo sheet
                 If Not WS Is DemoSheet Then
                     If WS.Visible = xlSheetVisible Then
