@@ -442,19 +442,34 @@ VBA-DATETIMEPICKER/
 
 ### Option 2 — Use the demo workbook
 
-Open the included demo workbook to:
+Download **`DATETIMEPICKER-demo-vx.y.z.xlsm`** from the
+[latest release](https://github.com/danielep71/vba-datetimepicker/releases/latest),
+where `vx.y.z` is the release version. Right-click the file → **Properties** →
+tick **Unblock** → **OK** before opening it.
+
+Use it to:
 
 - explore the picker behavior
+- compare table write scopes: pick a date in one **Expiry Date** cell, then use
+  **Fill Table Column**
 - validate the interaction model
 - test settings persistence
 - test right-click, keyboard, and in-grid icon entry points
 - use the demo as a starting point for integration
 
+The workbook is not stored in this repository. It is generated from
+`demo/M_DP_DEMO.bas` at release time, so if you are working from source you can
+rebuild it yourself:
+
+```vba
+DP_Demo_CreateDemoSheet
+```
+
 ### Option 3 — Install the prebuilt add-in (`.xlam`)
 
 For end users who just want the picker available across Excel, without touching VBA source:
 
-1. Download **`DATETIMEPICKER.xlam`** from the [latest release](https://github.com/danielep71/vba-datetimepicker/releases/latest).
+1. Download **`DATETIMEPICKER-vx.y.z.xlam`** from the [latest release](https://github.com/danielep71/vba-datetimepicker/releases/latest), where `vx.y.z` is the release version.
 2. Right-click the file → **Properties** → tick **Unblock** → **OK** (clears the downloaded-from-internet block).
 3. In Excel: **File → Options → Add-ins → Manage: Excel Add-ins → Go… → Browse…**, select the `.xlam`, and enable it.
 4. The Date / Time Picker is then available through its Ribbon button, right-click entry, and `Ctrl + Shift + D`.

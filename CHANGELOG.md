@@ -151,6 +151,30 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🐛 Fixed
 
+- Fixed six README statements describing `M_Picker_EnsureManager` behaviour that
+  `v1.1.1` removed. The routine no longer forces
+  `Application.EnableEvents = True`, but the public API table, the validation
+  checklist, the troubleshooting table and a feature list still said it did.
+
+  Two of them contradicted each other: **Known limitations** stated that
+  `DP_RepairRuntime` is the only routine that deliberately re-enables events,
+  while the troubleshooting table still offered `M_Picker_EnsureManager` as an
+  equivalent recovery — sending a user whose events were disabled to a routine
+  that, by design, does nothing to event state.
+
+  The Known limitations section was audited when it was written; the rest of the
+  file was not. The release documented its own behaviour change while
+  contradicting it four sections above the disclosure.
+
+- Fixed four documents describing `demo/DATEPICKER.xlsm` as a tracked file after
+  it was deleted. The `CONTRIBUTING.md` binary policy table was written
+  specifically to resolve a contradiction about that file and had come to assert
+  that a nonexistent file was tracked and must be kept in sync with source.
+
+  The binary policy now leads with the rule rather than the exceptions: no
+  workbook or add-in binary is tracked, and `UF_DatePicker.frx` is the only
+  tracked binary in the repository.
+
 - **Fixed a selected cell inside an Excel Table data column writing the entire
   column.** This applied to calendar selection, `DP_Today` and `DP_Now`, and it
   overwrote existing values in that column with no indication of the scope.
@@ -230,6 +254,35 @@ backward-compatible capability, 💥 **major** may break callers.
   ([#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23))
 
 ### 🔧 Changed
+
+- The demo workbook is now published as a release asset rather than tracked. It
+  is generated from `demo/M_DP_DEMO.bas` by `DP_Demo_CreateDemoSheet` at release
+  time, so a change to the demo is reviewable as a source diff.
+
+  Release assets carry the version and contain no spaces, because GitHub
+  replaces spaces with dots on upload and a spaced name is published under a
+  different name than the one documented:
+
+  ```text
+  DATETIMEPICKER-vx.y.z.xlam
+  DATETIMEPICKER-demo-vx.y.z.xlsm
+  ```
+
+- README, `CONTRIBUTING.md` and the pull request template brought current with
+  the table write-scope change. `DP_FillTableColumn` is documented in the public
+  API table, the write-scope callout describes the new default rather than
+  warning about the old one, and **Table write scope** is removed from Known
+  limitations.
+
+  An operating note records what the fix did *not* change: the size of the
+  resolved target moved, but formulas and existing values are still overwritten
+  within it. That is
+  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22).
+
+  The pull request template's demo section now asks the questions that matter
+  for generated output — rebuilt and visually checked, idempotent across two
+  rebuilds, `OnAction` targets wired, and whether it still demonstrates current
+  behaviour rather than superseded behaviour.
 
 - Separated write-back target resolution from mutation.
   `M_WriteBack_ResolveAndApplyTarget` resolved the target and wrote to it in one

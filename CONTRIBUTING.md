@@ -94,8 +94,19 @@ text that can be read in a diff.
 | Artifact | Tracked | Policy |
 |---|---|---|
 | `src/forms/UF_DatePicker.frx` | **yes** | Part of the form source. Not optional and not a build artifact. The only tracked binary, and it must travel with its `.frm`. |
-| The demo workbook | no | Built from `demo/M_DP_DEMO.bas` by `DP_Demo_CreateDemoSheet`. Published as a release asset. |
-| `DATETIMEPICKER.xlam` | no | Build output, excluded by `.gitignore`. Published as a release asset. |
+| `DATETIMEPICKER-demo-vx.y.z.xlsm` | no | Built from `demo/M_DP_DEMO.bas` by `DP_Demo_CreateDemoSheet`. Published as a release asset. |
+| `DATETIMEPICKER-vx.y.z.xlam` | no | Build output, excluded by `.gitignore`. Published as a release asset. |
+
+Release asset names carry the version, so a downloaded file is identifiable
+without opening it:
+
+```text
+DATETIMEPICKER-vx.y.z.xlam
+DATETIMEPICKER-demo-vx.y.z.xlsm
+```
+
+Names contain no spaces. GitHub replaces spaces with dots on upload, so a
+spaced name is published under a different name than the one documented.
 
 > [!IMPORTANT]
 > Change the demo by editing `demo/M_DP_DEMO.bas`, never by editing a workbook.
