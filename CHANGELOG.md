@@ -4,9 +4,9 @@
 
 **All notable changes to VBA-DATETIMEPICKER**
 
-[![Semantic Versioning](https://img.shields.io/badge/versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
-[![Format](https://img.shields.io/badge/format-keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
-[![Dates](https://img.shields.io/badge/dates-YYYY--MM--DD-217346?style=flat-square)](#)
+[![Semantic Versioning](https://img.shields.io/badge/Versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
+[![Format](https://img.shields.io/badge/Format-Keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
+[![Dates](https://img.shields.io/badge/Dates-YYYY--MM--DD-217346?style=flat-square)](#)
 
 </div>
 
@@ -43,7 +43,7 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ---
 
-## [1.1.1] - 2026-08-21
+## [1.1.1] - 2026-08-22
 
 > 🩹 **Patch** · correctness and disclosure release · public API unchanged
 
