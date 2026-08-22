@@ -157,6 +157,8 @@ Option Explicit
     Private mTST_DP_FailCount       As Long             'Total assertions failed in the current run
     Private mTST_DP_CurrentSuite    As String           'Suite name currently being executed
     Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
+    Private mTST_DP_MenuAtStart     As Long             'Context-menu controls registered before the run
+    Private mTST_DP_MenuAfterRemove As Long             'Context-menu controls left immediately after removal
     Private mTST_DP_RunInProgress   As Boolean          'True between run start and completed teardown
     Private mTST_DP_DirtyStart      As Boolean          'True when preflight found a previous run's leftovers
     Private mTST_DP_DirtyDetail     As String           'What preflight found, recorded once the result sheet exists
@@ -291,6 +293,163 @@ PreflightUnreadable:
 
 End Sub
 
+Private Sub TST_DP_ReportSetupFailure(ByVal EntryPoint As String)
+
+'
+'==============================================================================
+'                        REPORT SETUP FAILURE
+'==============================================================================
+'   Reports a failure that happened before the run could start.
+'
+'   Setup runs outside the run's own fatal handler, so an error here would
+'   otherwise reach the user as an unhandled VBE dialog naming a method rather
+'   than a cause. Nothing has been recorded at this point and there may be no
+'   result sheet, so the report goes to the Immediate window and a message box.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Capture the failure before anything can clear it
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
+    'Never let reporting raise
+        On Error Resume Next
+    'Record what failed
+        Debug.Print EntryPoint & " | Setup failed | " & _
+            VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+    'Record the conditions that explain it
+        Debug.Print EntryPoint & " | Environment | " & TST_DP_DescribeHostWorkbook()
+    'Tell the operator, because no result sheet exists to read
+        MsgBox _
+            "The regression run could not start." & VBA.vbCrLf & VBA.vbCrLf & _
+            VBA.CStr(ErrorNumber) & " - " & ErrorDescription & VBA.vbCrLf & VBA.vbCrLf & _
+            TST_DP_DescribeHostWorkbook() & VBA.vbCrLf & VBA.vbCrLf & _
+            "The Immediate window carries the same detail.", _
+            vbCritical Or vbOKOnly, _
+            "DatePicker regression harness"
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Public Sub TST_DP_ReportEnvironment()
+
+'
+'==============================================================================
+'                          REPORT ENVIRONMENT
+'==============================================================================
+'   Prints the host workbook conditions that decide whether the harness can set
+'   itself up. Run it from the Immediate window when a run fails during setup.
+'
+'   It resolves the host the same way a run does and writes nothing.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise
+        On Error Resume Next
+    'Resolve the host exactly as a run would
+        Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+    'Print the conditions that block Worksheets.Add
+        Debug.Print "TST_DP | Environment | " & TST_DP_DescribeHostWorkbook()
+    'Release the reference so the probe leaves nothing behind
+        Set mTST_DP_HostWorkbook = Nothing
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReportDirtyStart()
+
+'
+'==============================================================================
+'                          REPORT DIRTY START
+'==============================================================================
+'   Reports a refused run without writing anything to the workbook.
+'
+'   The result sheet cannot be used here. Building it is a mutation, and a run
+'   that has just decided the environment is not its own must not mutate it.
+'   Building that template over a previous run's leftovers is the failure this
+'   whole path exists to prevent.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' REPORT AND REFUSE
+'------------------------------------------------------------------------------
+    'Never let reporting raise
+        On Error Resume Next
+    'Record the refusal where it can be read without a result sheet
+        Debug.Print "TST_DP_RunAll | " & TST_DP_STATE_DIRTY_START & " | " & _
+            mTST_DP_DirtyDetail
+    'Describe the workbook the run refused to touch
+        Debug.Print "TST_DP_RunAll | Environment | " & TST_DP_DescribeHostWorkbook()
+    'Tell the operator, because a refused run produces no result sheet to read
+        MsgBox _
+            "The regression run was refused." & VBA.vbCrLf & VBA.vbCrLf & _
+            mTST_DP_DirtyDetail & VBA.vbCrLf & VBA.vbCrLf & _
+            "Restart Excel, delete any leftover " & TST_DP_SCRATCH_SHEET_NAME & _
+            " worksheet, and run again.", _
+            vbExclamation Or vbOKOnly, _
+            "DatePicker regression harness"
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_DescribeHostWorkbook() As String
+
+'
+'==============================================================================
+'                        DESCRIBE HOST WORKBOOK
+'==============================================================================
+'   Describes the conditions that stop a worksheet being added, so a setup
+'   failure names its cause instead of surfacing a bare 1004.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Description     As String       'Accumulated description
+
+'------------------------------------------------------------------------------
+' DESCRIBE
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_DescribeHostWorkbook = "host workbook could not be described"
+    'Report when no host workbook was resolved at all
+        If mTST_DP_HostWorkbook Is Nothing Then
+            TST_DP_DescribeHostWorkbook = "no host workbook was resolved"
+            Err.Clear
+            Exit Function
+        End If
+    'Name the workbook and the conditions that block Worksheets.Add
+        Description = "Host=" & mTST_DP_HostWorkbook.Name & _
+            "; IsAddin=" & VBA.CStr(mTST_DP_HostWorkbook.IsAddin) & _
+            "; ProtectStructure=" & VBA.CStr(mTST_DP_HostWorkbook.ProtectStructure) & _
+            "; ReadOnly=" & VBA.CStr(mTST_DP_HostWorkbook.ReadOnly) & _
+            "; Worksheets=" & VBA.CStr(mTST_DP_HostWorkbook.Worksheets.Count) & _
+            "; Sheets=" & VBA.CStr(mTST_DP_HostWorkbook.Sheets.Count) & _
+            "; " & TST_DP_RESULT_SHEET_NAME & " exists=" & _
+            VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_RESULT_SHEET_NAME)) & _
+            "; " & TST_DP_SCRATCH_SHEET_NAME & " exists=" & _
+            VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME))
+    'Return the description
+        TST_DP_DescribeHostWorkbook = Description
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Function
+
 Private Function TST_DP_SheetExists( _
     ByVal Book As Excel.Workbook, _
     ByVal SheetName As String) As Boolean
@@ -374,12 +533,20 @@ Public Sub TST_DP_RunAll()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
+    'Report a setup failure with the conditions that caused it, rather than
+    'surfacing a bare 1004 from a workbook that cannot accept a worksheet
+        On Error GoTo SetupFailed
     'Reset module-level counters and object references before the run
         TST_DP_ResetHarnessState
     'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
     'Decide whether the environment is clean before anything in this run changes it
         TST_DP_Preflight
+    'Stop before touching the workbook when the environment is not this run's to use
+        If mTST_DP_DirtyStart Then
+            TST_DP_ReportDirtyStart
+            Exit Sub
+        End If
     'Build the result sheet template before the run
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
             "Test Sheet", , TST_DP_RESULT_FIRST_ROW
@@ -387,8 +554,19 @@ Public Sub TST_DP_RunAll()
 '------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
+    'Restore normal error handling before the run takes over
+        On Error GoTo 0
     'Run the standard non-disruptive regression pack without UI smoke
         TST_DP_RunAllInternal False
+    'Exit before the setup handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SETUP FAILED
+'------------------------------------------------------------------------------
+SetupFailed:
+    'Report what failed and the workbook conditions behind it
+        TST_DP_ReportSetupFailure "TST_DP_RunAll"
 
 End Sub
 
@@ -441,6 +619,8 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '------------------------------------------------------------------------------
 ' RESOLVE HOST WORKBOOK
 '------------------------------------------------------------------------------
+    'Report a setup failure with the conditions that caused it
+        On Error GoTo SetupFailed
     'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
 
@@ -449,6 +629,11 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '------------------------------------------------------------------------------
     'Decide whether the environment is clean before anything in this run changes it
         TST_DP_Preflight
+    'Stop before touching the workbook when the environment is not this run's to use
+        If mTST_DP_DirtyStart Then
+            TST_DP_ReportDirtyStart
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' BUILD RESULT SHEET TEMPLATE
@@ -460,8 +645,19 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
+    'Restore normal error handling before the run takes over
+        On Error GoTo 0
     'Run the regression pack with the UI smoke suite included
         TST_DP_RunAllInternal True
+    'Exit before the setup handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SETUP FAILED
+'------------------------------------------------------------------------------
+SetupFailed:
+    'Report what failed and the workbook conditions behind it
+        TST_DP_ReportSetupFailure "TST_DP_RunAll_WithUISmoke"
 
 End Sub
 
@@ -660,6 +856,7 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '   TST_DP_CaptureApplicationState
 '   TST_DP_PrepareApplicationForRun
 '   TST_DP_ResetDatePickerArtifacts
+'   TST_DP_ContextMenuControlCount
 '   TST_DP_PrepareResultSheet
 '   TST_DP_PrepareScratchSheet
 '   TST_DP_WriteSummary
@@ -685,12 +882,15 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
     Dim FatalNumber         As Long                                 'Fatal error number
     Dim FatalDescription    As String                               'Fatal error description
     Dim HasFatalError       As Boolean                              'True when a fatal error must be re-raised
+    Dim HandlerStep         As String                               'Current setup step for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled fatal handling
         On Error GoTo FatalHandler
+    'Track the current setup step so a fatal names where it happened
+        HandlerStep = "Initialize"
     'Mark the run as in progress until teardown completes
         mTST_DP_RunInProgress = True
     'Reset the per-run cleanup and suite counters
@@ -700,21 +900,31 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         mTST_DP_SuitesCompleted = 0
     'Capture whether a manager existed before the run
         mTST_DP_HadManager = Not (gDP_Manager Is Nothing)
+    'Capture the context-menu registration the session already had. Teardown must
+    'restore this, not erase it: a DatePicker that was running before the harness
+    'started is entitled to its menu afterwards
+        mTST_DP_MenuAtStart = TST_DP_ContextMenuControlCount()
     'Capture current DatePicker settings and transient state
+        HandlerStep = "Capture DatePicker settings"
         TST_DP_CaptureSettings SettingsSnapshot
     'Capture current Excel Application state
+        HandlerStep = "Capture Application state"
         TST_DP_CaptureApplicationState AppSnapshot
 
 '------------------------------------------------------------------------------
 ' PREPARE ISOLATED RUN STATE
 '------------------------------------------------------------------------------
     'Prepare the Excel Application state for the regression run
+        HandlerStep = "Prepare Application for run"
         TST_DP_PrepareApplicationForRun
     'Reset transient DatePicker UI artifacts before testing
+        HandlerStep = "Reset DatePicker artifacts"
         TST_DP_ResetDatePickerArtifacts
     'Prepare the result worksheet
+        HandlerStep = "Prepare result sheet"
         TST_DP_PrepareResultSheet mTST_DP_HostWorkbook
     'Prepare the scratch worksheet
+        HandlerStep = "Prepare scratch sheet"
         TST_DP_PrepareScratchSheet mTST_DP_HostWorkbook
     'Record the run header
         TST_DP_RecordInfo "Harness", "Start", _
@@ -723,11 +933,19 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
     'reached before this run touched anything, and it decides the run state
         If mTST_DP_DirtyStart Then
             TST_DP_RecordInfo "Harness", "Dirty start", mTST_DP_DirtyDetail
+            TST_DP_RecordInfo "Harness", "Suites not dispatched", _
+                "No suite was run. Results gathered in an environment this run " & _
+                "did not establish would describe the predecessor's leftovers, " & _
+                "not the code under test. Restart Excel, delete the leftover " & _
+                "worksheets, and run again."
         End If
 
 '------------------------------------------------------------------------------
 ' RUN SUITES
 '------------------------------------------------------------------------------
+    'Skip every suite when the run did not start clean. A dirty run tears down and
+    'reports, but it never executes tests it could not interpret
+        If mTST_DP_DirtyStart Then GoTo CleanExit
     'Run environment and manager smoke checks
         TST_DP_RunSuiteSafe "Environment"
     'Run settings and persisted-state checks
@@ -785,9 +1003,24 @@ CleanExit:
     'nobody records is what leaves the next run unable to start
         On Error Resume Next
 
-    'Reset DatePicker UI artifacts after testing
-        TST_DP_ResetDatePickerArtifacts
-        TST_DP_CheckCleanupStep "ResetDatePickerArtifacts"
+    'Reset DatePicker UI artifacts after testing. Each operation is checked on its
+    'own, because a composite step that suppresses its own errors cannot report
+    'which of five operations failed, or that any of them did
+        M_Timer_Stop
+        TST_DP_CheckCleanupStep "StopTimer"
+
+        DP_Close
+        TST_DP_CheckCleanupStep "ClosePickerForm"
+
+        M_ContextMenu_Remove
+        TST_DP_CheckCleanupStep "RemoveContextMenu"
+        mTST_DP_MenuAfterRemove = TST_DP_ContextMenuControlCount()
+
+        M_KeyboardShortcut_Remove
+        TST_DP_CheckCleanupStep "RemoveKeyboardShortcut"
+
+        M_GridIcon_PurgeAll
+        TST_DP_CheckCleanupStep "PurgeGridIcons"
 
     'Delete the scratch worksheet
         TST_DP_DeleteScratchSheet
@@ -845,7 +1078,9 @@ FatalHandler:
         TST_DP_RecordResult TST_DP_FAIL_TEXT, _
             "Harness", _
             PROC_NAME, _
-            "Fatal error " & VBA.CStr(FatalNumber) & " - " & FatalDescription
+            "Fatal error " & VBA.CStr(FatalNumber) & " - " & FatalDescription & _
+            " | Step=" & HandlerStep & _
+            " | " & TST_DP_DescribeHostWorkbook()
         Err.Clear
         On Error GoTo 0
     'Run shared cleanup and re-raise
@@ -3768,6 +4003,7 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
 '   TST_DP_ResolveRunState
 '   TST_DP_CheckCleanupStep
 '   TST_DP_Preflight
+'   TST_DP_ContextMenuControlCount
 '
 ' NOTES
 '   The counters this suite manipulates are the counters that describe the run it
@@ -3809,6 +4045,7 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
     Dim StateDirtyOverFail  As String       'Resolver output when both apply
 
     Dim InjectedCount       As Long         'Cleanup failures after injection
+    Dim MenuProbeCount      As Long         'Context-menu controls seen by the probe
     Dim ProbeDirty          As Boolean      'Preflight verdict during the probe
     Dim ProbeDetail         As String       'Preflight detail during the probe
 
@@ -3889,6 +4126,12 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
         ProbeDetail = mTST_DP_DirtyDetail
 
 '------------------------------------------------------------------------------
+' PROBE THE CONTEXT-MENU READER
+'------------------------------------------------------------------------------
+    'Exercise the teardown probe while the run is still live
+        MenuProbeCount = TST_DP_ContextMenuControlCount()
+
+'------------------------------------------------------------------------------
 ' RESTORE LIVE RUN STATE
 '------------------------------------------------------------------------------
     'Restore before the first assertion, so this suite's own result is honest
@@ -3944,6 +4187,15 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
     'Assert the verdict names what it found
         TST_DP_AssertTrue "Preflight verdict names the leftover worksheet", _
             VBA.InStr(1, ProbeDetail, TST_DP_SCRATCH_SHEET_NAME, vbTextCompare) > 0
+
+'------------------------------------------------------------------------------
+' ASSERT THE CONTEXT-MENU PROBE
+'------------------------------------------------------------------------------
+    'Assert the teardown probe can read the context menus at all. A probe that
+    'silently returns zero because it cannot see the bars would report a clean
+    'teardown for a menu it never inspected
+        TST_DP_AssertTrue "Context-menu probe reads the command bars", _
+            MenuProbeCount >= 0
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -5202,6 +5454,7 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 ' DEPENDENCIES
 '   gDP_Manager
 '   M_GridIcon_PurgeAll
+'   TST_DP_ContextMenuControlCount
 '   TST_DP_RecordResult
 '
 ' NOTES
@@ -5231,6 +5484,24 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '   named shape from every open workbook, so this can pass because teardown
 '   reached beyond the host workbook. Bounding that purge is #14
 '
+'   The context menu is verified against its pre-run registration rather than
+'   against zero. The harness restores the session it found, and a DatePicker
+'   that was already running is entitled to its menu when the run ends
+'
+'   Two teardown targets cannot be verified from here, and both are recorded
+'   rather than quietly omitted:
+'
+'     keyboard shortcut   Excel exposes no getter for Application.OnKey, so the
+'                         assignment cannot be read back at all. See #42
+'     live-clock timer    mDP_TimerIsRunning is Private to M_DatePicker and
+'                         Application.OnTime schedules cannot be enumerated
+'
+'   Both are covered instead by per-operation cleanup accounting: M_Timer_Stop
+'   and M_KeyboardShortcut_Remove are now invoked and checked individually, so a
+'   failure in either is counted even though its final state cannot be inspected.
+'   Making them observable needs a production-side accessor, which is not a
+'   change this harness should make on its own
+'
 ' UPDATED
 '   2026-08-22
 '==============================================================================
@@ -5238,6 +5509,8 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Dim ManagerPresent  As Boolean      'True when a manager exists after teardown
+    Dim MenuControlCount As Long        'DatePicker context-menu controls left behind
     Dim StatusBarText   As String       'Status bar contents after teardown
     Dim LeftLoaded      As Boolean      'True when the picker form is still loaded
     Dim IconCount       As Long         'DatePicker shapes still present
@@ -5323,6 +5596,31 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
                 "Application.Calculation was not restored. Expected " & _
                 VBA.CStr(AppSnapshot.CalculationMode) & _
                 " but found " & VBA.CStr(Excel.Application.Calculation)
+        End If
+
+    'Record a manager state that does not match the pre-run condition. The
+    'harness restores it as a cleanup step; this proves the restore took effect
+        ManagerPresent = Not (gDP_Manager Is Nothing)
+        If ManagerPresent <> mTST_DP_HadManager Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Manager state was not restored. Expected present=" & _
+                VBA.CStr(mTST_DP_HadManager) & _
+                " but found present=" & VBA.CStr(ManagerPresent)
+        End If
+
+    'Record a context-menu registration that does not match the pre-run state.
+    'The after-removal count is reported alongside it, because a mismatch has two
+    'possible causes and they need different fixes: controls that removal never
+    'took away, or controls something re-registered afterwards
+        MenuControlCount = TST_DP_ContextMenuControlCount()
+        If MenuControlCount <> mTST_DP_MenuAtStart Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Context-menu registration was not restored. Before run=" & _
+                VBA.CStr(mTST_DP_MenuAtStart) & _
+                "; after removal=" & VBA.CStr(mTST_DP_MenuAfterRemove) & _
+                "; at end=" & VBA.CStr(MenuControlCount)
         End If
 
     'Record a status bar still showing the run's own message. Ownership cannot be
@@ -6195,37 +6493,22 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
 
 '
 '==============================================================================
-'                        RESET DATEPICKER ARTIFACTS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Clears all transient DatePicker UI artifacts before and after a run
+'                     RESET DATEPICKER ARTIFACTS (SETUP ONLY)
+'==============================================================================
+'   Clears transient DatePicker UI artifacts before a run, so the run starts from
+'   a known state.
 '
-' WHY THIS EXISTS
-'   Stale timers, open forms, context menu entries, keyboard shortcuts, and
-'   grid icons from a previous run or interrupted run must be cleared before
-'   testing begins and cleaned up after the run ends
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Calls each cleanup path behind On Error Resume Next so a failure in one
-'   path does not prevent the remaining cleanup steps from executing
-'
-' ERROR POLICY
-'   Best-effort. Silently absorbs all cleanup failures
-'
-' UPDATED
-'   2026-05-14
+'   Blanket error suppression is acceptable here and only here. This runs before
+'   the run, where the goal is to reach a usable starting state rather than to
+'   account for anything. Teardown does not use it: each cleanup operation is
+'   invoked and checked individually, because a composite step that swallows its
+'   own errors cannot report which operation failed, or that any did.
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' RESET ALL ARTIFACTS
+' RESET ARTIFACTS
 '------------------------------------------------------------------------------
-    'Suppress individual cleanup failures
+    'Suppress individual setup failures
         On Error Resume Next
     'Stop the live-clock timer
         M_Timer_Stop
@@ -6243,6 +6526,74 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
         On Error GoTo 0
 
 End Sub
+
+Private Function TST_DP_ContextMenuControlCount() As Long
+
+'
+'==============================================================================
+'                        COUNT CONTEXT MENU CONTROLS
+'==============================================================================
+'   Counts the DatePicker's own controls left on the Excel context menus.
+'
+'   The tag is duplicated here rather than read from M_DatePicker, where it is a
+'   Private constant. It is documented as a stable legacy identifier that cannot
+'   be renamed for backward compatibility, so duplicating it is safe in a way
+'   that duplicating an ordinary constant would not be.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const MENU_TAG          As String = "VBA_DATETIMEPICKER"    'Legacy context-menu tag
+    Const CELL_BAR          As String = "Cell"                  'Standard cell context menu
+    Const LIST_RANGE_BAR    As String = "List Range Popup"      'Table context menu
+
+    Dim BarNames            As Variant      'Command bars the DatePicker registers on
+    Dim BarIndex            As Long         'Current command bar index
+    Dim Bar                 As Object       'Current command bar
+    Dim Ctl                 As Object       'Current command bar control
+    Dim FoundCount          As Long         'DatePicker controls found
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let a probe raise into teardown
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_ContextMenuControlCount = 0
+    'List the bars the DatePicker registers on
+        BarNames = VBA.Array(CELL_BAR, LIST_RANGE_BAR)
+
+'------------------------------------------------------------------------------
+' COUNT TAGGED CONTROLS
+'------------------------------------------------------------------------------
+    'Walk each command bar the DatePicker touches
+        For BarIndex = LBound(BarNames) To UBound(BarNames)
+            'Resolve the command bar, skipping one that does not exist
+                Set Bar = Nothing
+                Set Bar = Excel.Application.CommandBars(BarNames(BarIndex))
+            'Count the controls carrying the DatePicker tag
+                If Not Bar Is Nothing Then
+                    For Each Ctl In Bar.Controls
+                        If VBA.StrComp(Ctl.Tag, MENU_TAG, vbTextCompare) = 0 Then
+                            FoundCount = FoundCount + 1
+                        End If
+                    Next Ctl
+                End If
+        Next BarIndex
+
+'------------------------------------------------------------------------------
+' RETURN COUNT
+'------------------------------------------------------------------------------
+    'Report what was found
+        TST_DP_ContextMenuControlCount = FoundCount
+    'Release object references
+        Set Ctl = Nothing
+        Set Bar = Nothing
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
 
 Private Sub TST_DP_RestoreManagerState()
 

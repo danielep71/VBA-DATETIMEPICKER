@@ -88,6 +88,40 @@ backward-compatible capability, 💥 **major** may break callers.
   project reset zeroes module state, so the next run read `False` and reported a
   clean start while sitting in the previous run's wreckage. The worksheet is the
   evidence that survives.
+
+  A dirty run does not execute suites. It records why, tears down, and reports.
+  Gathering results in an environment the run did not establish would describe
+  the predecessor's leftovers rather than the code under test, and a harness
+  whose subject is evidence quality should not manufacture evidence it cannot
+  interpret.
+
+  The verdict is acted on before the workbook is touched, not after. Preflight
+  ran before the mutation but its result was only consumed further downstream, so
+  a dirty start was detected and then crashed on the very mutation the detection
+  existed to prevent. Both entry points now refuse before building anything,
+  reporting through the Immediate window and a message box — the result sheet
+  cannot be created by a run that has just declined to touch the workbook.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
+
+- Added setup diagnostics to the regression harness. A failure before the run
+  started surfaced as an unhandled `1004` naming a method and nothing else — no
+  result sheet exists yet, and the run's own fatal handler had not been reached.
+
+  ```text
+  TST_DP_ReportSetupFailure    entry-point handler; names the error and its cause
+  TST_DP_DescribeHostWorkbook  IsAddin, ProtectStructure, ReadOnly, sheet counts,
+                               and whether each harness worksheet exists
+  TST_DP_ReportEnvironment     public probe, runnable without starting a run
+  ```
+
+  `TST_DP_RunAllInternal` also tracks its setup steps, so a fatal names which of
+  the six it happened in rather than only what failed:
+
+  ```text
+  Fatal error 1004 - Method 'Add' of object 'Sheets' failed
+      | Step=Prepare scratch sheet
+      | Host=...; Worksheets=3; TST_DP_SCRATCH exists=False
+  ```
   ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
 
 - Added the `HarnessSelfCheck` suite, which proves the run-state machine instead
@@ -300,6 +334,42 @@ backward-compatible capability, 💥 **major** may break callers.
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
+
+- Fixed composite teardown hiding which cleanup operation failed, or that any
+  did. `TST_DP_ResetDatePickerArtifacts` wrapped five operations in one
+  `On Error Resume Next` and cleared `Err` before returning, so the outer
+  `TST_DP_CheckCleanupStep` could never observe a failure inside it:
+
+  ```text
+  M_ContextMenu_Remove fails silently
+      -> the composite routine clears Err
+      -> the outer cleanup step sees no failure
+      -> CleanupFailures stays 0
+  ```
+
+  Teardown now invokes and checks each operation individually — `StopTimer`,
+  `ClosePickerForm`, `RemoveContextMenu`, `RemoveKeyboardShortcut`,
+  `PurgeGridIcons`. The composite routine survives as setup-only, where blanket
+  suppression is appropriate: setup wants a usable starting state, teardown wants
+  an account.
+
+  Final-state verification also gained manager state and context-menu
+  registration. Both are checked against their pre-run condition rather than
+  against zero, because the harness restores the session it found — a DatePicker
+  that was already running is entitled to its manager and its menu when the run
+  ends. The context-menu check reports the count immediately after removal
+  alongside the count at the end, since a mismatch has two causes needing
+  different fixes: controls removal never took away, or controls something
+  re-registered afterwards.
+
+  Two teardown targets remain unverifiable from the harness and are recorded as
+  such rather than quietly omitted. Excel exposes no getter for
+  `Application.OnKey`
+  ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42)), and
+  `mDP_TimerIsRunning` is `Private` to `M_DatePicker` with no way to enumerate
+  `Application.OnTime` schedules. Both are covered instead by the per-operation
+  accounting above.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
 
 - Fixed final-state verification covering three of the five Application settings
   the run snapshots. `TST_DP_CaptureApplicationState` captures
