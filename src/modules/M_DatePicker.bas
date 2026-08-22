@@ -6515,7 +6515,7 @@ End Function
 
 Public Sub M_Picker_SelectDate( _
     ByVal SelectedDate As Date, _
-    Optional ByVal NoTableGrow As Boolean = False)
+    Optional ByVal NoTableGrow As Boolean = True)
 
 '
 '------------------------------------------------------------------------------
@@ -6768,8 +6768,10 @@ Public Sub DP_Today()
 '------------------------------------------------------------------------------
 ' WRITE TODAY
 '------------------------------------------------------------------------------
-    'Delegate date-only write-back to the canonical DatePicker selection routine
-        M_Picker_SelectDate TodayDate, False
+    'Delegate date-only write-back to the canonical DatePicker selection routine.
+    'NoTableGrow is deliberately omitted so Today inherits the safe single-cell
+    'default rather than opting into table-column expansion
+        M_Picker_SelectDate TodayDate
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6895,8 +6897,10 @@ Public Sub DP_Now()
 '------------------------------------------------------------------------------
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
-    'Apply the date-time value to the current Excel target
-        M_WriteBack_Apply DP_WriteAction_DatePicker, False
+    'Apply the date-time value to the current Excel target. NoTableGrow is
+    'deliberately omitted so Now inherits the safe single-cell default rather
+    'than opting into table-column expansion
+        M_WriteBack_Apply DP_WriteAction_DatePicker
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -6955,9 +6959,189 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, "DatePicker Now command failed: " & ErrorDescription
 
 End Sub
+Public Sub DP_FillTableColumn( _
+    ByVal ValueToWrite As Date, _
+    Optional ByVal ConfirmFill As Boolean = True)
+
+'
+'------------------------------------------------------------------------------
+'                           FILL TABLE COLUMN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes one date to every cell of the Excel Table data column containing the
+'   current selection
+'
+' WHY THIS EXISTS
+'   Filling a table column is a legitimate operation, but it used to happen
+'   implicitly: selecting one cell inside a table and picking a date wrote the
+'   whole column, with nothing to indicate the scope
+'
+'   That default is now single-cell. This routine is the deliberate way to ask
+'   for the broad write, so the scope comes from the command the user invoked
+'   rather than from hidden state
+'
+' INPUTS
+'   ValueToWrite
+'     Date to write to every cell of the resolved table column
+'
+'   ConfirmFill
+'     True to describe the resolved scope and require confirmation, and to report
+'     a non-table selection with a message
+'
+'     False for a non-interactive call. Suppresses both prompts, which is what
+'     makes the routine usable from the regression harness
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Resolves the table column owning the selection. Reports and exits when the
+'   selection is not a table data cell. Otherwise confirms the scope and writes
+'   through the normal write-back engine with table expansion explicitly enabled
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error for a zero date and for genuine write
+'   failures
+'
+'   A selection outside a table data body is an ordinary usage condition, not an
+'   error. It reports and exits cleanly
+'
+' DEPENDENCIES
+'   M_WriteBack_TryResolveTableColumn
+'   M_WriteBack_Apply
+'   gDP_WriteValue
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   The write itself is delegated to M_WriteBack_Apply with NoTableGrow:=False
+'   rather than writing the resolved range directly. That reuses the existing
+'   event suppression, value validation and rollback rather than duplicating
+'   them, and keeps one write engine
+'
+'   The resolved column is used for the confirmation text. The engine resolves it
+'   again when it writes, which is cheap and avoids two routines disagreeing
+'   about the target
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "DP_FillTableColumn"
+
+    Dim TargetColumn        As Range        'Resolved table data column
+    Dim TableName           As String       'Owning table name
+    Dim ColumnName          As String       'Resolved column name
+    Dim CellCount           As Long         'Cells the fill would affect
+    Dim OldWriteValue       As Date         'Previous pending write value
+    Dim ValueApplied        As Boolean      'True once the write value was replaced
+    Dim PromptText          As String       'Confirmation prompt text
+    Dim HandlerStep         As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate value"
+    'Reject a zero date, which the write engine also rejects
+        If ValueToWrite = 0 Then
+            Err.Raise vbObjectError + 530, PROC_NAME, "ValueToWrite cannot be zero"
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE TABLE COLUMN
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve table column"
+    'Report and exit when the selection is not a table data cell
+        If Not M_WriteBack_TryResolveTableColumn(TargetColumn, TableName, ColumnName) Then
+            'Tell the user what is required, but only on the interactive path
+                If ConfirmFill Then
+                    VBA.MsgBox _
+                        "A table data cell is required." & VBA.vbCrLf & VBA.vbCrLf & _
+                        "Select a cell in the Excel Table column you want to fill, " & _
+                        "then try again.", _
+                        vbExclamation, _
+                        DP_MSGBOX_TITLE
+                End If
+            'Exit cleanly. This is a usage condition, not a failure
+                GoTo CleanExit
+        End If
+
+'------------------------------------------------------------------------------
+' CONFIRM SCOPE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Confirm fill scope"
+    'Describe the resolved scope before writing it
+        If ConfirmFill Then
+            'Resolve how many cells the fill would affect
+                CellCount = VBA.CLng(TargetColumn.Cells.CountLarge)
+            'Build the confirmation text from the resolved target
+                PromptText = "Fill " & VBA.CStr(CellCount) & " cells in " & _
+                    TableName & "[" & ColumnName & "] with " & _
+                    VBA.Format$(ValueToWrite, "dd-mmm-yyyy") & "?"
+            'Exit when the user declines the described scope
+                If VBA.MsgBox(PromptText, vbQuestion Or vbYesNo, DP_MSGBOX_TITLE) <> vbYes Then
+                    GoTo CleanExit
+                End If
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY FILL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply table column fill"
+    'Preserve the pending write value so it can be restored on failure
+        OldWriteValue = gDP_WriteValue
+    'Stage the value the write engine will apply
+        gDP_WriteValue = ValueToWrite
+        ValueApplied = True
+    'Write through the normal engine with table expansion explicitly enabled
+        M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow:=False
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set TargetColumn = Nothing
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Restore the previous pending write value when the write failed
+        If ValueApplied Then
+            On Error Resume Next
+            gDP_WriteValue = OldWriteValue
+            Err.Clear
+            On Error GoTo 0
+        End If
+    'Release object references
+        Set TargetColumn = Nothing
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Table column fill failed: " & Err.Description
+
+End Sub
+
 Public Sub M_WriteBack_Apply( _
     ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = False)
+    Optional ByVal NoTableGrow As Boolean = True)
 
 '
 '------------------------------------------------------------------------------
@@ -7153,12 +7337,180 @@ ErrorHandler:
         Resume CleanExit
 
 End Sub
+Private Function M_WriteBack_TryResolveTableColumn( _
+    ByRef TargetColumn As Range, _
+    ByRef TableName As String, _
+    ByRef ColumnName As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   TRY RESOLVE SELECTED TABLE COLUMN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the table data column owning the current selection, reporting
+'   whether one was found rather than raising when none was
+'
+' WHY THIS EXISTS
+'   A selection outside a table is an ordinary usage condition, not a failure.
+'   DP_FillTableColumn needs to tell the user that plainly, and a raised runtime
+'   error is the wrong instrument for it
+'
+'   Separating the expected negative from a genuine fault also keeps the two
+'   distinguishable when the structured write result is added
+'
+' INPUTS
+'   TargetColumn
+'     Receives the resolved ListColumn data body range
+'
+'   TableName
+'     Receives the owning ListObject name
+'
+'   ColumnName
+'     Receives the resolved column name
+'
+' RETURNS
+'   True when the selection is a single cell inside a table data body
+'   False when it is a valid Range but not a table data cell
+'
+' BEHAVIOR
+'   Requires a single-cell selection inside ListObject.DataBodyRange. A header
+'   cell, a totals row cell, a multi-cell selection, or a cell outside any table
+'   all return False
+'
+' ERROR POLICY
+'   Raises only on genuinely abnormal conditions such as an unavailable or
+'   non-Range selection. An ordinary non-table selection returns False
+'
+' DEPENDENCIES
+'   Application.Selection
+'   Excel.ListObject
+'
+' NOTES
+'   A header cell is deliberately rejected. The command fills a
+'   ListColumn.DataBodyRange, so the anchor must itself be inside that range
+'
+'   This mirrors the expansion rule used by M_WriteBack_ResolveTarget, which
+'   also intersects against DataBodyRange rather than the whole table
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_WriteBack_TryResolveTableColumn"
+
+    Dim SelectedObject      As Object           'Current Excel selection object
+    Dim Anchor              As Range            'Single selected cell
+    Dim TargetTable         As ListObject       'Worksheet table being inspected
+    Dim ColumnIndex         As Long             'Resolved table column index
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+    'Return the negative result unless a table column is resolved
+        M_WriteBack_TryResolveTableColumn = False
+        Set TargetColumn = Nothing
+        TableName = VBA.vbNullString
+        ColumnName = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' RESOLVE CURRENT SELECTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve current Excel selection"
+    'Suppress selection access errors temporarily
+        On Error Resume Next
+    'Capture the current Excel selection object
+        Set SelectedObject = Application.Selection
+    'Clear any suppressed selection access error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
+    'Reject missing selection objects
+        If SelectedObject Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "Current Excel selection is not available"
+        End If
+    'Reject non-range selections
+        If VBA.TypeName(SelectedObject) <> "Range" Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Current Excel selection must be a Range. Current selection type is '" & _
+                VBA.TypeName(SelectedObject) & "'"
+        End If
+    'Use the selection as the candidate anchor
+        Set Anchor = SelectedObject
+
+'------------------------------------------------------------------------------
+' REQUIRE A SINGLE ANCHOR CELL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate anchor cell"
+    'Return the negative result for a multi-cell selection
+        If Anchor.Cells.CountLarge <> 1 Then Exit Function
+
+'------------------------------------------------------------------------------
+' RESOLVE OWNING TABLE COLUMN
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve owning table column"
+    'Loop through worksheet tables
+        For Each TargetTable In Anchor.Worksheet.ListObjects
+            'Consider only tables that have a data body
+                If Not TargetTable.DataBodyRange Is Nothing Then
+                    'Consider only an anchor inside the table data body
+                        If Not Application.Intersect(Anchor, TargetTable.DataBodyRange) Is Nothing Then
+                            'Resolve the anchored table column index
+                                ColumnIndex = Anchor.Column - TargetTable.DataBodyRange.Column + 1
+                            'Return the resolved column when the index is valid
+                                If ColumnIndex >= 1 Then
+                                    If ColumnIndex <= TargetTable.ListColumns.Count Then
+                                        Set TargetColumn = TargetTable.ListColumns(ColumnIndex).DataBodyRange
+                                        TableName = TargetTable.Name
+                                        ColumnName = TargetTable.ListColumns(ColumnIndex).Name
+                                        M_WriteBack_TryResolveTableColumn = True
+                                    End If
+                                End If
+                            'Stop after resolving the owning table
+                                Exit For
+                        End If
+                End If
+        Next TargetTable
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set TargetTable = Nothing
+        Set Anchor = Nothing
+        Set SelectedObject = Nothing
+    'Exit the function
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Table column resolution failed: " & Err.Description
+
+End Function
+
 Private Sub M_WriteBack_ResolveTarget( _
     ByRef ResolvedTarget As Range, _
     ByRef ExpandedToTableColumn As Boolean, _
     ByRef TableName As String, _
     ByRef ColumnName As String, _
-    Optional ByVal NoTableGrow As Boolean = False)
+    Optional ByVal NoTableGrow As Boolean = True)
 
 '
 '------------------------------------------------------------------------------
@@ -7475,7 +7827,7 @@ End Sub
 
 Private Sub M_WriteBack_ResolveAndApplyTarget( _
     ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = False)
+    Optional ByVal NoTableGrow As Boolean = True)
 
 '
 '------------------------------------------------------------------------------

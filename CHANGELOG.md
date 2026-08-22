@@ -49,6 +49,39 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added `DP_FillTableColumn`, the explicit way to write one date to every cell
+  of an Excel Table data column:
+
+  ```vb
+  DP_FillTableColumn ValueToWrite As Date, Optional ConfirmFill As Boolean = True
+  ```
+
+  Filling a table column is a legitimate operation. It used to happen
+  implicitly — selecting one cell inside a table and picking a date wrote the
+  whole column with nothing to indicate the scope. Now the scope comes from the
+  command the user invoked.
+
+  With `ConfirmFill` left at its default the routine describes the resolved
+  scope before writing anything:
+
+  ```text
+  Fill 247 cells in Trades[Expiry Date] with 25-Aug-2026?
+  ```
+
+  A selection outside a table data body is an ordinary usage condition rather
+  than a failure: the routine reports what is required and exits cleanly. Header
+  cells and totals-row cells are deliberately rejected, matching the rule the
+  write engine already used — the anchor must be inside `DataBodyRange`.
+
+  `ConfirmFill:=False` suppresses both prompts, which is what makes the routine
+  callable from the regression harness.
+
+- Added `M_WriteBack_TryResolveTableColumn`, which reports whether the selection
+  is a table data cell rather than raising when it is not. Keeping the expected
+  negative distinct from a genuine fault also keeps the two distinguishable when
+  the structured write result
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21)) is added.
+
 - Added run states to the regression harness. A run now reports one of
   `PASS`, `FAIL`, `FAIL_CLEANUP` or `INCOMPLETE_SKIPPED`, in the Immediate
   Window summary and on the result sheet:
@@ -89,6 +122,30 @@ backward-compatible capability, 💥 **major** may break callers.
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
+
+- **Fixed a selected cell inside an Excel Table data column writing the entire
+  column.** This applied to calendar selection, `DP_Today` and `DP_Now`, and it
+  overwrote existing values in that column with no indication of the scope.
+
+  The four `NoTableGrow` parameters now default to `True`, so an omitted
+  argument means single-cell. `DP_Today` and `DP_Now` passed `False`
+  explicitly — opting into expansion — and no longer do.
+
+  Callers that already pass the argument are unaffected, in either direction:
+
+  ```vb
+  M_Picker_SelectDate SomeDate, False   'still expands to the column
+  M_Picker_SelectDate SomeDate, True    'still writes one cell
+  M_Picker_SelectDate SomeDate          'now writes one cell, previously expanded
+  ```
+
+  Only omitted arguments change, which is exactly the behaviour this release
+  intends to change.
+
+  No persisted setting governs this. The scope of a destructive write should not
+  depend on a preference saved weeks earlier, or the same gesture would write
+  one cell on one machine and a column on another.
+  ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13))
 
 - Fixed the regression harness discarding cleanup failures. Teardown runs under
   `On Error Resume Next` so that one failing step does not prevent the rest from
@@ -181,6 +238,12 @@ backward-compatible capability, 💥 **major** may break callers.
 - Embedded behaviour is unchanged. The add-in gains a Demo button that works.
 - The harness summary line gained `State=` and `CleanupFailures=` fields. Any
   tooling that parses it by position rather than by name will need updating.
+- **`DP_FillTableColumn` is a new public procedure in `src/`.** Under the
+  project's versioning policy that makes this release a minor rather than a
+  patch, which it already was.
+- **Table write scope changes for omitted arguments.** Code that relied on a
+  calendar selection, `DP_Today` or `DP_Now` filling a table column must now
+  either pass `NoTableGrow:=False` or call `DP_FillTableColumn`.
 
 ### ⚠️ Note on the add-in
 
