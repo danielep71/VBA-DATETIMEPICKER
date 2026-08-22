@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>A modern, reusable, worksheet-friendly Date / Time Picker for Excel VBA</b><br>
-  Clean UI • Smart cell detection • In-grid activation • Modeless workflow • Enterprise-friendly architecture
+  Clean UI • Smart cell detection • In-grid activation • Modeless workflow • Manager-driven architecture
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <b>🔒 No add-in • No install • No admin rights — just import the source; the picker lives inside your workbook.</b>
+  <b>🔒 No add-in required • No admin rights — import the source and the picker lives inside your workbook, or install the optional <code>.xlam</code>.</b>
 </p>
 
 ---
@@ -103,7 +103,12 @@ The picker is designed for real Excel workflows, not only for isolated form demo
 - 🕒 **Date-time write-back** through the Now shortcut
 - 📌 **Modeless UserForm**, so Excel remains usable while the picker is open
 - 🔁 **Repeated write-back workflow**, useful when users move across multiple target cells
-- 🧾 **Table-column friendly behavior**, suitable for structured data-entry ranges
+- 🧾 **Table-column write behavior** for structured data-entry ranges
+
+> ⚠️ **Selecting one cell inside an Excel Table data column can populate the entire
+> data column.** This is the current default write policy, and it applies to
+> calendar selection, Today, and Now. See
+> [Known limitations](#-known-limitations).
 
 ### 🧠 Smart activation and cell detection
 
@@ -198,7 +203,7 @@ The DatePicker includes explicit cleanup paths for real workbook sessions.
 - 🔁 repairs or restarts the manager when needed
 - 🛡️ keeps `Application.EnableEvents` aligned when ensuring the manager
 
-### 🏢 Enterprise-friendly VBA behavior
+### 🏢 Deployment-friendly VBA behavior
 
 The implementation is designed for controlled Excel environments.
 
@@ -207,6 +212,9 @@ The implementation is designed for controlled Excel environments.
 - 🧠 Clear separation between UI, manager, hooks, and infrastructure
 - 🧪 Demo-friendly and regression-friendly structure
 - 🧾 Compatible with source-controlled VBA exports
+
+Read [Known limitations](#-known-limitations) before deploying into a shared or
+business-critical workbook.
   
 ---
 
@@ -389,9 +397,9 @@ VBA-DATETIMEPICKER/
 │  │  ├─ UF_DatePicker.frm
 │  │  └─ UF_DatePicker.frx
 │  └─ ribbon/
-│     └─ customUI.xml
+│     └─ customUI14.xml
 ├─ demo/
-│  └─ DatePicker Demo.xlsm
+│  └─ DATEPICKER.xlsm
 ├─ assets/
 │  ├─ datepicker-main.png
 │  ├─ datepicker-settings.png
@@ -402,7 +410,7 @@ VBA-DATETIMEPICKER/
 ```
 > Important: if the exported UserForm references `UF_DatePicker.frx`, keep the `.frm` and `.frx` together in source control.
 > 
-> Ribbon support is callback-based. The VBA callbacks live in a standard module, while the Ribbon layout itself must be provided through RibbonX / `customUI.xml` in the workbook or add-in package.
+> Ribbon support is callback-based. The VBA callbacks live in a standard module, while the Ribbon layout itself must be provided through RibbonX / `customUI14.xml` in the workbook or add-in package.
 ---
 
 ## 🛠️ Installation
@@ -426,7 +434,7 @@ VBA-DATETIMEPICKER/
    - `UF_DatePicker.frm`
    - `UF_DatePicker.frx`, if referenced by the exported form
 4. Ensure the **Microsoft Forms 2.0 Object Library** is available.
-5. If Ribbon callbacks are used, ensure the workbook or add-in includes the matching RibbonX `customUI.xml`.
+5. If Ribbon callbacks are used, ensure the workbook or add-in includes the matching RibbonX `customUI14.xml`.
 6. Add the workbook lifecycle calls shown below.
 7. Compile the VBA project.
 8. Save as `.xlsm`, `.xlsb`, or package into your preferred add-in/deployment format.
@@ -980,20 +988,47 @@ Ribbon callbacks require RibbonX and an IRibbonControl callback context. Test th
 
 ---
 
-## 🧭 Roadmap
+## ⚠️ Known limitations
 
 <p align="left">
-  <img alt="Roadmap" src="https://img.shields.io/badge/Roadmap-Planned_enhancements-blue">
+  <img alt="Status" src="https://img.shields.io/badge/Read_before_deploying-important-orange">
 </p>
 
-Planned or possible future enhancements include:
+Two known defects are open against the next release. Both are safe to work with
+once you know they exist.
 
-- 📆 business-day / holiday-calendar integration
-- 🌙 dark mode / custom color and font themes
-- 🧠 richer date-cell detection heuristics
-- 🧩 tighter integration with reusable date/calendar modules
-- 🎨 additional visual themes
-- 🌐 improved localization options
+### Table write scope
+
+Selecting a single cell inside an Excel Table data column can write the value to
+the **entire data column**, not just the selected cell. This applies to calendar
+selection, the Today shortcut, and the Now shortcut. Existing values and
+formulas in that column are overwritten.
+
+Keep version history or backups for workbooks that use table write-back.
+Tracked in [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
+
+### Single-owner runtime
+
+The component registers process-wide Excel surfaces — the keyboard shortcut, the
+cell context-menu entry, `Application` events, the live-clock timer, worksheet
+icons, and registry settings — without an ownership model. Two copies in one
+Excel session will interfere: either can remove the other's registrations and
+delete the other's worksheet icons.
+
+Do not run the embedded source and the `.xlam` in the same Excel session, and do
+not embed the picker into multiple workbooks that will be open at once.
+Tracked in [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
+
+### Operating notes
+
+- Do not call DatePicker entry points inside a macro that depends on
+  `Application.EnableEvents = False`. `DP_RepairRuntime` is the only routine
+  that deliberately re-enables events.
+- Test the exact Ribbon package, not only the source callbacks.
+- Test both 32-bit and 64-bit Office where both are supported.
+- Keep an explicit teardown path available — `DP_Stop` or `DP_RepairRuntime`.
+- Accessibility, high-DPI, and high-contrast behaviour are not yet tested or
+  documented.
 
 ---
 
@@ -1003,9 +1038,15 @@ Planned or possible future enhancements include:
   <img alt="Docs" src="https://img.shields.io/badge/Guidance-Extended_notes-blue">
 </p>
 
-For additional examples, notes, and repository-level guidance, see the project wiki:
+The project wiki was written for `v1.1.0` and is broadly accurate for it, but it
+has not yet been verified against `v1.1.1`. Two areas are known to be out of
+date — the `Application.EnableEvents` behaviour of `M_Picker_EnsureManager`, and
+some file paths. Each affected page carries a notice.
 
-[cDateTimePicker Wiki](https://github.com/danielep71/VBA-DATETIMEPICKER/wiki)
+[VBA-DATETIMEPICKER Wiki](https://github.com/danielep71/VBA-DATETIMEPICKER/wiki)
+
+Treat `README.md` and the tagged source as authoritative until the wiki rewrite
+is complete.
 
 ---
 

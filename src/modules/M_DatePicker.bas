@@ -197,12 +197,10 @@ Option Explicit
     #If Mac Then
     #Else
         #If VBA7 Then
-            Private Declare PtrSafe Function GetLastError Lib "kernel32" () As Long
     
             Private Declare PtrSafe Sub SetLastError Lib "kernel32" ( _
                 ByVal dwErrCode As Long)
         #Else
-            Private Declare Function GetLastError Lib "kernel32" () As Long
     
             Private Declare Sub SetLastError Lib "kernel32" ( _
                 ByVal dwErrCode As Long)
@@ -5191,7 +5189,8 @@ Private Function M_Settings_BooleanToStorageValue(ByVal Value As Boolean) As Str
 
 End Function
 
-Public Sub M_Picker_EnsureManager()
+Public Sub M_Picker_EnsureManager( _
+    Optional ByRef EventsDisabledByCaller As Boolean)
 
 '
 '------------------------------------------------------------------------------
@@ -5209,20 +5208,23 @@ Public Sub M_Picker_EnsureManager()
 '   Application event hook
 '
 ' INPUTS
-'   None
+'   EventsDisabledByCaller
+'       Optional output flag. Set True when Application.EnableEvents was already
+'       False on entry. Left False otherwise
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Ensures persisted settings are loaded, forces Excel events on, creates the
-'   manager when missing, and recreates it when the existing manager is not
-'   hooked
+'   Ensures persisted settings are loaded, reports the caller's Excel event state
+'   without modifying it, creates the manager when missing, and recreates it when
+'   the existing manager is not hooked
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if settings cannot be loaded, if Excel
-'   events cannot be enabled, or if the manager cannot be instantiated or
-'   re-instantiated
+'   Raises a descriptive runtime error if settings cannot be loaded, or if the
+'   manager cannot be instantiated or re-instantiated
+'
+'   Does not raise when Excel events are disabled. That is a valid caller state
 '
 ' DEPENDENCIES
 '   Excel.Application.EnableEvents
@@ -5236,15 +5238,21 @@ Public Sub M_Picker_EnsureManager()
 '   The Is_Hooked check prevents a stale manager object from silently disabling
 '   Application event handling
 '
-'   This routine intentionally forces Application.EnableEvents = True because
-'   a hooked manager cannot receive Excel Application callbacks while events are
-'   disabled
+'   This routine does not modify Application.EnableEvents. A caller that
+'   deliberately suppresses Excel events keeps that state across this call
 '
-'   Do not call this routine inside a business macro that deliberately suppresses
-'   Excel events unless that macro is ready for events to be re-enabled
+'   A manager hooked while events are disabled is a valid, self-correcting state.
+'   The WithEvents reference remains live and Excel resumes dispatching as soon
+'   as the caller restores Application.EnableEvents = True
+'
+'   Is_Hooked reports the manager's own hook state and does not consult
+'   Application.EnableEvents, so a suppressed-event session does not trigger
+'   repeated manager recreation
+'
+'   DP_RepairRuntime is the only entry point that force-enables Excel events
 '
 ' UPDATED
-'   2026-05-10
+'   2026-08-21
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -5260,7 +5268,6 @@ Public Sub M_Picker_EnsureManager()
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
-    'Enable controlled error handling
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
@@ -5270,16 +5277,11 @@ Public Sub M_Picker_EnsureManager()
         M_Settings_EnsureLoaded
 
 '------------------------------------------------------------------------------
-' ENABLE EXCEL EVENTS
+' OBSERVE EXCEL EVENT STATE
 '------------------------------------------------------------------------------
-    'Ensure Excel events are enabled before validating or creating the manager
-        Excel.Application.EnableEvents = True
-    'Reject an environment where Excel events could not be re-enabled
-        If Not Excel.Application.EnableEvents Then
-            Err.Raise vbObjectError + 512, PROC_NAME, _
-                "Application.EnableEvents could not be re-enabled"
-        End If
-        
+    'Report the caller's Excel event state without altering it
+        EventsDisabledByCaller = Not Excel.Application.EnableEvents
+
 '------------------------------------------------------------------------------
 ' RESOLVE MANAGER STATE
 '------------------------------------------------------------------------------
@@ -5322,20 +5324,16 @@ Public Sub M_Picker_EnsureManager()
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
-    'Exit before the error handler
         Exit Sub
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
-    'Capture the original error number
         ErrorNumber = Err.Number
 
-    'Capture the original error description
         ErrorDescription = Err.Description
 
-    'Raise a descriptive error to the caller
         Err.Raise ErrorNumber, PROC_NAME, _
             "DatePicker manager initialization failed: " & ErrorDescription
 
@@ -9470,7 +9468,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '   SetWindowLongPtr / SetWindowLong
 '   SetWindowPos
 '   DrawMenuBar
-'   GetLastError
+'   Err.LastDllError
 '   SetLastError
 '   GWL_STYLE
 '   WS_CAPTION
@@ -9488,7 +9486,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '
 '   Because zero can theoretically be either a previous value or a failure, the
 '   routine clears the WinAPI last-error state before the call and then inspects
-'   GetLastError when the return value is zero
+'   Err.LastDllError when the return value is zero
 '
 '   SetWindowPos and DrawMenuBar return zero on failure
 '
@@ -9496,7 +9494,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '   not a functional requirement for date selection
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-21
 '==============================================================================
 
 #If Mac Then
@@ -9583,7 +9581,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 
     'Exit if the style cannot be read
         If WindowStyle = 0 Then
-            LastApiError = GetLastError
+            LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=GetWindowLong" & _
@@ -9617,7 +9615,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 
     'Diagnose SetWindowLong failure when return is zero and LastError is non-zero
         If SetStyleResult = 0 Then
-            LastApiError = GetLastError
+            LastApiError = Err.LastDllError
             If LastApiError <> 0 Then
                 Debug.Print PROC_NAME & _
                     " | Step=" & HandlerStep & _
@@ -9641,7 +9639,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
     'Diagnose SetWindowPos return-code failure
         If ApiResult = 0 Then
-            LastApiError = GetLastError
+            LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=SetWindowPos" & _
@@ -9659,7 +9657,7 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         ApiResult = DrawMenuBar(hWndForm)
     'Diagnose DrawMenuBar return-code failure
         If ApiResult = 0 Then
-            LastApiError = GetLastError
+            LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=DrawMenuBar" & _
@@ -9723,7 +9721,7 @@ Public Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)
 '
 ' DEPENDENCIES
 '   M_Platform_CanUseWinAPI
-'   FindWindow
+'   M_Window_GetUserFormHwnd
 '   ReleaseCapture
 '   SendMessage
 '   DP_WM_NCLBUTTONDOWN
@@ -9738,7 +9736,7 @@ Public Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)
 '   movement is safe on Windows even when optional WinAPI styling is disabled
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-21
 '------------------------------------------------------------------------------
 
 #If Mac Then
@@ -9772,12 +9770,8 @@ Public Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)
 '------------------------------------------------------------------------------
 ' RESOLVE USERFORM WINDOW
 '------------------------------------------------------------------------------
-    'Resolve the standard VBA UserForm window handle
-        FormHandle = FindWindow("ThunderDFrame", VBA.CStr(TargetForm.Caption))
-    'Try the older UserForm window class when needed
-        If FormHandle = 0 Then
-            FormHandle = FindWindow("ThunderXFrame", VBA.CStr(TargetForm.Caption))
-        End If
+    'Resolve the handle through the single module resolver
+        FormHandle = M_Window_GetUserFormHwnd(TargetForm)
     'Exit when the UserForm window cannot be resolved
         If FormHandle = 0 Then GoTo CleanExit
 
@@ -9857,8 +9851,12 @@ Public Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As Long
 '   first matching window. DatePicker captions should therefore remain unique
 '   while WinAPI behavior is enabled
 '
+'   This is the single handle resolver for the module. Callers must not perform
+'   their own FindWindow lookup, so the caption policy and the blank-caption
+'   guard apply to every WinAPI-dependent routine
+'
 ' UPDATED
-'   2026-05-06
+'   2026-08-21
 '------------------------------------------------------------------------------
 
 #If Mac Then
@@ -10031,7 +10029,7 @@ Public Sub M_Window_MoveFormToMouse( _
 '   multi-monitor setups
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-21
 '------------------------------------------------------------------------------
 
 #If Mac Then
@@ -10215,7 +10213,7 @@ Public Sub M_Window_MoveFormToMouse( _
         ApiResult = SetWindowPos(hWndForm, 0, TargetX, TargetY, 0, 0, MoveFlags)
     'Diagnose SetWindowPos return-code failure
         If ApiResult = 0 Then
-            LastApiError = GetLastError
+            LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=Move form" & _
                 " | Api=SetWindowPos" & _

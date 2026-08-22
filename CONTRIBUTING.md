@@ -1,241 +1,432 @@
-# 🤝 Contributing to VBA-DATETIMEPICKER
+<div align="center">
 
-<p align="left">
-  <img alt="Contributions" src="https://img.shields.io/badge/Contributions-Welcome-217346">
-  <img alt="Language" src="https://img.shields.io/badge/Language-Excel_VBA-blue">
-  <img alt="Style" src="https://img.shields.io/badge/Style-House_conventions-6f42c1">
-  <img alt="Tests" src="https://img.shields.io/badge/Tests-TST__DP__RunAll-orange">
-  <img alt="License" src="https://img.shields.io/badge/Contributions-MIT-green">
-</p>
+# 🤝 Contributing
 
-Thanks for your interest in improving the Date / Time Picker. This project values
-small, surgical, well-documented changes that match the existing conventions over
-large rewrites. This guide explains how to work with the VBA source and what a
-change needs to include before it can be merged.
+**Thank you for improving VBA-DATETIMEPICKER**
+
+[![Conduct](https://img.shields.io/badge/read_first-code_of_conduct-6f42c1?style=flat-square)](CODE_OF_CONDUCT.md)
+[![Security](https://img.shields.io/badge/read_first-security_policy-d73a49?style=flat-square)](SECURITY.md)
+[![Harness](https://img.shields.io/badge/gate-TST__DP__RunAll-217346?style=flat-square)](#-required-validation)
+[![Style](https://img.shields.io/badge/style-house_conventions-0969da?style=flat-square)](#-source-style)
+
+</div>
 
 ---
 
-## 💬 Before you start
+## 🧭 Before you start
 
-<p align="left">
-  <img alt="Step" src="https://img.shields.io/badge/Step-Open_an_issue_first-217346">
-</p>
+Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) and [SECURITY.md](SECURITY.md).
+**Open an issue before non-trivial work** — scope agreed in advance is far
+cheaper than scope discovered in review.
 
-Please **open an issue before starting non-trivial work** so the approach can be
-agreed up front. Good issues to raise:
+Tiny fixes — typos, comment corrections, obvious one-line bugs — can go straight
+to a pull request.
 
-- a clear bug with reproduction steps (Excel version, 32/64-bit, OS)
-- a focused enhancement with a concrete use case
-- a documentation gap or inaccuracy
+This project holds these above convenience, and a change that trades one away
+needs to say so explicitly:
 
-Tiny fixes (typos, comment corrections, obvious one-line bugs) can go straight to a
-pull request without a prior issue.
+| Priority | Why it is non-negotiable |
+|---|---|
+| 🎯 **Predictable write scope** | The component writes into user data. A write the user did not ask for is worse than no write at all. |
+| 🔒 **Caller-owned application state** | `Application.EnableEvents`, `OnKey`, `OnTime` and context menus belong to whoever set them. Changing one underneath a running macro breaks it silently. |
+| 🧹 **Recoverable runtime** | Every registration the component makes must be removable. A stuck grid icon or an orphaned timer outlives the workbook that created it. |
+| 🧾 **Deterministic diagnostics** | A failure that is not reported did not happen, as far as the caller is concerned. |
+| ⚙️ **32-bit and 64-bit parity** | A defect that only appears on the other bitness is invisible to the person who wrote it. |
+| 🧪 **Permanent regression coverage** | A fix without a test is a fix with a scheduled regression. |
+| 📖 **Readable exported source** | The `.bas` file is the review artifact; the VBE is not. |
 
 ---
 
-## 🧰 Project layout and toolchain
-
-<p align="left">
-  <img alt="Source" src="https://img.shields.io/badge/Source-Exported_VBA-217346">
-  <img alt="Tool" src="https://img.shields.io/badge/Tool-GitHub_Desktop-blue">
-</p>
-
-The repository stores **exported VBA source**, not a binary workbook:
+## ⚡ Quick reference
 
 ```text
-src/modules/M_DatePicker.bas         # coordination, state, write-back, settings
-src/classes/cDatePickerManager.cls   # Excel Application event manager
-src/classes/cDatePickerLabelHook.cls # per-label MouseMove/Click hook
-src/forms/UF_DatePicker.frm (+ .frx)  # modeless UserForm UI
-src/ribbon/customUI14.xml            # optional RibbonX layout
-test/M_cDP_Test.bas                  # regression harness
-demo/                                # demo workbook and builder
-dist/                                # build output (the .xlam is NOT tracked)
+Debug → Compile VBAProject           compile the imported project
+TST_DP_RunAll                        the regression gate
+TST_DP_RunAll_WithUISmoke            adds the form smoke suite
+DP_RepairRuntime                     recover a wedged session
 ```
 
-You do not need the git command line. The maintainer works through **GitHub
-Desktop**, and that is the recommended workflow for contributors too.
+There is no CI that executes VBA — a hosted runner has no Excel — so the harness
+is a manual step on a real host. Automating the parts that *can* run without
+Excel is tracked in
+[#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15).
 
 ---
 
-## 🔁 Edit and export workflow
+## 📁 Project layout
 
-<p align="left">
-  <img alt="Flow" src="https://img.shields.io/badge/Flow-Import_Edit_Export-217346">
-</p>
+```text
+VBA-DATETIMEPICKER/
+├─ src/
+│  ├─ modules/
+│  │  └─ M_DatePicker.bas          public API, settings, write-back, integrations
+│  ├─ classes/
+│  │  ├─ cDatePickerManager.cls    Application event manager
+│  │  └─ cDatePickerLabelHook.cls  per-label WithEvents router
+│  ├─ forms/
+│  │  ├─ UF_DatePicker.frm         modeless UserForm code-behind
+│  │  └─ UF_DatePicker.frx         binary companion — never edit by hand
+│  └─ ribbon/
+│     └─ customUI14.xml            optional RibbonX layout
+├─ test/
+│  └─ M_cDP_Test.bas               regression harness
+├─ demo/
+│  ├─ M_DEMO_BUILDER.bas           builds the demo workbook
+│  └─ DATEPICKER.xlsm              tracked binary — see below
+├─ dist/
+│  └─ README.md                    the .xlam ships as a release asset
+├─ CONTRIBUTING.md
+├─ README.md
+└─ …
+```
 
-Because the source lives as exported files, the working loop is:
+> [!IMPORTANT]
+> `UF_DatePicker.frx` is binary and is excluded from normalization by
+> `.gitattributes`. It must travel with the `.frm` on every import and export.
+> A `.frm` committed without its matching `.frx` produces a form that compiles
+> and renders wrongly.
 
-1. Import the relevant `.bas` / `.cls` / `.frm` files into an Excel workbook
-   through the VBE (`File → Import File...`). Keep `UF_DatePicker.frm` and
-   `UF_DatePicker.frx` together.
-2. Make your change in the VBE and **compile** (`Debug → Compile VBAProject`)
-   until it is clean.
-3. Run the test harness (see below).
-4. **Re-export** each changed component (`File → Export File...`) back over the
-   matching file in `src/`, preserving the existing folder layout.
-5. Commit the changed text files.
+### Binary policy
 
-Only commit source files that actually changed. Do not commit the host workbook
-you used for editing.
+Production source is authoritative. Two binaries exist alongside it, and they
+are governed differently:
+
+| Artifact | Tracked | Policy |
+|---|---|---|
+| `demo/DATEPICKER.xlsm` | **yes** | A convenience artifact, not a source of truth. It must be rebuilt from `demo/M_DEMO_BUILDER.bas` and the current `src/` whenever either changes. A commit that updates it must say what changed and why. |
+| `dist/DATETIMEPICKER.xlam` | no | Build output, excluded by `.gitignore`, published only as a GitHub Release asset. |
+| `src/forms/UF_DatePicker.frx` | **yes** | Part of the form source. Not optional and not a build artifact. |
+
+> [!WARNING]
+> The demo workbook has no reviewable diff. Changing it is invisible in a pull
+> request beyond the file name, so the description carries the entire burden of
+> explaining what moved. Binding it reproducibly to exported source is tracked
+> in [#33](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/33).
 
 ---
 
-## 🧱 Coding standards (house style)
+## 🌿 Branch workflow
 
-<p align="left">
-  <img alt="Explicit" src="https://img.shields.io/badge/Option-Explicit_required-217346">
-  <img alt="Banners" src="https://img.shields.io/badge/Doc-Banner_per_procedure-blue">
-  <img alt="Prefixes" src="https://img.shields.io/badge/Naming-Prefix_namespaced-6f42c1">
-</p>
+Do not make routine development changes directly on `main`.
 
-New code must match the existing conventions. Read a few procedures in
-`M_DatePicker.bas` before contributing — they are the reference.
+```text
+fix/enablevents-caller-state
+test/application-state-suite
+docs/readme-known-limitations
+ci/pin-actions
+feature/explicit-fill-column
+release/v<major>.<minor>.<patch>
+```
+
+| Prefix | For |
+|---|---|
+| `fix/` | A defect with an issue |
+| `feature/` | Backward-compatible new capability |
+| `test/` | Regression coverage only |
+| `docs/` | Prose only, no code effect |
+| `ci/` | Workflow, gate or tooling |
+| `chore/` | Repository configuration and hygiene |
+| `release/` | Integration branch for a version |
+
+Confirm the current branch in GitHub Desktop before every commit.
+
+> [!WARNING]
+> Editing files through the GitHub web interface while holding unpushed local
+> commits diverges the branch. If it happens, `git pull --rebase` replays your
+> work on top; setting `pull.rebase true` once avoids the prompt entirely.
+
+---
+
+## 🔁 Import, edit, compile, test, export
+
+Recommended import order:
+
+```text
+src/modules/M_DatePicker.bas
+src/classes/cDatePickerManager.cls
+src/classes/cDatePickerLabelHook.cls
+src/forms/UF_DatePicker.frm          with .frx alongside
+test/M_cDP_Test.bas
+demo/M_DEMO_BUILDER.bas              when needed
+```
+
+Workflow:
+
+1. Confirm the current branch.
+2. Import the required components into a controlled workbook.
+3. Compile with `Debug → Compile VBAProject`.
+4. Run `TST_DP_RunAll`.
+5. Run `TST_DP_RunAll_WithUISmoke` when the form changed.
+6. Perform the manual checks for whatever you touched.
+7. Re-export each changed component over its matching repository path.
+8. Review the GitHub Desktop diff.
+9. Update documentation and `UPDATED` dates.
+10. Commit and push.
+11. Open a pull request against the agreed base.
+
+Only commit source that actually changed. Never commit the workbook you edited
+in.
+
+> [!CAUTION]
+> The harness runs with `Application.EnableEvents = False` and restores it
+> afterwards. An aborted run can leave Excel in that state and leave its scratch
+> and result worksheets behind, which makes the *next* run fail during setup with
+> `1004 — Method 'Add' of object 'Sheets' failed`. Restart Excel and delete the
+> leftover sheets. Detecting this properly is tracked in
+> [#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19).
+
+---
+
+## ✅ Required validation
+
+For production code changes:
+
+```text
+Debug → Compile VBAProject
+TST_DP_RunAll
+TST_DP_RunAll_WithUISmoke        when the form changed
+DP_Show / DP_Close               manual
+DP_RepairRuntime                 manual
+```
+
+Quote the harness summary line in the pull request:
+
+```text
+INFO | Harness | Summary | Run=150; Passed=150; Failed=0
+```
+
+A run with any failure is not a pass. Neither is a run that ended early — the
+summary line only appears when the harness completed, so its absence is itself
+the verdict.
+
+Record only environments actually tested.
+
+> [!NOTE]
+> Suite-level failures currently report `Error 0 -` because the handler resets
+> `Err` before reading it. If you hit one, the real error number is not in the
+> output. Tracked in
+> [#18](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/18).
+
+---
+
+## 🔒 Public API compatibility
+
+Preserve unless an explicitly approved breaking release requires otherwise:
+
+- public procedure names — `DP_Start`, `DP_Show`, `DP_Close`, `DP_Preload`,
+  `DP_Hide`, `DP_Today`, `DP_Now`, `DP_RepairRuntime`, `DP_Stop`;
+- parameter order and optional defaults;
+- enum values — `DP_WriteAction`, `DP_ClockMode`, `DP_SizeMode`;
+- settings getter and setter semantics;
+- the `VBA_DATETIMEPICKER` registry application name;
+- the `VBA_DATETIMEPICKER` command-bar tag;
+- `DP_RepairRuntime` as the recovery path.
+
+The two stable legacy identifiers exist for backward compatibility. Renaming
+either silently discards every user's saved settings, or orphans every context
+menu entry a previous version installed.
+
+---
+
+## ⚙️ Application state
+
+The component touches surfaces it does not own. Every one of them belongs to
+whoever set it.
+
+| Surface | Rule |
+|---|---|
+| `Application.EnableEvents` | Read it, report it, never change it. `DP_RepairRuntime` is the single sanctioned exception. |
+| `Application.OnKey` | One registration, removable, and never assumed to be the only one in the session. |
+| `Application.OnTime` | Cancelled with the exact scheduled time and qualified procedure name it was created with. |
+| Cell context menus | Tagged `VBA_DATETIMEPICKER`, removed by tag, never by index. |
+| Worksheet shapes | Named consistently and purged only at documented boundaries. |
+| Registry settings | Written under the stable application name, on explicit save only. |
+
+> [!CAUTION]
+> `M_Picker_EnsureManager` used to force `Application.EnableEvents = True` on
+> every call, which broke any business macro that had deliberately suppressed
+> events. It no longer does. Do not reintroduce that pattern anywhere reachable
+> from `DP_Start`, `DP_Show`, or `DP_Preload` — see
+> [#2](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/2).
+
+---
+
+## 🎯 Write scope
+
+Write-back is the part of this component that touches user data, so it gets
+stricter treatment than the UI.
+
+- The visible Excel selection is the strongest signal of intended scope.
+- Expanding beyond the selection requires explicit user intent, not inference.
+- Formulas and existing values are not collateral.
+- A partial write must be reportable, not silent.
+- `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
+  including on the failure path. Preserve that.
+
+> [!WARNING]
+> Selecting one cell inside an Excel Table data column currently writes the
+> **entire data column**. This is the default write policy today and is being
+> changed — see
+> [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13). Any change
+> to write-back must state its effect on this behavior.
+
+---
+
+## 🪟 WinAPI changes
+
+- All declarations exist in both the `#If VBA7` and pre-`VBA7` branches.
+- `SetLastError 0` before a call whose zero return is ambiguous; read
+  `Err.LastDllError` on the statement immediately after.
+- `M_Window_GetUserFormHwnd` is the **single** handle resolver. Do not add a
+  second `FindWindow` call anywhere.
+- `WS_CAPTION` is manipulated in `M_Window_RemoveTitleBar` and nowhere else.
+- Test with more than one workbook window open.
+
+> [!NOTE]
+> MSForms re-applies `WS_CAPTION` whenever the `Caption` property is assigned.
+> Any approach that writes to `UserForm.Caption` will restore the title bar on a
+> borderless form. This has been tried and reverted; see
+> [#3](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/3).
+
+---
+
+## 🛡️ Error policy
+
+Every routine declares its policy in its banner, and the code must match.
+
+| Policy | Handler label | Use for |
+|---|---|---|
+| Raises | `ErrorHandler` | Anything a caller must know failed |
+| Best-effort | `FailSafe` / `SafeExit` | High-frequency UI, cleanup, teardown, timer callbacks |
+
+Rules that apply to both:
+
+- Capture `Err.Number` and `Err.Description` **before** any `On Error`
+  statement. Any `On Error` resets the `Err` object, so a handler that suppresses
+  cleanup errors first has already destroyed its own diagnostic.
+- Reserve `On Error Resume Next` for genuinely best-effort sequences.
+- Anything reachable from an error handler must not itself raise.
+- Do not introduce an unsolicited production `MsgBox`.
+
+Note that several module routines end with `On Error GoTo 0`, which clears the
+*caller's* handler on return. Where the harness or another caller depends on its
+own handler surviving, it re-arms immediately after the call. Preserve those
+re-arms; they are not redundant.
+
+---
+
+## ✒️ Source style
+
+New code must match existing conventions. Read a few procedures in
+`M_DatePicker.bas` first — they are the reference.
 
 **Module hygiene**
 
-- `Option Explicit` at the top of every module, class, and form.
-- Do not add `Option Private Module` to `M_DatePicker.bas`; public Excel UI
-  callbacks (CommandBars, `Shape.OnAction`, `Application.OnTime`, RibbonX) depend
-  on public procedures there.
+- `Option Explicit` at the top of every module, class and form.
+- Do not add `Option Private Module` to `M_DatePicker.bas`; Excel UI callbacks
+  depend on public procedures there.
 - Keep `cDatePickerManager` and `cDatePickerLabelHook` private-instanced
   (`VB_Exposed = False`).
 
 **Procedure banners**
-
-Every procedure carries a banner doc-block in this shape:
 
 ```vb
 '------------------------------------------------------------------------------
 '                              PROCEDURE TITLE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   ...
 ' WHY THIS EXISTS
-'   ...
-' INPUTS / RETURNS / BEHAVIOR
-'   ...
+' INPUTS
+' RETURNS
+' BEHAVIOR
 ' ERROR POLICY
-'   raises descriptive errors  -- or --  best-effort / safe-default
 ' DEPENDENCIES
-'   ...
 ' NOTES
-'   ...
 ' UPDATED
 '   YYYY-MM-DD
 '------------------------------------------------------------------------------
 ```
 
+Bump `UPDATED` on every routine you change. A stale date is worse than none —
+it asserts something false.
+
 **Body structure**
 
-- Open with a `DECLARE` section, then sectioned sub-banners (`INITIALIZE`,
-  `VALIDATE`, etc.).
-- Declare `Const PROC_NAME As String = "..."` for routines that report errors.
-- Put a short intent comment **above** each meaningful statement.
+- Open with `DECLARE`, then sectioned sub-banners (`INITIALIZE`, `VALIDATE`, …).
+- Declare `Const PROC_NAME As String = "..."` in routines that report errors.
+- Put a short intent comment above each meaningful statement — and only where it
+  adds something. `'Exit before the error handler` above `Exit Sub` is noise.
 
-**Naming and prefixes**
+**Naming**
 
 | Prefix | Scope |
-| --- | --- |
-| `DP_` | public entry-point API (`DP_Show`, `DP_Close`, `DP_Preload`, `DP_Hide`) |
-| `M_` | module-internal helpers grouped by area (`M_Settings_`, `M_WriteBack_`, `M_GridIcon_`, `M_Window_`) |
-| `UF_` | UserForm-level routines |
-| `cDatePicker*` | classes |
+|---|---|
+| `DP_` | Public entry points |
+| `M_` | Module-internal helpers, grouped by area — `M_Settings_`, `M_WriteBack_`, `M_GridIcon_`, `M_Window_`, `M_Timer_` |
+| `UF_` | UserForm routines |
+| `cDatePicker*` | Classes |
 | `Ribbon_` | RibbonX callbacks |
-| `TST_DP_` | test harness |
+| `TST_DP_` | Test harness |
+| `gDP_` | Global runtime state |
+| `m` | Private module or instance state |
 
-Keep the stable legacy identifiers (`VBA_DATETIMEPICKER` registry app name and
-command-bar tag) unchanged — they exist for backward compatibility.
+**Performance**
 
-**Error-handling contract**
-
-- Use a labeled handler whose name states intent: `ErrorHandler` for routines
-  that raise, and `FailSafe` / `SafeExit` for best-effort paths.
-- The banner `ERROR POLICY` section must say whether the routine raises a
-  descriptive error or is best-effort / safe-default — and the code must match.
-- Reserve `On Error Resume Next` for genuinely best-effort or cleanup sequences,
-  not for normal logic.
-
-**Performance conventions**
-
-- Bulk-load and bulk-write ranges via `.Value2`; fall back to per-cell writes
-  only when bulk cannot complete (see `M_WriteBack_TryBulkWriteRange`).
+- Bulk-read and bulk-write ranges; fall back to per-cell only when bulk cannot
+  complete.
 - Use 1-based arrays.
-- Cache repeated lookups rather than re-reading them per cell or per render.
+- Cache repeated lookups rather than re-reading per cell or per render.
 
 ---
 
-## 🧪 Testing
+## 📖 Documentation expectations
 
-<p align="left">
-  <img alt="Harness" src="https://img.shields.io/badge/Harness-M__cDP__Test-217346">
-  <img alt="Entry" src="https://img.shields.io/badge/Entry-TST__DP__RunAll-blue">
-</p>
+Documentation belongs in the same pull request, not a follow-up.
 
-Import `test/M_cDP_Test.bas` and run the suite before submitting:
+| Change | Update |
+|---|---|
+| Public API | `README.md` API table and the `Public-API` wiki page |
+| Install method | `README.md` and the `Installation-and-Import` wiki page |
+| UI internals | The `UserForm-UI-Layer` wiki page |
+| Any user-visible change | `CHANGELOG.md` |
+| Release process | The `Release-Checklist` wiki page |
+| Wiki edits | `UPDATE_NOTES` |
 
-```vb
-TST_DP_RunAll
-```
-
-Results are written to the Immediate Window and to a `TST_DP_RESULTS` worksheet;
-a scratch sheet (`TST_DP_SCRATCH`) is created and removed automatically.
-
-- All existing suites must still pass.
-- If you change or add behavior, add or extend a suite (for example
-  `TST_DP_RunSuite_WriteBack`) and use the existing `Assert*` helpers.
-- Include a `UISmoke` run (`TST_DP_RunAll_WithUISmoke`) when touching the form.
+> [!IMPORTANT]
+> The wiki was written for `v1.1.0` and has not been fully verified against
+> `v1.1.1`. Affected pages carry a notice. Until the rewrite
+> ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)) lands,
+> `README.md` and the tagged source are authoritative where they disagree.
 
 ---
 
-## 📚 Documentation expectations
+## 🧹 Repository hygiene
 
-<p align="left">
-  <img alt="Docs" src="https://img.shields.io/badge/Docs-Kept_in_sync-6f42c1">
-</p>
+Never commit:
 
-Documentation is part of the change, not a follow-up. When your change affects a
-public-facing surface, update the matching docs in the same pull request:
+- the built `DATETIMEPICKER.xlam` — excluded by `.gitignore`;
+- Excel lock and owner files (`~$*`);
+- the workbook you used to edit source;
+- personal settings, scratch sheets or local paths;
+- credentials, client data or production data.
 
-- **public API** changed → `Public-API` wiki page **and** the README API table
-- **install method / UI internals** changed → `Installation-and-Import` /
-  `UserForm-UI-Layer` wiki pages
-- any user-visible change → a note in `UPDATE_NOTES`
-
-This mirrors the docs-sync step in the **Release-Checklist** wiki page.
+`.gitattributes` stores VBA source as LF in the index and checks it out as CRLF.
+Markdown is LF throughout. Do not fight this — export normally and let git
+normalize.
 
 ---
 
-## 📦 What not to commit
+## 🚀 Pull requests
 
-<p align="left">
-  <img alt="Excluded" src="https://img.shields.io/badge/Excluded-Binaries_and_Locks-red">
-</p>
+1. Keep it **small and focused** — one logical change.
+2. Fill in the template. Delete sections that do not apply rather than writing
+   "N/A" fifteen times.
+3. State the problem, the approach, and how you tested it.
+4. Quote the harness summary line.
 
-- The built **`DATETIMEPICKER.xlam`** — it is a binary artifact published only as
-  a release asset and is excluded by `.gitignore`.
-- Excel owner/lock files (`~$*`).
-- The workbook you used to edit the source.
-- Personal settings, scratch sheets, or local paths.
-
----
-
-## 🚀 Submitting changes
-
-<p align="left">
-  <img alt="PR" src="https://img.shields.io/badge/PR-Small_and_focused-217346">
-</p>
-
-1. Fork the repository and create a branch for your change.
-2. Keep the pull request **small and focused** — one logical change per PR.
-3. In the PR description, state the problem, the approach, and how you tested it
-   (which suites you ran and the result).
-4. Confirm: project compiles cleanly, `TST_DP_RunAll` passes, banners and naming
-   follow the house style, and docs are updated.
-
-The maintainer reviews changes selectively and may adopt, adapt, or decline a
-contribution to keep the codebase coherent. Clear, well-scoped PRs are the most
-likely to be merged.
+The maintainer reviews selectively and may adopt, adapt or decline a
+contribution to keep the codebase coherent. Clear, well-scoped pull requests are
+the most likely to be merged.
 
 ---
 
@@ -244,10 +435,8 @@ likely to be merged.
 By contributing, you agree that your contributions are licensed under the
 project's **MIT License**.
 
----
-
 ## 👤 Maintainer
 
 Maintained by **Daniele Penza**. For anything that is not a code change — design
-questions, larger proposals, or general feedback — open an issue to start the
+questions, larger proposals, general feedback — open an issue to start the
 conversation.

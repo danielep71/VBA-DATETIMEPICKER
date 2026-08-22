@@ -556,6 +556,9 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "PreCreateHidden"
     'Run M_Picker_SelectDate write-back and state-management checks
         TST_DP_RunSuiteSafe "SelectDate"
+
+    'Run the application-state suite
+        TST_DP_RunSuiteSafe "ApplicationState"
     'Run optional UF_DatePicker open / close smoke check when requested
         If IncludeUISmoke Then
             TST_DP_RunSuiteSafe "UISmoke"
@@ -803,6 +806,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             
             Case "SELECTDATE"
                 TST_DP_RunSuite_SelectDate
+            Case "APPLICATIONSTATE"
+                TST_DP_RunSuite_ApplicationState
 
             Case "UISMOKE"
                 TST_DP_RunSuite_UISmoke
@@ -2382,6 +2387,11 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 '==============================================================================
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim EventsBeforeStart   As Boolean      'Caller event state before DP_Start
+
+'------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Set the current suite name
@@ -2409,6 +2419,8 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 '------------------------------------------------------------------------------
 ' START AFTER STOP - RECOVERY
 '------------------------------------------------------------------------------
+    'Capture the caller event state before the recovery start
+        EventsBeforeStart = Excel.Application.EnableEvents
     'Call DP_Start to recreate the DatePicker runtime
     'DP_Start internally calls Handle_SelectionChange which ends with
     'On Error GoTo 0, killing the SuiteFail handler. Re-arm immediately.
@@ -2419,9 +2431,9 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
         TST_DP_AssertFalse "Manager is instantiated after DP_Start", _
             (gDP_Manager Is Nothing)
 
-    'Assert Application.EnableEvents is True after DP_Start
-        TST_DP_AssertTrue "Application.EnableEvents is True after DP_Start", _
-            Excel.Application.EnableEvents
+    'Assert DP_Start preserved the caller's Application.EnableEvents state
+        TST_DP_AssertBooleanResult "DP_Start preserves the caller event state", _
+            (Excel.Application.EnableEvents = EventsBeforeStart)
 
     'Assert the manager is not busy after DP_Start
         If Not gDP_Manager Is Nothing Then
@@ -3056,6 +3068,233 @@ SuiteFail:
     'Record the suite-level failure and clear the error
         TST_DP_RecordFail "SelectDate suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_ApplicationState()
+
+'
+'==============================================================================
+'                        APPLICATION STATE SUITE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Validates that the public DatePicker entry points preserve the caller's
+'   Application.EnableEvents state
+'
+' WHY THIS EXISTS
+'   M_Picker_EnsureManager previously forced Application.EnableEvents = True on
+'   every normal entry point, which silently broke a business macro that had
+'   deliberately suppressed Excel events for a transactional update
+'
+'   DP_RepairRuntime remains the only entry point permitted to force events on
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Tests that DP_Start, DP_Show, DP_Preload, and M_Picker_EnsureManager leave a
+'   pre-existing disabled state untouched, that the EventsDisabledByCaller output
+'   flag reports the caller state, that write-back restores both the enabled and
+'   the disabled case, and that DP_RepairRuntime still force-enables events
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+'   Restores Application.EnableEvents = False on every exit path so the harness
+'   run state set by TST_DP_PrepareApplicationForRun is preserved
+'
+' DEPENDENCIES
+'   M_Picker_EnsureManager
+'   DP_Start
+'   DP_Show
+'   DP_Close
+'   DP_Preload
+'   DP_RepairRuntime
+'   M_WriteBack_Apply
+'   mTST_DP_ScratchSheet
+'
+' NOTES
+'   The harness itself runs with Application.EnableEvents = False, so the
+'   suppressed-caller condition under test is the ambient run state
+'
+'   DP_Show is exercised here rather than in the UI smoke suite because event
+'   preservation is a release-blocking assertion and must run unconditionally
+'
+' UPDATED
+'   2026-08-21
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim TargetCell          As Excel.Range  'Write-back target under test
+    Dim EventsDisabled      As Boolean      'Output flag from M_Picker_EnsureManager
+    Dim RestoredState       As Boolean      'Application.EnableEvents after write-back
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "ApplicationState"
+        On Error GoTo SuiteFail
+    'Activate the scratch sheet
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+    'Establish the suppressed-caller condition under test
+        Excel.Application.EnableEvents = False
+
+'------------------------------------------------------------------------------
+' BOOTSTRAP PRESERVES CALLER STATE
+'------------------------------------------------------------------------------
+    'Bootstrap the manager while the caller has events suppressed
+        M_Picker_EnsureManager EventsDisabled
+    'Assert the bootstrapper did not re-enable events
+        TST_DP_AssertFalse "M_Picker_EnsureManager preserves disabled events", _
+            Excel.Application.EnableEvents
+    'Assert the bootstrapper reported the caller state
+        TST_DP_AssertTrue "M_Picker_EnsureManager reports EventsDisabledByCaller", _
+            EventsDisabled
+    'Assert the manager was still created and hooked while events were suppressed
+        TST_DP_AssertTrue "Manager is hooked while events are suppressed", _
+            (Not gDP_Manager Is Nothing)
+    'Assert the hook state predicate is independent of Application.EnableEvents
+        TST_DP_AssertTrue "Is_Hooked is True while events are suppressed", _
+            gDP_Manager.Is_Hooked
+
+'------------------------------------------------------------------------------
+' DP_START PRESERVES CALLER STATE
+'------------------------------------------------------------------------------
+    'Start the runtime while the caller has events suppressed
+    'DP_Start resets On Error GoTo 0 on exit; re-arm immediately
+        DP_Start
+        On Error GoTo SuiteFail
+    'Assert DP_Start did not re-enable events
+        TST_DP_AssertFalse "DP_Start preserves disabled events", _
+            Excel.Application.EnableEvents
+
+'------------------------------------------------------------------------------
+' DP_PRELOAD PRESERVES CALLER STATE
+'------------------------------------------------------------------------------
+    'Restore the suppressed condition before the preload check
+        Excel.Application.EnableEvents = False
+    'Preload the form while the caller has events suppressed
+    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
+        DP_Preload
+        On Error GoTo SuiteFail
+    'Assert DP_Preload did not re-enable events
+        TST_DP_AssertFalse "DP_Preload preserves disabled events", _
+            Excel.Application.EnableEvents
+
+'------------------------------------------------------------------------------
+' DP_SHOW PRESERVES CALLER STATE
+'------------------------------------------------------------------------------
+    'Restore the suppressed condition before the show check
+        Excel.Application.EnableEvents = False
+    'Show the picker while the caller has events suppressed
+    'DP_Show resets On Error GoTo 0 on exit; re-arm immediately
+        DP_Show
+        On Error GoTo SuiteFail
+    'Assert DP_Show did not re-enable events
+        TST_DP_AssertFalse "DP_Show preserves disabled events", _
+            Excel.Application.EnableEvents
+    'Close the picker before the write-back checks
+    'DP_Close resets On Error GoTo 0 on exit; re-arm immediately
+        DP_Close
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' WRITE-BACK RESTORES THE DISABLED CASE
+'------------------------------------------------------------------------------
+    'Prepare a date-formatted target cell
+        Set TargetCell = mTST_DP_ScratchSheet.Range("H10")
+        TargetCell.ClearContents
+        TargetCell.NumberFormat = "dd/mm/yyyy"
+        TargetCell.Select
+    'Set the value the write-back transaction will apply
+        gDP_WriteValue = VBA.DateSerial(2026, 8, 21)
+    'Establish the suppressed condition before the transaction
+        Excel.Application.EnableEvents = False
+    'Apply the write-back transaction
+    'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
+        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        On Error GoTo SuiteFail
+    'Capture the restored state
+        RestoredState = Excel.Application.EnableEvents
+    'Assert write-back restored the disabled caller state
+        TST_DP_AssertFalse "Write-back restores disabled events", RestoredState
+    'Assert the target cell received the written value
+        TST_DP_AssertCellDateEquals "Write-back writes the target cell with events disabled", _
+            VBA.DateSerial(2026, 8, 21), _
+            TargetCell
+
+'------------------------------------------------------------------------------
+' WRITE-BACK RESTORES THE ENABLED CASE
+'------------------------------------------------------------------------------
+    'Prepare a second date-formatted target cell
+        Set TargetCell = mTST_DP_ScratchSheet.Range("H12")
+        TargetCell.ClearContents
+        TargetCell.NumberFormat = "dd/mm/yyyy"
+        TargetCell.Select
+    'Set the value the write-back transaction will apply
+        gDP_WriteValue = VBA.DateSerial(2026, 8, 22)
+    'Establish the enabled condition before the transaction
+        Excel.Application.EnableEvents = True
+    'Apply the write-back transaction
+    'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
+        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        On Error GoTo SuiteFail
+    'Capture the restored state
+        RestoredState = Excel.Application.EnableEvents
+    'Assert write-back restored the enabled caller state
+        TST_DP_AssertTrue "Write-back restores enabled events", RestoredState
+
+'------------------------------------------------------------------------------
+' REPAIR STILL FORCE-ENABLES
+'------------------------------------------------------------------------------
+    'Establish the suppressed condition before the repair check
+        Excel.Application.EnableEvents = False
+    'Repair the runtime, which is the only sanctioned force-enable path
+    'DP_RepairRuntime resets On Error GoTo 0 on exit; re-arm immediately
+        DP_RepairRuntime
+        On Error GoTo SuiteFail
+    'Assert DP_RepairRuntime re-enabled events
+        TST_DP_AssertTrue "DP_RepairRuntime force-enables events", _
+            Excel.Application.EnableEvents
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Restore the harness run state
+        Excel.Application.EnableEvents = False
+    'Release object references
+        Set TargetCell = Nothing
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Capture the escaping error before any On Error statement resets Err
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
+    'Suppress local cleanup errors
+        On Error Resume Next
+    'Close any picker left loaded by a failed assertion path
+        DP_Close
+    'Restore the harness run state
+        Excel.Application.EnableEvents = False
+    'Release object references
+        Set TargetCell = Nothing
+    'Record the captured suite-level failure
+        On Error GoTo 0
+        TST_DP_RecordFail "ApplicationState suite failed", _
+            "Error " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
         Err.Clear
 
 End Sub
