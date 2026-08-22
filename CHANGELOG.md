@@ -49,6 +49,97 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added `DP_WriteResult`, the structured outcome of a write-back. Every write
+  routine returned nothing, so a caller could not determine how many cells were
+  targeted, how many were written, whether anything was skipped or failed, which
+  cells those were, what range the selection resolved to, whether a one-cell
+  table selection expanded to a data column, or whether Excel events were already
+  disabled on entry. The only external signal was an exception, which made
+  *nothing happened* and *some of it happened* indistinguishable.
+
+  ```vb
+  Public Type DP_WriteResult
+      AttemptedCount          As Double
+      WrittenCount            As Double
+      LockedSkippedCount      As Double
+      LockedSkippedAddresses  As String
+      FailedCount             As Double
+      FailedAddresses         As String
+      ResolvedTargetAddress   As String
+      ExpandedToTableColumn   As Boolean
+      TableName               As String
+      ColumnName              As String
+      AreasCount              As Long
+      EventsDisabledByCaller  As Boolean
+  End Type
+  ```
+
+  A completed result satisfies:
+
+  ```text
+  AttemptedCount = WrittenCount + LockedSkippedCount + FailedCount
+  ```
+
+  Cell counts are `Double` rather than `Long` because they derive from
+  `Range.Cells.CountLarge`, which a full-worksheet target overflows a `Long`.
+  The skip and failure counts share the type so the invariant cannot overflow on
+  one side.
+
+  The result consumes what the resolver split
+  ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13)) already
+  produced rather than re-deriving it: `M_WriteBack_ResolveAndApplyTarget`
+  attaches the expansion metadata the resolver returns, and the resolver
+  signature is unchanged.
+
+  `EventsDisabledByCaller` records the same operational fact
+  `M_Picker_EnsureManager` already surfaces
+  ([#2](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/2)), carried in
+  this result rather than as a second interpretation of caller event state.
+  `M_WriteBack_Apply` derives it from the state it already captures, and still
+  restores exactly the state it observed on entry.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
+- Added address reporting for every cell a write did not write.
+  `LockedSkippedAddresses` and `FailedAddresses` carry worksheet-qualified
+  addresses in the form `SheetName!A1`, so a caller can distinguish *three
+  failures somewhere in the target* from `Scratch!G6, Scratch!G9, Scratch!G12`.
+
+  The lists are capped at 25 entries and end with an ellipsis beyond that. The
+  counts stay exact — the cap bounds the reported string so a failed write across
+  a long table column cannot build an unbounded string inside the write loop.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
+- Added `M_WriteBack_ReportShortfall` and `M_WriteBack_DescribeShortfall`.
+  `M_WriteBack_ReportShortfall` shows one consolidated summary for a whole
+  operation and is called by the interactive entry points;
+  `M_WriteBack_DescribeShortfall` formats the counts and addresses behind it. The
+  formula and existing-value skips of
+  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22) extend these
+  two rather than adding a parallel report.
+
+- Added structured-result coverage to the `WriteBack` suite, spanning the
+  regressions the result has to survive: contiguous bulk write, single-cell
+  write, discontiguous multi-area write, partial protected-range write, exact
+  failed-address reporting, and caller event state both enabled and disabled.
+
+  `TST_DP_AssertWriteResultBalances` asserts the accounting invariant on every
+  path, and is the single place that changes when `#22` adds
+  `FormulaSkippedCount` to the right-hand side.
+
+  `TST_DP_ExpectPartialWriteReport` protects the scratch sheet with one locked
+  cell inside the target and asserts two written, one skipped, and
+  `Scratch!H6` as the address behind it. `TST_DP_ExpectFailedAddressReport`
+  covers the other classification: an array formula inside the target makes two
+  cells reject the write, and the result must name exactly those two. It asserts
+  its own setup took effect and that the array survived the write, so a silent
+  setup failure cannot be mistaken for a reporting defect. Both release what they
+  changed on every path, including a failed assertion, so neither sheet protection
+  nor an array formula can leak into a later suite.
+
+  The `ApplicationState` suite now asserts `EventsDisabledByCaller` on both
+  branches, against the same call whose `Application.EnableEvents` restoration it
+  already checked.
+
 - Added three-way write-scope coverage to the `WriteBack` suite. The existing
   expansion test passes `NoTableGrow:=False` explicitly, so it kept passing
   through the behaviour change and proved nothing about the new default. Eleven
@@ -150,6 +241,72 @@ backward-compatible capability, 💥 **major** may break callers.
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
+
+- Fixed the fast bulk write path never producing a written count. When a
+  multi-cell target was written in one operation, `M_WriteBack_PopulateRange`
+  returned before the section that calculates `WrittenCount`. Nothing depended on
+  that section before, because the counts were discarded. A result fed only by
+  the per-cell fallback would have reported the most common multi-cell success as
+  nothing written.
+
+  The bulk path now contributes its full target count explicitly, and the
+  routine's notes record why, so the assignment is not read as redundant and
+  removed. A failed bulk write is still not counted as a failed cell — the result
+  describes the outcome of the logical write, not the optimization attempts
+  behind it.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
+- Fixed write-back reporting cells it had not written. Excel declines a value
+  assignment to an array formula **silently** through the object model — it
+  raises *You cannot change part of an array* only for an interactive edit. Three
+  distinct silent outcomes were possible:
+
+  ```text
+  range assignment covering an array     replaces it, reports success
+  range assignment overlapping an array  writes nothing, reports success
+  cell assignment to an array cell       writes nothing, reports success
+  ```
+
+  On top of that, `WrittenCount` was derived by subtraction:
+
+  ```vb
+  WrittenCount = AttemptedCount - LockedSkippedCount - FailedCount
+  ```
+
+  That derivation treats every cell that did not raise as written, so a silent
+  refusal was counted as a success. A write could report a full column written
+  and change nothing.
+
+  Two changes. `WrittenCount` now counts the cells that reported a successful
+  write, rather than inferring them from what did not fail — every cell
+  increments exactly one of written, locked or failed, so the accounting
+  invariant holds by construction instead of by definition. And array cells are
+  refused before the write on both paths: the fast path is skipped whenever
+  `Range.HasArray` is `True` or `Null` for the target, and the per-cell writer
+  refuses each array cell and records its address.
+
+  This is a detectable inability to write, not a policy decision about formulas.
+  The formula overwrite policy remains
+  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22).
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
+- Fixed the skipped-cell message appearing once per target area. The summary for
+  protected locked cells was raised inside `M_WriteBack_PopulateRange`, which
+  `M_WriteBack_ApplyResolvedTarget` calls once for each member of
+  `Target.Areas`. A discontiguous selection with locked cells in three areas
+  produced three consecutive dialogs describing three fragments of one write.
+
+  The write engine now resolves, writes, classifies and returns. It displays
+  nothing at any level, including `M_WriteBack_Apply`. Notification moved to the
+  interactive entry points — `M_Picker_SelectDate`, `DP_Now` and
+  `DP_FillTableColumn` — which each call `M_WriteBack_ReportShortfall` once,
+  after the complete result is available. `DP_Today` inherits this through
+  `M_Picker_SelectDate`.
+
+  A programmatic caller of `M_WriteBack_Apply` is no longer taken through modal
+  UI, which is also what lets the harness exercise a partial write without a
+  dialog stopping the run. Developer `Debug.Print` diagnostics remain.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
 
 - Fixed six README statements describing `M_Picker_EnsureManager` behaviour that
   `v1.1.1` removed. The routine no longer forces
@@ -255,6 +412,77 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🔧 Changed
 
+- The write-back chain now carries its result instead of discarding it.
+  `M_WriteBack_Apply` became a `Function`; the three stages below it accumulate
+  into a required `ByRef` result:
+
+  ```text
+  M_WriteBack_Apply(iType, [NoTableGrow])                    As DP_WriteResult
+  M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow, Result
+  M_WriteBack_ApplyResolvedTarget   Target, iType, Result
+  M_WriteBack_PopulateRange         oRange, iType, Result
+  ```
+
+  A `ByRef` output on `M_WriteBack_Apply` itself was considered and rejected. VBA
+  does not permit a user-defined type as an `Optional` argument, so the parameter
+  would have to be required, and every caller that does not want the result would
+  still have to declare and pass one. The `Function` form avoids that churn. The
+  private stages have no such constraint: their result parameter is required, and
+  accumulating through the write path is what makes one discontiguous target
+  produce one result.
+
+  A `Function` called with bare-call syntax compiles unchanged. All eight
+  `M_WriteBack_Apply` call sites were checked individually rather than assumed:
+
+  ```text
+  M_Picker_SelectDate       M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow
+  DP_Now                    M_WriteBack_Apply DP_WriteAction_DatePicker
+  DP_FillTableColumn        M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow:=False
+  test/M_cDP_Test.bas       five calls, positional and omitted arguments
+  ```
+
+  None uses `Call`, parenthesises its arguments, or assigns the result, so none
+  needed editing for the conversion. `M_WriteBack_Apply` already required an
+  argument and so never appeared in the macro dialog; converting it changes
+  nothing there.
+
+  `M_WriteBack_TryWriteCell` replaced its two `ByRef` counters with the
+  accumulating result, and now records the worksheet-qualified address behind
+  every skip and failure rather than only counting them.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
+- `DP_FillTableColumn` now checks its predicted scope against `AttemptedCount`.
+  The routine already described the scope before writing:
+
+  ```text
+  Fill 247 cells in Trades[Expiry Date] with 25-Aug-2026?
+  ```
+
+  The predicted count was only resolved when prompting. It is now resolved on
+  both paths and compared with `AttemptedCount` afterwards, which turns the
+  prompt into a check.
+
+  The comparison is deliberately against `AttemptedCount` rather than
+  `WrittenCount`. A fill that legitimately skips protected cells is still a
+  correct prediction:
+
+  ```text
+  Predicted scope / AttemptedCount   247
+  WrittenCount                       244
+  LockedSkippedCount                   3
+  ```
+
+  A prediction that does not match `AttemptedCount` means the target changed
+  between preview and application, or that the two resolution paths diverged.
+  That is reported as an inconsistency. The partial write is reported separately,
+  through the same consolidated summary every other entry point uses.
+
+  The routine is now a `Function` returning `DP_WriteResult`, so the harness can
+  assert the comparison instead of reading a dialog. Both of its call sites are
+  bare-call and unaffected: the regression suite, and `DP_Demo_FillTableColumn`
+  behind the demo sheet button.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
 - The demo workbook is now published as a release asset rather than tracked. It
   is generated from `demo/M_DP_DEMO.bas` by `DP_Demo_CreateDemoSheet` at release
   time, so a change to the demo is reviewable as a source diff.
@@ -325,6 +553,44 @@ backward-compatible capability, 💥 **major** may break callers.
 - **Table write scope changes for omitted arguments.** Code that relied on a
   calendar selection, `DP_Today` or `DP_Now` filling a table column must now
   either pass `NoTableGrow:=False` or call `DP_FillTableColumn`.
+- **`DP_WriteResult` is a new public type in `src/`.**
+- **`M_WriteBack_Apply` and `DP_FillTableColumn` are now `Function`s.** No
+  argument list changed and no existing call site needed editing, because all of
+  them use bare-call syntax. Code that wrapped either in `Call` with parentheses,
+  or resolved either through `Application.Run`, needs checking — a `Function`
+  returning a user-defined type cannot be called through `Application.Run`.
+- **`M_WriteBack_PopulateRange` gained a required third argument.** It is an
+  internal `M_` helper and outside the versioned public API, but any code calling
+  it directly must now pass a `DP_WriteResult` accumulator.
+- **A partial write is now reported once per operation, by the entry point.**
+  The write engine displays nothing. A discontiguous selection with skipped cells
+  in several areas produces one message instead of one per area, and a
+  programmatic call to `M_WriteBack_Apply` produces none at all.
+
+### ⚠️ Note for [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22)
+
+Building the failed-address regression established, empirically, that the fast
+bulk write is not safe around formulas:
+
+```vb
+TargetRange.Value = WriteValue
+```
+
+Excel does not raise when it declines a write through the object model. An array
+formula wholly inside the target is replaced without complaint; one partly
+overlapping the target makes the assignment do nothing, also without complaint;
+and a single-cell assignment to an array cell does nothing and returns normally.
+
+`#21` handles the accounting consequence — count successes rather than infer them,
+and refuse array cells on both paths. Two consequences carry into `#22`:
+
+- A *skip formulas by default* rule cannot live in `M_WriteBack_TryWriteCell`
+  alone, because the bulk path never reaches per-cell inspection. Formula
+  detection has to gate the bulk write, exactly as the array check now does.
+  `Range.HasFormula` follows the same `True`/`False`/`Null` convention.
+- A refusal cannot be detected by catching an error, because there is no error to
+  catch. Anything `#22` declines to overwrite has to be identified before the
+  write is attempted, never inferred from its outcome.
 
 ### ⚠️ Note on the add-in
 

@@ -71,8 +71,12 @@ Option Explicit
 '   raise outward on failure; they do not reset the caller SuiteFail handler and
 '   therefore do not need re-arming.
 '
+'   The write-back routines are Functions returning DP_WriteResult. Bare calls
+'   still compile and are kept where the outcome is not asserted, so the suite
+'   covers both call forms.
+'
 ' UPDATED
-'   2026-05-26
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1824,8 +1828,8 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '
 ' BEHAVIOR
 '   Tests direct contiguous range population, discontiguous range population,
-'   selection-based write-back, table data-column expansion, and unsupported
-'   write action rejection
+'   selection-based write-back, table data-column expansion, unsupported write
+'   action rejection, the structured write result, and partial-write reporting
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -1833,6 +1837,10 @@ Private Sub TST_DP_RunSuite_WriteBack()
 ' DEPENDENCIES
 '   M_WriteBack_PopulateRange
 '   M_WriteBack_Apply
+'   DP_FillTableColumn
+'   TST_DP_ExpectPartialWriteReport
+'   TST_DP_ExpectFailedAddressReport
+'   TST_DP_AssertWriteResultBalances
 '   gDP_WriteValue
 '   mTST_DP_ScratchSheet
 '
@@ -1840,8 +1848,25 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '   All write-back tests use the scratch worksheet only and leave no persistent
 '   state on the result sheet
 '
+'   M_WriteBack_Apply is a Function returning DP_WriteResult; the private stages
+'   below it accumulate into a ByRef result instead. Assertions use whichever
+'   form the routine under test provides, and the bare-call form of
+'   M_WriteBack_Apply is kept where the outcome is not asserted so the suite also
+'   covers the call form the rest of the project uses
+'
+'   A DP_WriteResult accumulates, so WriteResult is reset from EmptyResult before
+'   any direct call to M_WriteBack_PopulateRange
+'
+'   Reported addresses are worksheet-qualified, so expected values are built from
+'   the scratch sheet name rather than hard-coded
+'
+'   Two expectations mutate the scratch sheet in ways a failed assertion must not
+'   leave behind: TST_DP_ExpectPartialWriteReport protects it, and
+'   TST_DP_ExpectFailedAddressReport writes an array formula spanning I6:I7. Both
+'   release on every path
+'
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1851,6 +1876,8 @@ Private Sub TST_DP_RunSuite_WriteBack()
     Dim TableRange      As Excel.Range       'Source range for the test table
     Dim TestTable       As Excel.ListObject  'Regression test ListObject
     Dim UnionRange      As Excel.Range       'Discontiguous target range
+    Dim WriteResult     As DP_WriteResult    'Structured write-back result
+    Dim EmptyResult     As DP_WriteResult    'Zeroed result used to reset WriteResult
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1869,10 +1896,12 @@ Private Sub TST_DP_RunSuite_WriteBack()
         mTST_DP_ScratchSheet.Range("D5:D6").ClearContents
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 5, 3)
-    'Populate the contiguous range
+    'Populate the contiguous range through the fast bulk path
+        WriteResult = EmptyResult
         M_WriteBack_PopulateRange _
             mTST_DP_ScratchSheet.Range("D5:D6"), _
-            DP_WriteAction_DatePicker
+            DP_WriteAction_DatePicker, _
+            WriteResult
     'Assert the first cell received the date
         TST_DP_AssertCellDateEquals "Direct contiguous range write D5", _
             VBA.DateSerial(2026, 5, 3), _
@@ -1881,6 +1910,15 @@ Private Sub TST_DP_RunSuite_WriteBack()
         TST_DP_AssertCellDateEquals "Direct contiguous range write D6", _
             VBA.DateSerial(2026, 5, 3), _
             mTST_DP_ScratchSheet.Range("D6")
+    'A successful bulk write returns before the per-cell counters exist, so the
+    'written count has to be contributed by the bulk path itself
+        TST_DP_AssertEqualsLong "Bulk write reports 2 attempted cells", _
+            2, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert the bulk path reported what it wrote
+        TST_DP_AssertEqualsLong "Bulk write reports 2 written cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Bulk write result balances", WriteResult
 
 '------------------------------------------------------------------------------
 ' DISCONTIGUOUS RANGE POPULATION
@@ -1893,8 +1931,17 @@ Private Sub TST_DP_RunSuite_WriteBack()
         Set UnionRange = Excel.Application.Union( _
             mTST_DP_ScratchSheet.Range("C5"), _
             mTST_DP_ScratchSheet.Range("C7"))
-    'Populate the discontiguous range
-        M_WriteBack_PopulateRange UnionRange, DP_WriteAction_DatePicker
+    'Populate the discontiguous range and capture the structured result
+        WriteResult = EmptyResult
+        M_WriteBack_PopulateRange UnionRange, DP_WriteAction_DatePicker, WriteResult
+    'Assert the result counts both areas
+        TST_DP_AssertEqualsLong "Discontiguous result counts 2 areas", _
+            2, WriteResult.AreasCount
+    'Assert the result counts every written cell
+        TST_DP_AssertEqualsLong "Discontiguous result writes 2 cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Discontiguous result balances", WriteResult
     'Assert the first discontiguous cell received the date
         TST_DP_AssertCellDateEquals "Discontiguous range write C5", _
             VBA.DateSerial(2026, 6, 15), _
@@ -1917,7 +1964,24 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select the target range
         mTST_DP_ScratchSheet.Range("D5:D6").Select
     'Apply write-back to the current selection without table-column expansion
-        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
+    'Assert the result reports the attempted cells
+        TST_DP_AssertEqualsLong "Selection result attempts 2 cells", _
+            2, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert the result reports the written cells
+        TST_DP_AssertEqualsLong "Selection result writes 2 cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the result names the resolved target, worksheet-qualified
+        TST_DP_AssertEqualsString "Selection result reports the resolved target", _
+            mTST_DP_ScratchSheet.Name & "!D5:D6", WriteResult.ResolvedTargetAddress
+    'Assert a plain selection is not reported as a table expansion
+        TST_DP_AssertFalse "Selection result reports no table expansion", _
+            WriteResult.ExpandedToTableColumn
+    'Assert nothing was skipped or suppressed
+        TST_DP_AssertEqualsLong "Selection result reports no skipped cells", _
+            0, VBA.CLng(WriteResult.LockedSkippedCount + WriteResult.FailedCount)
+    'Assert the result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Selection result balances", WriteResult
     'Assert the first selected cell received the date
         TST_DP_AssertCellDateEquals "Selection write-back D5", _
             VBA.DateSerial(2026, 7, 20), _
@@ -1951,7 +2015,19 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select one data cell in the date column
         mTST_DP_ScratchSheet.Range("G5").Select
     'Apply write-back with table-column expansion enabled
-        M_WriteBack_Apply DP_WriteAction_DatePicker, False
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, False)
+    'Assert the expansion is reported rather than inferred from the cell count
+        TST_DP_AssertTrue "Expansion result reports ExpandedToTableColumn", _
+            WriteResult.ExpandedToTableColumn
+    'Assert the owning table is reported
+        TST_DP_AssertEqualsString "Expansion result names the table", _
+            "TST_DP_Table", WriteResult.TableName
+    'Assert the resolved column is reported
+        TST_DP_AssertEqualsString "Expansion result names the column", _
+            "DateValue", WriteResult.ColumnName
+    'Assert the whole data column was written
+        TST_DP_AssertEqualsLong "Expansion result writes 3 cells", _
+            3, VBA.CLng(WriteResult.WrittenCount)
     'Assert the first table data cell received the date
         TST_DP_AssertCellDateEquals "Table-column expansion writes G5", _
             VBA.DateSerial(2026, 8, 25), _
@@ -1972,7 +2048,18 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select one data cell in the date column
         mTST_DP_ScratchSheet.Range("G5").Select
     'Apply write-back with NoTableGrow omitted
-        M_WriteBack_Apply DP_WriteAction_DatePicker
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+    'Assert the safe default is reported as an unexpanded single-cell write
+        TST_DP_AssertFalse "Omitted NoTableGrow reports no expansion", _
+            WriteResult.ExpandedToTableColumn
+    'Assert the safe default wrote exactly one cell
+        TST_DP_AssertEqualsLong "Omitted NoTableGrow writes 1 cell", _
+            1, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the single-cell path reports one attempted cell in one area
+        TST_DP_AssertEqualsLong "Omitted NoTableGrow attempts 1 cell", _
+            1, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert the single-cell result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Single-cell result balances", WriteResult
     'Assert the anchored cell received the date
         TST_DP_AssertCellDateEquals "Omitted NoTableGrow writes only G5", _
             VBA.DateSerial(2026, 9, 10), _
@@ -1992,7 +2079,18 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select one data cell in the date column
         mTST_DP_ScratchSheet.Range("G5").Select
     'Fill the column without prompting so the run stays deterministic
-        DP_FillTableColumn VBA.DateSerial(2026, 10, 20), ConfirmFill:=False
+        WriteResult = DP_FillTableColumn(VBA.DateSerial(2026, 10, 20), ConfirmFill:=False)
+    'The prompt predicts the scope, so the prediction is checked against
+    'AttemptedCount. WrittenCount is reported separately and may legitimately be
+    'lower when cells are skipped
+        TST_DP_AssertEqualsLong "DP_FillTableColumn attempts the predicted 3 cells", _
+            3, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert every attempted cell was written on this unobstructed fill
+        TST_DP_AssertEqualsLong "DP_FillTableColumn writes all 3 cells", _
+            3, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the fill reports the expansion it performed
+        TST_DP_AssertTrue "DP_FillTableColumn reports the table expansion", _
+            WriteResult.ExpandedToTableColumn
     'Assert the anchored cell received the date
         TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G5", _
             VBA.DateSerial(2026, 10, 20), _
@@ -2015,10 +2113,13 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select a cell outside every table
         mTST_DP_ScratchSheet.Range("D8").Select
     'Attempt the fill without prompting
-        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+        WriteResult = DP_FillTableColumn(VBA.DateSerial(2026, 11, 5), ConfirmFill:=False)
     'Assert nothing was written outside a table
         TST_DP_AssertTrue "DP_FillTableColumn ignores a non-table cell", _
             VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("D8").Value)) = 0
+    'Assert the refused fill reports a zero write rather than an empty silence
+        TST_DP_AssertEqualsLong "DP_FillTableColumn reports 0 written outside a table", _
+            0, VBA.CLng(WriteResult.WrittenCount)
 
     'A header cell is not inside DataBodyRange and must be rejected
         mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
@@ -2052,6 +2153,18 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Assert no table row was written from a multi-cell anchor
         TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a multi-cell anchor", _
             VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+
+'------------------------------------------------------------------------------
+' PARTIAL WRITE REPORTING
+'------------------------------------------------------------------------------
+    'Assert a write that skips protected cells reports which cells it skipped
+        TST_DP_ExpectPartialWriteReport
+
+'------------------------------------------------------------------------------
+' FAILED ADDRESS REPORTING
+'------------------------------------------------------------------------------
+    'Assert a write that fails on some cells reports exactly which cells failed
+        TST_DP_ExpectFailedAddressReport
 
 '------------------------------------------------------------------------------
 ' INVALID WRITE ACTION
@@ -3273,8 +3386,11 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '   DP_Show is exercised here rather than in the UI smoke suite because event
 '   preservation is a release-blocking assertion and must run unconditionally
 '
+'   The caller event state is asserted twice: against Application.EnableEvents
+'   after the call, and against EventsDisabledByCaller on the returned result
+'
 ' UPDATED
-'   2026-08-21
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3282,6 +3398,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '------------------------------------------------------------------------------
     Dim TargetCell          As Excel.Range  'Write-back target under test
     Dim EventsDisabled      As Boolean      'Output flag from M_Picker_EnsureManager
+    Dim WriteResult         As DP_WriteResult   'Structured write-back result
     Dim RestoredState       As Boolean      'Application.EnableEvents after write-back
     Dim ErrorNumber         As Long         'Captured error number
     Dim ErrorDescription    As String       'Captured error description
@@ -3370,12 +3487,15 @@ Private Sub TST_DP_RunSuite_ApplicationState()
         Excel.Application.EnableEvents = False
     'Apply the write-back transaction
     'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
-        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
         On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the disabled caller state
         TST_DP_AssertFalse "Write-back restores disabled events", RestoredState
+    'Assert the result reports the caller's suppressed state
+        TST_DP_AssertTrue "Write-back result reports EventsDisabledByCaller", _
+            WriteResult.EventsDisabledByCaller
     'Assert the target cell received the written value
         TST_DP_AssertCellDateEquals "Write-back writes the target cell with events disabled", _
             VBA.DateSerial(2026, 8, 21), _
@@ -3395,12 +3515,15 @@ Private Sub TST_DP_RunSuite_ApplicationState()
         Excel.Application.EnableEvents = True
     'Apply the write-back transaction
     'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
-        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
         On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the enabled caller state
         TST_DP_AssertTrue "Write-back restores enabled events", RestoredState
+    'Assert the result reports the caller's enabled state
+        TST_DP_AssertFalse "Write-back result clears EventsDisabledByCaller", _
+            WriteResult.EventsDisabledByCaller
 
 '------------------------------------------------------------------------------
 ' REPAIR STILL FORCE-ENABLES
@@ -3870,12 +3993,313 @@ ExpectedError:
 
 End Sub
 
+Private Sub TST_DP_ExpectFailedAddressReport()
+
+'
+'==============================================================================
+'                      EXPECT FAILED ADDRESS REPORT
+'==============================================================================
+'   Places a multi-cell array formula inside the target so those cells reject the
+'   write, then asserts the result names exactly them.
+'
+'   Excel declines these writes silently through the object model. It raises
+'   "You cannot change part of an array" only for an interactive edit. So the
+'   engine refuses array cells before writing them, on both paths: the fast bulk
+'   path is skipped for any target touching an array, and the per-cell writer
+'   refuses each array cell individually.
+'
+'   Without those refusals the write reports success having changed nothing, which
+'   is what this expectation is really guarding. The assertions that the array
+'   survives and that I5 was written distinguish a correct refusal from a write
+'   that silently did not happen.
+'
+'   This is the non-lock failure path. Protected locked cells are a separate
+'   classification and are covered by TST_DP_ExpectPartialWriteReport.
+'
+'   The array formula is cleared on every path, including a failed assertion.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WriteResult     As DP_WriteResult   'Structured write-back result
+    Dim TargetRange     As Excel.Range      'Partially writable target
+    Dim ExpectedList    As String           'Expected failed address list
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo FailedAddressFail
+
+'------------------------------------------------------------------------------
+' BUILD A PARTIALLY WRITABLE TARGET
+'------------------------------------------------------------------------------
+    'Use a target away from the ranges the rest of the suite writes
+        Set TargetRange = mTST_DP_ScratchSheet.Range("I5:I8")
+    'Clear any content left by an earlier run
+        mTST_DP_ScratchSheet.Range("I5:I9").ClearContents
+    'A cell belonging to a multi-cell array formula rejects a direct value write
+        mTST_DP_ScratchSheet.Range("I6:I7").FormulaArray = "=ROW()"
+    'Assert the setup actually took, so a silent setup failure cannot look like a
+    'reporting defect in the result
+        TST_DP_AssertTrue "Failed write setup creates an array formula", _
+            mTST_DP_ScratchSheet.Range("I6").HasArray
+    'Prepare a distinct write value
+        gDP_WriteValue = VBA.DateSerial(2026, 12, 8)
+
+'------------------------------------------------------------------------------
+' WRITE THROUGH THE PARTIAL TARGET
+'------------------------------------------------------------------------------
+    'Call the range writer directly so the run stays free of modal messages
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT THE FAILED ADDRESSES
+'------------------------------------------------------------------------------
+    'Build the worksheet-qualified list the write is expected to report
+        ExpectedList = mTST_DP_ScratchSheet.Name & "!I6, " & _
+            mTST_DP_ScratchSheet.Name & "!I7"
+    'Assert the writable cells were written
+        TST_DP_AssertEqualsLong "Failed write reports 2 written cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the rejected cells were counted as failures rather than skips
+        TST_DP_AssertEqualsLong "Failed write reports 2 failed cells", _
+            2, VBA.CLng(WriteResult.FailedCount)
+    'Assert the array cells were left intact rather than silently replaced
+        TST_DP_AssertTrue "Failed write leaves the array formula intact", _
+            mTST_DP_ScratchSheet.Range("I6").HasArray
+    'Assert a non-lock failure is not misreported as a protected skip
+        TST_DP_AssertEqualsLong "Failed write reports no locked skips", _
+            0, VBA.CLng(WriteResult.LockedSkippedCount)
+    'Assert the exact failed addresses are reported, not just a count
+        TST_DP_AssertEqualsString "Failed write reports the exact failed addresses", _
+            ExpectedList, WriteResult.FailedAddresses
+    'Assert the failed result still satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Failed write result balances", WriteResult
+    'Assert the writable cells really received the value
+        TST_DP_AssertCellDateEquals "Failed write writes I5", _
+            VBA.DateSerial(2026, 12, 8), mTST_DP_ScratchSheet.Range("I5")
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Remove the array formula before leaving
+        TST_DP_ReleaseScratchArrayFormula
+    'Release object references
+        Set TargetRange = Nothing
+    'Exit after the expectation completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAILED ADDRESS FAIL
+'------------------------------------------------------------------------------
+FailedAddressFail:
+    'Remove the array formula even when the expectation failed
+        TST_DP_ReleaseScratchArrayFormula
+    'Release object references
+        Set TargetRange = Nothing
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Failed address reporting", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReleaseScratchArrayFormula()
+
+'
+'==============================================================================
+'                     RELEASE SCRATCH ARRAY FORMULA
+'==============================================================================
+'   Clears the array formula used by the failed-address expectation, so a failed
+'   assertion cannot leave an unwritable block on the scratch sheet.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RELEASE ARRAY FORMULA
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into the caller
+        On Error Resume Next
+    'Exit when there is no scratch sheet to release
+        If mTST_DP_ScratchSheet Is Nothing Then Exit Sub
+    'Clearing the whole array range is the only way to remove an array formula
+        mTST_DP_ScratchSheet.Range("I5:I9").ClearContents
+    'Clear any suppressed cleanup error
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_AssertWriteResultBalances( _
+    ByVal TestName As String, _
+    ByRef Result As DP_WriteResult)
+
+'
+'==============================================================================
+'                     ASSERT WRITE RESULT BALANCES
+'==============================================================================
+'   Asserts the accounting invariant every completed write result must satisfy:
+'
+'       AttemptedCount = WrittenCount + LockedSkippedCount + FailedCount
+'
+'   #22 extends the right-hand side with FormulaSkippedCount. This assertion is
+'   the place that has to change when it does.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT THE INVARIANT
+'------------------------------------------------------------------------------
+    If Result.AttemptedCount = Result.WrittenCount + _
+        Result.LockedSkippedCount + Result.FailedCount Then
+        TST_DP_RecordPass TestName, _
+            "Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+            "; Written=" & VBA.CStr(Result.WrittenCount) & _
+            "; Locked=" & VBA.CStr(Result.LockedSkippedCount) & _
+            "; Failed=" & VBA.CStr(Result.FailedCount)
+    Else
+        TST_DP_RecordFail TestName, _
+            "Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+            " does not equal Written=" & VBA.CStr(Result.WrittenCount) & _
+            " + Locked=" & VBA.CStr(Result.LockedSkippedCount) & _
+            " + Failed=" & VBA.CStr(Result.FailedCount)
+    End If
+
+End Sub
+
+Private Sub TST_DP_ExpectPartialWriteReport()
+
+'
+'==============================================================================
+'                      EXPECT PARTIAL WRITE REPORT
+'==============================================================================
+'   Protects the scratch sheet with one locked cell inside the target so the
+'   write partially succeeds, then asserts the result names the cell it skipped.
+'
+'   The sheet is unprotected on every path, including a failed assertion, so a
+'   protected scratch sheet cannot leak into a later suite.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WriteResult     As DP_WriteResult   'Structured write-back result
+    Dim TargetRange     As Excel.Range      'Partially writable target
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo PartialWriteFail
+
+'------------------------------------------------------------------------------
+' BUILD A PARTIALLY WRITABLE TARGET
+'------------------------------------------------------------------------------
+    'Use a target away from the ranges the rest of the suite writes
+        Set TargetRange = mTST_DP_ScratchSheet.Range("H5:H7")
+    'Clear any value left by an earlier run
+        TargetRange.ClearContents
+    'Unlock the cells that must remain writable
+        mTST_DP_ScratchSheet.Range("H5").Locked = False
+        mTST_DP_ScratchSheet.Range("H7").Locked = False
+    'Lock the cell the write must skip
+        mTST_DP_ScratchSheet.Range("H6").Locked = True
+    'Protect the sheet so the locked cell actually rejects the write
+        mTST_DP_ScratchSheet.Protect
+    'Prepare a distinct write value
+        gDP_WriteValue = VBA.DateSerial(2026, 12, 1)
+
+'------------------------------------------------------------------------------
+' WRITE THROUGH THE PARTIAL TARGET
+'------------------------------------------------------------------------------
+    'Call the range writer directly so the run stays free of modal messages
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT THE PARTIAL RESULT
+'------------------------------------------------------------------------------
+    'Assert the writable cells were written
+        TST_DP_AssertEqualsLong "Partial write reports 2 written cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the locked cell was counted as skipped
+        TST_DP_AssertEqualsLong "Partial write reports 1 skipped locked cell", _
+            1, VBA.CLng(WriteResult.LockedSkippedCount)
+    'Assert the skipped cell is named, not just counted
+        TST_DP_AssertEqualsString "Partial write reports the skipped address", _
+            mTST_DP_ScratchSheet.Name & "!H6", WriteResult.LockedSkippedAddresses
+    'Assert the shortfall description carries the same address
+        TST_DP_AssertTrue "Partial write description names the skipped cell", _
+            VBA.InStr(1, M_WriteBack_DescribeShortfall(WriteResult), "H6", vbTextCompare) > 0
+    'Assert the partial result still satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Partial write result balances", WriteResult
+    'Assert the writable cells really received the value
+        TST_DP_AssertCellDateEquals "Partial write writes H5", _
+            VBA.DateSerial(2026, 12, 1), mTST_DP_ScratchSheet.Range("H5")
+    'Assert the locked cell was left alone
+        TST_DP_AssertTrue "Partial write leaves H6 blank", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("H6").Value)) = 0
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release the sheet before leaving
+        TST_DP_ReleaseScratchProtection
+    'Release object references
+        Set TargetRange = Nothing
+    'Exit after the expectation completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' PARTIAL WRITE FAIL
+'------------------------------------------------------------------------------
+PartialWriteFail:
+    'Release the sheet even when the expectation failed
+        TST_DP_ReleaseScratchProtection
+    'Release object references
+        Set TargetRange = Nothing
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Partial write reporting", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReleaseScratchProtection()
+
+'
+'==============================================================================
+'                       RELEASE SCRATCH PROTECTION
+'==============================================================================
+'   Unprotects the scratch sheet and restores the default locked state, so a
+'   protection-based test cannot leave the sheet unusable for later suites.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RELEASE PROTECTION
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into the caller
+        On Error Resume Next
+    'Exit when there is no scratch sheet to release
+        If mTST_DP_ScratchSheet Is Nothing Then Exit Sub
+    'Unprotect the scratch sheet when it is protected
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+    'Restore the default locked state on the cells the test unlocked
+        mTST_DP_ScratchSheet.Range("H5:H7").Locked = True
+    'Clear any suppressed cleanup error
+        Err.Clear
+
+End Sub
+
 Private Sub TST_DP_ExpectError_InvalidWriteAction()
 
 '
 '==============================================================================
 '                     EXPECT ERROR: INVALID WRITE ACTION
 '==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim IgnoredResult   As DP_WriteResult   'Required accumulator, not asserted
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3886,7 +4310,7 @@ Private Sub TST_DP_ExpectError_InvalidWriteAction()
 ' INVOKE EXPECTED ERROR
 '------------------------------------------------------------------------------
     'Call with an unsupported write action value to trigger the expected error
-        M_WriteBack_PopulateRange mTST_DP_ScratchSheet.Range("J2"), 99
+        M_WriteBack_PopulateRange mTST_DP_ScratchSheet.Range("J2"), 99, IgnoredResult
 
 '------------------------------------------------------------------------------
 ' RECORD MISSING ERROR

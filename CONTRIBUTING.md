@@ -278,6 +278,59 @@ stricter treatment than the UI.
 - `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
   including on the failure path. Preserve that.
 
+### The write result
+
+Every write reports through `DP_WriteResult`: the counts, the worksheet-qualified
+addresses behind the skipped and failed cells, the resolved target, and the table
+expansion metadata the resolver already produces.
+
+```text
+M_WriteBack_Apply(iType, [NoTableGrow])          As DP_WriteResult
+M_WriteBack_ResolveAndApplyTarget ..., Result    accumulates, attaches metadata
+M_WriteBack_ApplyResolvedTarget   ..., Result    accumulates across areas
+M_WriteBack_PopulateRange         ..., Result    accumulates one range
+```
+
+`M_WriteBack_Apply` is a `Function` because VBA does not permit a user-defined
+type as an `Optional` argument, so a `ByRef` output would have to be required and
+every caller that ignores it would still have to pass one. Bare-call syntax still
+compiles. The private stages below it have no such constraint and take a required
+`ByRef` accumulator.
+
+Four rules hold this together:
+
+- **The invariant is load-bearing.** A completed result satisfies
+  `AttemptedCount = WrittenCount + LockedSkippedCount + FailedCount`.
+  `TST_DP_AssertWriteResultBalances` asserts it on every write path, and is the
+  one place that changes when a new skip classification is added.
+- **Every exit populates the result.** The fast bulk write returns before the
+  per-cell counters exist, so it contributes its own count. A path that returns
+  without populating reports a successful write as nothing written.
+- **A silent refusal is not a write.** Excel declines some assignments through
+  the object model without raising — an array formula is the known case. So
+  `WrittenCount` counts cells that reported success; it is never derived by
+  subtracting skips and failures from the attempted count, because that treats
+  anything that did not raise as written. Anything the engine cannot write has to
+  be identified *before* the attempt, never inferred from its outcome.
+- **The engine collects facts and displays nothing.** Deciding whether a human is
+  told belongs to the entry point that was invoked, which calls
+  `M_WriteBack_ReportShortfall` once after the complete result is available.
+  `M_WriteBack_ApplyResolvedTarget` calls `M_WriteBack_PopulateRange` once per
+  area, so a message raised lower down fires once per area — and a modal dialog
+  inside the write path stops the regression harness and forces every
+  programmatic caller through UI it did not ask for.
+- **Extend the result, do not add a second mechanism.** A new write policy adds
+  fields and extends `M_WriteBack_DescribeShortfall`. `EventsDisabledByCaller`
+  lives here for the same reason, rather than becoming a second reading of caller
+  event state.
+
+> [!NOTE]
+> A predicted scope is checked against `AttemptedCount`, never `WrittenCount`.
+> `DP_FillTableColumn` predicting 247 cells and writing 244 because three were
+> locked is a correct prediction and a legitimate partial write. A prediction
+> that does not match `AttemptedCount` means the target changed between preview
+> and application, and is a different kind of problem.
+
 > [!IMPORTANT]
 > A selected cell inside an Excel Table data column receives the date on its own.
 > `DP_FillTableColumn` is the only route to the whole column, and it reports the

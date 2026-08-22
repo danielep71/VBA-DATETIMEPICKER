@@ -53,8 +53,11 @@ Option Explicit
 '   Registry and context-menu identifiers retain VBA_DATETIMEPICKER as stable
 '   legacy names for backward compatibility
 '
+'   DP_WriteResult is the one structured outcome of a write-back. Later write
+'   policies extend it rather than adding a parallel reporting mechanism
+'
 ' UPDATED
-'   2026-05-06
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -314,6 +317,25 @@ Option Explicit
         DP_SizeMode_Normal = 0
         DP_SizeMode_Compact = 1
     End Enum
+
+'------------------------------------------------------------------------------
+' PUBLIC TYPES
+'------------------------------------------------------------------------------
+    'Structured outcome of one DatePicker write-back operation
+    Public Type DP_WriteResult
+        AttemptedCount          As Double       'Cells the write-back targeted
+        WrittenCount            As Double       'Cells that received the value
+        LockedSkippedCount      As Double       'Protected locked cells skipped
+        LockedSkippedAddresses  As String       'Addresses of the skipped locked cells
+        FailedCount             As Double       'Other suppressed write failures
+        FailedAddresses         As String       'Addresses of the failed cells
+        ResolvedTargetAddress   As String       'Address of the resolved target
+        ExpandedToTableColumn   As Boolean      'True when a table column was resolved
+        TableName               As String       'Owning table when expanded
+        ColumnName              As String       'Resolved column when expanded
+        AreasCount              As Long         'Discontiguous areas in the target
+        EventsDisabledByCaller  As Boolean      'True when events were already off
+    End Type
 
 '------------------------------------------------------------------------------
 ' PUBLIC STATE
@@ -6564,6 +6586,7 @@ Public Sub M_Picker_SelectDate( _
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_WriteBack_Apply
+'   M_WriteBack_ReportShortfall
 '   DP_Close
 '   M_FormBridge_AfterSuccessfulSelection
 '
@@ -6573,8 +6596,11 @@ Public Sub M_Picker_SelectDate( _
 '   SelectedDate is normalized once and the normalized value is reused for
 '   write-back, selected-state storage, and optional open-form refresh
 '
+'   This is an interactive entry point, so it reports a partial write once, after
+'   the whole operation. The write engine collects the facts and displays nothing
+'
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -6583,6 +6609,7 @@ Public Sub M_Picker_SelectDate( _
     Const PROC_NAME         As String = "M_Picker_SelectDate"
 
     Dim SelectedDateOnly    As Date         'Selected date without time
+    Dim WriteResult         As DP_WriteResult   'Structured write-back outcome
     Dim OldSelectedDate     As Date         'Previous selected date
     Dim OldHasSelectedDate  As Boolean      'Previous selected-date availability
     Dim OldWriteValue       As Variant      'Previous transient write value
@@ -6638,7 +6665,7 @@ Public Sub M_Picker_SelectDate( _
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
     'Write the selected date to the current Excel target
-        M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, NoTableGrow)
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -6665,6 +6692,12 @@ Public Sub M_Picker_SelectDate( _
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Report once for the whole operation when some cells were not written
+        M_WriteBack_ReportShortfall WriteResult
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6830,6 +6863,7 @@ Public Sub DP_Now()
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_WriteBack_Apply
+'   M_WriteBack_ReportShortfall
 '   DP_Close
 '   M_FormBridge_AfterSuccessfulSelection
 '
@@ -6838,8 +6872,11 @@ Public Sub DP_Now()
 '
 '   Selected-date highlighting uses only the date portion of the timestamp
 '
+'   This is an interactive entry point, so it reports a partial write once, after
+'   the whole operation. The write engine collects the facts and displays nothing
+'
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -6849,6 +6886,7 @@ Public Sub DP_Now()
 
     Dim NowValue            As Date                 'Current system date-time
     Dim NowDate             As Date                 'Date-only part of current timestamp
+    Dim WriteResult         As DP_WriteResult       'Structured write-back outcome
     Dim OldSelectedDate     As Date                 'Previous selected date
     Dim OldHasSelectedDate  As Boolean              'Previous selected-date availability
     Dim OldWriteValue       As Variant              'Previous transient write value
@@ -6900,7 +6938,7 @@ Public Sub DP_Now()
     'Apply the date-time value to the current Excel target. NoTableGrow is
     'deliberately omitted so Now inherits the safe single-cell default rather
     'than opting into table-column expansion
-        M_WriteBack_Apply DP_WriteAction_DatePicker
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -6927,6 +6965,12 @@ Public Sub DP_Now()
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Report once for the whole operation when some cells were not written
+        M_WriteBack_ReportShortfall WriteResult
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6959,9 +7003,9 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, "DatePicker Now command failed: " & ErrorDescription
 
 End Sub
-Public Sub DP_FillTableColumn( _
+Public Function DP_FillTableColumn( _
     ByVal ValueToWrite As Date, _
-    Optional ByVal ConfirmFill As Boolean = True)
+    Optional ByVal ConfirmFill As Boolean = True) As DP_WriteResult
 
 '
 '------------------------------------------------------------------------------
@@ -6992,12 +7036,18 @@ Public Sub DP_FillTableColumn( _
 '     makes the routine usable from the regression harness
 '
 ' RETURNS
-'   Nothing
+'   DP_WriteResult describing the fill
+'
+'   A zeroed result when the selection was not a table data cell or the user
+'   declined the described scope. WrittenCount is then zero and nothing was
+'   written
 '
 ' BEHAVIOR
 '   Resolves the table column owning the selection. Reports and exits when the
-'   selection is not a table data cell. Otherwise confirms the scope and writes
-'   through the normal write-back engine with table expansion explicitly enabled
+'   selection is not a table data cell. Otherwise confirms the scope, writes
+'   through the normal write-back engine with table expansion explicitly enabled,
+'   checks the predicted scope against AttemptedCount, and reports a partial write
+'   once for the whole operation
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error for a zero date and for genuine write
@@ -7006,9 +7056,16 @@ Public Sub DP_FillTableColumn( _
 '   A selection outside a table data body is an ordinary usage condition, not an
 '   error. It reports and exits cleanly
 '
+'   A partial write is reported, not raised. The engine already raised if nothing
+'   at all could be written
+'
+'   A predicted scope that does not match AttemptedCount is a detectable
+'   inconsistency rather than a partial write, and is reported as one
+'
 ' DEPENDENCIES
 '   M_WriteBack_TryResolveTableColumn
 '   M_WriteBack_Apply
+'   M_WriteBack_ReportShortfall
 '   gDP_WriteValue
 '   DP_MSGBOX_TITLE
 '
@@ -7022,6 +7079,21 @@ Public Sub DP_FillTableColumn( _
 '   again when it writes, which is cheap and avoids two routines disagreeing
 '   about the target
 '
+'   The predicted cell count is resolved on both paths, not only when prompting,
+'   so the non-interactive path can make the same comparison. That is what turns
+'   the confirmation prompt into a check
+'
+'   The prediction is checked against AttemptedCount, not WrittenCount. A fill
+'   that legitimately skips protected cells writes fewer cells than it predicted
+'   and is still a correct prediction:
+'
+'     Predicted scope / AttemptedCount   247
+'     WrittenCount                       244
+'     LockedSkippedCount                   3
+'
+'   A prediction that does not match AttemptedCount means the target changed
+'   between preview and application, or that the two resolution paths diverged
+'
 ' UPDATED
 '   2026-08-22
 '------------------------------------------------------------------------------
@@ -7031,6 +7103,7 @@ Public Sub DP_FillTableColumn( _
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "DP_FillTableColumn"
 
+    Dim FillResult          As DP_WriteResult   'Structured outcome of the fill
     Dim TargetColumn        As Range        'Resolved table data column
     Dim TableName           As String       'Owning table name
     Dim ColumnName          As String       'Resolved column name
@@ -7083,10 +7156,10 @@ Public Sub DP_FillTableColumn( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Confirm fill scope"
+    'Resolve how many cells the fill is expected to affect
+        CellCount = VBA.CLng(TargetColumn.Cells.CountLarge)
     'Describe the resolved scope before writing it
         If ConfirmFill Then
-            'Resolve how many cells the fill would affect
-                CellCount = VBA.CLng(TargetColumn.Cells.CountLarge)
             'Build the confirmation text from the resolved target
                 PromptText = "Fill " & VBA.CStr(CellCount) & " cells in " & _
                     TableName & "[" & ColumnName & "] with " & _
@@ -7108,7 +7181,43 @@ Public Sub DP_FillTableColumn( _
         gDP_WriteValue = ValueToWrite
         ValueApplied = True
     'Write through the normal engine with table expansion explicitly enabled
-        M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow:=False
+        FillResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, NoTableGrow:=False)
+    'Publish the structured outcome
+        DP_FillTableColumn = FillResult
+
+'------------------------------------------------------------------------------
+' CHECK PREDICTED SCOPE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Check predicted fill scope"
+    'The prediction describes the scope, so it is checked against AttemptedCount
+        If FillResult.AttemptedCount <> CellCount Then
+            'Tell the user the described scope is not the scope that was written
+                If ConfirmFill Then
+                    VBA.MsgBox _
+                        "The fill scope changed after it was described." & _
+                        VBA.vbCrLf & VBA.vbCrLf & _
+                        "Described: " & VBA.CStr(CellCount) & " cells in " & _
+                        TableName & "[" & ColumnName & "]" & VBA.vbCrLf & _
+                        "Written to: " & VBA.CStr(FillResult.AttemptedCount) & " cells in " & _
+                        FillResult.ResolvedTargetAddress, _
+                        vbExclamation, _
+                        DP_MSGBOX_TITLE
+                End If
+            'Record the inconsistency on every path, including the harness
+                Debug.Print PROC_NAME & ": predicted " & VBA.CStr(CellCount) & _
+                    " cells but the engine targeted " & VBA.CStr(FillResult.AttemptedCount)
+        End If
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Report partial fill"
+    'A legitimate partial write is reported once, and only on the interactive path
+        If ConfirmFill Then
+            M_WriteBack_ReportShortfall FillResult
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -7117,7 +7226,7 @@ CleanExit:
     'Release object references
         Set TargetColumn = Nothing
     'Exit the procedure
-        Exit Sub
+        Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
@@ -7137,11 +7246,11 @@ ErrorHandler:
             PROC_NAME & " | Step=" & HandlerStep, _
             "Table column fill failed: " & Err.Description
 
-End Sub
+End Function
 
-Public Sub M_WriteBack_Apply( _
+Public Function M_WriteBack_Apply( _
     ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = True)
+    Optional ByVal NoTableGrow As Boolean = True) As DP_WriteResult
 
 '
 '------------------------------------------------------------------------------
@@ -7166,7 +7275,13 @@ Public Sub M_WriteBack_Apply( _
 '     data column when applicable
 '
 ' RETURNS
-'   Nothing
+'   DP_WriteResult describing the completed write-back
+'
+'     AttemptedCount, WrittenCount
+'     LockedSkippedCount, LockedSkippedAddresses
+'     FailedCount, FailedAddresses
+'     ResolvedTargetAddress, ExpandedToTableColumn, TableName, ColumnName
+'     AreasCount, EventsDisabledByCaller
 '
 ' BEHAVIOR
 '   Validates the requested write action
@@ -7183,6 +7298,9 @@ Public Sub M_WriteBack_Apply( _
 '
 '   Raises a cleanup error only when event restoration fails and no original
 '   write-back error exists
+'
+'   A raised error means nothing was written. A returned result with
+'   WrittenCount below AttemptedCount means a partial write
 '
 ' DEPENDENCIES
 '   gDP_WriteValue
@@ -7202,14 +7320,31 @@ Public Sub M_WriteBack_Apply( _
 '   Unsupported write actions are rejected explicitly instead of silently doing
 '   nothing
 '
+'   This is a Function so callers can inspect the outcome, but bare-call syntax
+'   still compiles. A caller that ignores the result behaves exactly as before
+'
+'   A ByRef output was rejected: VBA does not permit a user-defined type as an
+'   Optional parameter, so the argument would have to be required and every
+'   existing caller would need editing
+'
+'   This routine displays nothing. Programmatic callers must be able to consume
+'   the result without being taken through modal UI, so any interactive summary
+'   belongs to the entry point above, which calls M_WriteBack_ReportShortfall
+'   once for the whole operation
+'
+'   The returned result satisfies:
+'     AttemptedCount = WrittenCount + LockedSkippedCount + FailedCount
+'
 ' UPDATED
-'   2026-05-06
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "M_WriteBack_Apply" 'Current procedure name
+
+    Dim Result                  As DP_WriteResult   'Structured write-back outcome
 
     Dim PreviousEvents          As Boolean      'Prior Application.EnableEvents state
     Dim EventsStateCaptured     As Boolean      'True when PreviousEvents is available
@@ -7283,7 +7418,23 @@ Public Sub M_WriteBack_Apply( _
     'Track the current handler step
         HandlerStep = "Resolve and apply write-back target"
     'Apply the requested action to the current selection
-        M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow
+        M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow, Result
+    'Record the caller's event state in the same result
+        Result.EventsDisabledByCaller = Not PreviousEvents
+    'Publish the structured outcome
+        M_WriteBack_Apply = Result
+
+'------------------------------------------------------------------------------
+' LOG PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Log partial write"
+    'Record a partial write for the developer without interrupting the caller
+        If Result.WrittenCount < Result.AttemptedCount Then
+            Debug.Print PROC_NAME & ": wrote " & VBA.CStr(Result.WrittenCount) & _
+                " of " & VBA.CStr(Result.AttemptedCount) & " cells - " & _
+                M_WriteBack_DescribeShortfall(Result)
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -7321,7 +7472,7 @@ CleanExit:
                 CleanupErrDescription
         End If
     'Exit the procedure
-        Exit Sub
+        Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
@@ -7336,7 +7487,249 @@ ErrorHandler:
     'Resume through cleanup
         Resume CleanExit
 
+End Function
+
+Private Sub M_WriteBack_AppendAddress( _
+    ByRef AddressList As String, _
+    ByVal RecordedCount As Double, _
+    ByVal AddressText As String)
+
+'
+'------------------------------------------------------------------------------
+'                          APPEND RESULT ADDRESS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one cell address to a write-result address list
+'
+' WHY THIS EXISTS
+'   A partial write has to report which cells were not written, but a failed
+'   write over a long table column would otherwise build an unbounded string
+'   inside the per-cell write loop
+'
+' INPUTS
+'   AddressList
+'     Accumulated address list, modified in place
+'
+'   RecordedCount
+'     Number of addresses counted for this list so far, including this one
+'
+'   AddressText
+'     Address to append
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Appends the address until the reporting cap is reached, then appends a single
+'   ellipsis so a truncated list is still recognizable as truncated
+'
+' ERROR POLICY
+'   Best-effort. Never raises, because it runs inside a suppressed write loop
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Addresses are worksheet-qualified by the caller, in the form SheetName!A1, so
+'   a reported address is unambiguous and stable enough to assert against
+'
+'   The cap bounds the reported string, not the counters. WrittenCount,
+'   LockedSkippedCount and FailedCount stay exact however long the list gets
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const ADDRESS_LIMIT As Long = 25            'Maximum addresses reported
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let diagnostics break a write
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' APPEND OR TRUNCATE
+'------------------------------------------------------------------------------
+    'Mark truncation once past the reporting cap
+        If RecordedCount > ADDRESS_LIMIT Then
+            If VBA.Right$(AddressList, 3) <> "..." Then
+                AddressList = AddressList & ", ..."
+            End If
+            Exit Sub
+        End If
+    'Start the list or extend it
+        If VBA.LenB(AddressList) = 0 Then
+            AddressList = AddressText
+        Else
+            AddressList = AddressList & ", " & AddressText
+        End If
+
 End Sub
+
+Public Sub M_WriteBack_ReportShortfall( _
+    ByRef Result As DP_WriteResult)
+
+'
+'------------------------------------------------------------------------------
+'                          REPORT WRITE SHORTFALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Shows one consolidated message describing the cells a write-back did not
+'   write
+'
+' WHY THIS EXISTS
+'   The write engine collects facts and returns them. Deciding whether a human is
+'   told about a partial write belongs to the entry point the human invoked
+'
+'   Reporting from inside the engine produced one dialog per target area, and
+'   forced every programmatic caller through modal UI
+'
+' INPUTS
+'   Result
+'     Completed DP_WriteResult to report
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Shows nothing when every attempted cell was written
+'
+'   Otherwise shows one message naming the counts and the addresses behind them
+'
+' ERROR POLICY
+'   Best-effort. Never raises, because a reporting failure must not turn a
+'   successful partial write into an error
+'
+' DEPENDENCIES
+'   M_WriteBack_DescribeShortfall
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   Interactive entry points call this once, after the whole operation. A
+'   programmatic caller inspects the result and never calls it
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let reporting break a completed write
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' SKIP A COMPLETE WRITE
+'------------------------------------------------------------------------------
+    'Say nothing when every attempted cell was written
+        If Result.WrittenCount >= Result.AttemptedCount Then Exit Sub
+
+'------------------------------------------------------------------------------
+' REPORT THE SHORTFALL
+'------------------------------------------------------------------------------
+    'Describe the whole operation in one message
+        MsgBox _
+            "Wrote " & VBA.CStr(Result.WrittenCount) & " of " & _
+            VBA.CStr(Result.AttemptedCount) & " cells in " & _
+            Result.ResolvedTargetAddress & "." & VBA.vbCrLf & VBA.vbCrLf & _
+            M_WriteBack_DescribeShortfall(Result), _
+            vbInformation Or vbOKOnly, _
+            DP_MSGBOX_TITLE
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Public Function M_WriteBack_DescribeShortfall( _
+    ByRef Result As DP_WriteResult) As String
+
+'
+'------------------------------------------------------------------------------
+'                          DESCRIBE WRITE SHORTFALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds one human-readable description of the cells a write-back did not write
+'
+' WHY THIS EXISTS
+'   The skipped and failed cells are reported in more than one place. One
+'   formatter keeps those messages consistent and gives later write policies a
+'   single place to extend rather than a second reporting mechanism
+'
+' INPUTS
+'   Result
+'     Completed DP_WriteResult to describe
+'
+' RETURNS
+'   Description of the skipped and failed cells
+'
+'   An empty string when every attempted cell was written
+'
+' BEHAVIOR
+'   Describes the protected locked cells and the suppressed failures, each with
+'   the addresses recorded for them
+'
+' ERROR POLICY
+'   Best-effort. Never raises, because it is called while reporting an outcome
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Addresses are worksheet-qualified, in the form SheetName!A1
+'
+'   Address lists are capped by M_WriteBack_AppendAddress, so a long list ends
+'   with an ellipsis while the counts stay exact
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Description     As String       'Accumulated description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let reporting break a caller
+        On Error Resume Next
+    'Set safe default result
+        M_WriteBack_DescribeShortfall = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' DESCRIBE PROTECTED LOCKED CELLS
+'------------------------------------------------------------------------------
+    'Describe the protected locked cells that were skipped
+        If Result.LockedSkippedCount > 0 Then
+            Description = VBA.CStr(Result.LockedSkippedCount) & " protected locked: " & _
+                Result.LockedSkippedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' DESCRIBE SUPPRESSED FAILURES
+'------------------------------------------------------------------------------
+    'Describe the cells that failed for another reason
+        If Result.FailedCount > 0 Then
+            If VBA.LenB(Description) > 0 Then
+                Description = Description & VBA.vbCrLf
+            End If
+            Description = Description & VBA.CStr(Result.FailedCount) & " failed: " & _
+                Result.FailedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN DESCRIPTION
+'------------------------------------------------------------------------------
+    'Return the accumulated description
+        M_WriteBack_DescribeShortfall = Description
+
+End Function
+
 Private Function M_WriteBack_TryResolveTableColumn( _
     ByRef TargetColumn As Range, _
     ByRef TableName As String, _
@@ -7703,14 +8096,16 @@ End Sub
 
 Private Sub M_WriteBack_ApplyResolvedTarget( _
     ByVal Target As Range, _
-    ByVal iType As DP_WriteAction)
+    ByVal iType As DP_WriteAction, _
+    ByRef Result As DP_WriteResult)
 
 '
 '------------------------------------------------------------------------------
 '                       APPLY RESOLVED WRITE-BACK TARGET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Writes the requested DatePicker value to an already-resolved target
+'   Writes the requested DatePicker value to an already-resolved target and
+'   accumulates one result describing the whole target
 '
 ' WHY THIS EXISTS
 '   Mutation is separated from resolution so a caller can inspect or confirm the
@@ -7723,12 +8118,15 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   iType
 '     DatePicker write action to apply
 '
+'   Result
+'     Accumulating DP_WriteResult, populated across every target area
+'
 ' RETURNS
-'   Nothing
+'   Nothing. The outcome is accumulated into Result
 '
 ' BEHAVIOR
-'   Validates the requested write action and the supplied target, then writes to
-'   each discontiguous target area
+'   Validates the requested write action and the supplied target, writes to each
+'   discontiguous target area, and reports the whole target address
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the write action is unsupported, the
@@ -7743,7 +8141,10 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   Application.EnableEvents is managed by M_WriteBack_Apply
 '
 '   The write action is validated here rather than during resolution, so that
-'   resolving a target for inspection does not require a valid action
+'   resolving a target for inspection does not require a valid write action
+'
+'   One result is accumulated across every area, so a discontiguous target
+'   reports the whole write rather than its last area
 '
 ' UPDATED
 '   2026-08-22
@@ -7795,14 +8196,23 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
         End If
 
 '------------------------------------------------------------------------------
+' REPORT RESOLVED TARGET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Report resolved target address"
+    'Report the whole target rather than the last area written
+        Result.ResolvedTargetAddress = Target.Worksheet.Name & "!" & _
+            Target.Address(False, False)
+
+'------------------------------------------------------------------------------
 ' POPULATE TARGET AREAS
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Populate target areas"
     'Loop through each discontiguous target area
         For Each Block In Target.Areas
-            'Populate this target area
-                M_WriteBack_PopulateRange Block, iType
+            'Populate this target area into the accumulating result
+                M_WriteBack_PopulateRange Block, iType, Result
         Next Block
 
 '------------------------------------------------------------------------------
@@ -7827,15 +8237,16 @@ End Sub
 
 Private Sub M_WriteBack_ResolveAndApplyTarget( _
     ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = True)
+    ByVal NoTableGrow As Boolean, _
+    ByRef Result As DP_WriteResult)
 
 '
 '------------------------------------------------------------------------------
 '                       RESOLVE AND APPLY WRITE-BACK TARGET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Resolves the current Excel write-back target and applies the requested
-'   DatePicker write action
+'   Resolves the current Excel write-back target, applies the requested DatePicker
+'   write action, and reports both through one accumulating result
 '
 ' WHY THIS EXISTS
 '   Most callers want resolution and mutation as one step. This routine keeps
@@ -7851,12 +8262,17 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '     False to expand a single selected table data-body cell to the full table
 '     data column
 '
+'   Result
+'     Accumulating DP_WriteResult, populated with the resolver metadata and the
+'     write counts
+'
 ' RETURNS
-'   Nothing
+'   Nothing. The outcome is accumulated into Result
 '
 ' BEHAVIOR
 '   Delegates to M_WriteBack_ResolveTarget and then to
-'   M_WriteBack_ApplyResolvedTarget
+'   M_WriteBack_ApplyResolvedTarget, then attaches the resolver metadata to the
+'   result rather than discarding it
 '
 ' ERROR POLICY
 '   Raises whatever the two stages raise, without adding a further wrapper
@@ -7866,8 +8282,11 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '   M_WriteBack_ApplyResolvedTarget
 '
 ' NOTES
-'   The expansion metadata returned by the resolver is discarded here. Callers
-'   that need it should call the two stages directly
+'   The resolver signature is unchanged. This routine consumes the metadata the
+'   resolver already produces instead of re-deriving it
+'
+'   NoTableGrow is required here because the only caller always supplies it. The
+'   safe default lives on the public entry points, not on this private stage
 '
 ' UPDATED
 '   2026-08-22
@@ -7888,10 +8307,20 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
         M_WriteBack_ResolveTarget Target, Expanded, TableName, ColumnName, NoTableGrow
 
 '------------------------------------------------------------------------------
+' ATTACH RESOLVER METADATA
+'------------------------------------------------------------------------------
+    'Report whether the selection was expanded to a table data column
+        Result.ExpandedToTableColumn = Expanded
+    'Report the owning table when expansion occurred
+        Result.TableName = TableName
+    'Report the resolved column when expansion occurred
+        Result.ColumnName = ColumnName
+
+'------------------------------------------------------------------------------
 ' APPLY TO TARGET
 '------------------------------------------------------------------------------
     'Write the value to the resolved range
-        M_WriteBack_ApplyResolvedTarget Target, iType
+        M_WriteBack_ApplyResolvedTarget Target, iType, Result
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -7902,7 +8331,8 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 End Sub
 Public Sub M_WriteBack_PopulateRange( _
     ByVal oRange As Range, _
-    ByVal iType As DP_WriteAction)
+    ByVal iType As DP_WriteAction, _
+    ByRef Result As DP_WriteResult)
 
 '
 '------------------------------------------------------------------------------
@@ -7910,6 +8340,7 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes the current DatePicker value to every cell in a resolved Excel range
+'   and accumulates the outcome into the supplied write result
 '
 ' WHY THIS EXISTS
 '   DatePicker write-back can target:
@@ -7929,8 +8360,13 @@ Public Sub M_WriteBack_PopulateRange( _
 '   iType
 '     DatePicker write action used to resolve the value to write
 '
+'   Result
+'     Accumulating DP_WriteResult. Counts and addresses for this range are added
+'     to whatever the result already carries, so one result can describe a target
+'     written one area at a time
+'
 ' RETURNS
-'   Nothing
+'   Nothing. The outcome is accumulated into Result
 '
 ' BEHAVIOR
 '   Validates the target range and write action, resolves the DatePicker write
@@ -7942,30 +8378,49 @@ Public Sub M_WriteBack_PopulateRange( _
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the target range is missing, the write
-'   action is unsupported, the write value cannot be resolved, or no cell can be
-'   written successfully
+'   action is unsupported, the write value cannot be resolved, or no cell in this
+'   range can be written successfully
 '
 '   Bulk-write failures are not raised directly because they are expected in
 '   mixed protected, validated, or partially writable ranges. The routine falls
 '   back to the existing per-cell write policy
 '
+'   A failed bulk write is not counted as a failed cell. The result describes the
+'   outcome of the logical write, not the optimization attempts behind it
+'
 ' DEPENDENCIES
 '   M_WriteBack_GetPickedValue
 '   M_WriteBack_TryBulkWriteRange
 '   M_WriteBack_TryWriteCell
-'   DP_MSGBOX_TITLE
 '
 ' NOTES
-'   Bulk write is used only as a fast path
+'   Counts are accumulated locally and added to Result once, so a raised error
+'   cannot leave Result holding half of this range
 '
-'   The fallback preserves the existing robust behavior for protected sheets,
-'   locked cells, validation failures, and partially writable selections
+'   WrittenCount counts the cells that reported a successful write. It is not
+'   derived by subtracting the skips and failures from the attempted count,
+'   because that derivation treats anything that did not raise as a success, and
+'   Excel declines some writes without raising
+'
+'   The bulk path contributes its full target count explicitly. It returns before
+'   the per-cell counters exist, so a result fed only by the fallback would report
+'   a successful bulk write as nothing written
+'
+'   The bulk path is refused when any target cell belongs to an array formula.
+'   A range assignment that overlaps an array neither raises nor writes, and a
+'   range assignment that covers one replaces it silently, so the fast path would
+'   report cells written that were not written. Range.HasArray returns Null for a
+'   mixed target, and an unreadable array state is also treated as a refusal
+'
+'   This routine reports through Result and displays nothing. Deciding whether a
+'   human is told about a partial write belongs to the entry point that was
+'   invoked, which sees the whole operation rather than one area
 '
 '   This routine intentionally uses Range.Value rather than Range.Value2 so VBA
 '   Date and DateTime values are written through Excel's normal date handling
 '
 ' UPDATED
-'   2026-05-17
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7973,12 +8428,11 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "M_WriteBack_PopulateRange"
 
+    Dim AreaResult      As DP_WriteResult   'Outcome for this range only
     Dim Cell            As Range            'Current target cell
-    Dim LockedCount     As Long             'Protected locked cells skipped
-    Dim FailedCount     As Long             'Other write failures suppressed
-    Dim AttemptedCount  As Double           'Total target cells attempted
-    Dim WrittenCount    As Double           'Total target cells successfully written
     Dim WriteValue      As Variant          'Resolved write value
+    Dim ArrayState      As Variant          'Range.HasArray for the target
+    Dim BulkAllowed     As Boolean          'True when the fast path may be used
     Dim HandlerStep     As String           'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
@@ -7999,11 +8453,13 @@ Public Sub M_WriteBack_PopulateRange( _
             Err.Raise vbObjectError + 513, PROC_NAME, "Target range cannot be Nothing"
         End If
     'Capture the number of target cells
-        AttemptedCount = oRange.Cells.CountLarge
+        AreaResult.AttemptedCount = oRange.Cells.CountLarge
     'Reject empty target ranges
-        If AttemptedCount <= 0 Then
+        If AreaResult.AttemptedCount <= 0 Then
             Err.Raise vbObjectError + 514, PROC_NAME, "Target range does not contain writable cells"
         End If
+    'Capture the discontiguous areas this range covers
+        AreaResult.AreasCount = oRange.Areas.Count
 
 '------------------------------------------------------------------------------
 ' RESOLVE WRITE VALUE
@@ -8027,9 +8483,32 @@ Public Sub M_WriteBack_PopulateRange( _
     'Track the current handler step
         HandlerStep = "Attempt fast bulk write"
     'Use the bulk path only when it can provide a meaningful benefit
-        If AttemptedCount > 1 Then
-            'Exit immediately when the fast bulk write succeeds
-                If M_WriteBack_TryBulkWriteRange(oRange, WriteValue) Then GoTo CleanExit
+        BulkAllowed = (AreaResult.AttemptedCount > 1)
+    'Resolve whether the target touches an array formula
+        If BulkAllowed Then
+            'Treat an unreadable array state as a reason to refuse the fast path
+                On Error Resume Next
+                ArrayState = oRange.HasArray
+                If Err.Number <> 0 Then
+                    ArrayState = Null
+                    Err.Clear
+                End If
+                On Error GoTo ErrorHandler
+            'Refuse the fast path when any target cell belongs to an array formula
+                If VBA.IsNull(ArrayState) Then
+                    BulkAllowed = False
+                ElseIf VBA.CBool(ArrayState) Then
+                    BulkAllowed = False
+                End If
+        End If
+    'Account for the whole range and exit when the fast bulk write succeeds
+        If BulkAllowed Then
+            If M_WriteBack_TryBulkWriteRange(oRange, WriteValue) Then
+                'The bulk write covered every target cell
+                    AreaResult.WrittenCount = AreaResult.AttemptedCount
+                'Skip the per-cell fallback
+                    GoTo AccumulateResult
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -8039,8 +8518,10 @@ Public Sub M_WriteBack_PopulateRange( _
         HandlerStep = "Populate target cells through safe fallback"
     'Loop through each target cell
         For Each Cell In oRange.Cells
-            'Attempt to write the resolved value to the current cell
-                M_WriteBack_TryWriteCell Cell, WriteValue, LockedCount, FailedCount
+            'Count only the cells that actually received the value
+                If M_WriteBack_TryWriteCell(Cell, WriteValue, AreaResult) Then
+                    AreaResult.WrittenCount = AreaResult.WrittenCount + 1
+                End If
         Next Cell
 
 '------------------------------------------------------------------------------
@@ -8048,32 +8529,44 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve write result"
-    'Calculate the number of successfully written cells
-        WrittenCount = AttemptedCount - LockedCount - FailedCount
     'Reject write-back attempts that did not write any cell
-        If WrittenCount <= 0 Then
+        If AreaResult.WrittenCount <= 0 Then
             Err.Raise vbObjectError + 516, PROC_NAME, _
                 "DatePicker write-back did not write any cell. Target cells: " & _
-                VBA.CStr(AttemptedCount) & "; protected locked cells skipped: " & _
-                VBA.CStr(LockedCount) & "; other failures: " & VBA.CStr(FailedCount)
+                VBA.CStr(AreaResult.AttemptedCount) & "; protected locked cells skipped: " & _
+                VBA.CStr(AreaResult.LockedSkippedCount) & "; other failures: " & _
+                VBA.CStr(AreaResult.FailedCount)
         End If
 
 '------------------------------------------------------------------------------
-' REPORT PARTIAL PROTECTED-CELL SKIPS
+' ACCUMULATE RESULT
 '------------------------------------------------------------------------------
-    'Show one summary message for protected locked cells that were skipped
-        If LockedCount > 0 Then
-            MsgBox VBA.CStr(LockedCount) & " protected locked cell(s) were skipped.", _
-                vbInformation Or vbOKOnly, DP_MSGBOX_TITLE
+AccumulateResult:
+    'Track the current handler step
+        HandlerStep = "Accumulate write result"
+    'Add this range to the running totals
+        Result.AttemptedCount = Result.AttemptedCount + AreaResult.AttemptedCount
+        Result.WrittenCount = Result.WrittenCount + AreaResult.WrittenCount
+        Result.LockedSkippedCount = Result.LockedSkippedCount + AreaResult.LockedSkippedCount
+        Result.FailedCount = Result.FailedCount + AreaResult.FailedCount
+        Result.AreasCount = Result.AreasCount + AreaResult.AreasCount
+    'Join the skipped locked addresses
+        If VBA.LenB(AreaResult.LockedSkippedAddresses) > 0 Then
+            If VBA.LenB(Result.LockedSkippedAddresses) = 0 Then
+                Result.LockedSkippedAddresses = AreaResult.LockedSkippedAddresses
+            Else
+                Result.LockedSkippedAddresses = Result.LockedSkippedAddresses & ", " & _
+                    AreaResult.LockedSkippedAddresses
+            End If
         End If
-
-'------------------------------------------------------------------------------
-' LOG PARTIAL NON-LOCK FAILURES
-'------------------------------------------------------------------------------
-    'Write non-lock failures to the Immediate Window for diagnostics
-        If FailedCount > 0 Then
-            Debug.Print PROC_NAME & ": " & VBA.CStr(FailedCount) & _
-                " cell write failure(s) were suppressed."
+    'Join the failed addresses
+        If VBA.LenB(AreaResult.FailedAddresses) > 0 Then
+            If VBA.LenB(Result.FailedAddresses) = 0 Then
+                Result.FailedAddresses = AreaResult.FailedAddresses
+            Else
+                Result.FailedAddresses = Result.FailedAddresses & ", " & _
+                    AreaResult.FailedAddresses
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -8205,8 +8698,7 @@ End Function
 Private Function M_WriteBack_TryWriteCell( _
     ByVal TargetCell As Range, _
     ByVal WriteValue As Variant, _
-    ByRef LockedCount As Long, _
-    ByRef FailedCount As Long) As Boolean
+    ByRef Result As DP_WriteResult) As Boolean
 
 '
 '------------------------------------------------------------------------------
@@ -8223,7 +8715,7 @@ Private Function M_WriteBack_TryWriteCell( _
 '   writable
 '
 '   This routine centralizes safe per-cell write behavior and reports the result
-'   through a Boolean return value plus failure counters
+'   through a Boolean return value plus the accumulating write result
 '
 ' INPUTS
 '   TargetCell
@@ -8232,11 +8724,9 @@ Private Function M_WriteBack_TryWriteCell( _
 '   WriteValue
 '     DatePicker value to write
 '
-'   LockedCount
-'     Counter incremented when a protected locked cell is skipped
-'
-'   FailedCount
-'     Counter incremented when another cell-level write failure occurs
+'   Result
+'     Accumulating DP_WriteResult. Its skip and failure counters are incremented
+'     in place and the corresponding cell addresses are recorded
 '
 ' RETURNS
 '   True when the value was successfully written to TargetCell
@@ -8245,9 +8735,10 @@ Private Function M_WriteBack_TryWriteCell( _
 '   written
 '
 ' BEHAVIOR
-'   Validates the target cell, skips protected locked cells, writes the supplied
-'   value to writable cells, returns True only after a successful write, and logs
-'   suppressed write failures to the Immediate Window
+'   Validates the target cell, skips protected locked cells, refuses cells that
+'   belong to an array formula, writes the supplied value to writable cells,
+'   returns True only after a successful write, records the address behind every
+'   skip and failure, and logs suppressed write failures to the Immediate Window
 '
 ' ERROR POLICY
 '   Best-effort per-cell write
@@ -8256,9 +8747,13 @@ Private Function M_WriteBack_TryWriteCell( _
 '   caller can complete the range write-back and decide whether the aggregate
 '   result is acceptable
 '
+'   Every cell increments exactly one of the written, locked or failed counts, so
+'   the caller's result satisfies its accounting invariant by construction
+'
 ' DEPENDENCIES
 '   Excel.Range
 '   Excel.Worksheet.ProtectContents
+'   M_WriteBack_AppendAddress
 '
 ' NOTES
 '   This routine intentionally uses Range.Value rather than Range.Value2 so VBA
@@ -8266,8 +8761,21 @@ Private Function M_WriteBack_TryWriteCell( _
 '
 '   Application.EnableEvents is managed by M_WriteBack_Apply, not by this routine
 '
+'   Recorded addresses are worksheet-qualified, in the form SheetName!A1, so a
+'   reported address stays unambiguous and is stable enough to assert against
+'
+'   A cell belonging to an array formula is refused before the write rather than
+'   after it. Excel raises "You cannot change part of an array" for an
+'   interactive edit but declines the same assignment silently through the object
+'   model, so an attempted write would return success having changed nothing
+'
+'   That is a detectable inability to write, not a policy decision about
+'   formulas. The formula overwrite policy is #22
+'
+'   Counters stay exact. Only the reported address lists are capped
+'
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -8293,13 +8801,16 @@ Private Function M_WriteBack_TryWriteCell( _
 '------------------------------------------------------------------------------
     'Count and exit when no target cell is supplied
         If TargetCell Is Nothing Then
-            FailedCount = FailedCount + 1
+            Result.FailedCount = Result.FailedCount + 1
+            M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, "(no cell)"
             Debug.Print PROC_NAME & ": skipped missing target cell"
             Exit Function
         End If
     'Count and exit when a non-single-cell range is supplied unexpectedly
         If TargetCell.Cells.CountLarge <> 1 Then
-            FailedCount = FailedCount + 1
+            Result.FailedCount = Result.FailedCount + 1
+            M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, _
+                TargetCell.Worksheet.Name & "!" & TargetCell.Address(False, False)
             Debug.Print PROC_NAME & ": skipped non-single-cell target"
             Exit Function
         End If
@@ -8318,9 +8829,25 @@ Private Function M_WriteBack_TryWriteCell( _
     'Skip locked cells on protected sheets
         If TargetCell.Worksheet.ProtectContents Then
             If TargetCell.Locked Then
-                LockedCount = LockedCount + 1
+                Result.LockedSkippedCount = Result.LockedSkippedCount + 1
+                M_WriteBack_AppendAddress Result.LockedSkippedAddresses, _
+                    Result.LockedSkippedCount, TargetSheetName & "!" & TargetAddress
                 Exit Function
             End If
+        End If
+
+'------------------------------------------------------------------------------
+' SKIP CELLS BELONGING TO AN ARRAY FORMULA
+'------------------------------------------------------------------------------
+    'Excel accepts a value assignment to an array cell without raising and without
+    'writing, so attempting one here would be counted as a successful write
+        If TargetCell.HasArray Then
+            Result.FailedCount = Result.FailedCount + 1
+            M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, _
+                TargetSheetName & "!" & TargetAddress
+            Debug.Print PROC_NAME & ": skipped array-formula cell " & _
+                TargetSheetName & "!" & TargetAddress
+            Exit Function
         End If
 
 '------------------------------------------------------------------------------
@@ -8352,7 +8879,7 @@ WriteFail:
     'Suppress diagnostic failures
         On Error Resume Next
     'Increment the non-lock failure counter
-        FailedCount = FailedCount + 1
+        Result.FailedCount = Result.FailedCount + 1
     'Refresh diagnostic context if it was not captured before the failure
         If Len(TargetAddress) = 0 Then
             If Not TargetCell Is Nothing Then
@@ -8365,6 +8892,9 @@ WriteFail:
                 TargetSheetName = TargetCell.Worksheet.Name
             End If
         End If
+    'Record the address behind this failure
+        M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, _
+            TargetSheetName & "!" & TargetAddress
     'Write diagnostics to the Immediate Window
         Debug.Print PROC_NAME & ": suppressed error " & VBA.CStr(ErrorNumber) & _
             " while writing " & TargetSheetName & "!" & TargetAddress & _
