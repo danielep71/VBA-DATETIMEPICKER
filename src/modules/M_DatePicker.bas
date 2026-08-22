@@ -15686,7 +15686,8 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '
 ' DEPENDENCIES
 '   IRibbonControl
-'   ThisWorkbook
+'   DP_DemoSheet_ResolveHostWorkbook
+'   DP_Demo_EnsureDemoSheet
 '   DP_DEMO_SHEET_NAME
 '   DP_DemoSheet_Show
 '   DP_DemoSheet_HideVeryHidden
@@ -15696,8 +15697,13 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   The Control argument is required by the RibbonX callback signature even when
 '   this routine does not use it directly
 '
-'   This routine uses ThisWorkbook rather than ActiveWorkbook so the Ribbon
-'   callback always targets the DatePicker host workbook
+'   The host workbook is resolved through DP_DemoSheet_ResolveHostWorkbook
+'   rather than assumed to be ThisWorkbook. ThisWorkbook is the add-in when the
+'   component is loaded as an .xlam, and an add-in has no worksheets, so the
+'   previous assumption made this button fail on every click in that deployment
+'
+'   The demo sheet is built on first use, so the button works from a session
+'   that has never opened the demo workbook
 '
 ' UPDATED
 '   2026-08-22
@@ -15946,21 +15952,24 @@ Public Sub DP_DemoSheet_Show()
 '   Nothing
 '
 ' BEHAVIOR
-'   Resolves the demo worksheet from ThisWorkbook, makes it visible, activates
-'   the workbook window when possible, and activates the demo sheet
+'   Resolves the demo worksheet from the resolved host workbook, makes it
+'   visible, activates that workbook's window when possible, and activates the
+'   demo sheet
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the demo worksheet cannot be resolved
 '   or activated
 '
 ' DEPENDENCIES
-'   ThisWorkbook
+'   DP_DemoSheet_ResolveHostWorkbook
 '   Excel.Worksheet
 '   DP_DEMO_SHEET_NAME
 '
 ' NOTES
-'   Uses ThisWorkbook rather than ActiveWorkbook so the callback always targets
-'   the DatePicker host workbook
+'   The host workbook is resolved through DP_DemoSheet_ResolveHostWorkbook, not
+'   assumed to be ThisWorkbook. This routine raises when no open workbook holds
+'   the demo sheet rather than creating one: showing a sheet the caller never
+'   built is not this routine's decision
 '
 ' UPDATED
 '   2026-08-22
@@ -16065,7 +16074,7 @@ Public Sub DP_DemoSheet_HideVeryHidden()
 '   workbook structure, or unavailable workbook window
 '
 ' DEPENDENCIES
-'   ThisWorkbook
+'   DP_DemoSheet_ResolveHostWorkbook
 '   Excel.Worksheet
 '   DP_DEMO_SHEET_NAME
 '   DP_DemoSheet_GetSafeVisibleSheet
@@ -16300,18 +16309,19 @@ Private Function DP_DemoSheet_GetSafeVisibleSheet( _
 '     Demo worksheet that should be excluded from the search
 '
 ' RETURNS
-'   First visible non-demo worksheet found in ThisWorkbook
+'   First visible non-demo worksheet in the workbook that owns the demo sheet
 '   Nothing when no suitable worksheet exists
 '
 ' BEHAVIOR
-'   Scans ThisWorkbook.Worksheets and returns the first visible worksheet that
+'   Scans the worksheets of the workbook that owns the supplied demo sheet and
+'   returns the first visible worksheet that
 '   is not the supplied demo worksheet
 '
 ' ERROR POLICY
 '   Best-effort lookup. Returns Nothing on error
 '
 ' DEPENDENCIES
-'   ThisWorkbook
+'   Worksheet.Parent
 '   Excel.Worksheet
 '
 ' NOTES
