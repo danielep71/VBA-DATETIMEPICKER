@@ -1962,6 +1962,98 @@ Private Sub TST_DP_RunSuite_WriteBack()
             mTST_DP_ScratchSheet.Range("G7")
 
 '------------------------------------------------------------------------------
+' TABLE SAFE DEFAULT
+'------------------------------------------------------------------------------
+    'This is the behaviour change. An omitted NoTableGrow argument previously
+    'expanded a single table cell to the whole data column
+        mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
+    'Prepare a distinct write value so a stale value cannot pass the assertion
+        gDP_WriteValue = VBA.DateSerial(2026, 9, 10)
+    'Select one data cell in the date column
+        mTST_DP_ScratchSheet.Range("G5").Select
+    'Apply write-back with NoTableGrow omitted
+        M_WriteBack_Apply DP_WriteAction_DatePicker
+    'Assert the anchored cell received the date
+        TST_DP_AssertCellDateEquals "Omitted NoTableGrow writes only G5", _
+            VBA.DateSerial(2026, 9, 10), _
+            mTST_DP_ScratchSheet.Range("G5")
+    'Assert the middle table row was not written
+        TST_DP_AssertTrue "Omitted NoTableGrow leaves G6 blank", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G6").Value)) = 0
+    'Assert the last table row was not written
+        TST_DP_AssertTrue "Omitted NoTableGrow leaves G7 blank", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G7").Value)) = 0
+
+'------------------------------------------------------------------------------
+' EXPLICIT TABLE COLUMN FILL
+'------------------------------------------------------------------------------
+    'The deliberate bulk command must still fill the whole data column
+        mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
+    'Select one data cell in the date column
+        mTST_DP_ScratchSheet.Range("G5").Select
+    'Fill the column without prompting so the run stays deterministic
+        DP_FillTableColumn VBA.DateSerial(2026, 10, 20), ConfirmFill:=False
+    'Assert the anchored cell received the date
+        TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G5", _
+            VBA.DateSerial(2026, 10, 20), _
+            mTST_DP_ScratchSheet.Range("G5")
+    'Assert the middle table row received the date
+        TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G6", _
+            VBA.DateSerial(2026, 10, 20), _
+            mTST_DP_ScratchSheet.Range("G6")
+    'Assert the last table row received the date
+        TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G7", _
+            VBA.DateSerial(2026, 10, 20), _
+            mTST_DP_ScratchSheet.Range("G7")
+
+'------------------------------------------------------------------------------
+' EXPLICIT FILL REJECTS NON-TABLE ANCHORS
+'------------------------------------------------------------------------------
+    'A selection outside a table data body is a usage condition, not a failure.
+    'The command must exit cleanly and write nothing
+        mTST_DP_ScratchSheet.Range("D8").ClearContents
+    'Select a cell outside every table
+        mTST_DP_ScratchSheet.Range("D8").Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert nothing was written outside a table
+        TST_DP_AssertTrue "DP_FillTableColumn ignores a non-table cell", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("D8").Value)) = 0
+
+    'A header cell is not inside DataBodyRange and must be rejected
+        mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
+    'Select the date column header
+        mTST_DP_ScratchSheet.Range("G4").Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert the header caption was not overwritten
+        TST_DP_AssertTrue "DP_FillTableColumn ignores a table header cell", _
+            VBA.CStr(mTST_DP_ScratchSheet.Range("G4").Value) = "DateValue"
+    'Assert no data row was written from a header anchor
+        TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a header anchor", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+
+    'A totals row cell is not inside DataBodyRange and must be rejected
+        TestTable.ShowTotals = True
+    'Select the date column totals cell
+        TestTable.TotalsRowRange.Cells(1, 2).Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert no data row was written from a totals anchor
+        TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a totals anchor", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+    'Restore the table to its pre-test shape
+        TestTable.ShowTotals = False
+
+    'A multi-cell selection is not a single anchor and must be rejected
+        mTST_DP_ScratchSheet.Range("G5:G6").Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert no table row was written from a multi-cell anchor
+        TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a multi-cell anchor", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+
+'------------------------------------------------------------------------------
 ' INVALID WRITE ACTION
 '------------------------------------------------------------------------------
     'Assert an unsupported write action raises a runtime error

@@ -49,6 +49,25 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added three-way write-scope coverage to the `WriteBack` suite. The existing
+  expansion test passes `NoTableGrow:=False` explicitly, so it kept passing
+  through the behaviour change and proved nothing about the new default. Eleven
+  assertions now cover each path independently:
+
+  ```text
+  omitted argument          anchored cell written, rest of column untouched
+  NoTableGrow:=False        whole data column written, unchanged legacy path
+  DP_FillTableColumn        whole data column written, deliberately
+  ```
+
+  Plus the anchors `DP_FillTableColumn` must refuse: a cell outside any table, a
+  header cell, a totals-row cell, and a multi-cell selection. Each asserts that
+  nothing was written rather than only that no error was raised.
+
+  The legacy expansion test is retained rather than replaced. Proving the defect
+  is fixed and proving the intentional bulk capability still exists are separate
+  claims.
+
 - Added `DP_FillTableColumn`, the explicit way to write one date to every cell
   of an Excel Table data column:
 
