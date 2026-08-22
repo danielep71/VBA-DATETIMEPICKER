@@ -35,10 +35,13 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
-# Least privilege: the job pushes CSV to the traffic-history branch and does
-# nothing else. It creates no issues, comments, releases or deployments.
+# Least privilege. Both grants are used:
+#   contents: write  pushes the CSV history to the traffic-history branch
+#   issues:   write  opens an alert issue on a traffic spike or new referrer
+# Nothing else is granted.
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: daily-traffic-${{ github.repository }}
@@ -580,7 +583,12 @@ jobs:
               check=False
           )
 
-          if existing_issue.returncode == 0 and existing_issue.stdout.strip():
+          if existing_issue.returncode != 0:
+              print("::error::Could not determine whether an alert issue already exists")
+              print(existing_issue.stderr.strip())
+              sys.exit(1)
+
+          if existing_issue.stdout.strip():
               print(f"Alert issue already exists for {current_date}")
               sys.exit(0)
 
@@ -614,7 +622,7 @@ jobs:
           4. Consider adding a short README CTA asking users to star the repository if they are using the component
           """).strip()
 
-          subprocess.run(
+          created = subprocess.run(
               [
                   "gh",
                   "issue",
@@ -624,6 +632,15 @@ jobs:
                   "--body",
                   body
               ],
+              capture_output=True,
+              text=True,
               check=False
           )
+
+          if created.returncode != 0:
+              print("::error::Traffic alert triggered but the issue could not be created")
+              print(created.stderr.strip())
+              sys.exit(1)
+
+          print(created.stdout.strip())
           PY
