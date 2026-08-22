@@ -68,6 +68,15 @@ backward-compatible capability, 💥 **major** may break callers.
   is fixed and proving the intentional bulk capability still exists are separate
   claims.
 
+- Added a **Fill Table Column** button to the demo sheet, and
+  `DP_Demo_FillTableColumn` behind it. `DP_FillTableColumn` takes the date to
+  write, so a worksheet button cannot call it directly; the wrapper supplies
+  today's date and leaves confirmation on.
+
+  The demo's Expiry Date column now demonstrates both scopes side by side:
+  picking a date in one of its cells writes that cell only, while the button
+  fills the column after reporting how many cells it would affect.
+
 - Added `DP_FillTableColumn`, the explicit way to write one date to every cell
   of an Excel Table data column:
 

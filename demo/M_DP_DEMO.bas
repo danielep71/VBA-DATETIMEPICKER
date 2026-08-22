@@ -444,6 +444,82 @@ End Function
 '------------------------------------------------------------------------------
 '
 
+Public Sub DP_Demo_FillTableColumn()
+
+'
+'------------------------------------------------------------------------------
+'                       DEMO FILL TABLE COLUMN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Demo-sheet entry point for the explicit table-column fill
+'
+' WHY THIS EXISTS
+'   DP_FillTableColumn takes the date to write, so a worksheet button cannot call
+'   it directly. This wrapper supplies today's date and leaves confirmation on,
+'   which is the behaviour the demo exists to show
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Fills the table column containing the current selection with today's date,
+'   after the confirmation prompt has described the resolved scope
+'
+' ERROR POLICY
+'   Best effort. Reports failures through a message box rather than raising,
+'   because this is reached from a worksheet button
+'
+' DEPENDENCIES
+'   DP_FillTableColumn
+'
+' NOTES
+'   A selection outside a table data body is handled by DP_FillTableColumn
+'   itself, which reports what is required and exits cleanly
+'
+'   The demo deliberately uses today's date rather than opening the picker. The
+'   point being demonstrated is write scope, not date selection
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_DP_DEMO.DP_Demo_FillTableColumn"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' FILL COLUMN
+'------------------------------------------------------------------------------
+    'Fill the column containing the selection, with confirmation left on
+        DP_FillTableColumn VBA.Date
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Report the failure without raising out of a worksheet button
+        VBA.MsgBox _
+            "The table column could not be filled." & VBA.vbCrLf & VBA.vbCrLf & _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description, _
+            vbExclamation, _
+            PROC_NAME
+
+End Sub
+
 Private Sub DP_Demo_WriteInstructions(ByVal WS As Worksheet)
 
 '
@@ -508,7 +584,10 @@ Private Sub DP_Demo_WriteInstructions(ByVal WS As Worksheet)
         WS.Range("C5").Value = "Instructions:"
         WS.Range("C6").Value = "1) Select a demo input cell."
         WS.Range("C7").Value = "2) Invoke the DatePicker using the in-grid icon or right-click menu."
-        WS.Range("C8").Value = "3) Use the diagnostics block to verify manager / feature state."
+        WS.Range("C8").Value = _
+            "3) Table write scope: picking a date in one Expiry Date cell writes " & _
+            "that cell only. To fill the whole column, click Fill Table Column " & _
+            "and confirm the reported scope."
     'Record the protected-sheet behaviour
         WS.Range("C9").Value = _
             "Protected-sheet note: the in-grid DatePicker icon is a worksheet Shape, " & _
@@ -961,8 +1040,10 @@ Private Sub DP_Demo_BuildTableSection(ByVal WS As Worksheet)
 '   DEMO_Table_AppendRow
 '
 ' NOTES
-'   The Expiry Date column is left empty on purpose. Selecting one of its cells
-'   is the shortest route to observing the table-column write-scope behaviour
+'   The Expiry Date column is left empty on purpose. It is the shortest route to
+'   comparing the two write scopes: picking a date in one of its cells writes
+'   that cell only, while the Fill Table Column button fills the column after
+'   reporting how many cells it would affect
 '
 ' UPDATED
 '   2026-08-22
@@ -1027,6 +1108,15 @@ Private Sub DP_Demo_BuildTableSection(ByVal WS As Worksheet)
         DemoTable.ListColumns("Expiry Date").DataBodyRange.NumberFormat = DEMO_FORMAT_DATE
     'Format the timestamp column for date and time
         DemoTable.ListColumns("Timestamp").DataBodyRange.NumberFormat = DEMO_FORMAT_DATETIME
+
+'------------------------------------------------------------------------------
+' ADD EXPLICIT FILL BUTTON
+'------------------------------------------------------------------------------
+    'Give the deliberate bulk operation a visible control, so the two write
+    'scopes can be compared without leaving the sheet
+        DEMO_Btn_Add WS, "Btn_FillTableColumn", "Fill Table Column", _
+            WS.Range("H29").Left, WS.Range("H29").Top, 110, 24, _
+            "DP_Demo_FillTableColumn"
 
 '------------------------------------------------------------------------------
 ' TIDY TABLE
