@@ -118,6 +118,53 @@ Please allow reasonable time for a fix before any public disclosure.
 
 ---
 
+## 🔑 Repository automation credentials
+
+<p align="left">
+  <img alt="Scope" src="https://img.shields.io/badge/Secret-TRAFFIC__TOKEN-d73a49">
+  <img alt="Rotation" src="https://img.shields.io/badge/Rotate-every_90_days-orange">
+</p>
+
+One workflow runs against this repository: `.github/workflows/daily-traffic.yml`.
+It reads the GitHub traffic API and appends a daily snapshot to CSV files on the
+orphan `traffic-history` branch.
+
+| Control | Setting |
+|---|---|
+| Secret | `TRAFFIC_TOKEN` |
+| Type | Fine-grained personal access token |
+| Permission | `Administration: read` on this repository only |
+| Environment | `analytics` — not readable by any other workflow |
+| Workflow permissions | `contents: write` only |
+| Third-party actions | Pinned to full commit SHAs |
+
+**Rotate `TRAFFIC_TOKEN` every 90 days**, and immediately if:
+
+- the workflow file is modified by anyone other than the maintainer;
+- the token is used from a workflow other than the traffic export;
+- a `permissions:` block is widened;
+- the repository gains a collaborator with write access.
+
+### Why the analytics token stays isolated
+
+`Administration: read` is a high-value permission — higher than this workflow's
+purpose suggests, but it is the minimum the traffic API accepts. Keeping it in a
+dedicated environment means a future workflow that compiles or executes
+repository code cannot read it, whatever its own permissions are.
+
+Software-quality automation is deliberately tracked as a separate workflow
+([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)) for that
+reason. Do not extend the traffic workflow to run tests, builds or checks.
+
+### Data retention
+
+GitHub retains traffic data for 14 days. The `traffic-history` branch exists to
+keep a longer record. It is public and holds the same aggregate data GitHub
+already shows repository admins — view counts, clone counts, referrers, popular
+paths. It contains no information identifying individual visitors.
+
+---
+
 ## 👤 Maintainer
 
 Maintained by **Daniele Penza**.

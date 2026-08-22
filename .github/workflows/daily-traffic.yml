@@ -1,3 +1,33 @@
+# ---------------------------------------------------------------------------
+# Daily traffic export
+#
+#   Reads the GitHub traffic API for this repository and appends a daily
+#   snapshot to CSV files on the orphan `traffic-history` branch.
+#
+#   Data retention
+#     GitHub retains traffic data for 14 days only. This workflow exists to
+#     keep a longer history. The `traffic-history` branch is public, and the
+#     data it holds — view counts, clone counts, referrers, popular paths — is
+#     the same aggregate data GitHub already exposes to repository admins. It
+#     contains no identifying information about individual visitors.
+#
+#   Credentials
+#     TRAFFIC_TOKEN is a fine-grained personal access token with
+#     `Administration: read` on this repository, which is what the traffic API
+#     requires. It is scoped to the `analytics` environment so it cannot be
+#     read by any other workflow.
+#
+#     Rotate it every 90 days, and immediately if this workflow is ever
+#     modified by someone other than the maintainer. See SECURITY.md.
+#
+#   Scope
+#     This is repository analytics. It is not CI. It compiles nothing, runs no
+#     tests, and must never be extended to do so — see issue #15 for the
+#     software-quality workflow, which is deliberately separate so that a
+#     high-privilege analytics token is never available to a job that executes
+#     repository code.
+# ---------------------------------------------------------------------------
+
 name: Daily traffic export
 
 on:
@@ -5,9 +35,10 @@ on:
     - cron: "0 6 * * *"
   workflow_dispatch:
 
+# Least privilege: the job pushes CSV to the traffic-history branch and does
+# nothing else. It creates no issues, comments, releases or deployments.
 permissions:
   contents: write
-  issues: write
 
 concurrency:
   group: daily-traffic-${{ github.repository }}
@@ -18,11 +49,17 @@ jobs:
     name: Export GitHub traffic
     runs-on: ubuntu-latest
 
+    # Isolates TRAFFIC_TOKEN to this workflow. A token with Administration
+    # read is worth protecting from every job that is not this one.
+    environment: analytics
+
     steps:
       - name: Checkout main branch
-        uses: actions/checkout@v6
+        # v6 - pinned to a full commit SHA so a moved tag cannot change what runs
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Prepare traffic-history branch
         shell: bash
