@@ -144,6 +144,34 @@ backward-compatible capability, 💥 **major** may break callers.
   outcome than opening a new one.
   ([#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23))
 
+### 🔧 Changed
+
+- Separated write-back target resolution from mutation.
+  `M_WriteBack_ResolveAndApplyTarget` resolved the target and wrote to it in one
+  routine, so nothing could ask what the target would be before it was written.
+
+  ```text
+  M_WriteBack_ResolveTarget         resolves and reports, writes nothing
+  M_WriteBack_ApplyResolvedTarget   writes an already-resolved range
+  ```
+
+  The resolver returns the range plus expansion metadata: whether a single
+  selected table cell was expanded to its data column, and the owning table and
+  column names when it was. `M_WriteBack_ResolveAndApplyTarget` is retained as a
+  thin delegation with its signature and default unchanged, so every existing
+  caller is untouched.
+
+  Write-action validation moved into the apply stage, so resolving a target for
+  inspection does not require a valid write action. Error numbers are preserved:
+  `513` unsupported action, `514` no selection, `515` non-range selection, `516`
+  unresolved target, `517` empty target.
+
+  No behaviour change. This is the seam that the write-scope fix
+  ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13)) uses to
+  describe a resolved scope before writing it, and that the structured write
+  result ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+  will later populate without re-deriving the target.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.

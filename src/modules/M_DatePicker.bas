@@ -7153,29 +7153,41 @@ ErrorHandler:
         Resume CleanExit
 
 End Sub
-Private Sub M_WriteBack_ResolveAndApplyTarget( _
-    ByVal iType As DP_WriteAction, _
+Private Sub M_WriteBack_ResolveTarget( _
+    ByRef ResolvedTarget As Range, _
+    ByRef ExpandedToTableColumn As Boolean, _
+    ByRef TableName As String, _
+    ByRef ColumnName As String, _
     Optional ByVal NoTableGrow As Boolean = False)
 
 '
 '------------------------------------------------------------------------------
-'                       RESOLVE AND APPLY WRITE-BACK TARGET
+'                       RESOLVE WRITE-BACK TARGET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Resolves the current Excel write-back target and applies the requested
-'   DatePicker write action
+'   Resolves the range the DatePicker would write to, without writing anything
 '
 ' WHY THIS EXISTS
-'   DatePicker UI handlers should not write directly to Excel
+'   Resolving the target and mutating it were previously one routine, so nothing
+'   could ask what the target would be before it was written
 '
-'   This routine centralizes target shaping so single-cell, multi-cell,
-'   discontiguous-range, and table-column write-back behavior remains consistent
-'   across calendar clicks, Today, Now, keyboard shortcuts, context-menu actions,
-'   and public macro entry points
+'   Separating them gives callers a seam: a confirmation prompt can describe the
+'   resolved scope, and a structured write result can report it, without either
+'   feature needing to re-derive the target
 '
 ' INPUTS
-'   iType
-'     DatePicker write action to apply
+'   ResolvedTarget
+'     Receives the range that would be written
+'
+'   ExpandedToTableColumn
+'     Receives True when a single selected table cell was expanded to its full
+'     data column
+'
+'   TableName
+'     Receives the owning ListObject name when expansion occurred
+'
+'   ColumnName
+'     Receives the expanded column name when expansion occurred
 '
 '   NoTableGrow
 '     True to keep a single selected table cell as a single-cell target
@@ -7184,44 +7196,40 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '     data column
 '
 ' RETURNS
-'   Nothing
+'   Nothing. Results are returned through the ByRef arguments
 '
 ' BEHAVIOR
-'   Validates the requested write action, resolves the current Excel selection,
-'   rejects non-range selections, optionally expands a single table data-body
-'   cell to its full ListObject data column, and writes to each target area
+'   Resolves the current Excel selection, rejects non-range selections,
+'   optionally expands a single table data-body cell to its full ListObject data
+'   column, and reports what it resolved
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the write action is unsupported, if
-'   the current Excel selection is not a Range, if table target expansion fails,
-'   or if range population fails
+'   Raises a descriptive runtime error if the current Excel selection is not a
+'   Range, or if the resolved target is missing or empty
 '
 ' DEPENDENCIES
-'   M_WriteBack_PopulateRange
 '   Application.Selection
 '   Excel.Range
 '   Excel.ListObject
 '
 ' NOTES
-'   This routine does not suppress Application events
+'   This routine does not write, does not suppress Application events, and does
+'   not prompt. It is safe to call to find out what a write would affect
 '
-'   Application.EnableEvents is managed by M_WriteBack_Apply
-'
-'   This routine intentionally raises on non-Range selections so callers do not
-'   treat a no-op as a successful write-back
+'   It intentionally raises on non-Range selections so callers do not treat a
+'   no-op as a successful resolution
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "M_WriteBack_ResolveAndApplyTarget"
+    Const PROC_NAME         As String = "M_WriteBack_ResolveTarget"
 
     Dim SelectedObject      As Object           'Current Excel selection object
     Dim Target              As Range            'Resolved target range
-    Dim Block               As Range            'Single target area
     Dim TargetTable         As ListObject       'Worksheet table being inspected
     Dim ColumnIndex         As Long             'Resolved table column index
     Dim HandlerStep         As String           'Current handler step for diagnostics
@@ -7231,32 +7239,19 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
     'Initialize diagnostic step
         HandlerStep = "Initialize"
-
-'------------------------------------------------------------------------------
-' VALIDATE WRITE ACTION
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate write action"
-
-    'Validate the requested write action
-        Select Case iType
-            Case DP_WriteAction_DatePicker
-                'Supported DatePicker write action
-            Case Else
-                'Reject unsupported write actions
-                    Err.Raise vbObjectError + 513, PROC_NAME, _
-                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
-        End Select
+    'Return the safe defaults unless expansion occurs
+        Set ResolvedTarget = Nothing
+        ExpandedToTableColumn = False
+        TableName = VBA.vbNullString
+        ColumnName = VBA.vbNullString
 
 '------------------------------------------------------------------------------
 ' RESOLVE CURRENT SELECTION
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve current Excel selection"
-
     'Suppress selection access errors temporarily
         On Error Resume Next
     'Capture the current Excel selection object
@@ -7265,6 +7260,7 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
+
     'Reject missing selection objects
         If SelectedObject Is Nothing Then
             Err.Raise vbObjectError + 514, PROC_NAME, "Current Excel selection is not available"
@@ -7283,7 +7279,6 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve optional table-column expansion"
-
     'Consider table expansion only for one selected cell when allowed
         If Target.Cells.CountLarge = 1 Then
             If Not NoTableGrow Then
@@ -7299,6 +7294,9 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
                                             If ColumnIndex >= 1 Then
                                                 If ColumnIndex <= TargetTable.ListColumns.Count Then
                                                     Set Target = TargetTable.ListColumns(ColumnIndex).DataBodyRange
+                                                    ExpandedToTableColumn = True
+                                                    TableName = TargetTable.Name
+                                                    ColumnName = TargetTable.ListColumns(ColumnIndex).Name
                                                 End If
                                             End If
                                         'Stop after resolving the owning table
@@ -7314,7 +7312,6 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Validate resolved write-back target"
-
     'Reject a missing resolved target
         If Target Is Nothing Then
             Err.Raise vbObjectError + 516, PROC_NAME, "Unable to resolve DatePicker write-back target"
@@ -7325,28 +7322,18 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
         End If
 
 '------------------------------------------------------------------------------
-' POPULATE TARGET AREAS
+' RETURN RESOLVED TARGET
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Populate target areas"
-
-    'Loop through each discontiguous target area
-        For Each Block In Target.Areas
-            'Populate this target area
-                M_WriteBack_PopulateRange Block, iType
-        Next Block
+    'Return the resolved target to the caller
+        Set ResolvedTarget = Target
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
 CleanExit:
     'Release object references
-        Set Block = Nothing
-    'Release object references
         Set TargetTable = Nothing
-    'Release object references
         Set Target = Nothing
-    'Release object references
         Set SelectedObject = Nothing
     'Exit the procedure
         Exit Sub
@@ -7359,6 +7346,206 @@ ErrorHandler:
         Err.Raise Err.Number, _
             PROC_NAME & " | Step=" & HandlerStep, _
             "DatePicker write-back target resolution failed: " & Err.Description
+
+End Sub
+
+Private Sub M_WriteBack_ApplyResolvedTarget( _
+    ByVal Target As Range, _
+    ByVal iType As DP_WriteAction)
+
+'
+'------------------------------------------------------------------------------
+'                       APPLY RESOLVED WRITE-BACK TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the requested DatePicker value to an already-resolved target
+'
+' WHY THIS EXISTS
+'   Mutation is separated from resolution so a caller can inspect or confirm the
+'   target before anything is written
+'
+' INPUTS
+'   Target
+'     Range resolved by M_WriteBack_ResolveTarget
+'
+'   iType
+'     DatePicker write action to apply
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Validates the requested write action and the supplied target, then writes to
+'   each discontiguous target area
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the write action is unsupported, the
+'   target is missing or empty, or range population fails
+'
+' DEPENDENCIES
+'   M_WriteBack_PopulateRange
+'
+' NOTES
+'   This routine does not suppress Application events
+'
+'   Application.EnableEvents is managed by M_WriteBack_Apply
+'
+'   The write action is validated here rather than during resolution, so that
+'   resolving a target for inspection does not require a valid action
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_WriteBack_ApplyResolvedTarget"
+
+    Dim Block               As Range            'Single target area
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE WRITE ACTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate write action"
+    'Validate the requested write action
+        Select Case iType
+            Case DP_WriteAction_DatePicker
+                'Supported DatePicker write action
+            Case Else
+                'Reject unsupported write actions
+                    Err.Raise vbObjectError + 513, PROC_NAME, _
+                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
+        End Select
+
+'------------------------------------------------------------------------------
+' VALIDATE TARGET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate supplied write-back target"
+    'Reject a missing target
+        If Target Is Nothing Then
+            Err.Raise vbObjectError + 516, PROC_NAME, "Unable to resolve DatePicker write-back target"
+        End If
+    'Reject empty targets
+        If Target.Cells.CountLarge = 0 Then
+            Err.Raise vbObjectError + 517, PROC_NAME, "Resolved DatePicker write-back target is empty"
+        End If
+
+'------------------------------------------------------------------------------
+' POPULATE TARGET AREAS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Populate target areas"
+    'Loop through each discontiguous target area
+        For Each Block In Target.Areas
+            'Populate this target area
+                M_WriteBack_PopulateRange Block, iType
+        Next Block
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set Block = Nothing
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker write-back failed: " & Err.Description
+
+End Sub
+
+Private Sub M_WriteBack_ResolveAndApplyTarget( _
+    ByVal iType As DP_WriteAction, _
+    Optional ByVal NoTableGrow As Boolean = False)
+
+'
+'------------------------------------------------------------------------------
+'                       RESOLVE AND APPLY WRITE-BACK TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the current Excel write-back target and applies the requested
+'   DatePicker write action
+'
+' WHY THIS EXISTS
+'   Most callers want resolution and mutation as one step. This routine keeps
+'   that convenience while the two stages remain separately callable
+'
+' INPUTS
+'   iType
+'     DatePicker write action to apply
+'
+'   NoTableGrow
+'     True to keep a single selected table cell as a single-cell target
+'
+'     False to expand a single selected table data-body cell to the full table
+'     data column
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_WriteBack_ResolveTarget and then to
+'   M_WriteBack_ApplyResolvedTarget
+'
+' ERROR POLICY
+'   Raises whatever the two stages raise, without adding a further wrapper
+'
+' DEPENDENCIES
+'   M_WriteBack_ResolveTarget
+'   M_WriteBack_ApplyResolvedTarget
+'
+' NOTES
+'   The expansion metadata returned by the resolver is discarded here. Callers
+'   that need it should call the two stages directly
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Target              As Range            'Resolved target range
+    Dim Expanded            As Boolean          'True when expansion occurred
+    Dim TableName           As String           'Owning table name when expanded
+    Dim ColumnName          As String           'Expanded column name when expanded
+
+'------------------------------------------------------------------------------
+' RESOLVE TARGET
+'------------------------------------------------------------------------------
+    'Resolve the range that will receive the value
+        M_WriteBack_ResolveTarget Target, Expanded, TableName, ColumnName, NoTableGrow
+
+'------------------------------------------------------------------------------
+' APPLY TO TARGET
+'------------------------------------------------------------------------------
+    'Write the value to the resolved range
+        M_WriteBack_ApplyResolvedTarget Target, iType
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set Target = Nothing
 
 End Sub
 Public Sub M_WriteBack_PopulateRange( _
