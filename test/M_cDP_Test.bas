@@ -83,6 +83,14 @@ Option Explicit
     Private Const TST_DP_PASS_TEXT          As String = "PASS"                  'Passed test marker
     Private Const TST_DP_FAIL_TEXT          As String = "FAIL"                  'Failed test marker
     Private Const TST_DP_INFO_TEXT          As String = "INFO"                  'Information marker
+
+    '-----------------------------RUN STATES-----------------------------------
+    'A run reports one of these. PASS is the only state that means the run both
+    'completed and left the environment as it found it
+    Private Const TST_DP_STATE_PASS         As String = "PASS"                  'All assertions passed and cleanup verified
+    Private Const TST_DP_STATE_FAIL         As String = "FAIL"                  'One or more assertions failed
+    Private Const TST_DP_STATE_FAIL_CLEANUP As String = "FAIL_CLEANUP"          'Assertions passed but cleanup did not complete
+    Private Const TST_DP_STATE_INCOMPLETE   As String = "INCOMPLETE_SKIPPED"    'A dispatched suite did not complete
     Private Const TST_DP_MODULE_NAME        As String = "M_cDP_Test"            'This module name for callback resolution
 
     'Result sheet layout
@@ -143,6 +151,11 @@ Option Explicit
     Private mTST_DP_FailCount       As Long             'Total assertions failed in the current run
     Private mTST_DP_CurrentSuite    As String           'Suite name currently being executed
     Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
+    Private mTST_DP_RunInProgress   As Boolean          'True between run start and completed teardown
+    Private mTST_DP_CleanupFails    As Long             'Cleanup steps that did not complete in the current run
+    Private mTST_DP_CleanupDetail   As String           'First cleanup failure detail in the current run
+    Private mTST_DP_SuitesDispatched As Long            'Suites dispatched in the current run
+    Private mTST_DP_SuitesCompleted As Long             'Suites that returned without escaping
 
 
 '
@@ -505,6 +518,20 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
     'Enable controlled fatal handling
         On Error GoTo FatalHandler
+    'Report an environment left dirty by a previous run. A run that aborted
+    'before teardown leaves Application state and worksheets behind, and the
+    'next run then fails during setup rather than at the point of the defect
+        If mTST_DP_RunInProgress Then
+            TST_DP_RecordInfo "Harness", "Dirty start", _
+                "The previous run did not complete teardown. Results may be affected."
+        End If
+    'Mark the run as in progress until teardown completes
+        mTST_DP_RunInProgress = True
+    'Reset the per-run cleanup and suite counters
+        mTST_DP_CleanupFails = 0
+        mTST_DP_CleanupDetail = VBA.vbNullString
+        mTST_DP_SuitesDispatched = 0
+        mTST_DP_SuitesCompleted = 0
     'Capture whether a manager existed before the run
         mTST_DP_HadManager = Not (gDP_Manager Is Nothing)
     'Capture current DatePicker settings and transient state
@@ -565,12 +592,6 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         End If
 
 '------------------------------------------------------------------------------
-' WRITE SUMMARY
-'------------------------------------------------------------------------------
-    'Write the run summary to the result sheet and Immediate Window
-        TST_DP_WriteSummary
-
-'------------------------------------------------------------------------------
 ' APPLY CONDITIONAL FORMATTING
 '------------------------------------------------------------------------------
     'Apply FAIL conditional formatting to the result column
@@ -586,22 +607,45 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
 CleanExit:
-    'Suppress cleanup errors so every cleanup step is attempted
+    'Suppress cleanup errors so every cleanup step is attempted. Each step is
+    'checked individually afterwards, because a suppressed cleanup failure that
+    'nobody records is what leaves the next run unable to start
         On Error Resume Next
+
     'Reset DatePicker UI artifacts after testing
         TST_DP_ResetDatePickerArtifacts
+        TST_DP_CheckCleanupStep "ResetDatePickerArtifacts"
+
     'Delete the scratch worksheet
         TST_DP_DeleteScratchSheet
+        TST_DP_CheckCleanupStep "DeleteScratchSheet"
+
     'Restore DatePicker settings and transient state
         TST_DP_RestoreSettings SettingsSnapshot
+        TST_DP_CheckCleanupStep "RestoreSettings"
+
     'Restore the manager state to its pre-run condition
         TST_DP_RestoreManagerState
+        TST_DP_CheckCleanupStep "RestoreManagerState"
+
     'Restore the Excel Application state
         TST_DP_RestoreApplicationState AppSnapshot
+        TST_DP_CheckCleanupStep "RestoreApplicationState"
+
+    'Verify the run left no DatePicker artifact behind
+        TST_DP_VerifyFinalState AppSnapshot
+
+    'Write the summary after cleanup so it can report the cleanup outcome
+        TST_DP_WriteSummary
+
     'Release module object references
         Set mTST_DP_ScratchSheet = Nothing
         Set mTST_DP_ResultSheet = Nothing
         Set mTST_DP_HostWorkbook = Nothing
+
+    'Mark teardown as complete so the next run does not report a dirty start
+        mTST_DP_RunInProgress = False
+
     'Clear any suppressed cleanup error
         Err.Clear
     'Restore normal error handling
@@ -759,6 +803,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 '------------------------------------------------------------------------------
     'Set the current suite name for recording context
         mTST_DP_CurrentSuite = SuiteName
+    'Count the dispatch so a suite that never returns can be detected
+        mTST_DP_SuitesDispatched = mTST_DP_SuitesDispatched + 1
     'Protect the harness from escaping suite failures
         On Error GoTo SuiteFail
 
@@ -816,6 +862,12 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RecordFail "Unknown suite name", "SuiteName=" & SuiteName
 
         End Select
+
+'------------------------------------------------------------------------------
+' RECORD COMPLETION
+'------------------------------------------------------------------------------
+    'Count the suite as completed only when it returned without escaping
+        mTST_DP_SuitesCompleted = mTST_DP_SuitesCompleted + 1
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -4086,6 +4138,282 @@ ResultSheetFail:
 
 End Sub
 
+Private Sub TST_DP_CheckCleanupStep(ByVal StepName As String)
+
+'
+'==============================================================================
+'                           CHECK CLEANUP STEP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records whether the cleanup step that just ran completed
+'
+' WHY THIS EXISTS
+'   Teardown runs under On Error Resume Next so that one failing step does not
+'   prevent the rest from being attempted. Without an explicit check afterwards
+'   the failure is discarded, the run still reports its assertion totals, and the
+'   next run inherits whatever was left behind
+'
+'   That is not hypothetical. An aborted run left Application state and
+'   worksheets in place, and the following TST_DP_RunAll failed during setup with
+'   1004 - Method Add of object Sheets failed
+'
+' INPUTS
+'   StepName
+'     Name of the cleanup step that has just executed
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Records a FAIL row and increments the cleanup-failure count when Err is set,
+'   then clears Err so the following steps still run
+'
+' ERROR POLICY
+'   Best effort. Must not raise, because it runs inside teardown
+'
+' DEPENDENCIES
+'   TST_DP_RecordResult
+'   mTST_DP_CleanupFails
+'   mTST_DP_CleanupDetail
+'
+' NOTES
+'   The caller stays under On Error Resume Next across the whole teardown. This
+'   routine reads Err before clearing it, so it must be called immediately after
+'   the step it checks
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
+
+'------------------------------------------------------------------------------
+' CAPTURE STEP OUTCOME
+'------------------------------------------------------------------------------
+    'Capture the outcome of the step that has just run
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
+
+    'Exit when the step completed
+        If ErrorNumber = 0 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' RECORD FAILURE
+'------------------------------------------------------------------------------
+    'Count the failed cleanup step
+        mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+
+    'Keep the first failure detail for the summary
+        If VBA.Len(mTST_DP_CleanupDetail) = 0 Then
+            mTST_DP_CleanupDetail = StepName & ": " & _
+                VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+        End If
+
+    'Record the failed cleanup step on the result sheet
+        TST_DP_RecordResult TST_DP_FAIL_TEXT, _
+            "Cleanup", _
+            StepName, _
+            "Cleanup step failed: " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+
+'------------------------------------------------------------------------------
+' CLEAR FOR THE NEXT STEP
+'------------------------------------------------------------------------------
+    'Clear the error so the following cleanup steps still run
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapshot)
+
+'
+'==============================================================================
+'                           VERIFY FINAL STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verifies that the run left no DatePicker or harness artifact behind
+'
+' WHY THIS EXISTS
+'   A run result is only meaningful if the environment it left is clean. Counting
+'   assertions says nothing about a form still loaded, a timer still scheduled,
+'   or grid icons still on a worksheet
+'
+' INPUTS
+'   AppSnapshot
+'     Application state captured before the run
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Checks the manager reference, the picker form, worksheet grid icons and
+'   Application.EnableEvents. Records a FAIL row for each violation and counts it
+'   as a cleanup failure
+'
+' ERROR POLICY
+'   Best effort. Must not raise, because it runs inside teardown
+'
+' DEPENDENCIES
+'   gDP_Manager
+'   M_GridIcon_PurgeAll
+'   TST_DP_RecordResult
+'
+' NOTES
+'   This routine reports rather than repairs. Silently fixing a leak would hide
+'   the defect that caused it
+'
+'   The scratch worksheet is not checked here. Its deletion is already verified
+'   as a cleanup step
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeftLoaded      As Boolean      'True when the picker form is still loaded
+    Dim IconCount       As Long         'DatePicker shapes still present
+    Dim WS              As Excel.Worksheet  'Worksheet scan variable
+    Dim Shp             As Excel.Shape  'Shape scan variable
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress verification errors so teardown always completes
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' VERIFY PICKER FORM
+'------------------------------------------------------------------------------
+    'Resolve whether the picker form is still loaded
+        LeftLoaded = False
+        If Not gDP_Manager Is Nothing Then LeftLoaded = gDP_Manager.Is_PickerLoaded
+        Err.Clear
+
+    'Record a form left loaded after the run
+        If LeftLoaded Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "DatePicker form is still loaded after teardown"
+        End If
+
+'------------------------------------------------------------------------------
+' VERIFY GRID ICONS
+'------------------------------------------------------------------------------
+    'Count DatePicker shapes left on the host workbook
+        IconCount = 0
+        If Not mTST_DP_HostWorkbook Is Nothing Then
+            For Each WS In mTST_DP_HostWorkbook.Worksheets
+                For Each Shp In WS.Shapes
+                    If VBA.InStr(1, Shp.Name, "DP_GridIcon", vbTextCompare) = 1 Then
+                        IconCount = IconCount + 1
+                    End If
+                Next Shp
+            Next WS
+        End If
+        Err.Clear
+
+    'Record grid icons left behind after the run
+        If IconCount > 0 Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                VBA.CStr(IconCount) & " DatePicker grid icon shapes remain after teardown"
+        End If
+
+'------------------------------------------------------------------------------
+' VERIFY APPLICATION STATE
+'------------------------------------------------------------------------------
+    'Record an Application event state that does not match the pre-run snapshot
+        If Excel.Application.EnableEvents <> AppSnapshot.EnableEvents Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.EnableEvents was not restored to its pre-run value"
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set WS = Nothing
+        Set Shp = Nothing
+    'Clear any suppressed verification error
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_ResolveRunState() As String
+
+'
+'==============================================================================
+'                           RESOLVE RUN STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the single state that describes the outcome of the run
+'
+' WHY THIS EXISTS
+'   Assertion totals alone cannot express a run that passed every assertion but
+'   failed to clean up, or one that ended before every dispatched suite returned.
+'   Both look like a pass if only Passed and Failed are reported
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   One of TST_DP_STATE_PASS, TST_DP_STATE_FAIL, TST_DP_STATE_FAIL_CLEANUP or
+'   TST_DP_STATE_INCOMPLETE
+'
+' BEHAVIOR
+'   Reports FAIL when any assertion failed, INCOMPLETE_SKIPPED when a dispatched
+'   suite did not return, FAIL_CLEANUP when teardown did not complete, and PASS
+'   only when none of those applies
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   mTST_DP_FailCount
+'   mTST_DP_CleanupFails
+'   mTST_DP_SuitesDispatched
+'   mTST_DP_SuitesCompleted
+'
+' NOTES
+'   Assertion failures rank above cleanup failures. A run with both is reported
+'   as FAIL, because the assertion failure is the more actionable of the two
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE STATE
+'------------------------------------------------------------------------------
+    'Report assertion failures first, as the most actionable outcome
+        If mTST_DP_FailCount > 0 Then
+            TST_DP_ResolveRunState = TST_DP_STATE_FAIL
+            Exit Function
+        End If
+
+    'Report a suite that was dispatched but never returned
+        If mTST_DP_SuitesCompleted < mTST_DP_SuitesDispatched Then
+            TST_DP_ResolveRunState = TST_DP_STATE_INCOMPLETE
+            Exit Function
+        End If
+
+    'Report teardown that did not complete
+        If mTST_DP_CleanupFails > 0 Then
+            TST_DP_ResolveRunState = TST_DP_STATE_FAIL_CLEANUP
+            Exit Function
+        End If
+
+    'Report a clean run
+        TST_DP_ResolveRunState = TST_DP_STATE_PASS
+
+End Function
+
 Private Sub TST_DP_WriteSummary()
 
 '
@@ -4126,9 +4454,16 @@ Private Sub TST_DP_WriteSummary()
 '------------------------------------------------------------------------------
     'Record the run summary as an INFO result
         TST_DP_RecordInfo "Harness", "Summary", _
-            "Run=" & VBA.CStr(mTST_DP_RunCount) & _
+            "State=" & TST_DP_ResolveRunState() & _
+            "; Run=" & VBA.CStr(mTST_DP_RunCount) & _
             "; Passed=" & VBA.CStr(mTST_DP_PassCount) & _
-            "; Failed=" & VBA.CStr(mTST_DP_FailCount)
+            "; Failed=" & VBA.CStr(mTST_DP_FailCount) & _
+            "; CleanupFailures=" & VBA.CStr(mTST_DP_CleanupFails)
+
+    'Record the first cleanup failure detail so the summary is actionable
+        If VBA.Len(mTST_DP_CleanupDetail) <> 0 Then
+            TST_DP_RecordInfo "Harness", "Cleanup", mTST_DP_CleanupDetail
+        End If
 
 '------------------------------------------------------------------------------
 ' WRITE RESULT SHEET SUMMARY
@@ -4147,12 +4482,16 @@ Private Sub TST_DP_WriteSummary()
         mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_PassCount
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Value = "Failed"
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_FailCount
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_LABEL).Value = "State"
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_VALUE).Value = TST_DP_ResolveRunState()
 
     'Bold the summary labels
         mTST_DP_ResultSheet.Cells(4, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(5, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_VALUE).Font.Bold = True
 
     'Auto-fit the result and summary columns
         mTST_DP_ResultSheet.Columns("C:K").AutoFit

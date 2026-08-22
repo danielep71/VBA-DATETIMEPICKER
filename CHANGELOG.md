@@ -49,6 +49,27 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added run states to the regression harness. A run now reports one of
+  `PASS`, `FAIL`, `FAIL_CLEANUP` or `INCOMPLETE_SKIPPED`, in the Immediate
+  Window summary and on the result sheet:
+
+  ```text
+  INFO | Harness | Summary | State=PASS; Run=150; Passed=150; Failed=0; CleanupFailures=0
+  ```
+
+  Assertion totals alone cannot express a run that passed every assertion but
+  failed to clean up, or one that ended before every dispatched suite returned.
+  Both looked like a pass when only `Passed` and `Failed` were reported.
+
+- Added `TST_DP_VerifyFinalState`, which checks after teardown that the picker
+  form is not still loaded, no `DP_GridIcon` shapes remain in the host workbook,
+  and `Application.EnableEvents` matches the pre-run snapshot. It reports rather
+  than repairs: silently fixing a leak would hide the defect that caused it.
+
+- Added a dirty-start guard. A run that aborts before teardown now leaves a flag
+  that the next run reports, so the cause is visible at the point of the defect
+  rather than as an unexplained setup failure later.
+
 - Added `demo/M_DP_DEMO.bas`, which builds the demo worksheet from code. The
   demo previously existed only as content inside `demo/DATEPICKER.xlsm`:
   `demo/M_DEMO_BUILDER.bas` is a toolkit of primitives, and nothing in the
@@ -68,6 +89,41 @@ backward-compatible capability, 💥 **major** may break callers.
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
+
+- Fixed the regression harness discarding cleanup failures. Teardown runs under
+  `On Error Resume Next` so that one failing step does not prevent the rest from
+  being attempted, and nothing checked the outcome afterwards. A failure to
+  restore `Application` state, delete the scratch worksheet or release the
+  manager was silently dropped, and the run still reported its assertion totals
+  as if nothing had gone wrong.
+
+  Because the harness mutates process-wide Excel state — it sets
+  `ScreenUpdating`, `EnableEvents` and `DisplayAlerts` to `False` for the
+  duration — an aborted run left Excel in that state and left its worksheets
+  behind. The next run then failed during setup:
+
+  ```text
+  FAIL | Harness | TST_DP_RunAllInternal | Fatal error 1004 -
+        Method 'Add' of object 'Sheets' failed
+  ```
+
+  Each of the five teardown steps is now checked immediately after it runs.
+  A failure is recorded as a `FAIL` row against the `Cleanup` suite, counted,
+  and the first detail carried into the summary.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
+
+- Fixed `TST_DP_RunSuite_Manager` and `TST_DP_RunSuite_UISmoke` destroying their
+  own diagnostics. Both performed cleanup before recording the escaping error,
+  and any `On Error` statement resets the `Err` object — not only `Err.Clear` —
+  so both reported `Error 0 -` with no number and no description.
+
+  The reported scope was wider than the defect. Reading all thirteen handlers
+  shows eleven read `Err` as the first statement and report correctly, and
+  `TST_DP_RunSuite_WriteBack` releases object references first, which is
+  assignment rather than an `On Error` statement, so `Err` survives. The
+  `Error 0 -` originally observed came from `ApplicationState`, which was
+  corrected when it was written.
+  ([#18](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/18))
 
 - Fixed the demo-sheet routines resolving their worksheet from `ThisWorkbook`.
   Four routines did so — `Ribbon_Demo`, `DP_DemoSheet_Show`,
@@ -95,6 +151,8 @@ backward-compatible capability, 💥 **major** may break callers.
   `demo/`. Versioning covers the public VBA API of the component in `src/`;
   `demo/` is example material that ships as a workbook.
 - Embedded behaviour is unchanged. The add-in gains a Demo button that works.
+- The harness summary line gained `State=` and `CleanupFailures=` fields. Any
+  tooling that parses it by position rather than by name will need updating.
 
 ### ⚠️ Note on the add-in
 
