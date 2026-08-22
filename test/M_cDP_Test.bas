@@ -95,10 +95,12 @@ Option Explicit
     Private Const TST_DP_STATE_FAIL         As String = "FAIL"                  'One or more assertions failed
     Private Const TST_DP_STATE_FAIL_CLEANUP As String = "FAIL_CLEANUP"          'Assertions passed but cleanup did not complete
     Private Const TST_DP_STATE_INCOMPLETE   As String = "INCOMPLETE_SKIPPED"    'A dispatched suite did not complete
+    Private Const TST_DP_STATE_DIRTY_START  As String = "FAIL_DIRTY_START"      'The run began in an environment a previous run left behind
     Private Const TST_DP_MODULE_NAME        As String = "M_cDP_Test"            'This module name for callback resolution
 
     'Result sheet layout
     Private Const TST_DP_RESULT_FIRST_ROW   As Long = 5                         'First result data row on the result sheet
+    Private Const TST_DP_STATUS_BAR_TEXT    As String = "Running DatePicker regression tests..."  'Status bar text the run displays
     Private Const TST_DP_COL_SEQ            As Long = 3                         'Result sequence number column index
     Private Const TST_DP_COL_TIMESTAMP      As Long = 4                         'Result timestamp column index
     Private Const TST_DP_COL_RESULT         As Long = 5                         'Result marker column index
@@ -156,6 +158,9 @@ Option Explicit
     Private mTST_DP_CurrentSuite    As String           'Suite name currently being executed
     Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
     Private mTST_DP_RunInProgress   As Boolean          'True between run start and completed teardown
+    Private mTST_DP_DirtyStart      As Boolean          'True when preflight found a previous run's leftovers
+    Private mTST_DP_DirtyDetail     As String           'What preflight found, recorded once the result sheet exists
+    Private mTST_DP_InjectCleanupFail As String         'Cleanup step name to force-fail, for harness self-checks
     Private mTST_DP_CleanupFails    As Long             'Cleanup steps that did not complete in the current run
     Private mTST_DP_CleanupDetail   As String           'First cleanup failure detail in the current run
     Private mTST_DP_SuitesDispatched As Long            'Suites dispatched in the current run
@@ -169,6 +174,157 @@ Option Explicit
 '
 '------------------------------------------------------------------------------
 '
+
+Private Sub TST_DP_Preflight()
+
+'
+'==============================================================================
+'                            HARNESS PREFLIGHT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether this run is starting in an environment a previous run left
+'   behind, before anything in this run modifies that environment
+'
+' WHY THIS EXISTS
+'   A run that aborts before teardown leaves worksheets and Application state in
+'   place. The next run then fails during its own setup rather than at the point
+'   of the original defect, and its results describe an environment nobody
+'   intended
+'
+'   Detection has to happen before the first mutation. Building the result sheet
+'   template over a previous run's leftovers is itself one of the ways the
+'   historical failure presented
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing. Sets mTST_DP_DirtyStart and mTST_DP_DirtyDetail
+'
+' BEHAVIOR
+'   Looks for evidence of an incomplete previous run and records what it found
+'
+'   Does not modify the workbook, the Application, or DatePicker state
+'
+' ERROR POLICY
+'   Best-effort. Never raises. A preflight that cannot read the environment
+'   reports a dirty start rather than assuming a clean one
+'
+' DEPENDENCIES
+'   mTST_DP_RunInProgress
+'   mTST_DP_HostWorkbook
+'   TST_DP_SheetExists
+'
+' NOTES
+'   Two independent kinds of evidence are needed, because they survive different
+'   kinds of abort:
+'
+'     mTST_DP_RunInProgress   an abort that left module state intact
+'     leftover scratch sheet  an abort that cleared it, such as a project reset
+'
+'   A VBA project reset zeroes module-level state, so the flag alone cannot see
+'   the abort it exists to detect. The worksheet is the evidence that survives
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Detail          As String       'Accumulated evidence description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Preflight must never break a run before it starts
+        On Error GoTo PreflightUnreadable
+    'Assume a clean start until evidence says otherwise
+        mTST_DP_DirtyStart = False
+        mTST_DP_DirtyDetail = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' EVIDENCE: MODULE STATE
+'------------------------------------------------------------------------------
+    'A run that set the flag and never cleared it did not reach teardown
+        If mTST_DP_RunInProgress Then
+            Detail = "the previous run did not complete teardown"
+        End If
+
+'------------------------------------------------------------------------------
+' EVIDENCE: LEFTOVER WORKSHEET
+'------------------------------------------------------------------------------
+    'The scratch sheet is deleted during teardown, so its presence outlives a
+    'project reset that would have cleared the flag above
+        If Not mTST_DP_HostWorkbook Is Nothing Then
+            If TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME) Then
+                If VBA.LenB(Detail) = 0 Then
+                    Detail = "worksheet " & TST_DP_SCRATCH_SHEET_NAME & " was left behind"
+                Else
+                    Detail = Detail & ", and worksheet " & TST_DP_SCRATCH_SHEET_NAME & _
+                        " was left behind"
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE PREFLIGHT
+'------------------------------------------------------------------------------
+    'Record the verdict for the run to report once it can write results
+        If VBA.LenB(Detail) > 0 Then
+            mTST_DP_DirtyStart = True
+            mTST_DP_DirtyDetail = "Dirty start: " & Detail & _
+                ". Results describe an environment this run did not establish."
+        End If
+    'Exit after a completed preflight
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' PREFLIGHT UNREADABLE
+'------------------------------------------------------------------------------
+PreflightUnreadable:
+    'An environment that cannot be inspected is not known to be clean
+        mTST_DP_DirtyStart = True
+        mTST_DP_DirtyDetail = "Dirty start: the pre-run environment could not be " & _
+            "inspected (error " & VBA.CStr(Err.Number) & " - " & Err.Description & ")."
+    Err.Clear
+
+End Sub
+
+Private Function TST_DP_SheetExists( _
+    ByVal Book As Excel.Workbook, _
+    ByVal SheetName As String) As Boolean
+
+'
+'==============================================================================
+'                              SHEET EXISTS
+'==============================================================================
+'   Reports whether a worksheet of the given name exists in the workbook,
+'   without creating it and without raising when it does not.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS              As Excel.Worksheet  'Resolved worksheet
+
+'------------------------------------------------------------------------------
+' RESOLVE SHEET
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the sheet is absent
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_SheetExists = False
+    'Attempt to resolve the named worksheet
+        Set WS = Book.Worksheets(SheetName)
+    'Report whether the resolution succeeded
+        TST_DP_SheetExists = Not (WS Is Nothing)
+    'Release object references
+        Set WS = Nothing
+    'Clear any suppressed lookup error
+        Err.Clear
+
+End Function
 
 Public Sub TST_DP_RunAll()
 
@@ -199,6 +355,7 @@ Public Sub TST_DP_RunAll()
 '
 ' DEPENDENCIES
 '   TST_DP_RunAllInternal
+'   TST_DP_Preflight
 '   DEMO_Sheet_BuildTemplate
 '   TST_DP_GetHostWorkbook
 '
@@ -206,8 +363,12 @@ Public Sub TST_DP_RunAll()
 '   Use TST_DP_RunAll_WithUISmoke when a brief UF_DatePicker open/close check
 '   is also needed
 '
+'   Preflight runs before the result sheet template is built, because building
+'   it over a previous run's leftovers is one of the ways an aborted predecessor
+'   presents
+'
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -217,6 +378,8 @@ Public Sub TST_DP_RunAll()
         TST_DP_ResetHarnessState
     'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+    'Decide whether the environment is clean before anything in this run changes it
+        TST_DP_Preflight
     'Build the result sheet template before the run
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
             "Test Sheet", , TST_DP_RESULT_FIRST_ROW
@@ -280,6 +443,12 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '------------------------------------------------------------------------------
     'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+
+'------------------------------------------------------------------------------
+' PREFLIGHT
+'------------------------------------------------------------------------------
+    'Decide whether the environment is clean before anything in this run changes it
+        TST_DP_Preflight
 
 '------------------------------------------------------------------------------
 ' BUILD RESULT SHEET TEMPLATE
@@ -522,13 +691,6 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '------------------------------------------------------------------------------
     'Enable controlled fatal handling
         On Error GoTo FatalHandler
-    'Report an environment left dirty by a previous run. A run that aborted
-    'before teardown leaves Application state and worksheets behind, and the
-    'next run then fails during setup rather than at the point of the defect
-        If mTST_DP_RunInProgress Then
-            TST_DP_RecordInfo "Harness", "Dirty start", _
-                "The previous run did not complete teardown. Results may be affected."
-        End If
     'Mark the run as in progress until teardown completes
         mTST_DP_RunInProgress = True
     'Reset the per-run cleanup and suite counters
@@ -557,6 +719,11 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
     'Record the run header
         TST_DP_RecordInfo "Harness", "Start", _
             "IncludeUISmoke=" & VBA.CStr(IncludeUISmoke)
+    'Report what preflight found, now that results can be written. The verdict was
+    'reached before this run touched anything, and it decides the run state
+        If mTST_DP_DirtyStart Then
+            TST_DP_RecordInfo "Harness", "Dirty start", mTST_DP_DirtyDetail
+        End If
 
 '------------------------------------------------------------------------------
 ' RUN SUITES
@@ -590,6 +757,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 
     'Run the application-state suite
         TST_DP_RunSuiteSafe "ApplicationState"
+    'Run the harness run-state and preflight self-checks
+        TST_DP_RunSuiteSafe "HarnessSelfCheck"
     'Run optional UF_DatePicker open / close smoke check when requested
         If IncludeUISmoke Then
             TST_DP_RunSuiteSafe "UISmoke"
@@ -858,6 +1027,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RunSuite_SelectDate
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
+            Case "HARNESSSELFCHECK"
+                TST_DP_RunSuite_HarnessSelfCheck
 
             Case "UISMOKE"
                 TST_DP_RunSuite_UISmoke
@@ -3571,6 +3742,236 @@ SuiteFail:
 
 End Sub
 
+Private Sub TST_DP_RunSuite_HarnessSelfCheck()
+
+'
+'==============================================================================
+'                          SUITE: HARNESS SELF CHECK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves the harness run-state machine, the cleanup-failure counter and the
+'   dirty-start preflight, rather than assuming them
+'
+' WHY THIS EXISTS
+'   #15 gates a release on these run states. A state that has never been observed
+'   to occur is not evidence of anything, and FAIL_CLEANUP and FAIL_DIRTY_START
+'   are both states a passing run never reaches on its own
+'
+' BEHAVIOR
+'   Drives TST_DP_ResolveRunState across every outcome, forces one cleanup step
+'   to fail, and runs the preflight against the current environment
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+' DEPENDENCIES
+'   TST_DP_ResolveRunState
+'   TST_DP_CheckCleanupStep
+'   TST_DP_Preflight
+'
+' NOTES
+'   The counters this suite manipulates are the counters that describe the run it
+'   is part of. Every one is saved before the first mutation and restored before
+'   the first assertion, so the run reports its own outcome and not the probe
+'   values used here
+'
+'   Assertions therefore run against locals captured during the probe, never
+'   against live module state
+'
+'   The preflight probe expects a dirty verdict, because the scratch worksheet
+'   exists while the run is using it. That is the same evidence a project reset
+'   would leave behind, which is the case the module-level flag cannot see
+'
+'   An aborted run cannot be staged from inside a run. This suite proves the
+'   detector fires on the evidence an abort leaves; that an abort leaves it is a
+'   manual validation step
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SavedFail           As Long         'Live assertion failure count
+    Dim SavedCleanup        As Long         'Live cleanup failure count
+    Dim SavedDetail         As String       'Live cleanup failure detail
+    Dim SavedDispatched     As Long         'Live dispatched suite count
+    Dim SavedCompleted      As Long         'Live completed suite count
+    Dim SavedDirty          As Boolean      'Live dirty-start verdict
+    Dim SavedDirtyDetail    As String       'Live dirty-start detail
+
+    Dim StatePass           As String       'Resolver output for a clean run
+    Dim StateFail           As String       'Resolver output for a failed assertion
+    Dim StateIncomplete     As String       'Resolver output for a skipped suite
+    Dim StateCleanup        As String       'Resolver output for failed teardown
+    Dim StateDirty          As String       'Resolver output for a dirty start
+    Dim StateDirtyOverFail  As String       'Resolver output when both apply
+
+    Dim InjectedCount       As Long         'Cleanup failures after injection
+    Dim ProbeDirty          As Boolean      'Preflight verdict during the probe
+    Dim ProbeDetail         As String       'Preflight detail during the probe
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "HarnessSelfCheck"
+
+'------------------------------------------------------------------------------
+' SAVE LIVE RUN STATE
+'------------------------------------------------------------------------------
+    'Every counter touched below belongs to the run in progress
+        SavedFail = mTST_DP_FailCount
+        SavedCleanup = mTST_DP_CleanupFails
+        SavedDetail = mTST_DP_CleanupDetail
+        SavedDispatched = mTST_DP_SuitesDispatched
+        SavedCompleted = mTST_DP_SuitesCompleted
+        SavedDirty = mTST_DP_DirtyStart
+        SavedDirtyDetail = mTST_DP_DirtyDetail
+
+'------------------------------------------------------------------------------
+' PROBE THE RUN-STATE MACHINE
+'------------------------------------------------------------------------------
+    'Clean run
+        mTST_DP_FailCount = 0
+        mTST_DP_CleanupFails = 0
+        mTST_DP_SuitesDispatched = 3
+        mTST_DP_SuitesCompleted = 3
+        mTST_DP_DirtyStart = False
+        StatePass = TST_DP_ResolveRunState()
+
+    'Failed assertion
+        mTST_DP_FailCount = 1
+        StateFail = TST_DP_ResolveRunState()
+
+    'Dispatched suite that never returned
+        mTST_DP_FailCount = 0
+        mTST_DP_SuitesCompleted = 2
+        StateIncomplete = TST_DP_ResolveRunState()
+
+    'Teardown that did not complete
+        mTST_DP_SuitesCompleted = 3
+        mTST_DP_CleanupFails = 1
+        StateCleanup = TST_DP_ResolveRunState()
+
+    'Dirty start on an otherwise clean run
+        mTST_DP_CleanupFails = 0
+        mTST_DP_DirtyStart = True
+        StateDirty = TST_DP_ResolveRunState()
+
+    'Dirty start alongside a failed assertion
+        mTST_DP_FailCount = 1
+        StateDirtyOverFail = TST_DP_ResolveRunState()
+
+'------------------------------------------------------------------------------
+' PROBE CLEANUP FAULT INJECTION
+'------------------------------------------------------------------------------
+    'Start the probe from a known clean counter
+        mTST_DP_CleanupFails = 0
+        mTST_DP_CleanupDetail = VBA.vbNullString
+    'Clear any error state so only the injection can trigger a failure
+        Err.Clear
+    'Force the named step to be treated as failed
+        mTST_DP_InjectCleanupFail = "SelfCheckProbeStep"
+        TST_DP_CheckCleanupStep "SelfCheckProbeStep"
+        mTST_DP_InjectCleanupFail = VBA.vbNullString
+    'Capture what the counter recorded
+        InjectedCount = mTST_DP_CleanupFails
+
+'------------------------------------------------------------------------------
+' PROBE THE DIRTY-START PREFLIGHT
+'------------------------------------------------------------------------------
+    'Run preflight against the live environment. The scratch worksheet exists
+    'while the run is using it, which is the evidence an aborted run leaves
+        TST_DP_Preflight
+        ProbeDirty = mTST_DP_DirtyStart
+        ProbeDetail = mTST_DP_DirtyDetail
+
+'------------------------------------------------------------------------------
+' RESTORE LIVE RUN STATE
+'------------------------------------------------------------------------------
+    'Restore before the first assertion, so this suite's own result is honest
+        mTST_DP_FailCount = SavedFail
+        mTST_DP_CleanupFails = SavedCleanup
+        mTST_DP_CleanupDetail = SavedDetail
+        mTST_DP_SuitesDispatched = SavedDispatched
+        mTST_DP_SuitesCompleted = SavedCompleted
+        mTST_DP_DirtyStart = SavedDirty
+        mTST_DP_DirtyDetail = SavedDirtyDetail
+    'Clear any error left by the injection probe
+        Err.Clear
+
+'------------------------------------------------------------------------------
+' ASSERT THE RUN-STATE MACHINE
+'------------------------------------------------------------------------------
+    'Assert a clean run reports PASS
+        TST_DP_AssertEqualsString "Clean run resolves to PASS", _
+            TST_DP_STATE_PASS, StatePass
+    'Assert a failed assertion reports FAIL
+        TST_DP_AssertEqualsString "Failed assertion resolves to FAIL", _
+            TST_DP_STATE_FAIL, StateFail
+    'Assert a suite that never returned reports INCOMPLETE_SKIPPED
+        TST_DP_AssertEqualsString "Skipped suite resolves to INCOMPLETE_SKIPPED", _
+            TST_DP_STATE_INCOMPLETE, StateIncomplete
+    'Assert failed teardown reports FAIL_CLEANUP
+        TST_DP_AssertEqualsString "Failed teardown resolves to FAIL_CLEANUP", _
+            TST_DP_STATE_FAIL_CLEANUP, StateCleanup
+    'Assert a dirty start reports FAIL_DIRTY_START
+        TST_DP_AssertEqualsString "Dirty start resolves to FAIL_DIRTY_START", _
+            TST_DP_STATE_DIRTY_START, StateDirty
+    'Assert a dirty start outranks a failed assertion
+        TST_DP_AssertEqualsString "Dirty start outranks a failed assertion", _
+            TST_DP_STATE_DIRTY_START, StateDirtyOverFail
+    'Assert a dirty start can never resolve to PASS, which is #19's invariant
+        TST_DP_AssertTrue "A dirty start can never resolve to PASS", _
+            (StateDirty <> TST_DP_STATE_PASS) And _
+            (StateDirtyOverFail <> TST_DP_STATE_PASS)
+
+'------------------------------------------------------------------------------
+' ASSERT CLEANUP FAULT INJECTION
+'------------------------------------------------------------------------------
+    'Assert a forced cleanup failure is counted, which is what produces
+    'FAIL_CLEANUP in a real run
+        TST_DP_AssertEqualsLong "Injected cleanup failure is counted", _
+            1, InjectedCount
+
+'------------------------------------------------------------------------------
+' ASSERT THE DIRTY-START PREFLIGHT
+'------------------------------------------------------------------------------
+    'Assert preflight detects the leftover-worksheet evidence
+        TST_DP_AssertTrue "Preflight detects leftover scratch worksheet", ProbeDirty
+    'Assert the verdict names what it found
+        TST_DP_AssertTrue "Preflight verdict names the leftover worksheet", _
+            VBA.InStr(1, ProbeDetail, TST_DP_SCRATCH_SHEET_NAME, vbTextCompare) > 0
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Never leave the injection seam armed
+        mTST_DP_InjectCleanupFail = VBA.vbNullString
+    'Restore whatever the probe was holding when it failed
+        mTST_DP_FailCount = SavedFail
+        mTST_DP_CleanupFails = SavedCleanup
+        mTST_DP_CleanupDetail = SavedDetail
+        mTST_DP_SuitesDispatched = SavedDispatched
+        mTST_DP_SuitesCompleted = SavedCompleted
+        mTST_DP_DirtyStart = SavedDirty
+        mTST_DP_DirtyDetail = SavedDirtyDetail
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Harness self check", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
 Private Sub TST_DP_RunSuite_UISmoke()
 
 '
@@ -4706,6 +5107,7 @@ Private Sub TST_DP_CheckCleanupStep(ByVal StepName As String)
 '------------------------------------------------------------------------------
     Dim ErrorNumber         As Long         'Captured error number
     Dim ErrorDescription    As String       'Captured error description
+    Dim IsInjected          As Boolean      'True when the failure was staged by a self-check
 
 '------------------------------------------------------------------------------
 ' CAPTURE STEP OUTCOME
@@ -4713,6 +5115,15 @@ Private Sub TST_DP_CheckCleanupStep(ByVal StepName As String)
     'Capture the outcome of the step that has just run
         ErrorNumber = Err.Number
         ErrorDescription = Err.Description
+
+    'Recognize a failure staged by the harness self-check
+        If VBA.LenB(mTST_DP_InjectCleanupFail) > 0 Then
+            If VBA.StrComp(StepName, mTST_DP_InjectCleanupFail, vbTextCompare) = 0 Then
+                ErrorNumber = vbObjectError + 900
+                ErrorDescription = "Injected cleanup failure for harness self-check"
+                IsInjected = True
+            End If
+        End If
 
     'Exit when the step completed
         If ErrorNumber = 0 Then Exit Sub
@@ -4729,11 +5140,18 @@ Private Sub TST_DP_CheckCleanupStep(ByVal StepName As String)
                 VBA.CStr(ErrorNumber) & " - " & ErrorDescription
         End If
 
-    'Record the failed cleanup step on the result sheet
-        TST_DP_RecordResult TST_DP_FAIL_TEXT, _
-            "Cleanup", _
-            StepName, _
-            "Cleanup step failed: " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+    'Record the failed cleanup step on the result sheet. A staged failure is
+    'recorded as INFO: it is a probe of this routine, not a defect in the run,
+    'and a FAIL row would report a teardown failure that never happened
+        If IsInjected Then
+            TST_DP_RecordInfo "Cleanup", StepName, _
+                "Staged cleanup failure for harness self-check"
+        Else
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, _
+                "Cleanup", _
+                StepName, _
+                "Cleanup step failed: " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAR FOR THE NEXT STEP
@@ -4766,8 +5184,17 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '
 ' BEHAVIOR
 '   Checks the manager reference, the picker form, worksheet grid icons and
-'   Application.EnableEvents. Records a FAIL row for each violation and counts it
-'   as a cleanup failure
+'   every Application setting the run snapshotted. Records a FAIL row for each
+'   violation and counts it as a cleanup failure
+'
+'   The Application settings verified are the full contents of the pre-run
+'   snapshot:
+'
+'     ScreenUpdating
+'     EnableEvents
+'     DisplayAlerts
+'     Calculation
+'     StatusBar ownership
 '
 ' ERROR POLICY
 '   Best effort. Must not raise, because it runs inside teardown
@@ -4781,8 +5208,28 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '   This routine reports rather than repairs. Silently fixing a leak would hide
 '   the defect that caused it
 '
+'   Verification covers everything the snapshot captures. A field that is
+'   restored but not verified cannot report a restore that silently failed, so
+'   the two lists have to stay the same length
+'
+'   StatusBar is the exception to the rule above, and deliberately so. Setting it
+'   to False hands the bar back to Excel, but reading it immediately afterwards
+'   can still return the text that was there before Excel repaints, so neither
+'   "StatusBar = False" nor a VarType test gives a stable answer at teardown
+'
+'   What is determinable is whether the run left its own message behind, so that
+'   is what is asserted. Restoring the bar is verified as a cleanup step; this
+'   check exists to catch the harness leaking its own status text into the session
+'
+'   Each check reports the expected and actual value. A cleanup failure that only
+'   names the property leaves the next person guessing which of five it was
+'
 '   The scratch worksheet is not checked here. Its deletion is already verified
 '   as a cleanup step
+'
+'   The grid-icon check is weaker than it looks: M_GridIcon_PurgeAll removes the
+'   named shape from every open workbook, so this can pass because teardown
+'   reached beyond the host workbook. Bounding that purge is #14
 '
 ' UPDATED
 '   2026-08-22
@@ -4791,6 +5238,7 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Dim StatusBarText   As String       'Status bar contents after teardown
     Dim LeftLoaded      As Boolean      'True when the picker form is still loaded
     Dim IconCount       As Long         'DatePicker shapes still present
     Dim WS              As Excel.Worksheet  'Worksheet scan variable
@@ -4850,6 +5298,44 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
                 "Application.EnableEvents was not restored to its pre-run value"
         End If
 
+    'Record a screen updating state that does not match the pre-run snapshot
+        If Excel.Application.ScreenUpdating <> AppSnapshot.ScreenUpdating Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.ScreenUpdating was not restored. Expected " & _
+                VBA.CStr(AppSnapshot.ScreenUpdating) & _
+                " but found " & VBA.CStr(Excel.Application.ScreenUpdating)
+        End If
+
+    'Record an alert state that does not match the pre-run snapshot
+        If Excel.Application.DisplayAlerts <> AppSnapshot.DisplayAlerts Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.DisplayAlerts was not restored. Expected " & _
+                VBA.CStr(AppSnapshot.DisplayAlerts) & _
+                " but found " & VBA.CStr(Excel.Application.DisplayAlerts)
+        End If
+
+    'Record a calculation mode that does not match the pre-run snapshot
+        If Excel.Application.Calculation <> AppSnapshot.CalculationMode Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.Calculation was not restored. Expected " & _
+                VBA.CStr(AppSnapshot.CalculationMode) & _
+                " but found " & VBA.CStr(Excel.Application.Calculation)
+        End If
+
+    'Record a status bar still showing the run's own message. Ownership cannot be
+    'asserted: releasing the bar hands it back to Excel, and reading it straight
+    'afterwards can still return the previous text. What the harness controls, and
+    'what actually matters, is that its own message is gone
+        StatusBarText = VBA.CStr(Excel.Application.StatusBar)
+        If VBA.InStr(1, StatusBarText, TST_DP_STATUS_BAR_TEXT, vbTextCompare) > 0 Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.StatusBar still shows the harness message: " & StatusBarText
+        End If
+
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
@@ -4879,26 +5365,37 @@ Private Function TST_DP_ResolveRunState() As String
 '   None
 '
 ' RETURNS
-'   One of TST_DP_STATE_PASS, TST_DP_STATE_FAIL, TST_DP_STATE_FAIL_CLEANUP or
-'   TST_DP_STATE_INCOMPLETE
+'   One of TST_DP_STATE_DIRTY_START, TST_DP_STATE_FAIL, TST_DP_STATE_INCOMPLETE,
+'   TST_DP_STATE_FAIL_CLEANUP or TST_DP_STATE_PASS
 '
 ' BEHAVIOR
-'   Reports FAIL when any assertion failed, INCOMPLETE_SKIPPED when a dispatched
-'   suite did not return, FAIL_CLEANUP when teardown did not complete, and PASS
-'   only when none of those applies
+'   Reports FAIL_DIRTY_START when the run began in an environment a previous run
+'   left behind, FAIL when any assertion failed, INCOMPLETE_SKIPPED when a
+'   dispatched suite did not return, FAIL_CLEANUP when teardown did not complete,
+'   and PASS only when none of those applies
 '
 ' ERROR POLICY
 '   Does not raise
 '
 ' DEPENDENCIES
+'   mTST_DP_DirtyStart
 '   mTST_DP_FailCount
 '   mTST_DP_CleanupFails
 '   mTST_DP_SuitesDispatched
 '   mTST_DP_SuitesCompleted
 '
 ' NOTES
-'   Assertion failures rank above cleanup failures. A run with both is reported
-'   as FAIL, because the assertion failure is the more actionable of the two
+'   A dirty start outranks everything, including assertion failures. It is the
+'   only condition that makes the rest of the report untrustworthy rather than
+'   merely bad: the failures may belong to the environment the previous run left,
+'   not to the code under test. Reporting FAIL first would send someone to debug
+'   an assertion that is an artifact
+'
+'   Below that, assertion failures rank above cleanup failures. A run with both
+'   is reported as FAIL, because the assertion failure is the more actionable
+'
+'   No run can report PASS unless it started clean. That is the closure invariant
+'   of #19 and it is enforced here rather than by the caller
 '
 ' UPDATED
 '   2026-08-22
@@ -4907,6 +5404,13 @@ Private Function TST_DP_ResolveRunState() As String
 '------------------------------------------------------------------------------
 ' RESOLVE STATE
 '------------------------------------------------------------------------------
+    'Report a run that began in an environment it did not establish. Nothing
+    'below this line can be trusted if this is true
+        If mTST_DP_DirtyStart Then
+            TST_DP_ResolveRunState = TST_DP_STATE_DIRTY_START
+            Exit Function
+        End If
+
     'Report assertion failures first, as the most actionable outcome
         If mTST_DP_FailCount > 0 Then
             TST_DP_ResolveRunState = TST_DP_STATE_FAIL
@@ -5647,7 +6151,7 @@ Private Sub TST_DP_PrepareApplicationForRun()
     Excel.Application.ScreenUpdating = False
     Excel.Application.EnableEvents = False
     Excel.Application.DisplayAlerts = False
-    Excel.Application.StatusBar = "Running DatePicker regression tests..."
+    Excel.Application.StatusBar = TST_DP_STATUS_BAR_TEXT
 
 End Sub
 

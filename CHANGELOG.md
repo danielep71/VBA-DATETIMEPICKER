@@ -49,6 +49,65 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added `FAIL_DIRTY_START`, a fifth harness run state, and the preflight that
+  produces it. The harness detected an incomplete predecessor and recorded an
+  `INFO` row about it, but the detection never reached
+  `TST_DP_ResolveRunState`. A run could inherit a dirty environment, pass every
+  assertion against it, and report `PASS`:
+
+  ```text
+  dirty predecessor detected
+      + current assertions pass
+      + current cleanup succeeds
+      → State=PASS
+  ```
+
+  The new state outranks every other outcome, including assertion failures. A
+  dirty start does not make the report bad, it makes it untrustworthy — the
+  failures may belong to the environment the previous run left rather than to the
+  code under test, and reporting `FAIL` first would send someone to debug an
+  artifact.
+
+  Detection also moved to the real entry boundary. It ran inside
+  `TST_DP_RunAllInternal`, after the public entry points had already resolved the
+  host workbook and built the result sheet template — and building that template
+  over a previous run's leftovers is one of the ways the failure presents.
+  `TST_DP_Preflight` now runs before any mutation, reads without writing, and
+  fails closed: an environment it cannot inspect is reported dirty rather than
+  assumed clean.
+
+  Detection takes two independent kinds of evidence, because they survive
+  different kinds of abort:
+
+  ```text
+  mTST_DP_RunInProgress   an abort that left module state intact
+  leftover scratch sheet  an abort that cleared it, such as a project reset
+  ```
+
+  The module flag alone could not see the abort it existed to detect. A VBA
+  project reset zeroes module state, so the next run read `False` and reported a
+  clean start while sitting in the previous run's wreckage. The worksheet is the
+  evidence that survives.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
+
+- Added the `HarnessSelfCheck` suite, which proves the run-state machine instead
+  of assuming it. It drives `TST_DP_ResolveRunState` across all five outcomes,
+  forces a cleanup step to fail through a one-condition injection seam in
+  `TST_DP_CheckCleanupStep`, and runs the preflight against the live environment.
+
+  `FAIL_CLEANUP` and `FAIL_DIRTY_START` are states a passing run never reaches on
+  its own, and
+  [#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15) gates a
+  release on them. A state that has never been observed to occur is not evidence
+  of anything.
+
+  Every counter the suite manipulates belongs to the run it is part of, so each
+  is saved before the first mutation and restored before the first assertion.
+  Assertions run against locals captured during the probe, never against live
+  module state. A staged cleanup failure records as `INFO` rather than `FAIL`,
+  because it is a probe of the routine and not a defect in the run.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
+
 - Added `DP_WriteResult`, the structured outcome of a write-back. Every write
   routine returned nothing, so a caller could not determine how many cells were
   targeted, how many were written, whether anything was skipped or failed, which
@@ -241,6 +300,26 @@ backward-compatible capability, 💥 **major** may break callers.
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
+
+- Fixed final-state verification covering three of the five Application settings
+  the run snapshots. `TST_DP_CaptureApplicationState` captures
+  `ScreenUpdating`, `EnableEvents`, `DisplayAlerts`, `Calculation` and the status
+  bar; `TST_DP_VerifyFinalState` asserted only `EnableEvents`, alongside the
+  picker form and grid icons. A restore that silently failed on any of the other
+  four was invisible.
+
+  All are now verified, and each failure reports the expected and actual value
+  rather than only naming the property.
+
+  The status bar is the deliberate exception. Setting
+  `Application.StatusBar = False` hands the bar back to Excel, but reading it
+  immediately afterwards can still return the previous text, so neither a
+  comparison against `False` nor a `VarType` test gives a stable answer at
+  teardown. What is determinable — and what actually matters — is that the run
+  left no message of its own, so that is what is asserted. The harness status
+  text is now a single constant shared by the routine that sets it and the check
+  that looks for it.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
 
 - Fixed the fast bulk write path never producing a written count. When a
   multi-cell target was written in one operation, `M_WriteBack_PopulateRange`

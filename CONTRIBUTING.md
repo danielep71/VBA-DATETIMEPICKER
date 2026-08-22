@@ -185,10 +185,10 @@ in.
 > [!CAUTION]
 > The harness runs with `Application.EnableEvents = False` and restores it
 > afterwards. An aborted run can leave Excel in that state and leave its scratch
-> and result worksheets behind, which makes the *next* run fail during setup with
-> `1004 — Method 'Add' of object 'Sheets' failed`. Restart Excel and delete the
-> leftover sheets. Detecting this properly is tracked in
-> [#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19).
+> and result worksheets behind. The next run now detects this before it changes
+> anything and reports `FAIL_DIRTY_START` rather than passing against an
+> environment it did not establish. Restart Excel and delete the leftover sheets
+> before treating a later run as valid.
 
 ---
 
@@ -207,12 +207,25 @@ DP_RepairRuntime                 manual
 Quote the harness summary line in the pull request:
 
 ```text
-INFO | Harness | Summary | Run=150; Passed=150; Failed=0
+INFO | Harness | Summary | State=PASS; Run=214; Passed=214; Failed=0; CleanupFailures=0
 ```
 
-A run with any failure is not a pass. Neither is a run that ended early — the
-summary line only appears when the harness completed, so its absence is itself
-the verdict.
+`State` is the verdict. It is one of:
+
+```text
+PASS                the run started clean, passed, and tore down completely
+FAIL                an assertion failed
+FAIL_CLEANUP        assertions passed but teardown did not complete
+INCOMPLETE_SKIPPED  a dispatched suite never returned
+FAIL_DIRTY_START    the run began in an environment a previous run left behind
+```
+
+Only `PASS` is a pass. `FAIL_DIRTY_START` outranks the others because it makes
+the rest of the report untrustworthy rather than merely bad — restart Excel,
+delete the leftover sheets, and run again before reading anything else.
+
+A run that ended early has no summary line at all, so its absence is itself the
+verdict.
 
 Record only environments actually tested.
 
