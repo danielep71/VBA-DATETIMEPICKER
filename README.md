@@ -105,10 +105,10 @@ The picker is designed for real Excel workflows, not only for isolated form demo
 - 🔁 **Repeated write-back workflow**, useful when users move across multiple target cells
 - 🧾 **Table-column write behavior** for structured data-entry ranges
 
-> ⚠️ **Selecting one cell inside an Excel Table data column can populate the entire
-> data column.** This is the current default write policy, and it applies to
-> calendar selection, Today, and Now. See
-> [Known limitations](#-known-limitations).
+> ℹ️ **A selected cell inside an Excel Table data column receives the date on its
+> own.** Calendar selection, Today and Now all write only the selected cell. Use
+> `DP_FillTableColumn` to fill the whole data column; it reports how many cells
+> it would affect before writing.
 
 ### 🧠 Smart activation and cell detection
 
@@ -201,7 +201,7 @@ The DatePicker includes explicit cleanup paths for real workbook sessions.
 - 🖱️ removes right-click menu entries
 - ⌨️ removes keyboard shortcut assignments
 - 🔁 repairs or restarts the manager when needed
-- 🛡️ keeps `Application.EnableEvents` aligned when ensuring the manager
+- 🛡️ preserves the caller's `Application.EnableEvents` state
 
 ### 🏢 Deployment-friendly VBA behavior
 
@@ -399,7 +399,8 @@ VBA-DATETIMEPICKER/
 │  └─ ribbon/
 │     └─ customUI14.xml
 ├─ demo/
-│  └─ DATEPICKER.xlsm
+│  ├─ M_DEMO_BUILDER.bas
+│  └─ M_DP_DEMO.bas
 ├─ assets/
 │  ├─ datepicker-main.png
 │  ├─ datepicker-settings.png
@@ -568,8 +569,9 @@ Primary public entry points are exposed through `M_DatePicker.bas`.
 | `DP_Hide` | Hides the picker while keeping it loaded for fast reuse, unlike `DP_Close` which tears it down |
 | `DP_Today` | Writes today’s date to the current target |
 | `DP_Now` | Writes today’s date with the current system time to the current target |
+| `DP_FillTableColumn` | Writes one date to every cell of the Excel Table data column containing the selection, after confirming the scope |
 | `DP_RepairRuntime` | Repairs runtime state, including event enablement and manager recreation |
-| `M_Picker_EnsureManager` | Ensures settings are loaded, forces `Application.EnableEvents = True`, and creates or repairs the manager |
+| `M_Picker_EnsureManager` | Ensures settings are loaded and creates or repairs the manager. Reports the caller's `Application.EnableEvents` state without changing it |
 | `M_ContextMenu_Update` | Synchronizes right-click menu integration with current settings |
 | `M_KeyboardShortcut_Update` | Synchronizes keyboard shortcut integration with current settings |
 | `M_GridIcon_PurgeAll` | Removes all DatePicker grid icons from open workbooks |
@@ -899,7 +901,7 @@ Use the demo sheet to validate:
 - compact and normal layout behavior
 - WinAPI enabled / disabled behavior
 - runtime repair through DP_RepairRuntime
-- manager repair through M_Picker_EnsureManager
+- caller event state preserved across DP_Start, DP_Show and DP_Preload
 
 
 ## ✅ Test quick start
@@ -911,12 +913,12 @@ Use the demo sheet to validate:
   <img alt="Drag" src="https://img.shields.io/badge/Borderless_Drag-Supported-6f42c1">
 </p>
 
-Use this checklist before publishing a release or updating the demo workbook.
+Use this checklist before publishing a release.
 
 1. Compile the VBA project.
 2. Run `DP_Start`.
-3. Confirm `Application.EnableEvents = True` after manager initialization.
-4. Open the `DATE PICKER DEMO` worksheet from the Ribbon Demo button, if RibbonX is included.
+3. Confirm `Application.EnableEvents` is unchanged after manager initialization.
+4. Build the demo worksheet with `DP_Demo_CreateDemoSheet`, or open it from the Ribbon Demo button if RibbonX is included.
 5. Test the **Basic Single-Cell Scenarios** block:
    - empty date-formatted cell
    - pre-filled date
@@ -927,7 +929,7 @@ Use this checklist before publishing a release or updating the demo workbook.
    - empty datetime-formatted cell
 6. Test the **Format Showcase** block across the listed date and datetime formats.
 7. Test the **Multi-Cell Selection** block and confirm repeated write-back behavior.
-8. Test the **Excel Table Demo** block and confirm table-column-friendly behavior.
+8. Test the **Excel Table Demo** block: picking a date in one cell writes that cell only, and the **Fill Table Column** button fills the column after confirming the scope.
 9. Select eligible and non-eligible cells.
 10. Confirm the in-grid icon shows, moves, hides, removes, and purges according to policy.
 11. Open the picker with `DP_Show`.
@@ -961,6 +963,7 @@ DP_Stop
 
 M_Picker_EnsureManager
 M_GridIcon_PurgeAll
+DP_Demo_CreateDemoSheet
 DP_DemoSheet_Show
 DP_DemoSheet_HideVeryHidden
 ```
@@ -974,17 +977,17 @@ Ribbon callbacks require RibbonX and an IRibbonControl callback context. Test th
 
 | Symptom | Check |
 |---|---|
-| Selection changes do not trigger picker behavior | Confirm `Application.EnableEvents = True` and run `DP_Start` |
+| Selection changes do not trigger picker behavior | Confirm `Application.EnableEvents = True`, then run `DP_Start`. If a macro disabled events, run `DP_RepairRuntime` |
 | Form import fails or looks incomplete | Ensure `UF_DatePicker.frm` and `UF_DatePicker.frx` are both present |
 | Right-click menu entry does not appear | Check settings, then run `M_ContextMenu_Update` |
 | In-grid icon remains after disabling the feature | Run `M_GridIcon_PurgeAll`, then save settings again |
 | Picker does not open near the mouse | Confirm platform capability and WinAPI declarations |
 | Borderless styling does not apply | Confirm `gDP_UseWinAPI = True` and platform support |
 | Settings appear stale | Open settings panel and use Save, or reload with `M_Settings_EnsureLoaded` |
-| Events were disabled by another macro | Run `DP_RepairRuntime` or `M_Picker_EnsureManager` |
+| Events were disabled by another macro | Run `DP_RepairRuntime`. It is the only routine that deliberately re-enables events |
 | Ribbon button does nothing | Confirm the RibbonX `onAction` name exactly matches the public VBA callback name |
 | Ribbon callback raises a compile error on `IRibbonControl` | Ensure the callback is in a standard module and the Office object library is available |
-| Demo Ribbon button fails | Confirm the workbook contains a worksheet named `DATE PICKER DEMO` |
+| Demo Ribbon button fails | The demo sheet is built on first use. If it still fails, confirm `M_DP_DEMO.bas` and `M_DEMO_BUILDER.bas` are imported |
 
 ---
 
@@ -994,18 +997,8 @@ Ribbon callbacks require RibbonX and an IRibbonControl callback context. Test th
   <img alt="Status" src="https://img.shields.io/badge/Read_before_deploying-important-orange">
 </p>
 
-Two known defects are open against the next release. Both are safe to work with
-once you know they exist.
-
-### Table write scope
-
-Selecting a single cell inside an Excel Table data column can write the value to
-the **entire data column**, not just the selected cell. This applies to calendar
-selection, the Today shortcut, and the Now shortcut. Existing values and
-formulas in that column are overwritten.
-
-Keep version history or backups for workbooks that use table write-back.
-Tracked in [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
+One known defect is open against the next release. It is safe to work with once
+you know it exists.
 
 ### Single-owner runtime
 
@@ -1024,6 +1017,9 @@ Tracked in [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
 - Do not call DatePicker entry points inside a macro that depends on
   `Application.EnableEvents = False`. `DP_RepairRuntime` is the only routine
   that deliberately re-enables events.
+- Formulas and existing values are still overwritten within the resolved target.
+  Only the target's size changed; what happens inside it did not. Tracked in
+  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22).
 - Test the exact Ribbon package, not only the source callbacks.
 - Test both 32-bit and 64-bit Office where both are supported.
 - Keep an explicit teardown path available — `DP_Stop` or `DP_RepairRuntime`.

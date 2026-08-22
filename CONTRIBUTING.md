@@ -71,10 +71,10 @@ VBA-DATETIMEPICKER/
 ├─ test/
 │  └─ M_cDP_Test.bas               regression harness
 ├─ demo/
-│  ├─ M_DEMO_BUILDER.bas           builds the demo workbook
-│  └─ DATEPICKER.xlsm              tracked binary — see below
+│  ├─ M_DEMO_BUILDER.bas           worksheet-building primitives
+│  └─ M_DP_DEMO.bas                composes the DatePicker demo sheet
 ├─ dist/
-│  └─ README.md                    the .xlam ships as a release asset
+│  └─ README.md                    binaries ship as release assets
 ├─ CONTRIBUTING.md
 ├─ README.md
 └─ …
@@ -88,20 +88,23 @@ VBA-DATETIMEPICKER/
 
 ### Binary policy
 
-Production source is authoritative. Two binaries exist alongside it, and they
-are governed differently:
+**No workbook or add-in binary is tracked.** Everything under version control is
+text that can be read in a diff.
 
 | Artifact | Tracked | Policy |
 |---|---|---|
-| `demo/DATEPICKER.xlsm` | **yes** | A convenience artifact, not a source of truth. It must be rebuilt from `demo/M_DEMO_BUILDER.bas` and the current `src/` whenever either changes. A commit that updates it must say what changed and why. |
-| `dist/DATETIMEPICKER.xlam` | no | Build output, excluded by `.gitignore`, published only as a GitHub Release asset. |
-| `src/forms/UF_DatePicker.frx` | **yes** | Part of the form source. Not optional and not a build artifact. |
+| `src/forms/UF_DatePicker.frx` | **yes** | Part of the form source. Not optional and not a build artifact. The only tracked binary, and it must travel with its `.frm`. |
+| The demo workbook | no | Built from `demo/M_DP_DEMO.bas` by `DP_Demo_CreateDemoSheet`. Published as a release asset. |
+| `DATETIMEPICKER.xlam` | no | Build output, excluded by `.gitignore`. Published as a release asset. |
 
-> [!WARNING]
-> The demo workbook has no reviewable diff. Changing it is invisible in a pull
-> request beyond the file name, so the description carries the entire burden of
-> explaining what moved. Binding it reproducibly to exported source is tracked
-> in [#33](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/33).
+> [!IMPORTANT]
+> Change the demo by editing `demo/M_DP_DEMO.bas`, never by editing a workbook.
+> A hand-edited workbook produces a release asset that no committed source can
+> reproduce, and nothing in the repository would show it happened.
+
+Both release assets are rebuilt from the tagged source at release time. Neither
+carries a manifest binding it to the commit that produced it yet; that is
+[#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16).
 
 ---
 
@@ -147,7 +150,8 @@ src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
 src/forms/UF_DatePicker.frm          with .frx alongside
 test/M_cDP_Test.bas
-demo/M_DEMO_BUILDER.bas              when needed
+demo/M_DEMO_BUILDER.bas              when working on the demo
+demo/M_DP_DEMO.bas                   with M_DEMO_BUILDER.bas
 ```
 
 Workflow:
@@ -263,12 +267,20 @@ stricter treatment than the UI.
 - `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
   including on the failure path. Preserve that.
 
-> [!WARNING]
-> Selecting one cell inside an Excel Table data column currently writes the
-> **entire data column**. This is the default write policy today and is being
-> changed — see
-> [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13). Any change
-> to write-back must state its effect on this behavior.
+> [!IMPORTANT]
+> A selected cell inside an Excel Table data column receives the date on its own.
+> `DP_FillTableColumn` is the only route to the whole column, and it reports the
+> scope before writing.
+>
+> That default was inverted in `v1.2.0` ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13)).
+> Any change to write-back must state its effect on it, and the `WriteBack` suite
+> covers the three paths — omitted argument, explicit `NoTableGrow:=False`, and
+> `DP_FillTableColumn` — independently. Keep all three.
+
+> [!NOTE]
+> `#13` changed the *size* of the resolved target, not what happens inside it.
+> Formulas and existing values are still overwritten within the target; that is
+> [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22).
 
 ---
 

@@ -149,7 +149,11 @@ bitness is invisible to the person who wrote it.
 
 - [ ] No write extends beyond the visible selection without explicit user
       intent.
-- [ ] Effect on the table-column default (#13) is stated, or none.
+- [ ] Effect on the table write-scope default is stated, or none. A selected
+      table cell receives the date on its own; `DP_FillTableColumn` is the only
+      route to the whole column.
+- [ ] The three `WriteBack` scope paths still pass — omitted argument, explicit
+      `NoTableGrow:=False`, and `DP_FillTableColumn`.
 - [ ] Formulas and existing values are not overwritten as collateral.
 - [ ] Partial writes are reportable rather than silent.
 - [ ] `M_WriteBack_Apply` still restores caller event state on both the success
@@ -175,27 +179,29 @@ bitness is invisible to the person who wrote it.
 
 ---
 
-## 🖼️ Demo workbook
+## 🖼️ Demo sheet
 
 <details>
-<summary>Expand when <code>demo/DATEPICKER.xlsm</code> changed</summary>
+<summary>Expand when <code>demo/M_DP_DEMO.bas</code> or <code>demo/M_DEMO_BUILDER.bas</code> changed</summary>
 
 <br>
 
-The demo workbook is a tracked binary with no reviewable diff. The description
-carries the entire burden of explaining what moved.
+The demo is built from source. No workbook is tracked, so the change is
+reviewable as a diff — but the rendered result is not, and the release asset is
+built from this code.
 
 ```text
-What changed in the workbook:
-Rebuilt from:                       commit / exported source
-M_DEMO_BUILDER.bas changed:         yes / no
-Validated by:
+Sections changed:
+Rebuilt and inspected with:         DP_Demo_CreateDemoSheet
+Tested from:                        embedded / .xlam / both
 ```
 
-- [ ] The workbook was rebuilt from current exported source, not hand-edited.
-- [ ] The change is intentional and described above.
+- [ ] The sheet was rebuilt with `DP_Demo_CreateDemoSheet` and visually checked.
+- [ ] Rebuilding twice produces the same sheet — the builder is idempotent.
+- [ ] Any new worksheet control has a working `OnAction` target.
 - [ ] The demo sheet still starts `xlSheetVeryHidden`.
-- [ ] No personal data, local paths or scratch content is embedded.
+- [ ] No personal data, local paths or scratch content is written into the sheet.
+- [ ] The demo still demonstrates current behaviour, not superseded behaviour.
 
 </details>
 
