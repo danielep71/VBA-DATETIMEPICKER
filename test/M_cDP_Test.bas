@@ -2177,14 +2177,16 @@ Private Sub TST_DP_RunSuite_Manager()
 '   which allows either the remove or the hide implementation path
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Manager         As cDatePickerManager   'Manager instance under test
-    Dim MergedArea      As Excel.Range          'Merged area under test
+    Dim Manager             As cDatePickerManager   'Manager instance under test
+    Dim MergedArea          As Excel.Range          'Merged area under test
+    Dim ErrorNumber         As Long                 'Captured error number
+    Dim ErrorDescription    As String               'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2317,6 +2319,9 @@ Private Sub TST_DP_RunSuite_Manager()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Capture the escaping error before any On Error statement resets Err
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
     'Suppress local cleanup errors
         On Error Resume Next
     'Unmerge the merged area when still present
@@ -2324,10 +2329,10 @@ SuiteFail:
     'Release object references
         Set MergedArea = Nothing
         Set Manager = Nothing
-    'Record the suite-level failure and clear the error
+    'Record the captured suite-level failure
         On Error GoTo 0
         TST_DP_RecordFail "Manager suite failed", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+            "Error " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
         Err.Clear
 
 End Sub
@@ -3338,8 +3343,14 @@ Private Sub TST_DP_RunSuite_UISmoke()
 '   release rather than on every development edit
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrorNumber         As Long                 'Captured error number
+    Dim ErrorDescription    As String               'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3392,14 +3403,17 @@ Private Sub TST_DP_RunSuite_UISmoke()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Capture the escaping error before any On Error statement resets Err
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
     'Attempt to close the picker after a UI smoke failure
         On Error Resume Next
         DP_Close
         Err.Clear
         On Error GoTo 0
-    'Record the suite-level failure and clear the error
+    'Record the captured suite-level failure
         TST_DP_RecordFail "UISmoke suite failed", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+            "Error " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
         Err.Clear
 
 End Sub
