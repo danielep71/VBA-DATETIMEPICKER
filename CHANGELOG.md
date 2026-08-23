@@ -49,6 +49,66 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added `DP_WindowStyleResult`, the structured outcome of applying the borderless
+  window style. `M_Window_RemoveTitleBar` returned nothing, so complete success,
+  a safe abort before any change, and a half-applied style were indistinguishable
+  at the two `UF_DatePicker.frm` call sites.
+
+  ```vb
+  Public Type DP_WindowStyleResult
+      Attempted           As Boolean
+      Applied             As Boolean
+      Committed           As Boolean
+      RolledBack          As Boolean
+      RecoveryRequired    As Boolean
+      FailedStep          As String
+      LastApiError        As Long
+  End Type
+  ```
+
+  The routine is now a `Function`, following the precedent
+  [#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21) set for
+  operations with meaningful partial outcomes. It is a separate type from
+  `DP_WriteResult` because a native-window transaction and a worksheet write-back
+  are different domains. Bare-call syntax still compiles, so both call sites are
+  unchanged.
+  ([#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20))
+
+- Added the `WindowStyle` regression suite, covering every native failure point
+  the transaction has to survive: safe non-attempts, the successful path and its
+  repeat, both pre-commit failures, both post-commit failures with successful
+  rollback, both rollback failures, and one-shot fault consumption for the
+  primary and rollback seams.
+
+  None of those paths can be produced through ordinary input — no test can make
+  `SetWindowPos` fail on a window that has just accepted a style write — so the
+  suite drives them through a narrow test-only seam in `M_DatePicker`:
+
+  ```text
+  two Private injection values
+  one Public setter, M_Window_Test_SetFaultInjection, requiring an argument
+  consumed one-shot at entry, before the window is touched
+  ```
+
+  The setter is technically `Public` only because the regression module is a
+  separate VBA module and cannot assign `Private` state in `M_DatePicker`. It is
+  internal test infrastructure, classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25), absent from
+  the README supported API, and has no effect unless deliberately armed. Failure
+  points are private constants duplicated in both modules rather than a public
+  enum, so the seam does not enlarge the public surface.
+
+  One-shot consumption is the safety property: the injected values are copied to
+  locals and cleared before any native call, so a test run that aborts mid-way
+  cannot leave a later real call poisoned. The harness disarms the seam again on
+  its own cleanup and failure paths.
+
+  The suite asserts a resolvable window handle before exercising any injected
+  failure. A preloaded hidden UserForm has one on supported hosts, which is why
+  these cases run in the standard pack; a missing handle reports as a setup
+  failure rather than passing quietly as a non-attempt.
+  ([#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20))
+
 - Added `FAIL_DIRTY_START`, a fifth harness run state, and the preflight that
   produces it. The harness detected an incomplete predecessor and recorded an
   `INFO` row about it, but the detection never reached
@@ -334,6 +394,48 @@ backward-compatible capability, 💥 **major** may break callers.
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
+
+- Fixed a failed frame refresh leaving the picker form half-styled.
+  `M_Window_RemoveTitleBar` performs several native operations in sequence, and
+  once `SetWindowLong` had cleared `WS_CAPTION` the original style was gone. A
+  later `SetWindowPos` or `DrawMenuBar` failure was written to the Immediate
+  Window and then **ignored**, leaving a window whose style said borderless and
+  whose frame still showed a title bar:
+
+  ```text
+  style commit succeeds
+      -> frame refresh fails
+      -> routine logs and continues
+      -> caller sees no failure
+  ```
+
+  Rollback was not merely absent, it was impossible: the original style was read
+  into `WindowStyle` and then overwritten in place by the mask, so the value
+  needed to restore it had been discarded.
+
+  The operation is now transactional. The original style is kept in its own
+  variable, a successful style write is the commit point, and a post-commit
+  failure restores the original style and refreshes the frame through
+  `M_Window_RollbackStyle`. A rollback that itself fails reports
+  `RecoveryRequired` so the caller can rebuild the form rather than continue
+  against a window in an unknown state. The original failure stays in
+  `FailedStep` and `LastApiError` — a failed rollback must not overwrite the
+  diagnostic that made rollback necessary.
+
+  The closure invariant is derived on the common exit path rather than trusted to
+  each branch, so a future branch cannot forget to mark a partially committed
+  transaction unsafe:
+
+  ```text
+  Committed And Not Applied And Not RolledBack  ->  RecoveryRequired
+  ```
+
+  There is deliberately no shortcut for a caption bit that is already clear. The
+  bit being clear proves a style write succeeded; it proves nothing about the
+  frame refresh that should have followed, and skipping the refresh on that basis
+  would make a half-applied window permanently unrepairable. That constraint is
+  recorded in the routine banner.
+  ([#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20))
 
 - Fixed composite teardown hiding which cleanup operation failed, or that any
   did. `TST_DP_ResetDatePickerArtifacts` wrapped five operations in one
@@ -702,7 +804,10 @@ backward-compatible capability, 💥 **major** may break callers.
 - **Table write scope changes for omitted arguments.** Code that relied on a
   calendar selection, `DP_Today` or `DP_Now` filling a table column must now
   either pass `NoTableGrow:=False` or call `DP_FillTableColumn`.
-- **`DP_WriteResult` is a new public type in `src/`.**
+- **`DP_WriteResult` and `DP_WindowStyleResult` are new public types in `src/`.**
+- **`M_Window_RemoveTitleBar` is now a `Function`.** Its argument list is
+  unchanged and both `UF_DatePicker.frm` call sites use bare-call syntax, so
+  neither needed editing.
 - **`M_WriteBack_Apply` and `DP_FillTableColumn` are now `Function`s.** No
   argument list changed and no existing call site needed editing, because all of
   them use bare-call syntax. Code that wrapped either in `Call` with parentheses,

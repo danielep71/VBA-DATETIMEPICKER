@@ -975,6 +975,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 
     'Run the application-state suite
         TST_DP_RunSuiteSafe "ApplicationState"
+    'Run the borderless window-style transaction suite
+        TST_DP_RunSuiteSafe "WindowStyle"
     'Run the harness run-state and preflight self-checks
         TST_DP_RunSuiteSafe "HarnessSelfCheck"
     'Run optional UF_DatePicker open / close smoke check when requested
@@ -1021,6 +1023,9 @@ CleanExit:
 
         M_GridIcon_PurgeAll
         TST_DP_CheckCleanupStep "PurgeGridIcons"
+
+        M_Window_Test_SetFaultInjection 0, 0
+        TST_DP_CheckCleanupStep "DisarmWindowFaultInjection"
 
     'Delete the scratch worksheet
         TST_DP_DeleteScratchSheet
@@ -1262,6 +1267,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RunSuite_SelectDate
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
+            Case "WINDOWSTYLE"
+                TST_DP_RunSuite_WindowStyle
             Case "HARNESSSELFCHECK"
                 TST_DP_RunSuite_HarnessSelfCheck
 
@@ -3977,6 +3984,256 @@ SuiteFail:
 
 End Sub
 
+Private Sub TST_DP_RunSuite_WindowStyle()
+
+'
+'==============================================================================
+'                          SUITE: WINDOW STYLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves the borderless window-style transaction, including the failure paths
+'   that leave a window half-styled
+'
+' WHY THIS EXISTS
+'   Clearing WS_CAPTION and refreshing the frame are separate native operations.
+'   The first can succeed and the second fail, and no ordinary input can make
+'   SetWindowPos or DrawMenuBar fail on demand
+'
+'   Without deterministic coverage, the rollback this issue exists to add would
+'   never execute outside a real defect
+'
+' BEHAVIOR
+'   Loads the picker form, resolves its native window, then drives every failure
+'   point through the one-shot fault seam and asserts the transaction outcome
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+'   Always disarms the fault seam, including on a failed assertion
+'
+' DEPENDENCIES
+'   DP_Preload
+'   UF_DatePicker
+'   M_Window_GetUserFormHwnd
+'   M_Window_RemoveTitleBar
+'   M_Window_Test_SetFaultInjection
+'   M_Settings_SetUseWinAPI
+'
+' NOTES
+'   The failure-point numbers below are duplicated from private constants in
+'   M_DatePicker rather than shared through a public enum, so the seam does not
+'   enlarge the public API. The two lists must be changed together
+'
+'   A resolvable window handle is asserted before any injected failure. A
+'   preloaded hidden UserForm is expected to have one on supported hosts, but a
+'   missing handle must report as a setup failure rather than pass quietly as a
+'   non-attempt
+'
+'   If the supported host proves otherwise, this suite moves to the UI smoke pack
+'   where the form can be shown deliberately. The precondition is not weakened to
+'   keep it here
+'
+'   The suite ends by reapplying the style cleanly, so a rolled-back form is not
+'   left with its native title bar for whatever runs next
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const FAULT_STYLE_READ      As Long = 1     'Matches M_DatePicker
+    Const FAULT_STYLE_WRITE     As Long = 2     'Matches M_DatePicker
+    Const FAULT_SET_WINDOW_POS  As Long = 3     'Matches M_DatePicker
+    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Matches M_DatePicker
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Matches M_DatePicker
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Matches M_DatePicker
+
+    #If VBA7 Then
+        Dim FormHandle          As LongPtr      'Native window behind the picker form
+    #Else
+        Dim FormHandle          As Long         'Native window behind the picker form
+    #End If
+
+    Dim StyleResult         As DP_WindowStyleResult 'Outcome under test
+    Dim PriorUseWinAPI      As Boolean              'WinAPI setting before the suite
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "WindowStyle"
+    PriorUseWinAPI = gDP_UseWinAPI
+
+'------------------------------------------------------------------------------
+' RESOLVE A REAL WINDOW HANDLE
+'------------------------------------------------------------------------------
+    'Load the picker form without showing it
+    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
+        DP_Preload
+        On Error GoTo SuiteFail
+    'Resolve the native window the transaction will operate on
+        FormHandle = M_Window_GetUserFormHwnd(UF_DatePicker)
+    'Assert the precondition. A missing handle is a setup failure, never a pass
+        TST_DP_AssertTrue "Preloaded form exposes a native window handle", _
+            FormHandle <> 0
+    'Stop here when there is no window to test against
+        If FormHandle = 0 Then
+            TST_DP_RecordFail "Window style suite setup", _
+                "No native window handle. Move these cases to the UI smoke pack " & _
+                "rather than weakening the precondition."
+            GoTo SuiteExit
+        End If
+
+'------------------------------------------------------------------------------
+' SAFE NON-ATTEMPT PATHS
+'------------------------------------------------------------------------------
+    'A missing form must not touch anything
+        StyleResult = M_Window_RemoveTitleBar(Nothing)
+        TST_DP_AssertFalse "Missing form is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "Missing form is not committed", StyleResult.Committed
+    'A disabled WinAPI policy must leave the native title bar alone
+        M_Settings_SetUseWinAPI False
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "WinAPI-disabled path is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "WinAPI-disabled path is not committed", StyleResult.Committed
+        TST_DP_AssertFalse "WinAPI-disabled path reports no recovery", _
+            StyleResult.RecoveryRequired
+        M_Settings_SetUseWinAPI PriorUseWinAPI
+
+'------------------------------------------------------------------------------
+' SUCCESSFUL TRANSACTION
+'------------------------------------------------------------------------------
+    'A clean call must fully apply the borderless style
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Clean call applies the borderless style", StyleResult.Applied
+        TST_DP_AssertTrue "Clean call commits the style write", StyleResult.Committed
+        TST_DP_AssertFalse "Clean call does not roll back", StyleResult.RolledBack
+        TST_DP_AssertFalse "Clean call needs no recovery", StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Clean call reports no failing step", _
+            VBA.vbNullString, StyleResult.FailedStep
+    'A second call on an already-borderless window must remain safe
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Repeat call still applies the style", StyleResult.Applied
+        TST_DP_AssertFalse "Repeat call needs no recovery", StyleResult.RecoveryRequired
+
+'------------------------------------------------------------------------------
+' PRE-COMMIT FAILURES
+'------------------------------------------------------------------------------
+    'A failed style read must abort before anything is changed
+        M_Window_Test_SetFaultInjection FAULT_STYLE_READ
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "Style-read failure is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "Style-read failure is not committed", StyleResult.Committed
+        TST_DP_AssertFalse "Style-read failure needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Style-read failure names its step", _
+            "Read window style", StyleResult.FailedStep
+    'A failed style write must abort before anything is changed
+        M_Window_Test_SetFaultInjection FAULT_STYLE_WRITE
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "Style-write failure is not committed", StyleResult.Committed
+        TST_DP_AssertFalse "Style-write failure is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "Style-write failure needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Style-write failure names its step", _
+            "Write window style", StyleResult.FailedStep
+
+'------------------------------------------------------------------------------
+' POST-COMMIT FAILURES WITH SUCCESSFUL ROLLBACK
+'------------------------------------------------------------------------------
+    'A frame refresh that fails after the commit must roll back
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "SetWindowPos failure commits first", StyleResult.Committed
+        TST_DP_AssertFalse "SetWindowPos failure is not applied", StyleResult.Applied
+        TST_DP_AssertTrue "SetWindowPos failure rolls back", StyleResult.RolledBack
+        TST_DP_AssertFalse "SetWindowPos rollback needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "SetWindowPos failure names its step", _
+            "Refresh non-client frame", StyleResult.FailedStep
+    'A redraw that fails after the commit must roll back
+        M_Window_Test_SetFaultInjection FAULT_DRAW_MENU_BAR
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "DrawMenuBar failure commits first", StyleResult.Committed
+        TST_DP_AssertFalse "DrawMenuBar failure is not applied", StyleResult.Applied
+        TST_DP_AssertTrue "DrawMenuBar failure rolls back", StyleResult.RolledBack
+        TST_DP_AssertFalse "DrawMenuBar rollback needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "DrawMenuBar failure names its step", _
+            "Redraw frame", StyleResult.FailedStep
+
+'------------------------------------------------------------------------------
+' ROLLBACK FAILURES
+'------------------------------------------------------------------------------
+    'A rollback whose style restore fails leaves no known good state
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_STYLE
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "Failed style rollback does not report RolledBack", _
+            StyleResult.RolledBack
+        TST_DP_AssertTrue "Failed style rollback requires recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Failed style rollback keeps the primary step", _
+            "Refresh non-client frame", StyleResult.FailedStep
+    'A rollback whose frame refresh fails leaves no known good state
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_FRAME
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "Failed frame rollback does not report RolledBack", _
+            StyleResult.RolledBack
+        TST_DP_AssertTrue "Failed frame rollback requires recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Failed frame rollback keeps the primary step", _
+            "Refresh non-client frame", StyleResult.FailedStep
+
+'------------------------------------------------------------------------------
+' ONE-SHOT CONSUMPTION
+'------------------------------------------------------------------------------
+    'An armed fault must affect exactly one call
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Armed fault affects the first call", StyleResult.RolledBack
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Armed fault does not affect the next call", _
+            StyleResult.Applied
+        TST_DP_AssertFalse "Consumed fault leaves no rollback", StyleResult.RolledBack
+    'An armed rollback fault must also affect exactly one call
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_STYLE
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Armed rollback fault affects the first call", _
+            StyleResult.RecoveryRequired
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Consumed rollback fault leaves the next call clean", _
+            StyleResult.Applied
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm the seam before anything else runs
+        M_Window_Test_SetFaultInjection 0, 0
+    'Restore the WinAPI setting the suite may have changed
+        M_Settings_SetUseWinAPI PriorUseWinAPI
+    'Leave the form styled rather than rolled back
+        If FormHandle <> 0 Then M_Window_RemoveTitleBar UF_DatePicker
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Never leave the seam armed after a failed assertion
+        M_Window_Test_SetFaultInjection 0, 0
+    'Restore the WinAPI setting the suite may have changed
+        M_Settings_SetUseWinAPI PriorUseWinAPI
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Window style suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
 Private Sub TST_DP_RunSuite_HarnessSelfCheck()
 
 '
@@ -6520,6 +6777,8 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
         M_KeyboardShortcut_Remove
     'Purge all in-grid DatePicker icons
         M_GridIcon_PurgeAll
+    'Disarm any window-style fault injection left by an aborted run
+        M_Window_Test_SetFaultInjection 0, 0
     'Clear any suppressed error
         Err.Clear
     'Restore normal error handling

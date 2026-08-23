@@ -321,6 +321,17 @@ Option Explicit
 '------------------------------------------------------------------------------
 ' PUBLIC TYPES
 '------------------------------------------------------------------------------
+    'Structured outcome of one borderless-window styling operation
+    Public Type DP_WindowStyleResult
+        Attempted               As Boolean      'True when the native style was actually touched
+        Applied                 As Boolean      'True when the borderless style is fully in effect
+        Committed               As Boolean      'True once the style write succeeded
+        RolledBack              As Boolean      'True when the original style was restored
+        RecoveryRequired        As Boolean      'True when the window is in no known good state
+        FailedStep              As String       'Step that failed, empty on success
+        LastApiError            As Long         'WinAPI last-error behind the failure
+    End Type
+
     'Structured outcome of one DatePicker write-back operation
     Public Type DP_WriteResult
         AttemptedCount          As Double       'Cells the write-back targeted
@@ -336,6 +347,14 @@ Option Explicit
         AreasCount              As Long         'Discontiguous areas in the target
         EventsDisabledByCaller  As Boolean      'True when events were already off
     End Type
+
+'------------------------------------------------------------------------------
+' TEST FAULT INJECTION STATE
+'------------------------------------------------------------------------------
+    'Armed failure point for the next borderless-styling call, zero when disarmed
+    Private mDP_TestWindowPrimaryFailure    As Long
+    'Armed rollback failure point for that same call, zero when disarmed
+    Private mDP_TestWindowRollbackFailure   As Long
 
 '------------------------------------------------------------------------------
 ' PUBLIC STATE
@@ -10489,108 +10508,351 @@ Public Function M_Platform_ShouldUseWinAPI() As Boolean
 
 End Function
 
-Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
+#If VBA7 Then
+Private Sub M_Window_RollbackStyle(ByVal hWndForm As LongPtr, ByVal OriginalStyle As LongPtr, ByVal FailedStep As String, ByVal FailedApiError As Long, ByVal RollbackFault As Long, ByRef Result As DP_WindowStyleResult)
+#Else
+Private Sub M_Window_RollbackStyle(ByVal hWndForm As Long, ByVal OriginalStyle As Long, ByVal FailedStep As String, ByVal FailedApiError As Long, ByVal RollbackFault As Long, ByRef Result As DP_WindowStyleResult)
+#End If
 
 '
-'==============================================================================
-'                           WINDOW REMOVE TITLE BAR
+'------------------------------------------------------------------------------
+'                        ROLLBACK WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Removes the native title bar from a DatePicker UserForm on Windows
+'   Restores the window style captured before a committed change, after a later
+'   step in the same operation failed
 '
 ' WHY THIS EXISTS
-'   The DatePicker can use a borderless visual style
-'
-'   Removing the native UserForm title bar requires Windows API calls and must
-'   therefore degrade safely on Mac or when WinAPI behavior is disabled by
-'   settings
+'   Clearing WS_CAPTION succeeds long before the frame is refreshed. A failure in
+'   between leaves a window whose style and frame disagree, which no later call
+'   detects and nothing repairs
 '
 ' INPUTS
-'   Frm
-'     UserForm instance whose native title bar should be removed
+'   hWndForm
+'     Native window handle being restored
+'
+'   OriginalStyle
+'     Style read before the change
+'
+'   FailedStep
+'     Step whose failure triggered this rollback
+'
+'   FailedApiError
+'     WinAPI error behind that failure
+'
+'   RollbackFault
+'     Regression fault-injection point, zero in normal use
+'
+'   Result
+'     Outcome to populate, modified in place
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Exits safely on Mac
-'   Exits safely when no form is supplied
-'   Exits safely when WinAPI usage is disabled
-'   Exits safely when the form window handle cannot be resolved
-'   Reads the current native window style
-'   Removes the WS_CAPTION style bit
-'   Writes the updated native window style
-'   Refreshes the non-client frame
-'   Redraws the menu bar / frame area
-'   Logs WinAPI return-code failures to the Immediate Window
+'   Restores the original style and refreshes the frame
+'
+'   Reports RolledBack when the window is back as it was found, and
+'   RecoveryRequired when it is not
 '
 ' ERROR POLICY
-'   Best-effort UI styling
-'   Suppresses unexpected WinAPI or form-handle errors
-'   Diagnoses both VBA runtime errors and WinAPI return-code failures
-'   Does not raise outward
+'   Does not raise. A rollback that fails is reported, not thrown, because the
+'   caller needs the original failure as well as this one
 '
 ' DEPENDENCIES
-'   M_Platform_ShouldUseWinAPI
-'   M_Window_GetUserFormHwnd
-'   GetWindowLongPtr / GetWindowLong
-'   SetWindowLongPtr / SetWindowLong
+'   SetWindowLong / SetWindowLongPtr
 '   SetWindowPos
-'   DrawMenuBar
-'   Err.LastDllError
-'   SetLastError
-'   GWL_STYLE
-'   WS_CAPTION
-'   SWP_NOMOVE
-'   SWP_NOSIZE
-'   SWP_NOZORDER
-'   SWP_NOACTIVATE
-'   SWP_FRAMECHANGED
 '
 ' NOTES
-'   This routine intentionally does nothing on Mac
+'   The original failure is what the caller has to act on, so FailedStep and
+'   LastApiError describe that failure and not this rollback. A rollback that
+'   fails is reported through RecoveryRequired
 '
-'   SetWindowLongPtr / SetWindowLong return the previous value, not a Boolean
-'   success flag
-'
-'   Because zero can theoretically be either a previous value or a failure, the
-'   routine clears the WinAPI last-error state before the call and then inspects
-'   Err.LastDllError when the return value is zero
-'
-'   SetWindowPos and DrawMenuBar return zero on failure
-'
-'   The routine does not raise outward because title-bar removal is visual polish,
-'   not a functional requirement for date selection
+'   A restored style still needs a frame refresh. Restoring the bits without it
+'   reproduces the same half-applied state in the opposite direction
 '
 ' UPDATED
-'   2026-08-21
-'==============================================================================
-
-#If Mac Then
-
+'   2026-08-23
 '------------------------------------------------------------------------------
-' MAC SAFE EXIT
-'------------------------------------------------------------------------------
-    'Do nothing on Mac
-        Exit Sub
-
-#Else
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_Window_RemoveTitleBar" 'Current procedure name
+    Const PROC_NAME             As String = "M_Window_RollbackStyle"
+
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Fail the rollback style restore
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Fail the rollback frame refresh
+
+    #If VBA7 Then
+        Dim RestoreResult       As LongPtr       'Previous style returned by the restore
+    #Else
+        Dim RestoreResult       As Long          'Previous style returned by the restore
+    #End If
+
+    Dim WindowFlags             As Long          'SetWindowPos flags
+    Dim ApiResult               As Long          'Generic WinAPI Boolean-style result
+    Dim LastApiError            As Long          'WinAPI last-error code
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A rollback must never raise into the operation it is recovering
+        On Error Resume Next
+    'Report the failure that caused the rollback, not the rollback itself
+        Result.FailedStep = FailedStep
+        Result.LastApiError = FailedApiError
+
+'------------------------------------------------------------------------------
+' RESTORE ORIGINAL STYLE
+'------------------------------------------------------------------------------
+    'Clear the WinAPI last-error state before restoring
+        SetLastError 0
+    #If VBA7 Then
+        'Restore the style captured before the change
+            RestoreResult = SetWindowLongPtr(hWndForm, GWL_STYLE, OriginalStyle)
+    #Else
+        'Restore the style captured before the change
+            RestoreResult = SetWindowLong(hWndForm, GWL_STYLE, OriginalStyle)
+    #End If
+    'Force the restore to fail when a regression test has armed this point
+        If RollbackFault = FAULT_ROLLBACK_STYLE Then
+            LastApiError = 0
+            Debug.Print PROC_NAME & " | Step=Restore original style | Injected failure"
+            Result.RecoveryRequired = True
+            Err.Clear
+            Exit Sub
+        End If
+    'Report an unrecoverable window when the style cannot be put back
+        If RestoreResult = 0 Then
+            LastApiError = Err.LastDllError
+            If LastApiError <> 0 Then
+                Debug.Print PROC_NAME & _
+                    " | Step=Restore original style" & _
+                    " | Api=SetWindowLong" & _
+                    " | LastError=" & VBA.CStr(LastApiError)
+                Result.RecoveryRequired = True
+                Err.Clear
+                Exit Sub
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' REFRESH RESTORED FRAME
+'------------------------------------------------------------------------------
+    'Build non-client refresh flags
+        WindowFlags = SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or _
+            SWP_NOACTIVATE Or SWP_FRAMECHANGED
+    'Clear the WinAPI last-error state before SetWindowPos
+        SetLastError 0
+    'Make the restored style visible in the frame
+        ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+    'Force the refresh to fail when a regression test has armed this point
+        If RollbackFault = FAULT_ROLLBACK_FRAME Then ApiResult = 0
+    'Report an unrecoverable window when the restored frame cannot be refreshed
+        If ApiResult = 0 Then
+            LastApiError = Err.LastDllError
+            Debug.Print PROC_NAME & _
+                " | Step=Refresh restored frame" & _
+                " | Api=SetWindowPos" & _
+                " | LastError=" & VBA.CStr(LastApiError)
+            Result.RecoveryRequired = True
+            Err.Clear
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' REPORT ROLLBACK
+'------------------------------------------------------------------------------
+    'The window is back as it was found, so the native title bar is usable
+        Result.RolledBack = True
+    'Clear any suppressed rollback error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Window_Test_SetFaultInjection( _
+    ByVal PrimaryFailurePoint As Long, _
+    Optional ByVal RollbackFailurePoint As Long = 0)
+
+'
+'------------------------------------------------------------------------------
+'                    ARM WINDOW-STYLE FAULT INJECTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a single forced failure inside the next borderless-styling call
+'
+' WHY THIS EXISTS
+'   The failure paths this seam covers cannot be produced on demand. A window
+'   that refuses SetWindowPos after accepting a style write is not something a
+'   test can arrange, and those are exactly the paths where a partially applied
+'   style is possible
+'
+'   The regression module is a separate VBA module and cannot assign private
+'   state in M_DatePicker, so the setter has to be technically Public
+'
+' INPUTS
+'   PrimaryFailurePoint
+'     1 style read, 2 style write, 3 frame refresh, 4 redraw. Zero disarms
+'
+'   RollbackFailurePoint
+'     1 rollback style restore, 2 rollback frame refresh. Zero disarms
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the requested failure points for the next call only
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API,
+'   is classified internal under #25, and must not appear in the README public
+'   API table
+'
+'   Injection is one-shot. M_Window_RemoveTitleBar copies these values and
+'   clears them before touching the window, so an armed test cannot leak into a
+'   later real call
+'
+'   The required first argument keeps this out of the Alt+F8 macro list
+'
+'   Failure-point numbers are duplicated as private constants in the regression
+'   module rather than shared through a public enum, so this seam does not
+'   enlarge the public surface. The two lists must be changed together
+'
+'   No state is persisted. Nothing is written to the registry, a workbook, or
+'   any Excel object
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ARM INJECTION
+'------------------------------------------------------------------------------
+    'Arm the requested primary failure point for the next call only
+        mDP_TestWindowPrimaryFailure = PrimaryFailurePoint
+    'Arm the requested rollback failure point for the next call only
+        mDP_TestWindowRollbackFailure = RollbackFailurePoint
+
+End Sub
+
+Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleResult
+
+'
+'------------------------------------------------------------------------------
+'                      REMOVE USERFORM TITLE BAR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies the borderless DatePicker window style, as one transaction that
+'   either completes or leaves the window as it was found
+'
+' WHY THIS EXISTS
+'   Clearing WS_CAPTION and refreshing the frame are two separate native
+'   operations. The first can succeed and the second fail, leaving a window whose
+'   style says borderless and whose frame still shows a title bar
+'
+'   Reporting through Debug.Print alone made that state invisible: complete
+'   success, a safe abort before any change, and a half-applied style were
+'   indistinguishable to the caller
+'
+' INPUTS
+'   Frm
+'     UserForm whose native window should lose its title bar
+'
+' RETURNS
+'   DP_WindowStyleResult describing the outcome
+'
+'     Attempted           the native style was actually touched
+'     Applied             the borderless style is fully in effect
+'     Committed           the style write succeeded
+'     RolledBack          the original style was restored after a later failure
+'     RecoveryRequired    the window is in no known good state
+'     FailedStep          the step that failed
+'     LastApiError        the WinAPI error behind it
+'
+' BEHAVIOR
+'   Captures the original style, clears WS_CAPTION, and refreshes the frame
+'
+'   A failure before the style write leaves the window untouched
+'
+'   A failure after the style write restores the original style and refreshes the
+'   frame again, so the form falls back to its native title bar
+'
+'   A rollback that itself fails reports RecoveryRequired, so the caller can
+'   unload and rebuild the form rather than continue against a window in an
+'   unknown state
+'
+' ERROR POLICY
+'   Does not raise. Every outcome is reported through the returned result
+'
+'   Diagnostics are still written to the Immediate Window, naming the failing
+'   step and the WinAPI error. They supplement the result, they do not replace it
+'
+' DEPENDENCIES
+'   M_Platform_ShouldUseWinAPI
+'   M_Window_GetUserFormHwnd
+'   GetWindowLong / SetWindowLong
+'   SetWindowPos
+'   DrawMenuBar
+'
+' NOTES
+'   The original style is kept in its own variable. The masked value goes
+'   somewhere else, because rollback is impossible once the two share storage
+'
+'   There is deliberately no shortcut for a caption bit that is already clear.
+'   The bit being clear proves a previous style write succeeded; it proves
+'   nothing about the frame refresh that should have followed. Skipping the
+'   refresh on that basis would make a half-applied window permanently
+'   unrepairable, because every retry would see the bit clear and report success
+'
+'   Repeating the refresh on an already-borderless window is harmless, which is
+'   what makes a second call a valid recovery
+'
+'   The SetWindowLong zero return is ambiguous: it also means the previous style
+'   was zero. Err.LastDllError disambiguates, and that check is preserved
+'
+'   This is a Function so callers can inspect the outcome, but bare-call syntax
+'   still compiles. Both UF_DatePicker call sites are unchanged
+'
+'   Fault injection is consumed one-shot at entry. See
+'   M_Window_Test_SetFaultInjection
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Window_RemoveTitleBar"
+
+    Const FAULT_STYLE_READ      As Long = 1     'Fail the style read
+    Const FAULT_STYLE_WRITE     As Long = 2     'Fail the style write
+    Const FAULT_SET_WINDOW_POS  As Long = 3     'Fail the frame refresh after commit
+    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Fail the redraw after commit
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Fail the rollback style restore
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Fail the rollback frame refresh
 
     #If VBA7 Then
         Dim hWndForm            As LongPtr       'UserForm window handle
-        Dim WindowStyle         As LongPtr       'Window style bits
+        Dim OriginalStyle       As LongPtr       'Window style as found
+        Dim WindowStyle         As LongPtr       'Window style being written
         Dim SetStyleResult      As LongPtr       'Previous window style returned by SetWindowLongPtr
     #Else
         Dim hWndForm            As Long          'UserForm window handle
-        Dim WindowStyle         As Long          'Window style bits
+        Dim OriginalStyle       As Long          'Window style as found
+        Dim WindowStyle         As Long          'Window style being written
         Dim SetStyleResult      As Long          'Previous window style returned by SetWindowLong
     #End If
 
+    Dim Result                  As DP_WindowStyleResult  'Structured outcome
+    Dim PrimaryFault            As Long          'Armed primary failure point
+    Dim RollbackFault           As Long          'Armed rollback failure point
     Dim WindowFlags             As Long          'SetWindowPos flags
     Dim ApiResult               As Long          'Generic WinAPI Boolean-style result
     Dim LastApiError            As Long          'WinAPI last-error code
@@ -10605,6 +10867,12 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         On Error GoTo CleanExit
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+    'Consume any armed fault injection immediately, so a test call cannot leave
+    'this routine poisoned for a later real one
+        PrimaryFault = mDP_TestWindowPrimaryFailure
+        RollbackFault = mDP_TestWindowRollbackFailure
+        mDP_TestWindowPrimaryFailure = 0
+        mDP_TestWindowRollbackFailure = 0
 
 '------------------------------------------------------------------------------
 ' VALIDATE INPUT
@@ -10619,38 +10887,40 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Check WinAPI policy"
-    'Exit if WinAPI features should not be used
+    'Leave the native title bar in place when WinAPI use is disabled
         If Not M_Platform_ShouldUseWinAPI Then GoTo CleanExit
-
 
 '------------------------------------------------------------------------------
 ' RESOLVE FORM HANDLE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve form handle"
-    'Resolve the form window handle
+    'Resolve the native window behind the UserForm
         hWndForm = M_Window_GetUserFormHwnd(Frm)
-    'Exit if the form window handle is unavailable
+    'Exit when the window cannot be resolved
         If hWndForm = 0 Then GoTo CleanExit
-
 
 '------------------------------------------------------------------------------
 ' READ WINDOW STYLE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Read window style"
-
+    'Clear the WinAPI last-error state before reading
+        SetLastError 0
     #If VBA7 Then
-        'Read current window style
-            WindowStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
+        'Read the current window style
+            OriginalStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
     #Else
-        'Read current window style
-            WindowStyle = GetWindowLong(hWndForm, GWL_STYLE)
+        'Read the current window style
+            OriginalStyle = GetWindowLong(hWndForm, GWL_STYLE)
     #End If
-
-    'Exit if the style cannot be read
-        If WindowStyle = 0 Then
+    'Force the read to fail when a regression test has armed this point
+        If PrimaryFault = FAULT_STYLE_READ Then OriginalStyle = 0
+    'Abort before any change when the style cannot be read
+        If OriginalStyle = 0 Then
             LastApiError = Err.LastDllError
+            Result.FailedStep = HandlerStep
+            Result.LastApiError = LastApiError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=GetWindowLong" & _
@@ -10659,21 +10929,16 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         End If
 
 '------------------------------------------------------------------------------
-' REMOVE TITLE BAR STYLE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Remove title bar style"
-    'Remove the caption style bit
-        WindowStyle = (WindowStyle And Not WS_CAPTION)
-
-'------------------------------------------------------------------------------
 ' WRITE WINDOW STYLE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Write window style"
-    'Clear the WinAPI last-error state before SetWindowLong
+    'Build the borderless style without losing the original
+        WindowStyle = (OriginalStyle And Not WS_CAPTION)
+    'Record that the native window is about to be changed
+        Result.Attempted = True
+    'Clear the WinAPI last-error state before writing
         SetLastError 0
-
     #If VBA7 Then
         'Write the updated window style
             SetStyleResult = SetWindowLongPtr(hWndForm, GWL_STYLE, WindowStyle)
@@ -10681,11 +10946,24 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         'Write the updated window style
             SetStyleResult = SetWindowLong(hWndForm, GWL_STYLE, WindowStyle)
     #End If
-
+    'Force the write to fail when a regression test has armed this point
+        If PrimaryFault = FAULT_STYLE_WRITE Then
+            Result.FailedStep = HandlerStep
+            Result.LastApiError = 0
+            Result.Attempted = False
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Api=SetWindowLong" & _
+                " | Injected failure"
+            GoTo CleanExit
+        End If
     'Diagnose SetWindowLong failure when return is zero and LastError is non-zero
         If SetStyleResult = 0 Then
             LastApiError = Err.LastDllError
             If LastApiError <> 0 Then
+                Result.FailedStep = HandlerStep
+                Result.LastApiError = LastApiError
+                Result.Attempted = False
                 Debug.Print PROC_NAME & _
                     " | Step=" & HandlerStep & _
                     " | Api=SetWindowLong" & _
@@ -10693,6 +10971,8 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
                 GoTo CleanExit
             End If
         End If
+    'The style is now committed. Everything after this point must recover
+        Result.Committed = True
 
 '------------------------------------------------------------------------------
 ' REFRESH NON-CLIENT FRAME
@@ -10706,13 +10986,18 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         SetLastError 0
     'Force Windows to recalculate the frame
         ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
-    'Diagnose SetWindowPos return-code failure
+    'Force the refresh to fail when a regression test has armed this point
+        If PrimaryFault = FAULT_SET_WINDOW_POS Then ApiResult = 0
+    'Recover when the frame could not be refreshed after the style was committed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=SetWindowPos" & _
                 " | LastError=" & VBA.CStr(LastApiError)
+            M_Window_RollbackStyle hWndForm, OriginalStyle, HandlerStep, _
+                LastApiError, RollbackFault, Result
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -10724,14 +11009,25 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         SetLastError 0
     'Redraw menu bar and non-client elements
         ApiResult = DrawMenuBar(hWndForm)
-    'Diagnose DrawMenuBar return-code failure
+    'Force the redraw to fail when a regression test has armed this point
+        If PrimaryFault = FAULT_DRAW_MENU_BAR Then ApiResult = 0
+    'Recover when the redraw could not be completed after the style was committed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=DrawMenuBar" & _
                 " | LastError=" & VBA.CStr(LastApiError)
+            M_Window_RollbackStyle hWndForm, OriginalStyle, HandlerStep, _
+                LastApiError, RollbackFault, Result
+            GoTo CleanExit
         End If
+
+'------------------------------------------------------------------------------
+' REPORT SUCCESS
+'------------------------------------------------------------------------------
+    'The borderless style is fully in effect
+        Result.Applied = True
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -10743,19 +11039,24 @@ CleanExit:
         ErrorDescription = Err.Description
     'Write diagnostics only when VBA raised during borderless styling
         If ErrorNumber <> 0 Then
+            If VBA.LenB(Result.FailedStep) = 0 Then Result.FailedStep = HandlerStep
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Error=" & VBA.CStr(ErrorNumber) & _
                 " | " & ErrorDescription
         End If
+    'A committed style that was neither applied nor rolled back needs recovery
+        If Result.Committed And Not Result.Applied And Not Result.RolledBack Then
+            Result.RecoveryRequired = True
+        End If
+    'Publish the outcome
+        M_Window_RemoveTitleBar = Result
     'Clear any suppressed styling error
         Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
-#End If
-
-End Sub
+End Function
 
 Public Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)
 
