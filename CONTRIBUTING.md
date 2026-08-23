@@ -286,7 +286,9 @@ stricter treatment than the UI.
 
 - The visible Excel selection is the strongest signal of intended scope.
 - Expanding beyond the selection requires explicit user intent, not inference.
-- Formulas and existing values are not collateral.
+- Formulas are not collateral. They are preserved by default and replaced only
+  when a caller passes `OverwriteFormulas:=True`. Existing literal values are
+  fair game; a formula is not.
 - A partial write must be reportable, not silent.
 - `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
   including on the failure path. Preserve that.
@@ -386,9 +388,11 @@ Four rules hold this together:
 > `DP_FillTableColumn` — independently. Keep all three.
 
 > [!NOTE]
-> `#13` changed the *size* of the resolved target, not what happens inside it.
-> Formulas and existing values are still overwritten within the target; that is
-> [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22).
+> `#13` changed the *size* of the resolved target. What happens inside it is
+> settled separately: literal values are overwritten, formulas are preserved
+> unless the caller opts in, and array-formula cells cannot be written at all.
+> The three are distinct classifications in `DP_WriteResult`, because a preserved
+> formula is a policy decision the caller can reverse and a failure is not.
 
 ---
 

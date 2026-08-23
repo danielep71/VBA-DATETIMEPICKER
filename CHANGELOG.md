@@ -408,6 +408,60 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🐛 Fixed
 
+- Fixed write-back destroying formulas. Nothing inspected whether a target cell
+  held one: the per-cell writer refused missing cells, protected locked cells and
+  array-formula cells, and wrote over everything else.
+
+  Formula cells are now preserved by default and reported as a distinct
+  classification:
+
+  ```text
+  cell is empty                        written
+  cell holds a literal value           written
+  cell holds a formula                 preserved and reported
+  cell holds a date-returning formula  preserved and reported
+  OverwriteFormulas:=True supplied     formulas written
+  ```
+
+  A formula that evaluates to a date is still a formula. Replacing a displayed
+  date does not imply deleting what produced it.
+
+  **Two gates, because one is not enough.** A rule in the per-cell writer alone
+  would be bypassed on the most common multi-cell path:
+  `M_WriteBack_TryBulkWriteRange` assigns across the whole target in one
+  operation and never reaches per-cell inspection. The fast path is therefore
+  refused whenever the target holds any formula, mirroring the array guard from
+  [#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21).
+  `Range.HasFormula` follows the same `True`/`False`/`Null` convention, and
+  `Null` — the mixed case — refuses rather than being coerced to `False`. That
+  coercion was the bypass this had to prevent.
+
+  A single formula disables the fast path for the whole target. That is
+  deliberate: partitioning the range would be faster on a long column containing
+  one formula, at the cost of a scan, a block walk, and a new failure mode if the
+  partition and the write disagree.
+
+  The gate order is locked, then array, then formula. An array cell cannot be
+  written at all, which is stronger and non-overridable, so it stays a failure
+  whichever way `OverwriteFormulas` is set.
+
+  `DP_WriteResult` gains `FormulaSkippedCount` and `FormulaSkippedAddresses`, and
+  the accounting invariant extends to:
+
+  ```text
+  AttemptedCount = WrittenCount + LockedSkippedCount
+                 + FormulaSkippedCount + FailedCount
+  ```
+
+  Every cell increments exactly one term, so it holds by construction.
+  `M_WriteBack_DescribeShortfall` reports preserved formulas alongside the other
+  classifications rather than through a second path.
+
+  The override is a procedure parameter defaulting to protection, never a
+  persisted setting, and no default UI path enables it — the same shape
+  `NoTableGrow` already uses.
+  ([#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22))
+
 - Fixed a stale grid-icon reference raising `424 Object required` on teardown,
   and silently suppressing icon creation. Every use of the tracked icon was
   guarded by:
@@ -890,6 +944,11 @@ backward-compatible capability, 💥 **major** may break callers.
   right-click, in-grid icon and keyboard shortcut all disabled is now permitted
   and preserved. Anything relying on the shortcut re-enabling itself when the
   other two were disabled must now set `EnableKeyboardShortcut` explicitly.
+- **Formula cells are no longer overwritten.** Code relying on write-back
+  replacing a formula must now pass `OverwriteFormulas:=True` to
+  `M_WriteBack_Apply` or `DP_FillTableColumn`. A fill that previously reported
+  every predicted cell written may now report fewer, with the preserved
+  addresses listed.
 - **`DP_WriteResult` and `DP_WindowStyleResult` are new public types in `src/`.**
 - **`M_Window_RemoveTitleBar` is now a `Function`.** Its argument list is
   unchanged and both `UF_DatePicker.frm` call sites use bare-call syntax, so

@@ -1056,9 +1056,15 @@ button instead.
 - Do not call DatePicker entry points inside a macro that depends on
   `Application.EnableEvents = False`. `DP_RepairRuntime` is the only routine
   that deliberately re-enables events.
-- Formulas and existing values are still overwritten within the resolved target.
-  Only the target's size changed; what happens inside it did not. Tracked in
-  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22).
+- Formula cells are preserved. A cell holding a formula is skipped and reported,
+  including one that evaluates to a date: replacing a displayed date does not
+  imply deleting the formula that produced it. Existing literal values are still
+  overwritten. Cells belonging to an array formula cannot be written at all and
+  are reported as failures.
+- The written and skipped counts are returned, not inferred. `DP_FillTableColumn`
+  compares what it predicted against what it targeted, so a fill that preserves
+  three formulas reports 247 targeted and 244 written rather than implying every
+  cell changed.
 - Test the exact Ribbon package, not only the source callbacks.
 - Test both 32-bit and 64-bit Office where both are supported.
 - Keep an explicit teardown path available — `DP_Stop` or `DP_RepairRuntime`.

@@ -338,6 +338,8 @@ Option Explicit
         WrittenCount            As Double       'Cells that received the value
         LockedSkippedCount      As Double       'Protected locked cells skipped
         LockedSkippedAddresses  As String       'Addresses of the skipped locked cells
+        FormulaSkippedCount     As Double       'Formula cells preserved by policy
+        FormulaSkippedAddresses As String       'Addresses of the preserved formula cells
         FailedCount             As Double       'Other suppressed write failures
         FailedAddresses         As String       'Addresses of the failed cells
         ResolvedTargetAddress   As String       'Address of the resolved target
@@ -6975,7 +6977,8 @@ ErrorHandler:
 End Sub
 Public Function DP_FillTableColumn( _
     ByVal ValueToWrite As Date, _
-    Optional ByVal ConfirmFill As Boolean = True) As DP_WriteResult
+    Optional ByVal ConfirmFill As Boolean = True, _
+    Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult
 
 '
 '------------------------------------------------------------------------------
@@ -7065,7 +7068,7 @@ Public Function DP_FillTableColumn( _
 '   between preview and application, or that the two resolution paths diverged
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7151,7 +7154,8 @@ Public Function DP_FillTableColumn( _
         gDP_WriteValue = ValueToWrite
         ValueApplied = True
     'Write through the normal engine with table expansion explicitly enabled
-        FillResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, NoTableGrow:=False)
+        FillResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, _
+            NoTableGrow:=False, OverwriteFormulas:=OverwriteFormulas)
     'Publish the structured outcome
         DP_FillTableColumn = FillResult
 
@@ -7220,7 +7224,8 @@ End Function
 
 Public Function M_WriteBack_Apply( _
     ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = True) As DP_WriteResult
+    Optional ByVal NoTableGrow As Boolean = True, _
+    Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult
 
 '
 '------------------------------------------------------------------------------
@@ -7249,6 +7254,7 @@ Public Function M_WriteBack_Apply( _
 '
 '     AttemptedCount, WrittenCount
 '     LockedSkippedCount, LockedSkippedAddresses
+'     FormulaSkippedCount, FormulaSkippedAddresses
 '     FailedCount, FailedAddresses
 '     ResolvedTargetAddress, ExpandedToTableColumn, TableName, ColumnName
 '     AreasCount, EventsDisabledByCaller
@@ -7303,10 +7309,11 @@ Public Function M_WriteBack_Apply( _
 '   once for the whole operation
 '
 '   The returned result satisfies:
-'     AttemptedCount = WrittenCount + LockedSkippedCount + FailedCount
+'     AttemptedCount = WrittenCount + LockedSkippedCount
+'                    + FormulaSkippedCount + FailedCount
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7388,7 +7395,7 @@ Public Function M_WriteBack_Apply( _
     'Track the current handler step
         HandlerStep = "Resolve and apply write-back target"
     'Apply the requested action to the current selection
-        M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow, Result
+        M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow, OverwriteFormulas, Result
     'Record the caller's event state in the same result
         Result.EventsDisabledByCaller = Not PreviousEvents
     'Publish the structured outcome
@@ -7655,7 +7662,7 @@ Public Function M_WriteBack_DescribeShortfall( _
 '   with an ellipsis while the counts stay exact
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7678,6 +7685,18 @@ Public Function M_WriteBack_DescribeShortfall( _
         If Result.LockedSkippedCount > 0 Then
             Description = VBA.CStr(Result.LockedSkippedCount) & " protected locked: " & _
                 Result.LockedSkippedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' DESCRIBE PRESERVED FORMULA CELLS
+'------------------------------------------------------------------------------
+    'Describe the formula cells policy left in place
+        If Result.FormulaSkippedCount > 0 Then
+            If VBA.LenB(Description) > 0 Then
+                Description = Description & VBA.vbCrLf
+            End If
+            Description = Description & VBA.CStr(Result.FormulaSkippedCount) & _
+                " formula cells preserved: " & Result.FormulaSkippedAddresses
         End If
 
 '------------------------------------------------------------------------------
@@ -8067,6 +8086,7 @@ End Sub
 Private Sub M_WriteBack_ApplyResolvedTarget( _
     ByVal Target As Range, _
     ByVal iType As DP_WriteAction, _
+    ByVal OverwriteFormulas As Boolean, _
     ByRef Result As DP_WriteResult)
 
 '
@@ -8117,7 +8137,7 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   reports the whole write rather than its last area
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -8182,7 +8202,7 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
     'Loop through each discontiguous target area
         For Each Block In Target.Areas
             'Populate this target area into the accumulating result
-                M_WriteBack_PopulateRange Block, iType, Result
+                M_WriteBack_PopulateRange Block, iType, Result, OverwriteFormulas
         Next Block
 
 '------------------------------------------------------------------------------
@@ -8208,6 +8228,7 @@ End Sub
 Private Sub M_WriteBack_ResolveAndApplyTarget( _
     ByVal iType As DP_WriteAction, _
     ByVal NoTableGrow As Boolean, _
+    ByVal OverwriteFormulas As Boolean, _
     ByRef Result As DP_WriteResult)
 
 '
@@ -8259,7 +8280,7 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '   safe default lives on the public entry points, not on this private stage
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -8290,7 +8311,7 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 ' APPLY TO TARGET
 '------------------------------------------------------------------------------
     'Write the value to the resolved range
-        M_WriteBack_ApplyResolvedTarget Target, iType, Result
+        M_WriteBack_ApplyResolvedTarget Target, iType, OverwriteFormulas, Result
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -8302,7 +8323,8 @@ End Sub
 Public Sub M_WriteBack_PopulateRange( _
     ByVal oRange As Range, _
     ByVal iType As DP_WriteAction, _
-    ByRef Result As DP_WriteResult)
+    ByRef Result As DP_WriteResult, _
+    Optional ByVal OverwriteFormulas As Boolean = False)
 
 '
 '------------------------------------------------------------------------------
@@ -8346,6 +8368,8 @@ Public Sub M_WriteBack_PopulateRange( _
 '   Protected locked cells may be skipped by the fallback path when at least one
 '   target cell is written successfully
 '
+'   Formula cells are preserved unless the caller opted into replacing them
+'
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the target range is missing, the write
 '   action is unsupported, the write value cannot be resolved, or no cell in this
@@ -8382,6 +8406,13 @@ Public Sub M_WriteBack_PopulateRange( _
 '   report cells written that were not written. Range.HasArray returns Null for a
 '   mixed target, and an unreadable array state is also treated as a refusal
 '
+'   The bulk path is refused again when formula protection is active and the
+'   target holds any formula, because the bulk write never reaches per-cell
+'   inspection and would destroy them. Range.HasFormula follows the same
+'   True/False/Null convention, and Null is the mixed case that must refuse. A
+'   single formula therefore disables the fast path for the whole target: that is
+'   deliberate, and cheaper than a partition that could disagree with the write
+'
 '   This routine reports through Result and displays nothing. Deciding whether a
 '   human is told about a partial write belongs to the entry point that was
 '   invoked, which sees the whole operation rather than one area
@@ -8390,7 +8421,7 @@ Public Sub M_WriteBack_PopulateRange( _
 '   Date and DateTime values are written through Excel's normal date handling
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -8402,6 +8433,7 @@ Public Sub M_WriteBack_PopulateRange( _
     Dim Cell            As Range            'Current target cell
     Dim WriteValue      As Variant          'Resolved write value
     Dim ArrayState      As Variant          'Range.HasArray for the target
+    Dim FormulaState    As Variant          'Range.HasFormula for the target
     Dim BulkAllowed     As Boolean          'True when the fast path may be used
     Dim HandlerStep     As String           'Current handler step for diagnostics
 
@@ -8471,6 +8503,24 @@ Public Sub M_WriteBack_PopulateRange( _
                     BulkAllowed = False
                 End If
         End If
+    'Resolve whether the target holds formulas that policy protects
+        If BulkAllowed And Not OverwriteFormulas Then
+            'Treat an unreadable formula state as a reason to refuse the fast path
+                On Error Resume Next
+                FormulaState = oRange.HasFormula
+                If Err.Number <> 0 Then
+                    FormulaState = Null
+                    Err.Clear
+                End If
+                On Error GoTo ErrorHandler
+            'Refuse the fast path when any target cell holds a formula. Null is the
+            'mixed case and must refuse, not be coerced to False
+                If VBA.IsNull(FormulaState) Then
+                    BulkAllowed = False
+                ElseIf VBA.CBool(FormulaState) Then
+                    BulkAllowed = False
+                End If
+        End If
     'Account for the whole range and exit when the fast bulk write succeeds
         If BulkAllowed Then
             If M_WriteBack_TryBulkWriteRange(oRange, WriteValue) Then
@@ -8489,7 +8539,7 @@ Public Sub M_WriteBack_PopulateRange( _
     'Loop through each target cell
         For Each Cell In oRange.Cells
             'Count only the cells that actually received the value
-                If M_WriteBack_TryWriteCell(Cell, WriteValue, AreaResult) Then
+                If M_WriteBack_TryWriteCell(Cell, WriteValue, OverwriteFormulas, AreaResult) Then
                     AreaResult.WrittenCount = AreaResult.WrittenCount + 1
                 End If
         Next Cell
@@ -8504,7 +8554,8 @@ Public Sub M_WriteBack_PopulateRange( _
             Err.Raise vbObjectError + 516, PROC_NAME, _
                 "DatePicker write-back did not write any cell. Target cells: " & _
                 VBA.CStr(AreaResult.AttemptedCount) & "; protected locked cells skipped: " & _
-                VBA.CStr(AreaResult.LockedSkippedCount) & "; other failures: " & _
+                VBA.CStr(AreaResult.LockedSkippedCount) & "; formula cells preserved: " & _
+                VBA.CStr(AreaResult.FormulaSkippedCount) & "; other failures: " & _
                 VBA.CStr(AreaResult.FailedCount)
         End If
 
@@ -8518,6 +8569,7 @@ AccumulateResult:
         Result.AttemptedCount = Result.AttemptedCount + AreaResult.AttemptedCount
         Result.WrittenCount = Result.WrittenCount + AreaResult.WrittenCount
         Result.LockedSkippedCount = Result.LockedSkippedCount + AreaResult.LockedSkippedCount
+        Result.FormulaSkippedCount = Result.FormulaSkippedCount + AreaResult.FormulaSkippedCount
         Result.FailedCount = Result.FailedCount + AreaResult.FailedCount
         Result.AreasCount = Result.AreasCount + AreaResult.AreasCount
     'Join the skipped locked addresses
@@ -8527,6 +8579,15 @@ AccumulateResult:
             Else
                 Result.LockedSkippedAddresses = Result.LockedSkippedAddresses & ", " & _
                     AreaResult.LockedSkippedAddresses
+            End If
+        End If
+    'Join the preserved formula addresses
+        If VBA.LenB(AreaResult.FormulaSkippedAddresses) > 0 Then
+            If VBA.LenB(Result.FormulaSkippedAddresses) = 0 Then
+                Result.FormulaSkippedAddresses = AreaResult.FormulaSkippedAddresses
+            Else
+                Result.FormulaSkippedAddresses = Result.FormulaSkippedAddresses & ", " & _
+                    AreaResult.FormulaSkippedAddresses
             End If
         End If
     'Join the failed addresses
@@ -8668,6 +8729,7 @@ End Function
 Private Function M_WriteBack_TryWriteCell( _
     ByVal TargetCell As Range, _
     ByVal WriteValue As Variant, _
+    ByVal OverwriteFormulas As Boolean, _
     ByRef Result As DP_WriteResult) As Boolean
 
 '
@@ -8694,6 +8756,9 @@ Private Function M_WriteBack_TryWriteCell( _
 '   WriteValue
 '     DatePicker value to write
 '
+'   OverwriteFormulas
+'     False preserves a cell holding a formula. True replaces it
+'
 '   Result
 '     Accumulating DP_WriteResult. Its skip and failure counters are incremented
 '     in place and the corresponding cell addresses are recorded
@@ -8706,9 +8771,10 @@ Private Function M_WriteBack_TryWriteCell( _
 '
 ' BEHAVIOR
 '   Validates the target cell, skips protected locked cells, refuses cells that
-'   belong to an array formula, writes the supplied value to writable cells,
-'   returns True only after a successful write, records the address behind every
-'   skip and failure, and logs suppressed write failures to the Immediate Window
+'   belong to an array formula, preserves formula cells unless the caller opted
+'   into replacing them, writes the supplied value to writable cells, returns True
+'   only after a successful write, records the address behind every skip and
+'   failure, and logs suppressed write failures to the Immediate Window
 '
 ' ERROR POLICY
 '   Best-effort per-cell write
@@ -8739,13 +8805,18 @@ Private Function M_WriteBack_TryWriteCell( _
 '   interactive edit but declines the same assignment silently through the object
 '   model, so an attempted write would return success having changed nothing
 '
-'   That is a detectable inability to write, not a policy decision about
-'   formulas. The formula overwrite policy is #22
+'   The array gate runs before the formula gate deliberately. An array cell cannot
+'   be written at all, which is a stronger and non-overridable condition than a
+'   formula the caller could choose to replace. Reporting it as a failure stays
+'   correct whichever way OverwriteFormulas is set
+'
+'   Every cell increments exactly one of the written, locked, formula-skipped or
+'   failed counts, so the caller's accounting invariant holds by construction
 '
 '   Counters stay exact. Only the reported address lists are capped
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -8818,6 +8889,21 @@ Private Function M_WriteBack_TryWriteCell( _
             Debug.Print PROC_NAME & ": skipped array-formula cell " & _
                 TargetSheetName & "!" & TargetAddress
             Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' PRESERVE FORMULA CELLS
+'------------------------------------------------------------------------------
+    'Leave a formula in place unless the caller explicitly opted into replacing it.
+    'A formula that evaluates to a date is still a formula: the user may mean to
+    'replace the displayed date without meaning to delete what produced it
+        If Not OverwriteFormulas Then
+            If TargetCell.HasFormula Then
+                Result.FormulaSkippedCount = Result.FormulaSkippedCount + 1
+                M_WriteBack_AppendAddress Result.FormulaSkippedAddresses, _
+                    Result.FormulaSkippedCount, TargetSheetName & "!" & TargetAddress
+                Exit Function
+            End If
         End If
 
 '------------------------------------------------------------------------------

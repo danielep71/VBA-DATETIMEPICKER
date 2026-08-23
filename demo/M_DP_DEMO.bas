@@ -729,7 +729,7 @@ Private Sub DP_Demo_BuildSingleCellSection(ByVal WS As Worksheet)
         WS.Range("C18").Value = "Formula returning date"
         WS.Range("D18").Formula = "=TODAY()"
         WS.Range("E18").Value = "Positive"
-        WS.Range("F18").Value = "Formula result is date-like."
+        WS.Range("F18").Value = "Date-like result; formula preserved on write."
     'Empty datetime-formatted cell
         WS.Range("C19").Value = "Empty datetime-formatted cell"
         WS.Range("E19").Value = "Positive"

@@ -190,6 +190,9 @@ Option Explicit
     Private mTST_DP_FailCount       As Long             'Total assertions failed in the current run
     Private mTST_DP_CurrentSuite    As String           'Suite name currently being executed
     Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
+    Private mTST_DP_ScratchAddBefore As Long            'Worksheet count immediately before the scratch-sheet Add
+    Private mTST_DP_ScratchAddAfter  As Long            'Worksheet count immediately after it
+    Private mTST_DP_ScratchAddOrphan As String          'Name of a worksheet the failed Add left behind
     Private mTST_DP_MenuAtStart     As Long             'Context-menu controls registered before the run
     Private mTST_DP_MenuAfterRemove As Long             'Context-menu controls left immediately after removal
     Private mTST_DP_RunInProgress   As Boolean          'True between run start and completed teardown
@@ -475,7 +478,11 @@ Private Function TST_DP_DescribeHostWorkbook() As String
             "; " & TST_DP_RESULT_SHEET_NAME & " exists=" & _
             VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_RESULT_SHEET_NAME)) & _
             "; " & TST_DP_SCRATCH_SHEET_NAME & " exists=" & _
-            VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME))
+            VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME)) & _
+            "; WorksheetsBeforeAdd=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
+            "; WorksheetsAfterAdd=" & VBA.CStr(mTST_DP_ScratchAddAfter) & _
+            "; OrphanRemoved=" & _
+            VBA.IIf(VBA.LenB(mTST_DP_ScratchAddOrphan) = 0, "none", mTST_DP_ScratchAddOrphan)
     'Return the description
         TST_DP_DescribeHostWorkbook = Description
     'Clear any suppressed diagnostic error
@@ -2326,6 +2333,7 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '   DP_FillTableColumn
 '   TST_DP_ExpectPartialWriteReport
 '   TST_DP_ExpectFailedAddressReport
+'   TST_DP_ExpectFormulaProtection
 '   TST_DP_AssertWriteResultBalances
 '   gDP_WriteValue
 '   mTST_DP_ScratchSheet
@@ -2639,6 +2647,12 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Assert no table row was written from a multi-cell anchor
         TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a multi-cell anchor", _
             VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+
+'------------------------------------------------------------------------------
+' FORMULA PROTECTION
+'------------------------------------------------------------------------------
+    'Assert formula cells are preserved, reported, and replaceable on request
+        TST_DP_ExpectFormulaProtection
 
 '------------------------------------------------------------------------------
 ' PARTIAL WRITE REPORTING
@@ -5264,29 +5278,180 @@ Private Sub TST_DP_AssertWriteResultBalances( _
 '==============================================================================
 '   Asserts the accounting invariant every completed write result must satisfy:
 '
-'       AttemptedCount = WrittenCount + LockedSkippedCount + FailedCount
+'       AttemptedCount = WrittenCount + LockedSkippedCount
+'                      + FormulaSkippedCount + FailedCount
 '
-'   #22 extends the right-hand side with FormulaSkippedCount. This assertion is
-'   the place that has to change when it does.
+'   Every cell increments exactly one term, so the invariant holds by
+'   construction rather than by arithmetic. A term that stops being incremented
+'   exactly once shows up here.
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' ASSERT THE INVARIANT
 '------------------------------------------------------------------------------
-    If Result.AttemptedCount = Result.WrittenCount + _
-        Result.LockedSkippedCount + Result.FailedCount Then
+    If Result.AttemptedCount = Result.WrittenCount + Result.LockedSkippedCount + _
+        Result.FormulaSkippedCount + Result.FailedCount Then
         TST_DP_RecordPass TestName, _
             "Attempted=" & VBA.CStr(Result.AttemptedCount) & _
             "; Written=" & VBA.CStr(Result.WrittenCount) & _
             "; Locked=" & VBA.CStr(Result.LockedSkippedCount) & _
+            "; Formula=" & VBA.CStr(Result.FormulaSkippedCount) & _
             "; Failed=" & VBA.CStr(Result.FailedCount)
     Else
         TST_DP_RecordFail TestName, _
             "Attempted=" & VBA.CStr(Result.AttemptedCount) & _
             " does not equal Written=" & VBA.CStr(Result.WrittenCount) & _
             " + Locked=" & VBA.CStr(Result.LockedSkippedCount) & _
+            " + Formula=" & VBA.CStr(Result.FormulaSkippedCount) & _
             " + Failed=" & VBA.CStr(Result.FailedCount)
     End If
+
+End Sub
+
+Private Sub TST_DP_ExpectFormulaProtection()
+
+'
+'==============================================================================
+'                      EXPECT FORMULA PROTECTION
+'==============================================================================
+'   Builds a target holding blanks, literals and formulas, then asserts that the
+'   formulas survive a default write and are replaced only on explicit request.
+'
+'   The target is deliberately larger than one cell, so the bulk path would be
+'   eligible if formula protection did not refuse it. A formula surviving here
+'   therefore also proves the bulk gate, which is the half of this policy that
+'   per-cell inspection alone cannot cover.
+'
+'   Row 18 of the demo teaches that a date-returning formula is a valid picker
+'   target. It stays one; what changes is that selecting a date no longer deletes
+'   the formula behind it.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WriteResult     As DP_WriteResult   'Structured write-back result
+    Dim EmptyResult     As DP_WriteResult   'Zeroed result used to reset WriteResult
+    Dim TargetRange     As Excel.Range      'Mixed blank/literal/formula target
+    Dim ExpectedList    As String           'Expected preserved address list
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo FormulaProtectionFail
+
+'------------------------------------------------------------------------------
+' BUILD A MIXED TARGET
+'------------------------------------------------------------------------------
+    'Use a target away from the ranges the rest of the suite writes
+        Set TargetRange = mTST_DP_ScratchSheet.Range("K5:K8")
+    'Clear any content left by an earlier run
+        TargetRange.ClearContents
+    'K5 blank, K6 literal, K7 plain formula, K8 date-returning formula
+        mTST_DP_ScratchSheet.Range("K6").Value = VBA.DateSerial(2020, 1, 1)
+        mTST_DP_ScratchSheet.Range("K7").Formula = "=1+1"
+        mTST_DP_ScratchSheet.Range("K8").Formula = "=TODAY()"
+    'Assert the setup took, so a silent setup failure cannot look like protection
+        TST_DP_AssertTrue "Formula setup creates a plain formula", _
+            mTST_DP_ScratchSheet.Range("K7").HasFormula
+        TST_DP_AssertTrue "Formula setup creates a date-returning formula", _
+            mTST_DP_ScratchSheet.Range("K8").HasFormula
+    'Prepare a distinct write value
+        gDP_WriteValue = VBA.DateSerial(2027, 3, 9)
+
+'------------------------------------------------------------------------------
+' WRITE WITH PROTECTION ACTIVE
+'------------------------------------------------------------------------------
+    'Default policy preserves formulas
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT PROTECTION
+'------------------------------------------------------------------------------
+    'Build the worksheet-qualified list the write is expected to report
+        ExpectedList = mTST_DP_ScratchSheet.Name & "!K7, " & _
+            mTST_DP_ScratchSheet.Name & "!K8"
+    'Assert the blank and the literal were written
+        TST_DP_AssertEqualsLong "Formula protection writes 2 cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert both formulas were preserved
+        TST_DP_AssertEqualsLong "Formula protection preserves 2 formula cells", _
+            2, VBA.CLng(WriteResult.FormulaSkippedCount)
+    'Assert a preserved formula is not misreported as a failure
+        TST_DP_AssertEqualsLong "Formula protection reports no failures", _
+            0, VBA.CLng(WriteResult.FailedCount)
+    'Assert the preserved cells are named, not just counted
+        TST_DP_AssertEqualsString "Formula protection reports the preserved addresses", _
+            ExpectedList, WriteResult.FormulaSkippedAddresses
+    'Assert the shortfall description names them
+        TST_DP_AssertTrue "Formula protection description names a preserved cell", _
+            VBA.InStr(1, M_WriteBack_DescribeShortfall(WriteResult), "K7", vbTextCompare) > 0
+    'Assert the result satisfies the extended accounting invariant
+        TST_DP_AssertWriteResultBalances "Formula protection result balances", WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT THE WORKSHEET ITSELF
+'------------------------------------------------------------------------------
+    'Verify the formulas natively, not only through the result being tested
+        TST_DP_AssertTrue "Plain formula survives the write", _
+            mTST_DP_ScratchSheet.Range("K7").HasFormula
+        TST_DP_AssertTrue "Date-returning formula survives the write", _
+            mTST_DP_ScratchSheet.Range("K8").HasFormula
+    'Verify the blank and the literal really were replaced
+        TST_DP_AssertCellDateEquals "Formula protection writes the blank cell", _
+            VBA.DateSerial(2027, 3, 9), mTST_DP_ScratchSheet.Range("K5")
+        TST_DP_AssertCellDateEquals "Formula protection overwrites the literal", _
+            VBA.DateSerial(2027, 3, 9), mTST_DP_ScratchSheet.Range("K6")
+
+'------------------------------------------------------------------------------
+' WRITE WITH THE OVERRIDE
+'------------------------------------------------------------------------------
+    'An explicit override replaces formulas
+        WriteResult = EmptyResult
+        gDP_WriteValue = VBA.DateSerial(2027, 4, 10)
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, _
+            WriteResult, OverwriteFormulas:=True
+
+'------------------------------------------------------------------------------
+' ASSERT THE OVERRIDE
+'------------------------------------------------------------------------------
+    'Assert every cell was written once the caller opted in
+        TST_DP_AssertEqualsLong "Override writes all 4 cells", _
+            4, VBA.CLng(WriteResult.WrittenCount)
+    'Assert nothing was preserved under the override
+        TST_DP_AssertEqualsLong "Override preserves no formula cells", _
+            0, VBA.CLng(WriteResult.FormulaSkippedCount)
+    'Assert the override result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Override result balances", WriteResult
+    'Verify the formulas really are gone
+        TST_DP_AssertFalse "Override replaces the plain formula", _
+            mTST_DP_ScratchSheet.Range("K7").HasFormula
+        TST_DP_AssertFalse "Override replaces the date-returning formula", _
+            mTST_DP_ScratchSheet.Range("K8").HasFormula
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Leave the scratch cells clear for later runs
+        mTST_DP_ScratchSheet.Range("K5:K8").ClearContents
+    'Release object references
+        Set TargetRange = Nothing
+    'Exit after the expectation completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FORMULA PROTECTION FAIL
+'------------------------------------------------------------------------------
+FormulaProtectionFail:
+    'Clear the target even when the expectation failed
+        On Error Resume Next
+        mTST_DP_ScratchSheet.Range("K5:K8").ClearContents
+        Set TargetRange = Nothing
+        Err.Clear
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Formula protection", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
 
 End Sub
 
@@ -6445,56 +6610,100 @@ Private Sub TST_DP_PrepareScratchSheet(ByVal HostWorkbook As Excel.Workbook)
 
 '
 '==============================================================================
-'                           PREPARE SCRATCH SHEET
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Creates a clean scratch worksheet for the current regression run
+'                        PREPARE SCRATCH WORKSHEET
+'==============================================================================
+'   Creates the worksheet the suites write to.
 '
-' WHY THIS EXISTS
-'   Write-back, grid-icon, and manager suites require a live worksheet that
-'   can be freely modified and deleted without affecting any user data
+'   The Add is instrumented rather than trusted. This call has been observed to
+'   report 1004 while leaving a new unnamed worksheet in the workbook, which the
+'   rename then never reached. That leaks a sheet on every occurrence, and
+'   preflight cannot see it: it looks for TST_DP_SCRATCH by name, and the
+'   leftover is called SheetNN.
 '
-' INPUTS
-'   HostWorkbook
-'     Workbook that will receive the scratch sheet
+'   Recording the worksheet count either side of the Add distinguishes the two
+'   explanations that the failure alone cannot:
 '
-' RETURNS
-'   Nothing
+'     before = after    the Add genuinely failed and created nothing
+'     after  > before   the Add created a sheet and reported failure anyway
 '
-' BEHAVIOR
-'   Deletes any existing scratch sheet, creates a new one at the end of the
-'   workbook, names it, writes a header cell, and sets standard column widths
-'
-' ERROR POLICY
-'   Raises a runtime error if the scratch sheet cannot be created
-'
-' UPDATED
-'   2026-05-14
+'   Whichever it is, a sheet that appears despite the failure is removed here, so
+'   the run leaks nothing and the next run starts from a workbook it recognizes.
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' DELETE EXISTING SCRATCH SHEET
+' DECLARE
 '------------------------------------------------------------------------------
-    'Delete any existing scratch sheet from a previous run
+    Dim NamesBefore     As String           'Delimited worksheet names before the Add
+    Dim AddErrNumber    As Long             'Error number reported by the Add
+    Dim AddErrText      As String           'Error description reported by the Add
+    Dim WS              As Excel.Worksheet  'Current worksheet while sweeping
+    Dim SweptName       As String           'Name of a worksheet that appeared
+
+'------------------------------------------------------------------------------
+' REMOVE ANY PREVIOUS SCRATCH SHEET
+'------------------------------------------------------------------------------
+    'Delete the named scratch sheet a previous run may have left
         TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
 
 '------------------------------------------------------------------------------
-' CREATE SCRATCH SHEET
+' RECORD THE WORKBOOK BEFORE THE ADD
 '------------------------------------------------------------------------------
-    'Add the scratch sheet at the end of the workbook
-        Set mTST_DP_ScratchSheet = HostWorkbook.Worksheets.Add( _
-            After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
+    'Capture the worksheet names so a sheet that appears can be identified even
+    'when the Add reports failure and returns nothing to identify it with
+        NamesBefore = "|"
+        For Each WS In HostWorkbook.Worksheets
+            NamesBefore = NamesBefore & WS.Name & "|"
+        Next WS
+        Set WS = Nothing
+        mTST_DP_ScratchAddBefore = HostWorkbook.Worksheets.Count
+        mTST_DP_ScratchAddAfter = mTST_DP_ScratchAddBefore
+        mTST_DP_ScratchAddOrphan = VBA.vbNullString
 
 '------------------------------------------------------------------------------
-' INITIALIZE SCRATCH SHEET
+' ADD THE SCRATCH SHEET
 '------------------------------------------------------------------------------
-    'Name the scratch sheet
+    'Capture the outcome rather than letting it propagate untold
+        On Error Resume Next
+        Set mTST_DP_ScratchSheet = HostWorkbook.Worksheets.Add( _
+            After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
+        AddErrNumber = Err.Number
+        AddErrText = Err.Description
+        Err.Clear
+        On Error GoTo 0
+    'Record what the workbook looks like now
+        mTST_DP_ScratchAddAfter = HostWorkbook.Worksheets.Count
+
+'------------------------------------------------------------------------------
+' HANDLE A FAILED ADD
+'------------------------------------------------------------------------------
+    'Remove anything the failed Add left behind, then report the original failure
+        If AddErrNumber <> 0 Then
+            'Find and delete any worksheet that was not there before
+                On Error Resume Next
+                For Each WS In HostWorkbook.Worksheets
+                    If VBA.InStr(1, NamesBefore, "|" & WS.Name & "|", vbBinaryCompare) = 0 Then
+                        SweptName = WS.Name
+                        mTST_DP_ScratchAddOrphan = SweptName
+                        WS.Delete
+                    End If
+                Next WS
+                Set WS = Nothing
+                Err.Clear
+                On Error GoTo 0
+            'Release the reference the failed Add may have left
+                Set mTST_DP_ScratchSheet = Nothing
+            'Re-raise the failure. The run is already disrupted, and succeeding
+            'quietly here would remove the evidence this failure still needs
+                Err.Raise AddErrNumber, "TST_DP_PrepareScratchSheet", AddErrText
+        End If
+
+'------------------------------------------------------------------------------
+' INITIALIZE THE SCRATCH SHEET
+'------------------------------------------------------------------------------
+    'Name and prepare the new worksheet
         mTST_DP_ScratchSheet.Name = TST_DP_SCRATCH_SHEET_NAME
-    'Write a header cell to identify the scratch sheet
         mTST_DP_ScratchSheet.Range("A1").Value = "DatePicker regression scratch sheet"
-    'Set standard column widths for the scratch sheet
         mTST_DP_ScratchSheet.Columns("A:J").ColumnWidth = 16
-    'Activate the scratch sheet
         mTST_DP_ScratchSheet.Activate
 
 End Sub
