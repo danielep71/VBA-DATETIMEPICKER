@@ -467,12 +467,17 @@ Public Sub M_Settings_Load()
 '   Settings are saved after load so invalid, missing, legacy, or unsupported
 '   values are normalized in persistent storage
 '
-'   If right-click integration and in-grid icon integration are both disabled,
-'   keyboard shortcut access is forced on to avoid a configuration with no
-'   practical manual DatePicker entry point
+'   Access-path settings reflect explicit configuration. Disabling right-click
+'   and in-grid icon access no longer re-enables the keyboard shortcut, because
+'   Application.OnKey is a session-wide binding and the DatePicker must not take
+'   it on behalf of a user who did not choose it
+'
+'   Zero built-in interactive access paths is a permitted configuration. The
+'   picker is then opened through DP_Show, a Ribbon integration, or a
+'   caller-supplied entry point
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -736,19 +741,6 @@ Public Sub M_Settings_Load()
             DP_DEFAULT_HOLIDAY_CALLBACK))
 
 '------------------------------------------------------------------------------
-' NORMALIZE ACCESS SETTINGS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Normalize access settings"
-
-    'Force keyboard access when both contextual and visible entry points are disabled
-        If Not gDP_ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                gDP_EnableKeyboardShortcut = True
-            End If
-        End If
-
-'------------------------------------------------------------------------------
 ' FINALIZE SETTINGS LOAD
 '------------------------------------------------------------------------------
     'Track the current handler step
@@ -823,15 +815,20 @@ Public Sub M_Settings_Save()
 '   Behavior settings are persisted under the Behavior section. The load path
 '   still supports the previous Display-section location for migration purposes
 '
-'   If right-click menu and in-grid icon access are both disabled, keyboard
-'   shortcut access is forced on to avoid a configuration with no practical
-'   manual DatePicker entry point
+'   Access-path settings reflect explicit configuration. Disabling right-click
+'   and in-grid icon access no longer re-enables the keyboard shortcut, because
+'   Application.OnKey is a session-wide binding and the DatePicker must not take
+'   it on behalf of a user who did not choose it
+'
+'   Zero built-in interactive access paths is a permitted configuration. The
+'   picker is then opened through DP_Show, a Ribbon integration, or a
+'   caller-supplied entry point
 '
 '   WinAPI styling is saved as disabled when the current platform does not
 '   support WinAPI helpers
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -872,19 +869,6 @@ Public Sub M_Settings_Save()
     'Disable WinAPI styling when the current platform does not support it
         If Not PlatformCanUseWinAPI Then
             gDP_UseWinAPI = False
-        End If
-
-'------------------------------------------------------------------------------
-' NORMALIZE ACCESS SETTINGS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Normalize access settings"
-
-    'Keep the keyboard shortcut enabled when all visible/contextual entry points are disabled
-        If Not gDP_ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                gDP_EnableKeyboardShortcut = True
-            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -1109,11 +1093,17 @@ Private Sub M_Settings_InitializeDefaults()
 ' NOTES
 '   This routine changes in-memory settings only
 '
-'   The keyboard shortcut is forced on if both right-click menu and in-grid icon
-'   access are disabled
+'   Access-path settings reflect explicit configuration. Disabling right-click
+'   and in-grid icon access no longer re-enables the keyboard shortcut, because
+'   Application.OnKey is a session-wide binding and the DatePicker must not take
+'   it on behalf of a user who did not choose it
+'
+'   Zero built-in interactive access paths is a permitted configuration. The
+'   picker is then opened through DP_Show, a Ribbon integration, or a
+'   caller-supplied entry point
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -1164,12 +1154,6 @@ Private Sub M_Settings_InitializeDefaults()
         gDP_ShowGridIcon = DP_DEFAULT_SHOW_GRID_ICON
     'Initialize the keyboard shortcut feature setting
         gDP_EnableKeyboardShortcut = DP_DEFAULT_ENABLE_KEYBOARD
-    'Force keyboard access when both visual/contextual entry points are disabled
-        If Not gDP_ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                gDP_EnableKeyboardShortcut = True
-            End If
-        End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE ADVANCED SETTINGS
@@ -1654,8 +1638,10 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '   Sets and saves whether the DatePicker keyboard shortcut is enabled
 '
 ' WHY THIS EXISTS
-'   The keyboard shortcut is the safe fallback entry point when optional visual
-'   integrations such as the in-grid icon and right-click menu are disabled
+'   The keyboard shortcut is one of three interactive entry points, alongside the
+'   in-grid icon and the right-click menu. Disabling the other two no longer
+'   enables it: Application.OnKey is a session-wide binding, and the component
+'   does not take it on behalf of a user who did not ask for it
 '
 '   Caller code, demo sheets, settings panels, and host workbooks need one
 '   controlled public entry point to update keyboard shortcut integration without
@@ -1708,7 +1694,7 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '   another add-in, workbook activation, or teardown logic
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -1754,17 +1740,6 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve access fallback"
-    'Keep keyboard access enabled when both visual entry points are disabled
-        If Not NewEnableKeyboard Then
-            If Not gDP_ShowRightClick Then
-                If Not gDP_ShowGridIcon Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
-
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAG
 '------------------------------------------------------------------------------
@@ -3000,7 +2975,7 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '   workbook activation, or application-level cleanup
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3055,18 +3030,6 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve access fallback"
-
-    'Keep keyboard access enabled when both visible entry points are disabled
-        If Not ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                If Not NewEnableKeyboard Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
-
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -3225,7 +3188,7 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '   expected to occur through the manager selection / context refresh path
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3280,18 +3243,6 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve access fallback"
-
-    'Keep keyboard access enabled when both visible entry points are disabled
-        If Not ShowGridIcon Then
-            If Not gDP_ShowRightClick Then
-                If Not NewEnableKeyboard Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
-
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -12455,8 +12406,10 @@ Public Sub M_KeyboardShortcut_Update()
 '   Registers or removes the DatePicker keyboard shortcut according to settings
 '
 ' WHY THIS EXISTS
-'   The keyboard shortcut is the safe fallback entry point when optional visual
-'   integrations such as the in-grid icon and right-click menu are disabled
+'   The keyboard shortcut is one of three interactive entry points, alongside the
+'   in-grid icon and the right-click menu. Disabling the other two no longer
+'   enables it: Application.OnKey is a session-wide binding, and the component
+'   does not take it on behalf of a user who did not ask for it
 '
 ' INPUTS
 '   None
@@ -12560,6 +12513,14 @@ Private Sub M_KeyboardShortcut_Register()
 '   Registers the DatePicker keyboard shortcut for the current Excel session
 '
 ' WHY THIS EXISTS
+'   Registration happens only when the user enabled the shortcut. Nothing else
+'   turns it on, because taking a session-wide key binding is not a decision the
+'   component makes on the user's behalf
+'
+'   Excel exposes no getter for Application.OnKey, so a binding this displaces
+'   cannot be captured and cannot be restored. That limitation is documented
+'   rather than worked around
+'
 '   Application.OnKey requires an explicit public macro callback and the
 '   assignment is not persisted by Excel across sessions
 '
@@ -12591,7 +12552,7 @@ Private Sub M_KeyboardShortcut_Register()
 '   M_KeyboardShortcut_Remove
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -12683,6 +12644,13 @@ Public Sub M_KeyboardShortcut_Remove()
 '   DP_KEYBOARD_SHORTCUT_KEY
 '
 ' NOTES
+'   This restores Excel's default handling rather than any binding the DatePicker
+'   displaced. Excel exposes no getter for Application.OnKey, so the displaced
+'   assignment cannot be captured and cannot be put back. Of the three possible
+'   teardown behaviors this is the least damaging: binding the key to an empty
+'   macro swallows it, and leaving the DatePicker callback in place points it at
+'   a project that may be unloading
+'
 '   Calling Application.OnKey with only the key argument restores normal Excel
 '   behavior for that key combination
 '
@@ -12690,7 +12658,7 @@ Public Sub M_KeyboardShortcut_Remove()
 '   is a teardown-safe cleanup routine
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------

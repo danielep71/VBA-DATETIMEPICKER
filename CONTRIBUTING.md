@@ -291,6 +291,37 @@ stricter treatment than the UI.
 - `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
   including on the failure path. Preserve that.
 
+### The keyboard shortcut
+
+`Application.OnKey` holds one assignment per key for the Excel session, and Excel
+exposes no getter for it. Two decisions follow from that, and both are settled —
+do not reopen them without new platform capability.
+
+**Registration reflects explicit configuration only.** The shortcut is bound when
+the user enabled it, and never because other access paths were disabled. An
+earlier rule forced it on when right-click and the in-grid icon were both off,
+which took a session-wide binding from whoever held it on behalf of a user who
+had not asked for it. Zero built-in interactive access paths is a permitted
+configuration; `DP_Show`, RibbonX and caller-supplied buttons remain.
+
+That rule lived in six places, expressed two different ways — three direct
+assignments and three through a local in the setters. If you are changing this
+area, search for the *invariant* rather than the assignment.
+
+**Teardown restores Excel default.** `M_KeyboardShortcut_Remove` calls
+`Application.OnKey KEY` with no macro. This cannot restore a displaced
+third-party binding, because that binding was never observable. It is the least
+harmful of the three available behaviors:
+
+```text
+Application.OnKey KEY       Excel default restored; displaced binding lost
+Application.OnKey KEY, ""   key swallowed; worse
+do nothing                  stale callback into a possibly unloaded project; worse
+```
+
+Do not add code that claims to restore an unknown predecessor. It cannot be
+captured, so any such claim would be false.
+
 ### The write result
 
 Every write reports through `DP_WriteResult`: the counts, the worksheet-qualified

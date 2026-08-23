@@ -1681,13 +1681,53 @@ Private Sub TST_DP_RunSuite_Settings()
         TST_DP_AssertTrue "Keyboard shortcut can be enabled", _
             M_Settings_GetEnableKeyboardShortcut()
 
-    'Disable both contextual access paths to trigger the dead-configuration guard
+    'Disable the keyboard shortcut, then remove both other access paths
+        M_Settings_SetEnableKeyboardShortcut False
         M_Settings_SetShowRightClick False
         M_Settings_SetShowGridIcon False
 
-    'Assert keyboard shortcut is forced on when both contextual paths are disabled
-        TST_DP_AssertTrue "Keyboard shortcut is forced when right-click and grid icon are disabled", _
+    'Assert nothing re-enables the shortcut behind the user's back. Taking a
+    'session-wide Application.OnKey binding is not a decision the component makes
+    'on the user's behalf, even when no other built-in access path remains
+        TST_DP_AssertFalse "Disabling other access paths does not re-enable the shortcut", _
             M_Settings_GetEnableKeyboardShortcut()
+
+    'Assert a persisted round trip does not re-enable it either
+        M_Settings_Save
+        M_Settings_Load
+        TST_DP_AssertFalse "Save and reload do not re-enable the shortcut", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+    'Assert the picker remains registrable with zero built-in access paths
+        TST_DP_AssertTrue "Zero built-in access paths is a permitted configuration", _
+            (M_Settings_GetShowRightClick() = False) And _
+            (M_Settings_GetShowGridIcon() = False) And _
+            (M_Settings_GetEnableKeyboardShortcut() = False)
+
+    'Restore the shortcut for the following suites
+        M_Settings_SetEnableKeyboardShortcut True
+
+'------------------------------------------------------------------------------
+' KEYBOARD SHORTCUT REGISTRATION PATHS
+'------------------------------------------------------------------------------
+    'Exercise the registration path an explicitly enabled shortcut takes. Excel
+    'exposes no getter for Application.OnKey, so the binding cannot be read back;
+    'what is asserted here is that the operation completes, and the resulting key
+    'behavior is covered by the documented manual validation
+        M_Settings_SetEnableKeyboardShortcut True
+        M_KeyboardShortcut_Update
+        TST_DP_AssertTrue "Enabled shortcut completes its registration path", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+    'Exercise the removal path, which restores Excel default handling
+        M_Settings_SetEnableKeyboardShortcut False
+        M_KeyboardShortcut_Update
+        TST_DP_AssertFalse "Disabled shortcut completes its removal path", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+    'Restore the shortcut for the following suites
+        M_Settings_SetEnableKeyboardShortcut True
+        M_KeyboardShortcut_Update
 
     'Restore feature settings to working defaults for following suites
         M_Settings_SetShowRightClick True

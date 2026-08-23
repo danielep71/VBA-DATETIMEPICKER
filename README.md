@@ -623,8 +623,13 @@ The Date / Time Picker can be opened through several user-facing paths:
 - Ribbon button through `Ribbon_ShowPicker`
 - right-click menu entry
 - in-grid icon next to eligible cells
-- keyboard shortcut fallback through `Ctrl + Shift + D`
+- keyboard shortcut through `Ctrl + Shift + D`
 - direct macro call to `DP_Show`
+
+Each of the three built-in interactive paths — right-click, in-grid icon and
+keyboard shortcut — is independently configurable, and all three may be disabled
+at once. The picker is then reached through `DP_Show`, `Ribbon_ShowPicker`, or a
+button or macro you provide.
 
 The project intentionally keeps `VBA_DATETIMEPICKER` as a stable internal command-bar tag / settings name, while user-facing captions should use:
 
@@ -1026,6 +1031,25 @@ delete the other's worksheet icons.
 Do not run the embedded source and the `.xlam` in the same Excel session, and do
 not embed the picker into multiple workbooks that will be open at once.
 Tracked in [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
+
+### The keyboard shortcut is application-wide
+
+`Ctrl + Shift + D` is registered through `Application.OnKey`, which holds one
+assignment per key for the whole Excel session. Enabling the DatePicker shortcut
+can therefore replace a binding another workbook or add-in already made.
+
+Excel provides no way to read the existing assignment, so the DatePicker cannot
+detect the conflict, cannot record what it replaced, and cannot put it back.
+Disabling the shortcut restores Excel's **default** handling for the key, not the
+displaced assignment.
+
+The shortcut is only ever registered when you enable it. Disabling the right-click
+entry and the in-grid icon does not turn it on — taking a session-wide key binding
+is not a decision the component makes on your behalf.
+
+If `Ctrl + Shift + D` matters to something else in your session, leave the
+DatePicker shortcut disabled and use `DP_Show`, the Ribbon button, or your own
+button instead.
 
 ### Operating notes
 
