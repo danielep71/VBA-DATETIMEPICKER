@@ -408,6 +408,75 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🐛 Fixed
 
+- Fixed a stale grid-icon reference raising `424 Object required` on teardown,
+  and silently suppressing icon creation. Every use of the tracked icon was
+  guarded by:
+
+  ```vb
+  If Not gDP_GridIconShape Is Nothing Then
+  ```
+
+  which tests the **variable**, not the object. The icon is an ordinary worksheet
+  shape and can be destroyed without going through any routine that maintains the
+  reference — the worksheet holding it is deleted, `M_GridIcon_PurgeAll` removes
+  it by name from another workbook, or the user deletes it. The variable then
+  still points at an object that no longer exists.
+
+  The visible symptom was noise on every teardown:
+
+  ```text
+  M_GridIcon_Remove | Step=DeleteTrackedShape | Error=424 | Object required
+  ```
+
+  The more serious one was silent. `M_GridIcon_PreCreateHidden` guarded creation
+  with the same test and jumped straight to hiding on a non-`Nothing` variable, so
+  a stale reference meant **no icon was created at all** — and nothing reported
+  it.
+
+  `M_GridIcon_TrackedShapeIsLive` now asks the object model rather than the
+  variable, clearing a reference whose shape no longer answers. A stale reference
+  is an ordinary condition, not a failure to log. The check is applied at all
+  eight sites that used the tracked reference, including the two that decided
+  control flow from it rather than dereferencing it.
+
+  Genuine deletion failures are still captured and reported; only the
+  stale-reference case is removed from that signal.
+  ([#<ISSUE>](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/<ISSUE>))
+
+- Fixed the keyboard shortcut being enabled on the user's behalf. Disabling both
+  the right-click entry and the in-grid icon forced `EnableKeyboardShortcut` back
+  on, to avoid *a configuration with no practical access path*.
+
+  `Ctrl + Shift + D` is registered through `Application.OnKey`, which holds one
+  assignment per key for the whole Excel session. So the rule took a session-wide
+  binding — possibly another add-in's — from a user who had explicitly turned the
+  shortcut off. `M_Settings_SetEnableKeyboardShortcut(False)` also refused to
+  store `False` in that configuration, so the setting could not be turned off
+  even by asking directly.
+
+  The premise was also shaky: `Ribbon_ShowPicker`, `DP_Show` and any
+  caller-supplied button are access paths the rule did not count, and the
+  component cannot detect at runtime whether the host package includes RibbonX.
+
+  Registration now reflects explicit configuration only, and all three built-in
+  interactive access paths may be disabled at once. The picker is then reached
+  through `DP_Show`, `Ribbon_ShowPicker` or a caller-supplied entry point.
+
+  The rule lived in **six** places, expressed two ways — three direct assignments
+  to `gDP_EnableKeyboardShortcut` in `M_Settings_Load`, `M_Settings_Save` and
+  `M_Settings_InitializeDefaults`, and three through a local in the setters. A
+  search for the assignment finds half of them; the invariant is what has to be
+  searched for.
+
+  Teardown is unchanged and now documented rather than incidental.
+  `M_KeyboardShortcut_Remove` restores Excel's default handling, which cannot
+  bring back a displaced third-party binding — Excel exposes no getter for
+  `Application.OnKey`, so that binding was never observable. It remains the least
+  harmful of the three available behaviors: binding the key to an empty macro
+  swallows it, and leaving the callback in place points at a project that may be
+  unloading.
+  ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42))
+
 - Fixed a failed frame refresh leaving the picker form half-styled.
   `M_Window_RemoveTitleBar` performs several native operations in sequence, and
   once `SetWindowLong` had cleared `WS_CAPTION` the original style was gone. A
@@ -817,6 +886,10 @@ backward-compatible capability, 💥 **major** may break callers.
 - **Table write scope changes for omitted arguments.** Code that relied on a
   calendar selection, `DP_Today` or `DP_Now` filling a table column must now
   either pass `NoTableGrow:=False` or call `DP_FillTableColumn`.
+- **The keyboard shortcut is no longer forced on.** A configuration with
+  right-click, in-grid icon and keyboard shortcut all disabled is now permitted
+  and preserved. Anything relying on the shortcut re-enabling itself when the
+  other two were disabled must now set `EnableKeyboardShortcut` explicitly.
 - **`DP_WriteResult` and `DP_WindowStyleResult` are new public types in `src/`.**
 - **`M_Window_RemoveTitleBar` is now a `Function`.** Its argument list is
   unchanged and both `UF_DatePicker.frm` call sites use bare-call syntax, so

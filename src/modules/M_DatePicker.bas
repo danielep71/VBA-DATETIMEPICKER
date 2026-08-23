@@ -12975,7 +12975,7 @@ Private Function M_GridIcon_IsSameVisibleTarget( _
     'Exit when the target sheet is missing
         If TargetSheet Is Nothing Then Exit Function
     'Exit when the tracked icon is missing
-        If gDP_GridIconShape Is Nothing Then Exit Function
+        If Not M_GridIcon_TrackedShapeIsLive() Then Exit Function
     'Exit when the cached target key differs
         If VBA.StrComp(mDP_GridIconLastAnchorKey, AnchorKey, vbBinaryCompare) <> 0 Then Exit Function
     'Exit when the cached left position differs
@@ -13353,7 +13353,7 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     'Create the icon only when no reusable shape exists
         M_GridIcon_Create AnchorCell
     'Remember the target when cold creation succeeded
-        If Not gDP_GridIconShape Is Nothing Then
+        If M_GridIcon_TrackedShapeIsLive() Then
             M_GridIcon_RememberTarget AnchorKey, IconLeft, IconTop
         End If
         
@@ -13468,8 +13468,8 @@ Public Sub M_GridIcon_Hide()
 '------------------------------------------------------------------------------
 ' HIDE TRACKED SHAPE
 '------------------------------------------------------------------------------
-    'Hide the tracked icon when available
-        If Not gDP_GridIconShape Is Nothing Then
+    'Hide the tracked icon when it still exists
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Visible = msoFalse
             'Clear stale tracked references only when hiding failed
                 If Err.Number <> 0 Then
@@ -13866,7 +13866,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     'Suppress old-icon cleanup errors
         On Error Resume Next
     'Delete the tracked old icon when available
-        If Not gDP_GridIconShape Is Nothing Then
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
         End If
     'Delete any same-named icon on the target sheet
@@ -14043,7 +14043,7 @@ Public Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)
 ' EXIT IF ICON ALREADY EXISTS
 '------------------------------------------------------------------------------
     'Exit when a tracked icon already exists
-        If Not gDP_GridIconShape Is Nothing Then GoTo HideIcon
+        If M_GridIcon_TrackedShapeIsLive() Then GoTo HideIcon
 
 '------------------------------------------------------------------------------
 ' RESOLVE INITIAL ANCHOR
@@ -14069,7 +14069,7 @@ Public Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
 HideIcon:
     'Hide the icon after creation so startup does not display it prematurely
-        If Not gDP_GridIconShape Is Nothing Then
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Visible = msoFalse
         End If
 
@@ -14085,6 +14085,95 @@ ExitProcedure:
         On Error GoTo 0
 
 End Sub
+Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
+
+'
+'==============================================================================
+'                      TRACKED GRID ICON IS LIVE
+'==============================================================================
+' PURPOSE
+'   Reports whether the tracked grid-icon reference still points at a shape that
+'   exists, and clears it when it does not
+'
+' WHY THIS EXISTS
+'   "Not gDP_GridIconShape Is Nothing" tests the variable, not the object. The
+'   icon is an ordinary worksheet shape and can be destroyed without going
+'   through any routine that maintains the reference:
+'
+'     the worksheet holding it is deleted
+'     M_GridIcon_PurgeAll removes it by name from another workbook
+'     the user deletes it
+'
+'   The variable then still holds a reference to an object that no longer exists,
+'   and the next dereference raises. That produced a routine 424 on every
+'   teardown, suppressed and logged, which is noise that hides real failures
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the tracked shape exists and can be used
+'
+'   False when nothing is tracked, or when the reference is stale. A stale
+'   reference is cleared before returning
+'
+' BEHAVIOR
+'   Probes a cheap property of the tracked shape and reports whether the probe
+'   succeeded
+'
+' ERROR POLICY
+'   Best-effort. Never raises. A stale reference is an ordinary condition here,
+'   not a failure to report
+'
+' DEPENDENCIES
+'   gDP_GridIconShape
+'
+' NOTES
+'   .Name is used as the probe because it is cheap and any surviving shape
+'   answers it. Any property access would do; the point is that the object model
+'   is asked rather than the variable
+'
+'   Callers that need to know a deletion failed should still capture Err after
+'   their own call. This function only removes the stale-reference case from that
+'   signal
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ProbeName       As String       'Probed shape name, discarded
+
+'------------------------------------------------------------------------------
+' PROBE THE TRACKED SHAPE
+'------------------------------------------------------------------------------
+    'Never let a liveness probe raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_GridIcon_TrackedShapeIsLive = False
+    'Exit when nothing is tracked
+        If gDP_GridIconShape Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Ask the object model whether the shape still answers
+        Err.Clear
+        ProbeName = gDP_GridIconShape.Name
+    'Drop a reference to a shape that no longer exists
+        If Err.Number <> 0 Then
+            Err.Clear
+            Set gDP_GridIconShape = Nothing
+            Exit Function
+        End If
+    'Report a usable tracked shape
+        M_GridIcon_TrackedShapeIsLive = True
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
 Public Sub M_GridIcon_Remove()
 
 '
@@ -14168,8 +14257,9 @@ Public Sub M_GridIcon_Remove()
 '------------------------------------------------------------------------------
     'Clear any pending error before deleting the tracked shape
         Err.Clear
-    'Delete the tracked grid icon shape when available
-        If Not gDP_GridIconShape Is Nothing Then
+    'Delete the tracked grid icon shape when it still exists. A stale reference is
+    'cleared by the liveness check and is not a deletion failure
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
             TrackedErrNumber = Err.Number
             TrackedErrDescription = Err.Description
@@ -15488,8 +15578,8 @@ Public Sub M_GridIcon_PurgeAll()
 '------------------------------------------------------------------------------
 ' DELETE TRACKED SHAPE
 '------------------------------------------------------------------------------
-    'Delete the tracked grid icon shape when available
-        If Not gDP_GridIconShape Is Nothing Then
+    'Delete the tracked grid icon shape when it still exists
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
         End If
     'Clear the tracked shape reference

@@ -101,6 +101,7 @@ Option Explicit
     'Result sheet layout
     Private Const TST_DP_RESULT_FIRST_ROW   As Long = 5                         'First result data row on the result sheet
     Private Const TST_DP_STATUS_BAR_TEXT    As String = "Running DatePicker regression tests..."  'Status bar text the run displays
+    Private Const TST_DP_STALE_SHEET_NAME   As String = "TST_DP_STALE"          'Temporary sheet used to strand a grid icon
     Private Const TST_DP_COL_SEQ            As Long = 3                         'Result sequence number column index
     Private Const TST_DP_COL_TIMESTAMP      As Long = 4                         'Result timestamp column index
     Private Const TST_DP_COL_RESULT         As Long = 5                         'Result marker column index
@@ -2733,6 +2734,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     Dim IconPath            As String   'Embedded icon file path
     Dim ShapeLeftBefore     As Double   'Icon left position before the move
     Dim ShapeTopBefore      As Double   'Icon top position before the move
+    Dim StaleSheet          As Excel.Worksheet  'Temporary sheet used to strand the icon
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2865,6 +2867,70 @@ Private Sub TST_DP_RunSuite_GridIcon()
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
 
 '------------------------------------------------------------------------------
+' STALE TRACKED REFERENCE
+'------------------------------------------------------------------------------
+    'The tracked reference outlives the shape it points to whenever the shape is
+    'destroyed without going through a routine that maintains it. Deleting the
+    'worksheet holding the icon is the simplest way to produce that state
+        gDP_ShowGridIcon = True
+        Set StaleSheet = mTST_DP_HostWorkbook.Worksheets.Add( _
+            After:=mTST_DP_HostWorkbook.Worksheets(mTST_DP_HostWorkbook.Worksheets.Count))
+        StaleSheet.Name = TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest StaleSheet
+
+    'Create the icon on the temporary worksheet
+    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
+        M_GridIcon_ShowOrMove StaleSheet.Range("B2")
+        On Error GoTo SuiteFail
+        DoEvents
+        TST_DP_AssertTrue "Stale-reference setup creates a tracked icon", _
+            Not (gDP_GridIconShape Is Nothing)
+
+    'Destroy the shape behind the reference without clearing it. Deletion goes
+    'through the shared helper, which suppresses its own errors, and nothing here
+    'touches DisplayAlerts: the run already disabled alerts and forcing them back
+    'on would re-enable the delete prompt for everything that follows
+        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+
+    'A stale reference must not stop a new icon being created. Before the
+    'liveness check, PreCreateHidden saw a non-Nothing variable and skipped
+    'straight to hiding a shape that no longer existed
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+        DoEvents
+        TST_DP_AssertTrue "Stale reference does not block icon creation", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+
+    'Recreate the stale condition and prove teardown clears it rather than
+    'raising on it
+        Set StaleSheet = mTST_DP_HostWorkbook.Worksheets.Add( _
+            After:=mTST_DP_HostWorkbook.Worksheets(mTST_DP_HostWorkbook.Worksheets.Count))
+        StaleSheet.Name = TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest StaleSheet
+        M_GridIcon_ShowOrMove StaleSheet.Range("B2")
+        On Error GoTo SuiteFail
+        DoEvents
+        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+
+    'Remove must leave nothing tracked and must not raise
+        M_GridIcon_Remove
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Remove clears a stale tracked reference", _
+            gDP_GridIconShape Is Nothing
+
+    'Purge must tolerate the same condition
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+        M_GridIcon_PurgeAll
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Purge clears the tracked reference", _
+            gDP_GridIconShape Is Nothing
+
+'------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
     'Exit after the suite completes
@@ -2874,6 +2940,12 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Release the temporary worksheet the stale-reference cases may have left. The
+    'run owns DisplayAlerts and this must not change it
+        On Error Resume Next
+        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        Err.Clear
     'Record the suite-level failure and clear the error
         TST_DP_RecordFail "GridIcon suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
