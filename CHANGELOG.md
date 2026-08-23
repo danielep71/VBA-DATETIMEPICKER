@@ -925,6 +925,42 @@ backward-compatible capability, 💥 **major** may break callers.
   result ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
   will later populate without re-deriving the target.
 
+### 📖 Documentation
+
+- The wiki's first `v1.2.0` pass corrects navigation, file paths and the
+  `Application.EnableEvents` description. Nine pages changed.
+
+  `_Sidebar` linked to a `Wiki Upload Guide` page that does not exist, and
+  `UPDATE_NOTES` was a substantive page nothing linked to. The broken entry now
+  points at the orphan: no broken links, no orphans.
+
+  Eight references to `customUI.xml` across five pages became `customUI14.xml`,
+  which is the file the project actually ships. The `<customUI>` XML root element
+  in `Ribbon-Integration` is untouched — it is the element name, not a filename,
+  and a blind replacement would have corrupted the example.
+
+  `Manager-and-Events` and `Public-API` carried a warning banner above text that
+  still said `M_Picker_EnsureManager must ensure Application.EnableEvents = True`.
+  A banner over incorrect text is a holding measure, so the banners are gone and
+  the text is rewritten: the routine preserves the caller's state and reports it
+  through `EventsDisabledByCaller`.
+
+  That makes `Is_Hooked = True` with events globally disabled a reachable state.
+  The old page called it *the dangerous condition* the invariant existed to
+  prevent; it is now the caller's decision, with `DP_RepairRuntime` as the
+  documented way out. The pages say so rather than leaving it implied.
+
+  `Home` claimed `v1.1.1` was in progress and cited `demo/DATEPICKER.xlsm`, a file
+  deleted in this release. Its notice now records what has been verified against
+  `v1.2.0` and names the two areas deliberately left alone:
+  [#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26) registry
+  scope, and [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)
+  multiple providers in one session.
+
+  Page version metadata, the remaining `v1.2.0` API and behavior pages, and the
+  final source-to-wiki verification pass are still outstanding.
+  ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17))
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
