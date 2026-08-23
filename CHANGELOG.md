@@ -98,10 +98,23 @@ backward-compatible capability, 💥 **major** may break callers.
   points are private constants duplicated in both modules rather than a public
   enum, so the seam does not enlarge the public surface.
 
-  One-shot consumption is the safety property: the injected values are copied to
-  locals and cleared before any native call, so a test run that aborts mid-way
-  cannot leave a later real call poisoned. The harness disarms the seam again on
-  its own cleanup and failure paths.
+  An injected failure **skips** the native call it is failing. Performing the
+  call and then overwriting its result would leave the window in the state of a
+  success while the result described a failure — the opposite of what these paths
+  exist to reproduce. A skipped style write leaves the window with its original
+  style; a skipped rollback restore leaves it genuinely committed, which is what
+  makes `RecoveryRequired` true rather than merely reported.
+
+  One-shot consumption is the other safety property: the injected values are
+  copied to locals and cleared before any native call, so a test run that aborts
+  mid-way cannot leave a later real call poisoned. The harness disarms the seam
+  again on its own cleanup and failure paths.
+
+  The suite verifies native window state directly, through its own
+  `GetWindowLongPtr` declaration, rather than inferring it from the result the
+  routine under test returned. That covers the claims most worth proving
+  independently: a pre-commit failure leaves the style unchanged, a successful
+  rollback restores it, and a failed rollback does not.
 
   The suite asserts a resolvable window handle before exercising any injected
   failure. A preloaded hidden UserForm has one on supported hosts, which is why

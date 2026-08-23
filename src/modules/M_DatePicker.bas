@@ -10607,6 +10607,17 @@ Private Sub M_Window_RollbackStyle(ByVal hWndForm As Long, ByVal OriginalStyle A
 '------------------------------------------------------------------------------
     'Clear the WinAPI last-error state before restoring
         SetLastError 0
+    'Skip the restore entirely when a regression test has armed this point.
+    'Restoring and then reporting failure would leave the window back in its
+    'original state while the result claimed it could not be recovered
+        If RollbackFault = FAULT_ROLLBACK_STYLE Then
+            Debug.Print PROC_NAME & _
+                " | Step=Restore original style" & _
+                " | Injected failure, native restore skipped"
+            Result.RecoveryRequired = True
+            Err.Clear
+            Exit Sub
+        End If
     #If VBA7 Then
         'Restore the style captured before the change
             RestoreResult = SetWindowLongPtr(hWndForm, GWL_STYLE, OriginalStyle)
@@ -10614,14 +10625,6 @@ Private Sub M_Window_RollbackStyle(ByVal hWndForm As Long, ByVal OriginalStyle A
         'Restore the style captured before the change
             RestoreResult = SetWindowLong(hWndForm, GWL_STYLE, OriginalStyle)
     #End If
-    'Force the restore to fail when a regression test has armed this point
-        If RollbackFault = FAULT_ROLLBACK_STYLE Then
-            LastApiError = 0
-            Debug.Print PROC_NAME & " | Step=Restore original style | Injected failure"
-            Result.RecoveryRequired = True
-            Err.Clear
-            Exit Sub
-        End If
     'Report an unrecoverable window when the style cannot be put back
         If RestoreResult = 0 Then
             LastApiError = Err.LastDllError
@@ -10644,10 +10647,14 @@ Private Sub M_Window_RollbackStyle(ByVal hWndForm As Long, ByVal OriginalStyle A
             SWP_NOACTIVATE Or SWP_FRAMECHANGED
     'Clear the WinAPI last-error state before SetWindowPos
         SetLastError 0
-    'Make the restored style visible in the frame
-        ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
-    'Force the refresh to fail when a regression test has armed this point
-        If RollbackFault = FAULT_ROLLBACK_FRAME Then ApiResult = 0
+    'Skip the refresh entirely when a regression test has armed this point, so the
+    'injected state really is a restored style whose frame was never refreshed
+        If RollbackFault = FAULT_ROLLBACK_FRAME Then
+            ApiResult = 0
+        Else
+            'Make the restored style visible in the frame
+                ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+        End If
     'Report an unrecoverable window when the restored frame cannot be refreshed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError
@@ -10822,6 +10829,11 @@ Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleRe
 '   Fault injection is consumed one-shot at entry. See
 '   M_Window_Test_SetFaultInjection
 '
+'   An injected failure skips the native call it is failing. Performing the call
+'   and then overwriting its result would leave the window in the state of a
+'   success while the result described a failure, which is the opposite of what
+'   these paths exist to reproduce
+'
 ' UPDATED
 '   2026-08-23
 '------------------------------------------------------------------------------
@@ -10907,15 +10919,20 @@ Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleRe
         HandlerStep = "Read window style"
     'Clear the WinAPI last-error state before reading
         SetLastError 0
-    #If VBA7 Then
-        'Read the current window style
-            OriginalStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
-    #Else
-        'Read the current window style
-            OriginalStyle = GetWindowLong(hWndForm, GWL_STYLE)
-    #End If
-    'Force the read to fail when a regression test has armed this point
-        If PrimaryFault = FAULT_STYLE_READ Then OriginalStyle = 0
+    'Skip the read entirely when a regression test has armed this point, so the
+    'injected failure reproduces the native state of a real failure rather than
+    'overwriting the result of a call that already succeeded
+        If PrimaryFault = FAULT_STYLE_READ Then
+            OriginalStyle = 0
+        Else
+            #If VBA7 Then
+                'Read the current window style
+                    OriginalStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
+            #Else
+                'Read the current window style
+                    OriginalStyle = GetWindowLong(hWndForm, GWL_STYLE)
+            #End If
+        End If
     'Abort before any change when the style cannot be read
         If OriginalStyle = 0 Then
             LastApiError = Err.LastDllError
@@ -10935,10 +10952,24 @@ Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleRe
         HandlerStep = "Write window style"
     'Build the borderless style without losing the original
         WindowStyle = (OriginalStyle And Not WS_CAPTION)
-    'Record that the native window is about to be changed
+    'Record that the native style path was entered. The write below either takes
+    'effect or does not, and Committed is what distinguishes the two
         Result.Attempted = True
     'Clear the WinAPI last-error state before writing
         SetLastError 0
+    'Skip the write entirely when a regression test has armed this point. Writing
+    'and then reporting failure would leave the window borderless while the result
+    'said nothing had happened, and no rollback would run
+        If PrimaryFault = FAULT_STYLE_WRITE Then
+            SetStyleResult = 0
+            Result.FailedStep = HandlerStep
+            Result.LastApiError = 0
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Api=SetWindowLong" & _
+                " | Injected failure, native write skipped"
+            GoTo CleanExit
+        End If
     #If VBA7 Then
         'Write the updated window style
             SetStyleResult = SetWindowLongPtr(hWndForm, GWL_STYLE, WindowStyle)
@@ -10946,24 +10977,12 @@ Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleRe
         'Write the updated window style
             SetStyleResult = SetWindowLong(hWndForm, GWL_STYLE, WindowStyle)
     #End If
-    'Force the write to fail when a regression test has armed this point
-        If PrimaryFault = FAULT_STYLE_WRITE Then
-            Result.FailedStep = HandlerStep
-            Result.LastApiError = 0
-            Result.Attempted = False
-            Debug.Print PROC_NAME & _
-                " | Step=" & HandlerStep & _
-                " | Api=SetWindowLong" & _
-                " | Injected failure"
-            GoTo CleanExit
-        End If
     'Diagnose SetWindowLong failure when return is zero and LastError is non-zero
         If SetStyleResult = 0 Then
             LastApiError = Err.LastDllError
             If LastApiError <> 0 Then
                 Result.FailedStep = HandlerStep
                 Result.LastApiError = LastApiError
-                Result.Attempted = False
                 Debug.Print PROC_NAME & _
                     " | Step=" & HandlerStep & _
                     " | Api=SetWindowLong" & _
@@ -10984,10 +11003,14 @@ Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleRe
             SWP_NOACTIVATE Or SWP_FRAMECHANGED
     'Clear the WinAPI last-error state before SetWindowPos
         SetLastError 0
-    'Force Windows to recalculate the frame
-        ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
-    'Force the refresh to fail when a regression test has armed this point
-        If PrimaryFault = FAULT_SET_WINDOW_POS Then ApiResult = 0
+    'Skip the refresh entirely when a regression test has armed this point, so the
+    'window really is left with a committed style and an unrefreshed frame
+        If PrimaryFault = FAULT_SET_WINDOW_POS Then
+            ApiResult = 0
+        Else
+            'Force Windows to recalculate the frame
+                ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+        End If
     'Recover when the frame could not be refreshed after the style was committed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError
@@ -11007,10 +11030,13 @@ Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleRe
         HandlerStep = "Redraw frame"
     'Clear the WinAPI last-error state before DrawMenuBar
         SetLastError 0
-    'Redraw menu bar and non-client elements
-        ApiResult = DrawMenuBar(hWndForm)
-    'Force the redraw to fail when a regression test has armed this point
-        If PrimaryFault = FAULT_DRAW_MENU_BAR Then ApiResult = 0
+    'Skip the redraw entirely when a regression test has armed this point
+        If PrimaryFault = FAULT_DRAW_MENU_BAR Then
+            ApiResult = 0
+        Else
+            'Redraw menu bar and non-client elements
+                ApiResult = DrawMenuBar(hWndForm)
+        End If
     'Recover when the redraw could not be completed after the style was committed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError

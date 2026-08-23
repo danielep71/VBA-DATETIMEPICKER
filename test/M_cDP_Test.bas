@@ -146,6 +146,38 @@ Option Explicit
     End Type
 
 '------------------------------------------------------------------------------
+' NATIVE DECLARATIONS FOR INDEPENDENT WINDOW-STYLE VERIFICATION
+'------------------------------------------------------------------------------
+'   The window-style suite must be able to read the native style itself. Proving
+'   a transaction only from the result the transaction returns is the function
+'   testing itself
+'
+'   GWL_STYLE and WS_CAPTION are duplicated from M_DatePicker, where they are
+'   Private. They are fixed Windows values and cannot drift
+'------------------------------------------------------------------------------
+    Private Const TST_DP_GWL_STYLE      As Long = -16           'Window style index
+    Private Const TST_DP_WS_CAPTION     As Long = &HC00000      'Window caption style flag
+
+    #If Mac Then
+    #Else
+        #If VBA7 Then
+            #If Win64 Then
+                Private Declare PtrSafe Function TST_DP_GetWindowLongPtr Lib "user32" Alias "GetWindowLongPtrA" ( _
+                    ByVal hWnd As LongPtr, _
+                    ByVal nIndex As Long) As LongPtr
+            #Else
+                Private Declare PtrSafe Function TST_DP_GetWindowLongPtr Lib "user32" Alias "GetWindowLongA" ( _
+                    ByVal hWnd As LongPtr, _
+                    ByVal nIndex As Long) As LongPtr
+            #End If
+        #Else
+            Private Declare Function TST_DP_GetWindowLong Lib "user32" Alias "GetWindowLongA" ( _
+                ByVal hWnd As Long, _
+                ByVal nIndex As Long) As Long
+        #End If
+    #End If
+
+'------------------------------------------------------------------------------
 ' PRIVATE STATE
 '------------------------------------------------------------------------------
     Private mTST_DP_ResultSheet     As Excel.Worksheet  'Result worksheet used by the current run
@@ -3984,6 +4016,42 @@ SuiteFail:
 
 End Sub
 
+#If VBA7 Then
+Private Function TST_DP_ReadWindowStyle(ByVal WindowHandle As LongPtr) As LongPtr
+#Else
+Private Function TST_DP_ReadWindowStyle(ByVal WindowHandle As Long) As Long
+#End If
+
+'
+'==============================================================================
+'                        READ NATIVE WINDOW STYLE
+'==============================================================================
+'   Reads a window's style directly, so the window-style suite can verify native
+'   state without asking the routine under test what it did.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' READ STYLE
+'------------------------------------------------------------------------------
+    'Never let a verification read raise into a test
+        On Error Resume Next
+    #If Mac Then
+        'No native window styling on Mac
+            TST_DP_ReadWindowStyle = 0
+    #Else
+        #If VBA7 Then
+            'Read the current window style
+                TST_DP_ReadWindowStyle = TST_DP_GetWindowLongPtr(WindowHandle, TST_DP_GWL_STYLE)
+        #Else
+            'Read the current window style
+                TST_DP_ReadWindowStyle = TST_DP_GetWindowLong(WindowHandle, TST_DP_GWL_STYLE)
+        #End If
+    #End If
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
 Private Sub TST_DP_RunSuite_WindowStyle()
 
 '
@@ -4056,6 +4124,14 @@ Private Sub TST_DP_RunSuite_WindowStyle()
         Dim FormHandle          As Long         'Native window behind the picker form
     #End If
 
+    #If VBA7 Then
+        Dim StyleBefore         As LongPtr      'Native style read before a call
+        Dim StyleAfter          As LongPtr      'Native style read after a call
+    #Else
+        Dim StyleBefore         As Long         'Native style read before a call
+        Dim StyleAfter          As Long         'Native style read after a call
+    #End If
+
     Dim StyleResult         As DP_WindowStyleResult 'Outcome under test
     Dim PriorUseWinAPI      As Boolean              'WinAPI setting before the suite
 
@@ -4113,6 +4189,10 @@ Private Sub TST_DP_RunSuite_WindowStyle()
         TST_DP_AssertFalse "Clean call needs no recovery", StyleResult.RecoveryRequired
         TST_DP_AssertEqualsString "Clean call reports no failing step", _
             VBA.vbNullString, StyleResult.FailedStep
+    'Verify the native style directly, not through the result being tested
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+        TST_DP_AssertTrue "Clean call clears WS_CAPTION natively", _
+            (StyleAfter And TST_DP_WS_CAPTION) = 0
     'A second call on an already-borderless window must remain safe
         StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
         TST_DP_AssertTrue "Repeat call still applies the style", StyleResult.Applied
@@ -4122,21 +4202,32 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 ' PRE-COMMIT FAILURES
 '------------------------------------------------------------------------------
     'A failed style read must abort before anything is changed
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
         M_Window_Test_SetFaultInjection FAULT_STYLE_READ
         StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+    'Verify natively that nothing was changed
+        TST_DP_AssertTrue "Style-read failure leaves the native style unchanged", _
+            StyleAfter = StyleBefore
         TST_DP_AssertFalse "Style-read failure is not attempted", StyleResult.Attempted
         TST_DP_AssertFalse "Style-read failure is not committed", StyleResult.Committed
         TST_DP_AssertFalse "Style-read failure needs no recovery", _
             StyleResult.RecoveryRequired
         TST_DP_AssertEqualsString "Style-read failure names its step", _
             "Read window style", StyleResult.FailedStep
-    'A failed style write must abort before anything is changed
+    'A failed style write must abort before anything is changed. The injected
+    'failure skips the native write, so the window keeps the style it had
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
         M_Window_Test_SetFaultInjection FAULT_STYLE_WRITE
         StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
         TST_DP_AssertFalse "Style-write failure is not committed", StyleResult.Committed
-        TST_DP_AssertFalse "Style-write failure is not attempted", StyleResult.Attempted
+        TST_DP_AssertTrue "Style-write failure reports the attempt", StyleResult.Attempted
         TST_DP_AssertFalse "Style-write failure needs no recovery", _
             StyleResult.RecoveryRequired
+    'Verify natively that the write really did not take effect
+        TST_DP_AssertTrue "Style-write failure leaves the native style unchanged", _
+            StyleAfter = StyleBefore
         TST_DP_AssertEqualsString "Style-write failure names its step", _
             "Write window style", StyleResult.FailedStep
 
@@ -4144,8 +4235,13 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 ' POST-COMMIT FAILURES WITH SUCCESSFUL ROLLBACK
 '------------------------------------------------------------------------------
     'A frame refresh that fails after the commit must roll back
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
         M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS
         StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+    'Verify natively that the original style really came back
+        TST_DP_AssertTrue "SetWindowPos rollback restores the native style", _
+            StyleAfter = StyleBefore
         TST_DP_AssertTrue "SetWindowPos failure commits first", StyleResult.Committed
         TST_DP_AssertFalse "SetWindowPos failure is not applied", StyleResult.Applied
         TST_DP_AssertTrue "SetWindowPos failure rolls back", StyleResult.RolledBack
@@ -4167,9 +4263,16 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '------------------------------------------------------------------------------
 ' ROLLBACK FAILURES
 '------------------------------------------------------------------------------
-    'A rollback whose style restore fails leaves no known good state
+    'A rollback whose style restore fails leaves no known good state. The injected
+    'failure skips the restore, so the window is genuinely left committed
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
         M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_STYLE
         StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+    'Verify natively that the style was not restored, which is what makes this
+    'case unrecoverable rather than a rollback
+        TST_DP_AssertTrue "Failed style rollback leaves the committed style in place", _
+            (StyleAfter And TST_DP_WS_CAPTION) = 0
         TST_DP_AssertFalse "Failed style rollback does not report RolledBack", _
             StyleResult.RolledBack
         TST_DP_AssertTrue "Failed style rollback requires recovery", _
