@@ -117,7 +117,7 @@ The DatePicker can be shown through multiple entry points and can react to works
 - 🧠 Detects date-like values and date-formatted cells
 - 🖱️ Supports optional **right-click menu** integration
 - 🎯 Supports optional **in-grid activation icon** next to eligible cells
-- ⌨️ Supports optional **keyboard shortcut** fallback
+- ⌨️ Supports an optional **keyboard shortcut**, bound only when enabled
 - 🎛️ Supports optional **Ribbon callbacks** for workbook or add-in Ribbon buttons
 - 🧯 Prevents dead access configurations by preserving at least one practical entry path
 
@@ -289,7 +289,7 @@ The DatePicker uses several transient Excel / VBA UI surfaces:
   - modeless runtime UserForm
   - in-grid DatePicker icon
   - workbook, worksheet, window, save, print, close, and activation events
-  - optional keyboard shortcut fallback
+  - optional keyboard shortcut, bound only when enabled
 
 Centralizing the Application event flow in one manager class keeps the
 project predictable, avoids duplicate event wiring, and prevents stale UI
@@ -780,7 +780,11 @@ For production use, wrap callbacks with controlled error handling and user-facin
 </p>
 
 The picker can also be opened directly from Excel through the configured keyboard shortcut: Ctrl + Shift + D
-This shortcut is intended as a fallback entry point when the user does not want to rely on the right-click menu, Ribbon button, or in-grid icon.
+This shortcut is one of three interactive entry points, alongside the right-click
+entry and the in-grid icon. Each is configured independently, and disabling the
+other two does **not** enable it — see
+[Only one copy can run at a time](#-known-limitations) for why taking a
+session-wide key binding is never done on the user's behalf.
 
 Typical keyboard behavior includes:
 
