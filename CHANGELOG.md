@@ -1154,6 +1154,28 @@ backward-compatible capability, 💥 **major** may break callers.
   final source-to-wiki verification pass are still outstanding.
   ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17))
 
+- Rewrote `README.md` for the `v1.2.0` surface. The previous version had grown by
+  accretion across three releases and described behavior that no longer existed:
+  the keyboard shortcut as a fallback that appears when the other entry points are
+  disabled, table selections expanding to the whole data column, and formulas
+  being overwritten within the resolved target.
+
+  The rewrite leads with what changed for an existing `v1.1.1` user — the
+  single-cell table default, formula preservation, and the structured write
+  result — then documents the provider lease, the settings namespace, the harness
+  run states, and the recovery paths for a stranded lease and a displaced
+  keyboard binding.
+
+  Known limitations gained subsections for the cases a reader has to know rather
+  than discover: one current-version provider at a time, mixed-version sessions
+  being unprotected, `Application.OnKey` having no getter, and the default
+  settings scope being user-global.
+
+  Verified against source: every `DP_`, `M_` and `TST_DP_` procedure named in the
+  README exists and is `Public`, neither internal test seam appears, all internal
+  anchor links resolve, and none of the superseded claims survive.
+  ([#41](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/41))
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
