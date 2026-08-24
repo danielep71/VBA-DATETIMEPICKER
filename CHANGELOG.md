@@ -1144,8 +1144,34 @@ backward-compatible capability, 💥 **major** may break callers.
   scope, and [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)
   multiple providers in one session.
 
-  Page version metadata, the remaining `v1.2.0` API and behavior pages, and the
-  final source-to-wiki verification pass are still outstanding.
+  A second pass added page version metadata to all 21 substantive pages:
+
+  ```text
+  Applies to:      v1.2.0
+  Reviewed commit: 6435c91
+  ```
+
+  Three pages carry an explicit partial-review note instead of a clean stamp,
+  because their content waits on an open issue — `Settings-and-Configuration` on
+  [#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26), and
+  `Installation-and-Import` and `Workbook-Lifecycle` on
+  [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37). A stamp that
+  can be applied to unverified content is worth nothing.
+
+  Stamping asserts a page was checked, so the check ran first: every backticked
+  `M_*`, `DP_*`, `TST_DP_*`, `gDP_*`, `UF_*` and `Ribbon_*` symbol, and every
+  repository path, across all 23 pages, resolved against the source tree. That is
+  the symbol-and-claim check
+  [#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15) proposes,
+  performed by hand — and a demonstration that it is implementable.
+
+  It found one live defect. `Home` still carried the *Pending verification
+  against v1.1.1* notice, referencing `demo/DATEPICKER.xlsm`, deleted in this
+  release. The replacement written during the first pass had never been pushed,
+  so the page had been stale throughout.
+
+  The remaining `v1.2.0` API and behavior pages, and the final source-to-wiki
+  verification pass, are still outstanding.
   ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17))
 
 ### 🔗 Compatibility
