@@ -49,6 +49,54 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### ➕ Added
 
+- Added a one-provider runtime lease, so two DatePicker copies in one Excel
+  session are detected and the second is refused rather than silently displacing
+  the first.
+
+  Every copy registers the same application-wide resources under the same fixed
+  identifiers — the `Ctrl + Shift + D` binding, the context-menu tag, the grid
+  icon name — and either copy's teardown removes them all. Nothing detected this.
+
+  The lease is a hidden `Temporary` `CommandBar` carrying one hidden `Temporary`
+  control whose `Parameter` holds an ephemeral owner token:
+
+  ```text
+  __VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__
+  ```
+
+  A `CommandBar` is visible to every VBA project in the process, needs no WinAPI
+  — which the lease could not use, since WinAPI is disableable by setting and by
+  platform — and `Temporary:=True` means Excel removes it at shutdown. A
+  registry-backed lease would have had the opposite lifetime: it would survive a
+  restart and block startup permanently.
+
+  `DP_Start` claims the lease **before** the first shared registration. A copy
+  that registered first and discovered the conflict afterwards would already have
+  displaced the owner's shortcut.
+
+  `DP_Stop` and `DP_RepairRuntime` verify ownership before acting. That is the
+  more important half: refusing a second copy at startup protects nothing while
+  its teardown still dismantles the owner. `DP_Stop` releases the lease last,
+  after removing its own registrations.
+
+  Ownership is never assumed. Release requires a local token, a lease still
+  carrying it, and an exact match; an unreadable lease is reported as ambiguous
+  and left alone, because a marker this component cannot interpret belongs to
+  something. Acquisition re-reads the marker after writing it and only then
+  claims ownership.
+
+  Stale leases fail closed. A VBA project reset destroys the owner token while
+  the lease survives, so the former owner can no longer prove ownership and every
+  guarded entry point refuses. Restarting Excel clears it, since the lease is
+  temporary. Automatic reclamation of a stale lease belongs to
+  [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
+
+  `DP_ForceReleaseProviderLease` is the one deliberate exception — an operator
+  command that deletes the lease regardless of ownership, for the case where the
+  project was reset and no other copy is running. It is never called
+  automatically, and the refusal message names it.
+  ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37))
+
 - Added `DP_WindowStyleResult`, the structured outcome of applying the borderless
   window style. `M_Window_RemoveTitleBar` returned nothing, so complete success,
   a safe abort before any change, and a half-applied style were indistinguishable
@@ -1096,6 +1144,11 @@ backward-compatible capability, 💥 **major** may break callers.
   right-click, in-grid icon and keyboard shortcut all disabled is now permitted
   and preserved. Anything relying on the shortcut re-enabling itself when the
   other two were disabled must now set `EnableKeyboardShortcut` explicitly.
+- **Only one DatePicker copy may run per Excel session.** A second copy is
+  refused at `DP_Start`, and cannot tear down the first through `DP_Stop` or
+  `DP_RepairRuntime`. Sessions that previously loaded two copies — an `.xlam`
+  alongside an embedded copy, for example — will now see the second refused with
+  an explanation.
 - **Settings persistence is unchanged by default.** An installation that
   configures no namespace reads and writes exactly where earlier releases did.
   `DP_SETTINGS_APP_NAME` keeps its value and meaning. Isolation is opt-in through

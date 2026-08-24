@@ -293,6 +293,40 @@ stricter treatment than the UI.
 - `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
   including on the failure path. Preserve that.
 
+### The provider lease
+
+Only one DatePicker copy may own an Excel session. The lease is a hidden
+`Temporary` `CommandBar` named `__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__`,
+carrying one hidden `Temporary` control whose `Tag` identifies the marker and
+whose `Parameter` holds the owner's ephemeral token.
+
+Four rules, all settled:
+
+- **Acquire before the first shared registration.** A copy that registers and
+  then discovers the conflict has already displaced the owner's keyboard
+  shortcut. `DP_Start` claims the lease first or exits.
+- **Guard teardown, not just startup.** Refusing a second provider at startup
+  protects nothing while its `DP_Stop` or `DP_RepairRuntime` still dismantles the
+  owner. Both verify ownership before touching anything.
+- **Never delete a lease you cannot prove you own.** Release requires a local
+  token, a lease still carrying it, and an exact match. An unreadable lease is
+  ambiguous, never free — a bar this component cannot interpret belongs to
+  something.
+- **The lease is runtime state and is never persisted.** A registry-backed lease
+  would survive an Excel restart and block startup forever. `Temporary:=True`
+  means Excel removes it at shutdown, which is the correct lifetime.
+
+`DP_ForceReleaseProviderLease` is the single deliberate exception: an operator
+command that deletes the lease regardless of ownership. It must never be called
+automatically, and no lifecycle routine calls it.
+
+> [!NOTE]
+> The regression harness claims the lease during setup, through
+> `TST_DP_ResetDatePickerArtifacts`. That is the one place the guard is overridden
+> and it is deliberate: the lease outlives the VBA project that created it, so
+> re-importing a module strands a lease no project can release, and a regression
+> run is a single-provider environment by definition.
+
 ### Settings persistence
 
 `DP_SETTINGS_APP_NAME` is a stable legacy identifier and the default application

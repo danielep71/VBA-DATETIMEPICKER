@@ -1008,6 +1008,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "Manager"
     'Run DP_Start and DP_Stop lifecycle round-trip checks
         TST_DP_RunSuiteSafe "LifecyclePair"
+    'Run the one-provider lease suite
+        TST_DP_RunSuiteSafe "ProviderLease"
     'Run DP_RepairRuntime behavior checks
         TST_DP_RunSuiteSafe "RepairRuntime"
     'Run M_GridIcon_PreCreateHidden startup optimization checks
@@ -1298,6 +1300,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             Case "MANAGER"
                 TST_DP_RunSuite_Manager
 
+            Case "PROVIDERLEASE"
+                TST_DP_RunSuite_ProviderLease
             Case "LIFECYCLEPAIR"
                 TST_DP_RunSuite_LifecyclePair
 
@@ -3522,6 +3526,241 @@ SuiteFail:
         If gDP_Manager Is Nothing Then M_Picker_EnsureManager
         Err.Clear
         On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_RunSuite_ProviderLease()
+
+'
+'==============================================================================
+'                        SUITE: PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves the one-provider lease acquires, refuses, releases, and cannot be
+'   released by a provider that does not own it
+'
+' WHY THIS EXISTS
+'   Two DatePicker copies in one Excel process register the same application-wide
+'   resources under the same fixed identifiers, and either one's teardown removes
+'   the other's. Teardown is the more dangerous half: refusing a second provider
+'   at startup protects nothing while its DP_Stop still dismantles the owner
+'
+' BEHAVIOR
+'   Exercises acquisition, idempotent re-acquisition, ownership reporting and
+'   release from this single VBA project, then simulates a second provider by
+'   clearing this project's token while leaving the lease in place
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+'   Restores the lease state the run started with on every path
+'
+' DEPENDENCIES
+'   M_Lease_TryAcquire
+'   M_Lease_IsOwner
+'   M_Lease_Release
+'   DP_Start
+'
+' NOTES
+'   A second VBA project cannot be loaded from inside a run, so the second
+'   provider is simulated the way a VBA project reset produces it: the lease
+'   survives while the local token does not. That is the same state a reset
+'   leaves, and it is what the refusal has to detect
+'
+'   The suite therefore proves the DatePicker side of the contract. Two genuinely
+'   separate providers in one Excel session remain a manual validation case
+'
+'   The lease bar is Temporary, so Excel removes it at shutdown. Nothing here
+'   persists past the session even if the suite fails
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AcquiredFirst   As Boolean      'Result of the first acquisition
+    Dim AcquiredAgain   As Boolean      'Result of re-acquiring while owning
+    Dim OwnedAfter      As Boolean      'Ownership after acquisition
+    Dim OwnedAfterFree  As Boolean      'Ownership after release
+    Dim RefusedSecond   As Boolean      'Second provider refused acquisition
+    Dim OwnedAsSecond   As Boolean      'Second provider claimed ownership
+    Dim LeaseSurvived   As Boolean      'Lease still present after a refused release
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "ProviderLease"
+
+'------------------------------------------------------------------------------
+' START FROM A KNOWN STATE
+'------------------------------------------------------------------------------
+    'The run has already started the DatePicker, so this project may hold the
+    'lease. Release it to begin from a defined position
+        M_Lease_Release
+
+'------------------------------------------------------------------------------
+' ACQUIRE
+'------------------------------------------------------------------------------
+    'A free lease is acquired
+        AcquiredFirst = M_Lease_TryAcquire()
+        TST_DP_AssertTrue "A free lease is acquired", AcquiredFirst
+    'The owner reports ownership
+        OwnedAfter = M_Lease_IsOwner()
+        TST_DP_AssertTrue "The acquiring provider owns the lease", OwnedAfter
+    'Re-acquiring while owning is an idempotent success, not a refusal
+        AcquiredAgain = M_Lease_TryAcquire()
+        TST_DP_AssertTrue "Re-acquiring an owned lease succeeds", AcquiredAgain
+
+'------------------------------------------------------------------------------
+' A SECOND PROVIDER IS REFUSED
+'------------------------------------------------------------------------------
+    'Simulate the state a second provider sees, and the state a VBA project reset
+    'leaves behind: the lease exists, this project cannot prove it owns it
+        M_Lease_Test_ClearOwnerToken
+    'Acquisition is refused
+        RefusedSecond = Not M_Lease_TryAcquire()
+        TST_DP_AssertTrue "A second provider is refused the lease", RefusedSecond
+    'And it must not report ownership
+        OwnedAsSecond = M_Lease_IsOwner()
+        TST_DP_AssertFalse "A second provider does not own the lease", OwnedAsSecond
+
+'------------------------------------------------------------------------------
+' A SECOND PROVIDER CANNOT RELEASE THE OWNER'S LEASE
+'------------------------------------------------------------------------------
+    'This is the half that matters. A refused provider calling release must leave
+    'the owner's lease intact
+        M_Lease_Release
+        LeaseSurvived = (VBA.LenB(TST_DP_ReadLeaseOwnerForTest()) > 0)
+        TST_DP_AssertTrue "A refused provider cannot release the owner's lease", _
+            LeaseSurvived
+
+'------------------------------------------------------------------------------
+' THE OWNER RELEASES ITS OWN LEASE
+'------------------------------------------------------------------------------
+    'Reclaim ownership the only way a project can once its token is gone: the
+    'lease has to be removed by the test, standing in for the owner's own DP_Stop
+        TST_DP_ForceClearLeaseForTest
+    'A cleared lease is acquirable again
+        TST_DP_AssertTrue "A released lease can be acquired again", _
+            M_Lease_TryAcquire()
+    'The owner releases what it owns
+        M_Lease_Release
+        OwnedAfterFree = M_Lease_IsOwner()
+        TST_DP_AssertFalse "The owner no longer owns a released lease", OwnedAfterFree
+        TST_DP_AssertEqualsString "A released lease is gone", _
+            VBA.vbNullString, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Leave the run owning the lease, as it did before this suite
+        TST_DP_ForceClearLeaseForTest
+        M_Lease_TryAcquire
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Provider lease suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore the lease state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_ReadLeaseOwnerForTest() As String
+
+'
+'==============================================================================
+'                     READ LEASE OWNER FOR TEST
+'==============================================================================
+'   Reads the lease marker directly, so the suite can assert on the workbook
+'   state rather than on the routine under test.
+'
+'   The bar name and marker tag are duplicated from M_DatePicker, where they are
+'   Private. They are fixed identifiers that cannot drift without this suite
+'   failing.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const LEASE_BAR     As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"
+    Const MARKER_TAG    As String = "VBA_DATETIMEPICKER_RUNTIME_LEASE_OWNER"
+
+    Dim LeaseBar        As Object       'Resolved lease command bar
+    Dim Ctl             As Object       'Current control while scanning
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Never let a probe raise into a test
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_ReadLeaseOwnerForTest = VBA.vbNullString
+    'Resolve the lease bar, which may not exist
+        Set LeaseBar = Excel.Application.CommandBars(LEASE_BAR)
+        If LeaseBar Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Report the first marker token found
+        For Each Ctl In LeaseBar.Controls
+            If VBA.StrComp(Ctl.Tag, MARKER_TAG, vbBinaryCompare) = 0 Then
+                TST_DP_ReadLeaseOwnerForTest = Ctl.Parameter
+                Exit For
+            End If
+        Next Ctl
+    'Release object references
+        Set Ctl = Nothing
+        Set LeaseBar = Nothing
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Sub TST_DP_ForceClearLeaseForTest()
+
+'
+'==============================================================================
+'                     FORCE CLEAR LEASE FOR TEST
+'==============================================================================
+'   Removes the lease bar outright, standing in for an owner's clean shutdown.
+'
+'   This exists only because a suite cannot load a second VBA project to release
+'   a lease it does not own. Production code never deletes a lease it cannot
+'   prove it owns; this deliberately does, which is why it lives in the harness.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const LEASE_BAR     As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"
+
+    Dim LeaseBar        As Object       'Resolved lease command bar
+
+'------------------------------------------------------------------------------
+' CLEAR
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into a test
+        On Error Resume Next
+    'Resolve and delete the lease bar when it exists
+        Set LeaseBar = Excel.Application.CommandBars(LEASE_BAR)
+        If Not LeaseBar Is Nothing Then
+            LeaseBar.Delete
+        End If
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
 
 End Sub
 
@@ -7824,6 +8063,13 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
 '   account for anything. Teardown does not use it: each cleanup operation is
 '   invoked and checked individually, because a composite step that swallows its
 '   own errors cannot report which operation failed, or that any did.
+'
+'   It also claims the provider lease. That is deliberate and is the one place
+'   the harness overrides the #37 ownership guard: the lease lives for the Excel
+'   process while the token proving ownership lives in VBA module state, so any
+'   re-import strands a lease that no project can release. A regression run is a
+'   single-provider environment, and a genuine two-provider session is a manual
+'   validation case that this pack cannot construct anyway.
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -7841,6 +8087,13 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
         M_KeyboardShortcut_Remove
     'Purge all in-grid DatePicker icons
         M_GridIcon_PurgeAll
+    'Take the provider lease for this run. The lease outlives the VBA project that
+    'created it, so re-importing a module leaves a lease no project can prove it
+    'owns, and every guarded entry point then refuses. The harness is a
+    'single-provider environment by definition, so it claims ownership rather than
+    'failing on a lease it cannot otherwise reach
+        DP_ForceReleaseProviderLease
+        M_Lease_TryAcquire
     'Disarm any window-style fault injection left by an aborted run
         M_Window_Test_SetFaultInjection 0, 0
     'Clear any suppressed error

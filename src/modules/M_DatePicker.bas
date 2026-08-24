@@ -271,6 +271,9 @@ Option Explicit
 
     Public Const DP_SETTINGS_APP_NAME              As String = "VBA_DATETIMEPICKER"      'Legacy registry application name
     Private Const DP_SETTINGS_NAMESPACE_SEPARATOR  As String = "__"                      'Separates the legacy name from an optional namespace
+    Private Const DP_LEASE_BAR_NAME                As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"  'Application-wide provider lease
+    Private Const DP_LEASE_MARKER_TAG              As String = "VBA_DATETIMEPICKER_RUNTIME_LEASE_OWNER"         'Identifies the lease marker control
+    Private Const DP_LEASE_AMBIGUOUS               As String = "?"                       'Sentinel for a lease that cannot be read
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
     Public Const DP_MSGBOX_TITLE                   As String = "Date / Time Picker"      'Message-box title
 
@@ -390,6 +393,7 @@ Option Explicit
 '------------------------------------------------------------------------------
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
     Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
+    Private mDP_RuntimeOwnerId          As String               'Ephemeral lease token, non-empty only while this project owns the lease
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
     Private mDP_TimerIsRunning          As Boolean              'Timer running flag
     Private mDP_TimerProcedureName      As String               'Qualified OnTime timer procedure name
@@ -5789,6 +5793,616 @@ FailSafe:
 
 End Sub
 
+Public Sub DP_ForceReleaseProviderLease()
+
+'
+'------------------------------------------------------------------------------
+'                     FORCE RELEASE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes the one-provider lease regardless of who owns it, so an operator can
+'   recover a session the automatic policy has locked out
+'
+' WHY THIS EXISTS
+'   The lease lives for the Excel process; the token proving ownership lives in
+'   VBA module state. A VBA project reset destroys the token and leaves the lease,
+'   after which the provider that created it can no longer prove ownership and
+'   every entry point refuses
+'
+'   That is correct for a crashed provider and unusable during development, where
+'   re-importing a module resets the project several times an hour. Restarting
+'   Excel is a poor answer to a self-inflicted lockout
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Deletes the lease and clears this project''s token, whether or not this
+'   project owned it
+'
+' ERROR POLICY
+'   Does not raise. A lease that is absent or already gone is not an error
+'
+' DEPENDENCIES
+'   M_Lease_GetBar
+'
+' NOTES
+'   This is the one place the component deliberately breaks its own rule that a
+'   lease is never deleted unless ownership can be proved. That is safe only
+'   because it is an explicit operator action, never called automatically and
+'   never called by DP_Start, DP_Stop or DP_RepairRuntime
+'
+'   Call it only when no other copy of the DatePicker is running. Calling it
+'   while a live provider owns the lease will let a second provider acquire one,
+'   which is exactly the unsupported configuration #37 exists to prevent
+'
+'   Restarting Excel achieves the same thing without the risk, because the lease
+'   is Temporary. Prefer that when in doubt
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "DP_ForceReleaseProviderLease"
+
+    Dim LeaseBar        As Object       'Lease command bar
+
+'------------------------------------------------------------------------------
+' FORCE RELEASE
+'------------------------------------------------------------------------------
+    'Never let a recovery action raise
+        On Error Resume Next
+    'Delete the lease whoever owns it
+        Set LeaseBar = M_Lease_GetBar()
+        If Not LeaseBar Is Nothing Then
+            LeaseBar.Delete
+            Debug.Print PROC_NAME & " | Provider lease released by operator request"
+        Else
+            Debug.Print PROC_NAME & " | No provider lease was present"
+        End If
+    'Drop this project's claim as well
+        mDP_RuntimeOwnerId = VBA.vbNullString
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed release error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Lease_Test_ClearOwnerToken()
+
+'
+'==============================================================================
+'                     CLEAR LOCAL OWNER TOKEN (TEST)
+'==============================================================================
+'   Drops this project's lease token without touching the lease itself.
+'
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
+'   must be classified internal under #25.
+'
+'   It exists because a regression suite cannot load a second VBA project. This
+'   reproduces exactly the state a second provider sees, and the state a VBA
+'   project reset leaves behind:
+'
+'       the lease survives, the local token does not
+'
+'   It never deletes, creates or rewrites a lease. Clearing a token can only ever
+'   make this project less privileged, so a stray call cannot seize ownership or
+'   destroy another provider's registrations.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLEAR
+'------------------------------------------------------------------------------
+    'Drop this project's claim, leaving the lease untouched
+        mDP_RuntimeOwnerId = VBA.vbNullString
+
+End Sub
+
+Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
+
+'
+'==============================================================================
+'                          REPORT LEASE REFUSAL
+'==============================================================================
+'   Tells the operator why a DatePicker entry point declined to act.
+'
+'   A refused provider produces no visible change, so without this it would look
+'   like the DatePicker simply failed to start.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Never let reporting raise into a refusal
+        On Error Resume Next
+    'Record the refusal for diagnostics
+        Debug.Print EntryPoint & " | Refused | Another DatePicker provider owns " & _
+            "this Excel session, or ownership could not be verified"
+    'Tell the operator, because nothing else in the session will
+        MsgBox _
+            "Another copy of the DatePicker is already active in this Excel " & _
+            "session, or its ownership could not be verified." & VBA.vbCrLf & VBA.vbCrLf & _
+            "Running two copies at once is not supported: they share the same " & _
+            "keyboard shortcut, right-click entry and grid icons, and either " & _
+            "one's shutdown would remove the other's." & VBA.vbCrLf & VBA.vbCrLf & _
+            "Close the other copy and restart Excel." & VBA.vbCrLf & VBA.vbCrLf & _
+            "If you are certain no other copy is running - for example after " & _
+            "resetting the VBA project - run:" & VBA.vbCrLf & VBA.vbCrLf & _
+            "    DP_ForceReleaseProviderLease", _
+            vbExclamation Or vbOKOnly, _
+            DP_MSGBOX_TITLE
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Private Function M_Lease_NewOwnerId() As String
+
+'
+'------------------------------------------------------------------------------
+'                          NEW RUNTIME OWNER ID
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Generates the ephemeral token that identifies this provider while it holds
+'   the runtime lease
+'
+' WHY THIS EXISTS
+'   The lease has to distinguish "I own this" from "someone else owns this", and
+'   the answer must not survive the VBA project that produced it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   A token for this acquisition attempt
+'
+' BEHAVIOR
+'   Combines the clock, the sub-second timer and a random component
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The token deliberately carries no workbook identity. ThisWorkbook.Name and
+'   FullName change on rename, move and save-as, and none of those should alter
+'   ownership during a live Excel session
+'
+'   A GUID would be stronger, but CoCreateGuid is WinAPI and the lease must work
+'   with WinAPI disabled by setting or by platform. Two providers starting within
+'   the same millisecond would need the random component to collide as well,
+'   and a collision fails closed: the second provider reads a marker equal to its
+'   own token, believes it already owns the lease, and stops. It does not seize
+'   anything
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' GENERATE
+'------------------------------------------------------------------------------
+    'Never let token generation raise
+        On Error Resume Next
+    'Seed from the system timer so two projects do not share a sequence
+        Randomize
+    'Combine clock, sub-second timer and a random component
+        M_Lease_NewOwnerId = VBA.Format$(VBA.Now, "yyyymmddhhnnss") & "-" & _
+            VBA.Format$(VBA.Timer * 1000, "00000000") & "-" & _
+            VBA.Hex$(VBA.Int(VBA.Rnd() * 2147483647#))
+    'Clear any suppressed generation error
+        Err.Clear
+
+End Function
+
+Private Function M_Lease_GetBar() As Object
+
+'
+'==============================================================================
+'                            GET LEASE BAR
+'==============================================================================
+'   Returns the lease command bar, or Nothing when no bar of that name exists.
+'
+'   Resolving by name never creates anything: absence is an ordinary answer.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the bar does not exist
+        On Error Resume Next
+    'Set safe default result
+        Set M_Lease_GetBar = Nothing
+    'Attempt to resolve the lease bar
+        Set M_Lease_GetBar = Excel.Application.CommandBars(DP_LEASE_BAR_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+
+End Function
+
+Private Function M_Lease_ReadOwner() As String
+
+'
+'------------------------------------------------------------------------------
+'                          READ LEASE OWNER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports which provider currently holds the runtime lease
+'
+' WHY THIS EXISTS
+'   Every ownership decision, on acquisition and on release, needs one answer to
+'   this question, and it must distinguish "free" from "held by someone" from
+'   "cannot tell"
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   An empty string when no lease exists
+'
+'   The owner token when exactly one well-formed marker is present
+'
+'   DP_LEASE_AMBIGUOUS when a bar exists whose marker is missing, malformed or
+'   duplicated
+'
+' BEHAVIOR
+'   Scans the lease bar for controls carrying the marker tag and reports what it
+'   finds
+'
+' ERROR POLICY
+'   Does not raise. An unreadable lease is reported as ambiguous, never as free
+'
+' DEPENDENCIES
+'   M_Lease_GetBar
+'
+' NOTES
+'   Ambiguous is not the same as free, and the difference is the whole safety
+'   property. A bar this component cannot interpret belongs to something, and
+'   treating it as garbage to clear would be exactly the destruction #37 exists
+'   to prevent
+'
+'   Two markers mean two writers, which is unverifiable rather than resolvable
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeaseBar        As Object       'Resolved lease command bar
+    Dim Ctl             As Object       'Current control while scanning
+    Dim FoundToken      As String       'Token read from the marker
+    Dim FoundCount      As Long         'Markers found
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Never let a lease read raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_ReadOwner = VBA.vbNullString
+    'Resolve the lease bar
+        Set LeaseBar = M_Lease_GetBar()
+    'No bar means no lease, which is the only "free" answer
+        If LeaseBar Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Count the marker controls and capture the token
+        For Each Ctl In LeaseBar.Controls
+            If VBA.StrComp(Ctl.Tag, DP_LEASE_MARKER_TAG, vbBinaryCompare) = 0 Then
+                FoundCount = FoundCount + 1
+                FoundToken = Ctl.Parameter
+            End If
+        Next Ctl
+        Set Ctl = Nothing
+    'A bar exists, so something owns it. Anything but one readable marker is
+    'unverifiable rather than free
+        If Err.Number <> 0 Then
+            M_Lease_ReadOwner = DP_LEASE_AMBIGUOUS
+        ElseIf FoundCount <> 1 Then
+            M_Lease_ReadOwner = DP_LEASE_AMBIGUOUS
+        ElseIf VBA.LenB(FoundToken) = 0 Then
+            M_Lease_ReadOwner = DP_LEASE_AMBIGUOUS
+        Else
+            M_Lease_ReadOwner = FoundToken
+        End If
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Public Function M_Lease_IsOwner() As Boolean
+
+'
+'==============================================================================
+'                              IS LEASE OWNER
+'==============================================================================
+'   Reports whether this VBA project currently holds the runtime lease.
+'
+'   Both halves must agree: this project must hold a token, and the lease must
+'   still carry that same token. A project reset clears the first, and another
+'   provider's lease fails the second.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' COMPARE
+'------------------------------------------------------------------------------
+    'Never let an ownership check raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_IsOwner = False
+    'A project holding no token cannot be the owner
+        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
+            Err.Clear
+            Exit Function
+        End If
+    'The lease must still carry this project's token
+        M_Lease_IsOwner = (VBA.StrComp(M_Lease_ReadOwner(), mDP_RuntimeOwnerId, _
+            vbBinaryCompare) = 0)
+    'Clear any suppressed comparison error
+        Err.Clear
+
+End Function
+
+Public Function M_Lease_TryAcquire() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                          ACQUIRE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Claims the one-provider runtime lease, or reports that another provider holds
+'   it
+'
+' WHY THIS EXISTS
+'   Two DatePicker copies in one Excel process register the same application-wide
+'   resources under the same fixed identifiers, and either one's teardown removes
+'   the other's. Detection has to happen before the first shared registration
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when this project owns the lease, including when it already did
+'
+'   False when another provider owns it, or when ownership cannot be verified
+'
+' BEHAVIOR
+'   Reads the lease, and when it is free creates the bar, writes the marker, then
+'   re-reads to confirm the marker is this project's before claiming ownership
+'
+' ERROR POLICY
+'   Does not raise. Refusal is an ordinary answer that the caller reports
+'
+'   Fails closed: an unverifiable lease refuses rather than assuming it is free
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_GetBar
+'   M_Lease_NewOwnerId
+'
+' NOTES
+'   The bar and its control are Temporary, so Excel deletes them when it closes.
+'   The lease therefore cannot survive into the next Excel process, which is what
+'   makes a registry-backed lease the wrong shape: that one would outlive the
+'   process and block startup permanently
+'
+'   A VBA project reset clears mDP_RuntimeOwnerId while the bar survives, so the
+'   former owner can no longer prove ownership and startup refuses. That is the
+'   specified policy: fail closed, and restart Excel to recover. Automatic
+'   reclamation of a stale lease belongs to #14
+'
+'   The bar name is fixed rather than carrying the token, which gives the object
+'   model a uniqueness point during acquisition. Owner identity lives on the
+'   control
+'
+'   Creation is verified by re-reading. If something appeared between the lookup
+'   and the create, the re-read classifies it rather than the code retrying
+'
+'   A CommandBar is not indestructible: other VBA in the process can delete
+'   custom bars, and published examples do exactly that while sweeping invisible
+'   ones. That is external tampering. What this component guarantees is that it
+'   never deletes a lease it cannot prove it owns
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Lease_TryAcquire"
+
+    Dim CurrentOwner    As String       'Owner token currently on the lease
+    Dim Candidate       As String       'Token this attempt would claim
+    Dim LeaseBar        As Object       'Lease command bar
+    Dim Marker          As Object       'Marker control
+    Dim CreatedBar      As Boolean      'True when this attempt created the bar
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let acquisition raise into startup
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_TryAcquire = False
+
+'------------------------------------------------------------------------------
+' CLASSIFY THE EXISTING LEASE
+'------------------------------------------------------------------------------
+    'Read what currently holds the lease
+        CurrentOwner = M_Lease_ReadOwner()
+    'An existing lease carrying this project's token is an idempotent success
+        If VBA.LenB(mDP_RuntimeOwnerId) > 0 Then
+            If VBA.StrComp(CurrentOwner, mDP_RuntimeOwnerId, vbBinaryCompare) = 0 Then
+                M_Lease_TryAcquire = True
+                Err.Clear
+                Exit Function
+            End If
+        End If
+    'A lease held by anyone else refuses this provider
+        If VBA.LenB(CurrentOwner) > 0 Then
+            Debug.Print PROC_NAME & _
+                " | Refused | Lease held by " & _
+                VBA.IIf(CurrentOwner = DP_LEASE_AMBIGUOUS, _
+                    "an unverifiable owner", "another provider")
+            Err.Clear
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' CREATE THE LEASE
+'------------------------------------------------------------------------------
+    'Generate the token this attempt will claim
+        Candidate = M_Lease_NewOwnerId()
+    'Create a temporary, hidden, application-wide bar
+        Err.Clear
+        Set LeaseBar = Excel.Application.CommandBars.Add( _
+            Name:=DP_LEASE_BAR_NAME, Temporary:=True)
+    'Something may have created the lease between the read and this call
+        If Err.Number <> 0 Or LeaseBar Is Nothing Then
+            Err.Clear
+            Debug.Print PROC_NAME & " | Refused | Lease appeared during acquisition"
+            Set LeaseBar = Nothing
+            Exit Function
+        End If
+        CreatedBar = True
+    'Keep the lease invisible. A new custom bar is hidden by default; this is
+    'explicit so a later change cannot surface it
+        LeaseBar.Visible = False
+
+'------------------------------------------------------------------------------
+' WRITE THE MARKER
+'------------------------------------------------------------------------------
+    'Add one hidden temporary control to carry ownership
+        Set Marker = LeaseBar.Controls.Add(Temporary:=True)
+        If Not Marker Is Nothing Then
+            Marker.Tag = DP_LEASE_MARKER_TAG
+            Marker.Parameter = Candidate
+            Marker.Visible = False
+        End If
+        Set Marker = Nothing
+
+'------------------------------------------------------------------------------
+' VERIFY BEFORE CLAIMING
+'------------------------------------------------------------------------------
+    'Re-read rather than trusting the writes above
+        Err.Clear
+        If VBA.StrComp(M_Lease_ReadOwner(), Candidate, vbBinaryCompare) = 0 Then
+            mDP_RuntimeOwnerId = Candidate
+            M_Lease_TryAcquire = True
+        Else
+            'Remove only the bar this attempt created, and only when it is still
+            'the object this attempt created
+                If CreatedBar Then
+                    If Not LeaseBar Is Nothing Then
+                        LeaseBar.Delete
+                    End If
+                End If
+                mDP_RuntimeOwnerId = VBA.vbNullString
+                Debug.Print PROC_NAME & " | Refused | Lease could not be verified after creation"
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed acquisition error
+        Err.Clear
+
+End Function
+
+Public Sub M_Lease_Release()
+
+'
+'------------------------------------------------------------------------------
+'                          RELEASE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Gives up the runtime lease, but only when this project can prove it holds it
+'
+' WHY THIS EXISTS
+'   This is the more important half of the model. Refusing a second provider at
+'   startup protects nothing if that same provider can later release the owner's
+'   lease and dismantle its registrations
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Deletes the lease bar when its marker matches this project's token, and does
+'   nothing otherwise
+'
+' ERROR POLICY
+'   Does not raise. A lease this project does not own is left alone silently
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_GetBar
+'
+' NOTES
+'   Three conditions each mean "do not touch it": no local token, a marker that
+'   differs, and an unverifiable lease. Only an exact match releases
+'
+'   A refused provider therefore cannot release the owner's lease through DP_Stop
+'   or DP_RepairRuntime, because it never held a token to match with
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeaseBar        As Object       'Lease command bar
+
+'------------------------------------------------------------------------------
+' RELEASE ONLY WHAT THIS PROJECT OWNS
+'------------------------------------------------------------------------------
+    'Never let release raise into teardown
+        On Error Resume Next
+    'A project holding no token has nothing to release
+        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
+            Err.Clear
+            Exit Sub
+        End If
+    'The lease must still carry this project's token
+        If VBA.StrComp(M_Lease_ReadOwner(), mDP_RuntimeOwnerId, vbBinaryCompare) <> 0 Then
+            mDP_RuntimeOwnerId = VBA.vbNullString
+            Err.Clear
+            Exit Sub
+        End If
+    'Delete the lease this project owns
+        Set LeaseBar = M_Lease_GetBar()
+        If Not LeaseBar Is Nothing Then
+            LeaseBar.Delete
+        End If
+    'Clear the local token whether or not the delete succeeded
+        mDP_RuntimeOwnerId = VBA.vbNullString
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed release error
+        Err.Clear
+
+End Sub
+
 Public Sub DP_Start()
 
 '
@@ -5858,6 +6472,19 @@ Public Sub DP_Start()
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' ACQUIRE PROVIDER LEASE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Acquire provider lease"
+    'Claim the one-provider lease before touching anything application-wide. A
+    'second copy that registered first and discovered the conflict afterwards
+    'would already have displaced the owner's keyboard shortcut
+        If Not M_Lease_TryAcquire() Then
+            M_Lease_ReportRefusal "DP_Start"
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' ENSURE MANAGER
@@ -6406,6 +7033,16 @@ Public Sub DP_RepairRuntime()
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' VERIFY PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Repair rebuilds application-wide registrations, so it is at least as
+    'destructive as teardown and needs the same guard
+        If Not M_Lease_IsOwner() Then
+            M_Lease_ReportRefusal "DP_RepairRuntime"
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
 ' RE-ENABLE EXCEL EVENTS
 '------------------------------------------------------------------------------
     'Re-enable Excel events required by the DatePicker manager
@@ -6716,6 +7353,17 @@ Public Sub DP_Stop()
         On Error Resume Next
 
 '------------------------------------------------------------------------------
+' VERIFY PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'A provider that does not own the lease must not tear down the owner's
+    'registrations. Refusing a second provider at startup protects nothing while
+    'its teardown remains destructive
+        If Not M_Lease_IsOwner() Then
+            M_Lease_ReportRefusal "DP_Stop"
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
 ' RELEASE MANAGER
 '------------------------------------------------------------------------------
     'Release the Application event manager and trigger its teardown path
@@ -6744,6 +7392,13 @@ Public Sub DP_Stop()
 '------------------------------------------------------------------------------
     'Clear cached workbook-qualified callback names
         M_GetQualifiedMacroName_ClearCache
+
+'------------------------------------------------------------------------------
+' RELEASE PROVIDER LEASE
+'------------------------------------------------------------------------------
+    'Give up the lease last, so this provider still owns it while tearing its own
+    'registrations down
+        M_Lease_Release
 
 '------------------------------------------------------------------------------
 ' EXIT

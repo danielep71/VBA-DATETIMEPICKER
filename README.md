@@ -494,6 +494,9 @@ Recommended `ThisWorkbook` pattern:
 Option Explicit
 
 Private Sub Workbook_Open()
+    ' Only if this deployment needs its own persisted settings.
+    ' It must come before DP_Start, which loads them.
+    ' M_Settings_SetNamespace "TreasuryTool"
     DP_Start
 End Sub
 
@@ -631,6 +634,9 @@ Primary public entry points are exposed through `M_DatePicker.bas`.
 | `DP_FillTableColumn` | Writes one date to every cell of the Excel Table data column containing the selection, after confirming the scope |
 | `DP_RepairRuntime` | Repairs runtime state, including event enablement and manager recreation |
 | `M_Picker_EnsureManager` | Ensures settings are loaded and creates or repairs the manager. Reports the caller's `Application.EnableEvents` state without changing it |
+| `DP_ForceReleaseProviderLease` | Releases the one-provider lease regardless of ownership. Operator recovery only, when no other copy is running |
+| `M_Settings_SetNamespace` | Isolates this deployment's persisted settings under an explicit namespace. Must be called before anything loads settings, and is refused afterwards |
+| `M_Settings_GetNamespace` | Returns the configured settings namespace. Empty means the legacy `VBA_DATETIMEPICKER` scope |
 | `M_ContextMenu_Update` | Synchronizes right-click menu integration with current settings |
 | `M_KeyboardShortcut_Update` | Synchronizes keyboard shortcut integration with current settings |
 | `M_GridIcon_PurgeAll` | Removes all DatePicker grid icons from open workbooks |
@@ -1075,6 +1081,38 @@ delete the other's worksheet icons.
 Do not run the embedded source and the `.xlam` in the same Excel session, and do
 not embed the picker into multiple workbooks that will be open at once.
 Tracked in [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
+
+### Only one copy can run at a time
+
+The DatePicker registers application-wide resources — the `Ctrl + Shift + D`
+binding, the right-click entry, the in-grid icons — under fixed identifiers
+shared by every copy. Two copies in one Excel session would each register the
+same things, and either one's shutdown would remove the other's.
+
+The first copy to start therefore claims a **provider lease**, and a second copy
+is refused with an explanation rather than quietly displacing it. A refused copy
+also cannot tear the owner down: `DP_Stop` and `DP_RepairRuntime` decline unless
+the caller can prove it owns the lease.
+
+The lease lives for the Excel process. Closing the owning workbook releases it;
+so does closing Excel.
+
+#### Recovering a stranded lease
+
+Ownership is proved by a token held in VBA module state. Resetting the VBA
+project — or re-importing a module — destroys that token while the lease itself
+survives, so the DatePicker can no longer prove it owns what it created and
+every entry point refuses.
+
+Restarting Excel always clears it. If you are certain no other copy is running:
+
+```vb
+DP_ForceReleaseProviderLease
+```
+
+That deletes the lease regardless of ownership. Use it only when you know the
+session holds no other DatePicker — releasing a lease a live copy still owns
+lets a second copy acquire one, which is the configuration this is preventing.
 
 ### The keyboard shortcut is application-wide
 
