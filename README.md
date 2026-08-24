@@ -1097,6 +1097,21 @@ the caller can prove it owns the lease.
 The lease lives for the Excel process. Closing the owning workbook releases it;
 so does closing Excel.
 
+#### The lease only protects v1.2.0 against v1.2.0
+
+A copy from before `v1.2.0` has no lease code. It registers everything
+unconditionally and never checks whether another copy owns the session, so:
+
+```text
+v1.2.0 + v1.2.0      second copy refused, owner protected
+v1.2.0 + older copy  no protection in either direction
+```
+
+A `v1.2.0` copy starting beside an older one finds no lease, acquires cleanly,
+and both register. This cannot be fixed from this side — a released build cannot
+be given a check it never had. If you run more than one copy, make sure both are
+`v1.2.0` or later.
+
 #### Recovering a stranded lease
 
 Ownership is proved by a token held in VBA module state. Resetting the VBA
