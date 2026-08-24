@@ -688,7 +688,7 @@ backward-compatible capability, 💥 **major** may break callers.
 
   Genuine deletion failures are still captured and reported; only the
   stale-reference case is removed from that signal.
-  ([#<ISSUE>](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/<ISSUE>))
+  ([#44](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/44))
 
 - Fixed the keyboard shortcut being enabled on the user's behalf. Disabling both
   the right-click entry and the in-grid icon forced `EnableKeyboardShortcut` back
@@ -902,7 +902,7 @@ backward-compatible capability, 💥 **major** may break callers.
   The Known limitations section was audited when it was written; the rest of the
   file was not. The release documented its own behaviour change while
   contradicting it four sections above the disclosure.
-
+  ([#41](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/41))
 - Fixed four documents describing `demo/DATEPICKER.xlsm` as a tracked file after
   it was deleted. The `CONTRIBUTING.md` binary policy table was written
   specifically to resolve a contradiction about that file and had come to assert
