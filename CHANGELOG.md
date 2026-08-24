@@ -1200,6 +1200,33 @@ backward-compatible capability, 💥 **major** may break callers.
   Verified: no tracked file matches any ignore rule, and every source path checked
   individually remains trackable.
 
+- Expanded `CODE_OF_CONDUCT.md` from a conduct statement into a collaboration
+  standard, most of which is about evidence rather than behavior.
+
+  **Regression evidence** encodes what this release cycle repeatedly needed: a run
+  state and a cleanup result, not an assertion count. `302 assertions passed` is
+  recorded as incomplete evidence, and a non-`PASS` result must not be presented
+  as release-quality merely because some or all assertions passed.
+
+  **Data-safety discussions** requires write-back claims to distinguish target
+  resolution, literal values, formula cells, protected locked cells,
+  array-formula cells and partial writes — the same classifications
+  `DP_WriteResult` reports — and states the project's preference for explicit
+  destructive action over convenient defaults.
+
+  **Runtime-ownership discussions** lists the facts a lease report needs, and
+  records that a pre-`v1.2.0` copy does not participate in the provider-lease
+  protocol, so a mixed-version session must not be assumed protected.
+
+  Also adds sections on useful versus unhelpful disagreement, safe reproductions
+  and confidentiality, security issues as distinct from ordinary bugs, conflicts
+  of interest, source and licensing integrity, and response expectations for a
+  single-maintainer project.
+
+  Verified against source: both harness runners, all five run states and the
+  lifecycle procedures named in the document exist as described, and every
+  internal link resolves.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
