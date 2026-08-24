@@ -192,7 +192,7 @@ Option Explicit
     Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
     Private mTST_DP_ScratchAddBefore As Long            'Worksheet count immediately before the scratch-sheet Add
     Private mTST_DP_ScratchAddAfter  As Long            'Worksheet count immediately after it
-    Private mTST_DP_ScratchAddOrphan As String          'Name of a worksheet the failed Add left behind
+    Private mTST_DP_ScratchAddOrphan As String          'Outcome of cleaning up after a failed scratch-sheet setup
     Private mTST_DP_MenuAtStart     As Long             'Context-menu controls registered before the run
     Private mTST_DP_MenuAfterRemove As Long             'Context-menu controls left immediately after removal
     Private mTST_DP_RunInProgress   As Boolean          'True between run start and completed teardown
@@ -481,7 +481,7 @@ Private Function TST_DP_DescribeHostWorkbook() As String
             VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME)) & _
             "; WorksheetsBeforeAdd=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
             "; WorksheetsAfterAdd=" & VBA.CStr(mTST_DP_ScratchAddAfter) & _
-            "; OrphanRemoved=" & _
+            "; ScratchCleanup=" & _
             VBA.IIf(VBA.LenB(mTST_DP_ScratchAddOrphan) = 0, "none", mTST_DP_ScratchAddOrphan)
     'Return the description
         TST_DP_DescribeHostWorkbook = Description
@@ -990,6 +990,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "Environment"
     'Run settings and persisted-state checks
         TST_DP_RunSuiteSafe "Settings"
+    'Run the settings namespace isolation suite
+        TST_DP_RunSuiteSafe "SettingsNamespace"
     'Run date-selection policy checks
         TST_DP_RunSuiteSafe "DatePolicy"
     'Run holiday callback dispatch and fail-safe checks
@@ -1270,6 +1272,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             Case "ENVIRONMENT"
                 TST_DP_RunSuite_Environment
 
+            Case "SETTINGSNAMESPACE"
+                TST_DP_RunSuite_SettingsNamespace
             Case "SETTINGS"
                 TST_DP_RunSuite_Settings
 
@@ -1836,6 +1840,204 @@ SuiteFail:
     'Record the suite-level failure and clear the error
         TST_DP_RecordFail "Settings suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_SettingsNamespace()
+
+'
+'==============================================================================
+'                     SUITE: SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that an explicit settings namespace isolates persisted configuration,
+'   and that the default namespace still resolves exactly where it always did
+'
+' WHY THIS EXISTS
+'   Persistence is scoped to the Windows user, not the deployment. Two workbooks
+'   that never run at the same time can still overwrite each other's preferences,
+'   and loading is itself a write boundary because M_Settings_Load persists the
+'   values it normalizes
+'
+' BEHAVIOR
+'   Writes distinct values under two temporary namespaces, reads each back, and
+'   confirms neither disturbed the other or the legacy default
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+' DEPENDENCIES
+'   M_Settings_SetNamespace
+'   M_Settings_GetNamespace
+'   DP_SETTINGS_APP_NAME
+'
+' NOTES
+'   The suite never writes to the operator's real VBA_DATETIMEPICKER settings.
+'   It writes through GetSetting/SaveSetting directly under temporary namespaces
+'   it creates and deletes, so proving isolation costs the operator nothing
+'
+'   The namespace cannot be reconfigured once settings have loaded, and settings
+'   are loaded long before this suite runs. The lock is therefore asserted rather
+'   than worked around: the suite proves the refusal instead of trying to defeat
+'   it, and exercises isolation through the same registry API the resolver uses
+'
+'   Temporary registry keys are removed on every path, including a failed
+'   assertion. A leftover key is reported as a cleanup failure rather than left
+'   for the next run to find
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const SECTION_NAME  As String = "Display"           'Section used for the probe
+    Const KEY_NAME      As String = "TST_DP_NamespaceProbe"  'Key used for the probe
+
+    Dim AppNameA        As String       'Effective application name for namespace A
+    Dim AppNameB        As String       'Effective application name for namespace B
+    Dim LegacyValue     As String       'Legacy-namespace probe value, if any
+    Dim ReadBackA       As String       'Value read back from namespace A
+    Dim ReadBackB       As String       'Value read back from namespace B
+    Dim LegacyAfter     As String       'Legacy value after both namespace writes
+    Dim RefusedLate     As Boolean      'True when a late namespace change was refused
+    Dim RefusedInvalid  As Boolean      'True when an invalid namespace was refused
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "SettingsNamespace"
+    AppNameA = DP_SETTINGS_APP_NAME & "__TST_DP_NS_A"
+    AppNameB = DP_SETTINGS_APP_NAME & "__TST_DP_NS_B"
+
+'------------------------------------------------------------------------------
+' ASSERT THE DEFAULT RESOLVES TO THE LEGACY NAME
+'------------------------------------------------------------------------------
+    'An installation that configures nothing must read and write exactly where
+    'earlier releases did
+        TST_DP_AssertEqualsString "Default namespace is empty", _
+            VBA.vbNullString, M_Settings_GetNamespace()
+    'Record whatever the legacy namespace holds so the suite can prove it is
+    'left alone
+        LegacyValue = GetSetting(DP_SETTINGS_APP_NAME, SECTION_NAME, KEY_NAME, "<absent>")
+
+'------------------------------------------------------------------------------
+' WRITE TWO ISOLATED NAMESPACES
+'------------------------------------------------------------------------------
+    'Persist a distinct value under each temporary namespace
+        SaveSetting AppNameA, SECTION_NAME, KEY_NAME, "value-A"
+        SaveSetting AppNameB, SECTION_NAME, KEY_NAME, "value-B"
+    'Read each back
+        ReadBackA = GetSetting(AppNameA, SECTION_NAME, KEY_NAME, "<absent>")
+        ReadBackB = GetSetting(AppNameB, SECTION_NAME, KEY_NAME, "<absent>")
+
+'------------------------------------------------------------------------------
+' ASSERT ISOLATION
+'------------------------------------------------------------------------------
+    'Each namespace returns its own value
+        TST_DP_AssertEqualsString "Namespace A returns its own value", _
+            "value-A", ReadBackA
+        TST_DP_AssertEqualsString "Namespace B returns its own value", _
+            "value-B", ReadBackB
+    'Neither write disturbed the other
+        TST_DP_AssertTrue "Namespace A and B are isolated", ReadBackA <> ReadBackB
+    'Neither write reached the legacy default
+        LegacyAfter = GetSetting(DP_SETTINGS_APP_NAME, SECTION_NAME, KEY_NAME, "<absent>")
+        TST_DP_AssertEqualsString "Legacy namespace is unaffected", _
+            LegacyValue, LegacyAfter
+
+'------------------------------------------------------------------------------
+' ASSERT THE TIMING LOCK
+'------------------------------------------------------------------------------
+    'Settings are loaded by the time any suite runs, so reconfiguring must be
+    'refused rather than silently repointing values already in memory
+        On Error Resume Next
+        Err.Clear
+        M_Settings_SetNamespace "TooLate"
+        RefusedLate = (Err.Number <> 0)
+        Err.Clear
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Namespace change after settings load is refused", _
+            RefusedLate
+    'The refusal must not have altered the configured namespace
+        TST_DP_AssertEqualsString "Refused change leaves the namespace unchanged", _
+            VBA.vbNullString, M_Settings_GetNamespace()
+
+'------------------------------------------------------------------------------
+' ASSERT VALIDATION
+'------------------------------------------------------------------------------
+    'A namespace containing a path separator would make the registry location
+    'ambiguous. The lock above fires first, so this asserts only that an invalid
+    'namespace is never accepted silently
+        On Error Resume Next
+        Err.Clear
+        M_Settings_SetNamespace "bad\namespace"
+        RefusedInvalid = (Err.Number <> 0)
+        Err.Clear
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Invalid namespace is refused", RefusedInvalid
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Remove the temporary registry keys this suite created
+        TST_DP_DeleteNamespaceProbe AppNameA, SECTION_NAME
+        TST_DP_DeleteNamespaceProbe AppNameB, SECTION_NAME
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Settings namespace suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Never leave temporary registry keys behind
+        Resume SuiteExit
+
+End Sub
+
+Private Sub TST_DP_DeleteNamespaceProbe( _
+    ByVal ApplicationName As String, _
+    ByVal SectionName As String)
+
+'
+'==============================================================================
+'                      DELETE NAMESPACE PROBE KEY
+'==============================================================================
+'   Removes a temporary registry namespace the suite created.
+'
+'   A leftover key is counted as a cleanup failure rather than left for the next
+'   run, because the suite's whole point is that persisted state does not leak
+'   between deployments.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DELETE
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the key was never created
+        On Error Resume Next
+        Err.Clear
+    'Remove the whole temporary application namespace
+        DeleteSetting ApplicationName, SectionName
+    'Report a key this suite could not remove
+        If Err.Number <> 0 Then
+            Err.Clear
+            If GetSetting(ApplicationName, SectionName, "TST_DP_NamespaceProbe", _
+                "<absent>") <> "<absent>" Then
+                mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+                TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Namespace probe", _
+                    "Temporary registry namespace " & ApplicationName & _
+                    " could not be removed"
+            End If
+        End If
+    'Clear any suppressed cleanup error
         Err.Clear
 
 End Sub
@@ -6612,101 +6814,539 @@ Private Sub TST_DP_PrepareScratchSheet(ByVal HostWorkbook As Excel.Workbook)
 '==============================================================================
 '                        PREPARE SCRATCH WORKSHEET
 '==============================================================================
-'   Creates the worksheet the suites write to.
+' PURPOSE
+'   Creates and initializes the worksheet the regression suites write to
 '
-'   The Add is instrumented rather than trusted. This call has been observed to
-'   report 1004 while leaving a new unnamed worksheet in the workbook, which the
-'   rename then never reached. That leaks a sheet on every occurrence, and
-'   preflight cannot see it: it looks for TST_DP_SCRATCH by name, and the
-'   leftover is called SheetNN.
+' WHY THIS EXISTS
+'   Worksheets.Add here has been observed to report 1004 while leaving a new
+'   unnamed worksheet in the workbook. Every occurrence leaked a sheet, and
+'   preflight could not see it: it looks for TST_DP_SCRATCH by name and the
+'   leftover is called SheetNN
 '
-'   Recording the worksheet count either side of the Add distinguishes the two
-'   explanations that the failure alone cannot:
+'   Protecting only the Add is not enough. The rename, the initialization, the
+'   formatting and the activation can each fail after a successful Add and leak
+'   the same sheet, so the whole sequence is one transaction
 '
-'     before = after    the Add genuinely failed and created nothing
-'     after  > before   the Add created a sheet and reported failure anyway
+' INPUTS
+'   HostWorkbook
+'     Workbook that will receive the scratch worksheet
 '
-'   Whichever it is, a sheet that appears despite the failure is removed here, so
-'   the run leaks nothing and the next run starts from a workbook it recognizes.
+' RETURNS
+'   Nothing. Publishes mTST_DP_ScratchSheet on success
+'
+' BEHAVIOR
+'   Validates the host, removes any previous scratch sheet, snapshots worksheet
+'   identity, adds, names, initializes, formats and activates
+'
+'   On any failure removes only the worksheet this call created, when that
+'   worksheet can be identified unambiguously, then re-raises the original
+'   failure with the step that produced it
+'
+' ERROR POLICY
+'   Raises when the scratch worksheet cannot be established. The suites cannot run
+'   without it, so aborting is correct, and aborting leaks nothing and says where
+'   it stopped
+'
+'   Does not raise when Worksheets.Add reports a failure having nevertheless
+'   created exactly one worksheet. That is a partial success: the workbook
+'   mutation happened and only the call's completion did not. The candidate is
+'   validated and adopted, and the anomaly is recorded as an INFO row
+'
+'   Cleanup never replaces the original failure. A cleanup that itself fails is
+'   appended to the diagnostic rather than raised
+'
+' DEPENDENCIES
+'   TST_DP_DeleteWorksheetIfExists
+'   TST_DP_AnySheetNameExists
+'   TST_DP_WorksheetReferenceIsLive
+'   TST_DP_FindNewWorksheets
+'   TST_DP_ActivateWorksheetForTest
+'
+' NOTES
+'   Identity is captured as worksheet object references, not names. A worksheet
+'   name can contain the delimiter any string encoding would use, Excel treats
+'   names case-insensitively, and a rename would make a pre-existing sheet look
+'   new. Object identity has none of those problems
+'
+'   Cleanup deletes an exact or unambiguous candidate only. Deleting every
+'   worksheet absent from the snapshot would assume this routine created them,
+'   which is exactly the assumption that cannot be made while a re-entrancy
+'   hypothesis is open. Two or more candidates are reported and none is deleted
+'
+'   Adoption is confined to a failure of the Add itself. A failure at the rename
+'   or the initialization means that operation was already refused once, and
+'   repeating it in the handler would be a retry rather than a recovery
+'
+'   A candidate must prove it is usable before adoption. Excel has been reported
+'   to create a worksheet that then cannot be renamed, so appearing is not the
+'   same as working
+'
+'   The worksheet counts are net workbook state, not proof of which internal
+'   Excel operation ran:
+'
+'     before = after   no net worksheet-count increase was observed
+'     after > before   one or more worksheets appeared during the attempt
+'
+'   The Add anchors on Sheets, not Worksheets, so a workbook whose last sheet is
+'   a chart sheet is handled
+'
+'   The scratch name is checked against Sheets after deletion, because chart
+'   sheets share the workbook name namespace and a chart sheet of that name would
+'   survive a worksheet-only delete and then fail the rename
+'
+' UPDATED
+'   2026-08-23
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim NamesBefore     As String           'Delimited worksheet names before the Add
-    Dim AddErrNumber    As Long             'Error number reported by the Add
-    Dim AddErrText      As String           'Error description reported by the Add
-    Dim WS              As Excel.Worksheet  'Current worksheet while sweeping
-    Dim SweptName       As String           'Name of a worksheet that appeared
+    Const PROC_NAME         As String = "TST_DP_PrepareScratchSheet"
+
+    Dim HandlerStep         As String              'Current setup operation
+    Dim WorksheetsBefore    As Collection          'Object-identity snapshot
+    Dim NewWorksheets       As Collection          'Worksheets absent from the snapshot
+
+    Dim CreatedSheet        As Excel.Worksheet     'Worksheet created by this call
+    Dim CleanupCandidate    As Excel.Worksheet     'Exact sheet eligible for cleanup
+    Dim WS                  As Excel.Worksheet     'Current worksheet while scanning
+
+    Dim ErrorNumber         As Long                'Original failure number
+    Dim ErrorSource         As String              'Original failure source
+    Dim ErrorDescription    As String              'Original failure description
+
+    Dim CleanupErrNumber    As Long                'Cleanup failure number
+    Dim CleanupErrText      As String              'Cleanup failure description
+    Dim CleanupName         As String              'Name of the cleanup candidate
+    Dim DiagnosticText      As String              'Extended failure description
+    Dim AdoptionAllowed     As Boolean             'True when the failure was the Add itself
+    Dim AdoptionErrNumber   As Long                'Failure while validating a candidate
+    Dim CandidateName       As String              'Name the candidate arrived with
 
 '------------------------------------------------------------------------------
-' REMOVE ANY PREVIOUS SCRATCH SHEET
+' INITIALIZE
 '------------------------------------------------------------------------------
-    'Delete the named scratch sheet a previous run may have left
-        TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
-
-'------------------------------------------------------------------------------
-' RECORD THE WORKBOOK BEFORE THE ADD
-'------------------------------------------------------------------------------
-    'Capture the worksheet names so a sheet that appears can be identified even
-    'when the Add reports failure and returns nothing to identify it with
-        NamesBefore = "|"
-        For Each WS In HostWorkbook.Worksheets
-            NamesBefore = NamesBefore & WS.Name & "|"
-        Next WS
-        Set WS = Nothing
-        mTST_DP_ScratchAddBefore = HostWorkbook.Worksheets.Count
-        mTST_DP_ScratchAddAfter = mTST_DP_ScratchAddBefore
+    'Treat the whole setup as one transaction
+        On Error GoTo ErrorHandler
+    'Track the current operation
+        HandlerStep = "Validate host workbook"
+    'Reject a missing host explicitly
+        If HostWorkbook Is Nothing Then
+            Err.Raise vbObjectError + 2401, PROC_NAME, _
+                "The host workbook reference is missing."
+        End If
+    'Structure protection prevents both creation and deletion, so say so here
+    'rather than surfacing a bare 1004 from the Add
+        If HostWorkbook.ProtectStructure Then
+            Err.Raise vbObjectError + 2402, PROC_NAME, _
+                "The host workbook structure is protected."
+        End If
+    'A workbook always has at least one sheet to anchor the Add after
+        If HostWorkbook.Sheets.Count = 0 Then
+            Err.Raise vbObjectError + 2403, PROC_NAME, _
+                "The host workbook contains no sheet to add a worksheet after."
+        End If
+    'Never let a failed Set leave the harness holding a previous run's worksheet
+        Set mTST_DP_ScratchSheet = Nothing
+    'Reset the setup diagnostics
+        mTST_DP_ScratchAddBefore = 0
+        mTST_DP_ScratchAddAfter = 0
         mTST_DP_ScratchAddOrphan = VBA.vbNullString
 
 '------------------------------------------------------------------------------
-' ADD THE SCRATCH SHEET
+' REMOVE PREVIOUS SCRATCH WORKSHEET
 '------------------------------------------------------------------------------
-    'Capture the outcome rather than letting it propagate untold
-        On Error Resume Next
-        Set mTST_DP_ScratchSheet = HostWorkbook.Worksheets.Add( _
-            After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
-        AddErrNumber = Err.Number
-        AddErrText = Err.Description
-        Err.Clear
-        On Error GoTo 0
-    'Record what the workbook looks like now
-        mTST_DP_ScratchAddAfter = HostWorkbook.Worksheets.Count
-
-'------------------------------------------------------------------------------
-' HANDLE A FAILED ADD
-'------------------------------------------------------------------------------
-    'Remove anything the failed Add left behind, then report the original failure
-        If AddErrNumber <> 0 Then
-            'Find and delete any worksheet that was not there before
-                On Error Resume Next
-                For Each WS In HostWorkbook.Worksheets
-                    If VBA.InStr(1, NamesBefore, "|" & WS.Name & "|", vbBinaryCompare) = 0 Then
-                        SweptName = WS.Name
-                        mTST_DP_ScratchAddOrphan = SweptName
-                        WS.Delete
-                    End If
-                Next WS
-                Set WS = Nothing
-                Err.Clear
-                On Error GoTo 0
-            'Release the reference the failed Add may have left
-                Set mTST_DP_ScratchSheet = Nothing
-            'Re-raise the failure. The run is already disrupted, and succeeding
-            'quietly here would remove the evidence this failure still needs
-                Err.Raise AddErrNumber, "TST_DP_PrepareScratchSheet", AddErrText
+    'Track the current operation
+        HandlerStep = "Remove previous scratch worksheet"
+    'Delete a scratch worksheet an earlier run may have left
+        TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
+    'Chart sheets share the workbook name namespace, so a worksheet-only delete
+    'can leave the name taken and the rename below would then fail
+        If TST_DP_AnySheetNameExists(HostWorkbook, TST_DP_SCRATCH_SHEET_NAME) Then
+            Err.Raise vbObjectError + 2404, PROC_NAME, _
+                "A workbook sheet named " & TST_DP_SCRATCH_SHEET_NAME & _
+                " still exists after scratch cleanup."
         End If
 
 '------------------------------------------------------------------------------
-' INITIALIZE THE SCRATCH SHEET
+' SNAPSHOT WORKSHEET IDENTITY
 '------------------------------------------------------------------------------
-    'Name and prepare the new worksheet
-        mTST_DP_ScratchSheet.Name = TST_DP_SCRATCH_SHEET_NAME
-        mTST_DP_ScratchSheet.Range("A1").Value = "DatePicker regression scratch sheet"
-        mTST_DP_ScratchSheet.Columns("A:J").ColumnWidth = 16
-        mTST_DP_ScratchSheet.Activate
+    'Track the current operation
+        HandlerStep = "Snapshot worksheets"
+    'Capture object references rather than names
+        Set WorksheetsBefore = New Collection
+        For Each WS In HostWorkbook.Worksheets
+            WorksheetsBefore.Add WS
+        Next WS
+        Set WS = Nothing
+    'Record the pre-Add count
+        mTST_DP_ScratchAddBefore = HostWorkbook.Worksheets.Count
+        mTST_DP_ScratchAddAfter = mTST_DP_ScratchAddBefore
+
+'------------------------------------------------------------------------------
+' ADD SCRATCH WORKSHEET
+'------------------------------------------------------------------------------
+    'Track the current operation
+        HandlerStep = "Add scratch worksheet"
+    'Anchor on Sheets so a trailing chart sheet is handled
+        Set CreatedSheet = HostWorkbook.Worksheets.Add( _
+            After:=HostWorkbook.Sheets(HostWorkbook.Sheets.Count))
+    'Record the post-Add count immediately
+        mTST_DP_ScratchAddAfter = HostWorkbook.Worksheets.Count
+    'A silent empty return is a setup failure, not something to dereference
+        If CreatedSheet Is Nothing Then
+            Err.Raise vbObjectError + 2405, PROC_NAME, _
+                "Worksheets.Add returned no worksheet."
+        End If
+    'Publish the worksheet to the harness
+        Set mTST_DP_ScratchSheet = CreatedSheet
+
+'------------------------------------------------------------------------------
+' NAME AND INITIALIZE
+'------------------------------------------------------------------------------
+    'Track the current operation
+        HandlerStep = "Name scratch worksheet"
+        CreatedSheet.Name = TST_DP_SCRATCH_SHEET_NAME
+    'Track the current operation
+        HandlerStep = "Initialize scratch worksheet"
+        CreatedSheet.Range("A1").Value = "DatePicker regression scratch sheet"
+    'Track the current operation
+        HandlerStep = "Format scratch worksheet"
+        CreatedSheet.Columns("A:J").ColumnWidth = 16
+
+'------------------------------------------------------------------------------
+' ACTIVATE
+'------------------------------------------------------------------------------
+    'Track the current operation
+        HandlerStep = "Activate scratch worksheet"
+    'Use the harness activation helper rather than a raw Activate
+        TST_DP_ActivateWorksheetForTest CreatedSheet
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release local references. The module-level reference stays authoritative
+        Set CreatedSheet = Nothing
+        Set WorksheetsBefore = Nothing
+    'Exit after successful setup
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original failure before cleanup can replace it
+        ErrorNumber = Err.Number
+        ErrorSource = Err.Source
+        ErrorDescription = Err.Description
+    'Cleanup must never replace the failure it is cleaning up after
+        On Error Resume Next
+    'Record the worksheet count before anything is removed
+        If Not (HostWorkbook Is Nothing) Then
+            Err.Clear
+            mTST_DP_ScratchAddAfter = HostWorkbook.Worksheets.Count
+            Err.Clear
+        End If
+
+    'Prefer the exact object the Add returned
+        If TST_DP_WorksheetReferenceIsLive(CreatedSheet) Then
+            Set CleanupCandidate = CreatedSheet
+        End If
+
+    'Otherwise look for exactly one worksheet that was not in the snapshot
+        If CleanupCandidate Is Nothing Then
+            If Not (HostWorkbook Is Nothing) Then
+                If Not (WorksheetsBefore Is Nothing) Then
+                    Set NewWorksheets = TST_DP_FindNewWorksheets(HostWorkbook, WorksheetsBefore)
+                End If
+            End If
+            If Not (NewWorksheets Is Nothing) Then
+                If NewWorksheets.Count = 1 Then
+                    Set CleanupCandidate = NewWorksheets.Item(1)
+                ElseIf NewWorksheets.Count > 1 Then
+                    'Two or more candidates cannot be attributed to this call.
+                    'Report the ambiguity and delete nothing
+                    mTST_DP_ScratchAddOrphan = "ambiguous, " & _
+                        VBA.CStr(NewWorksheets.Count) & " new worksheets, none deleted"
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' ADOPT A PARTIAL SUCCESS
+'------------------------------------------------------------------------------
+    'Excel has been observed to create a worksheet and then report 1004 from the
+    'same Add call. That is a partial success, not a failure: the workbook
+    'mutation happened and only the call's own completion did not. Discarding the
+    'worksheet and aborting the run throws away work Excel actually did
+        AdoptionAllowed = (HandlerStep = "Add scratch worksheet")
+    'Adoption is confined to the Add step deliberately. A failure at the rename or
+    'the initialization means that operation was already refused once, and
+    'repeating it here would be a retry rather than a recovery
+        If AdoptionAllowed Then
+            If TST_DP_WorksheetReferenceIsLive(CleanupCandidate) Then
+                'Record the name the candidate arrived with, for the audit line
+                    CandidateName = CleanupCandidate.Name
+                'The candidate must prove it is usable. A created worksheet that
+                'cannot be renamed or written has been reported too
+                    Err.Clear
+                    CleanupCandidate.Name = TST_DP_SCRATCH_SHEET_NAME
+                    CleanupCandidate.Range("A1").Value = "DatePicker regression scratch sheet"
+                    CleanupCandidate.Columns("A:J").ColumnWidth = 16
+                    AdoptionErrNumber = Err.Number
+                    Err.Clear
+                'Adopt only a candidate that answered every operation
+                    If AdoptionErrNumber = 0 Then
+                        Set mTST_DP_ScratchSheet = CleanupCandidate
+                        TST_DP_ActivateWorksheetForTest CleanupCandidate
+                        Err.Clear
+                        mTST_DP_ScratchAddOrphan = CandidateName & " (adopted)"
+                        'Record the anomaly. A run that recovered from a misreported
+                        'native call is not a clean run and must not look like one
+                            TST_DP_RecordInfo "Harness", "Scratch sheet", _
+                                "Worksheets.Add reported " & VBA.CStr(ErrorNumber) & _
+                                " after creating " & CandidateName & _
+                                ". The worksheet was validated and adopted; " & _
+                                "WorksheetsBefore=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
+                                ", WorksheetsAfter=" & VBA.CStr(mTST_DP_ScratchAddAfter) & "."
+                        'Release local references and continue the run
+                            Set CleanupCandidate = Nothing
+                            Set CreatedSheet = Nothing
+                            Set NewWorksheets = Nothing
+                            Set WorksheetsBefore = Nothing
+                            Set WS = Nothing
+                            Err.Clear
+                            On Error GoTo 0
+                            Exit Sub
+                    End If
+                'Record that adoption was attempted and refused
+                    mTST_DP_ScratchAddOrphan = CandidateName & _
+                        " (adoption failed: " & VBA.CStr(AdoptionErrNumber) & ")"
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' REMOVE AN UNUSABLE CANDIDATE
+'------------------------------------------------------------------------------
+    'Remove only the identified worksheet
+        If TST_DP_WorksheetReferenceIsLive(CleanupCandidate) Then
+            CleanupName = CleanupCandidate.Name
+            Err.Clear
+            CleanupCandidate.Delete
+            CleanupErrNumber = Err.Number
+            CleanupErrText = Err.Description
+            Err.Clear
+            If CleanupErrNumber = 0 Then
+                mTST_DP_ScratchAddOrphan = CleanupName & " (deleted)"
+            Else
+                mTST_DP_ScratchAddOrphan = CleanupName & " (delete failed: " & _
+                    VBA.CStr(CleanupErrNumber) & " - " & CleanupErrText & ")"
+            End If
+        End If
+
+    'Never expose a partially initialized scratch worksheet
+        Set mTST_DP_ScratchSheet = Nothing
+    'Release local references
+        Set CleanupCandidate = Nothing
+        Set CreatedSheet = Nothing
+        Set NewWorksheets = Nothing
+        Set WorksheetsBefore = Nothing
+        Set WS = Nothing
+    'Restore ordinary error handling
+        Err.Clear
+        On Error GoTo 0
+
+    'Build the diagnostic without changing the original error number
+        DiagnosticText = ErrorDescription & _
+            " | Step=" & HandlerStep & _
+            " | WorksheetsBefore=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
+            " | WorksheetsAfter=" & VBA.CStr(mTST_DP_ScratchAddAfter)
+        If VBA.LenB(ErrorSource) > 0 Then
+            DiagnosticText = DiagnosticText & " | OriginalSource=" & ErrorSource
+        End If
+        If VBA.LenB(mTST_DP_ScratchAddOrphan) > 0 Then
+            DiagnosticText = DiagnosticText & " | Cleanup=" & mTST_DP_ScratchAddOrphan
+        End If
+    'Re-raise the original failure
+        Err.Raise ErrorNumber, PROC_NAME, DiagnosticText
 
 End Sub
+
+Private Function TST_DP_AnySheetNameExists( _
+    ByVal HostWorkbook As Excel.Workbook, _
+    ByVal SheetName As String) As Boolean
+
+'
+'==============================================================================
+'                         ANY SHEET NAME EXISTS
+'==============================================================================
+'   Reports whether any sheet of that name exists, of any type.
+'
+'   Worksheets and chart sheets share one name namespace, so a worksheet-only
+'   lookup can report a name free while a rename to it still fails.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SheetObject     As Object       'Resolved sheet of any type
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the name is free
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_AnySheetNameExists = False
+    'Exit when there is no workbook to inspect
+        If HostWorkbook Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Attempt to resolve a sheet of any type
+        Set SheetObject = HostWorkbook.Sheets(SheetName)
+    'Report whether the resolution succeeded
+        TST_DP_AnySheetNameExists = Not (SheetObject Is Nothing)
+    'Release object references
+        Set SheetObject = Nothing
+    'Clear any suppressed lookup error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_WorksheetReferenceIsLive( _
+    ByVal Candidate As Excel.Worksheet) As Boolean
+
+'
+'==============================================================================
+'                     WORKSHEET REFERENCE IS LIVE
+'==============================================================================
+'   Reports whether a worksheet reference still points at a sheet that exists.
+'
+'   "Not Candidate Is Nothing" tests the variable, not the object. A reference to
+'   a deleted worksheet passes that test and raises on use.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ProbeName       As String       'Probed worksheet name, discarded
+
+'------------------------------------------------------------------------------
+' PROBE
+'------------------------------------------------------------------------------
+    'Never let a liveness probe raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_WorksheetReferenceIsLive = False
+    'Exit when nothing is referenced
+        If Candidate Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Ask the object model whether the worksheet still answers
+        Err.Clear
+        ProbeName = Candidate.Name
+        TST_DP_WorksheetReferenceIsLive = (Err.Number = 0)
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_WorksheetSnapshotContains( _
+    ByVal Snapshot As Collection, _
+    ByVal Candidate As Excel.Worksheet) As Boolean
+
+'
+'==============================================================================
+'                     WORKSHEET SNAPSHOT CONTAINS
+'==============================================================================
+'   Reports whether a worksheet was present in an identity snapshot, comparing
+'   with Is rather than by name.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Existing        As Excel.Worksheet  'Current snapshot entry
+
+'------------------------------------------------------------------------------
+' COMPARE BY IDENTITY
+'------------------------------------------------------------------------------
+    'Never let a comparison raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_WorksheetSnapshotContains = False
+    'Exit when there is nothing to compare
+        If Snapshot Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+        If Candidate Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Compare object identity, not names
+        For Each Existing In Snapshot
+            If Candidate Is Existing Then
+                TST_DP_WorksheetSnapshotContains = True
+                Exit For
+            End If
+        Next Existing
+    'Release object references
+        Set Existing = Nothing
+    'Clear any suppressed comparison error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_FindNewWorksheets( _
+    ByVal HostWorkbook As Excel.Workbook, _
+    ByVal Snapshot As Collection) As Collection
+
+'
+'==============================================================================
+'                          FIND NEW WORKSHEETS
+'==============================================================================
+'   Returns the worksheets present now that were not in the snapshot.
+'
+'   The caller decides what to do with them. One candidate can be attributed to
+'   the failed call; two or more cannot.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ResultList      As Collection       'Worksheets absent from the snapshot
+    Dim WS              As Excel.Worksheet  'Current worksheet while scanning
+
+'------------------------------------------------------------------------------
+' COLLECT
+'------------------------------------------------------------------------------
+    'Never let a scan raise into a caller
+        On Error Resume Next
+    'Always return a usable collection
+        Set ResultList = New Collection
+        Set TST_DP_FindNewWorksheets = ResultList
+    'Exit when there is no workbook to scan
+        If HostWorkbook Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Collect worksheets the snapshot did not contain. Nothing is deleted here
+        For Each WS In HostWorkbook.Worksheets
+            If Not TST_DP_WorksheetSnapshotContains(Snapshot, WS) Then
+                ResultList.Add WS
+            End If
+        Next WS
+    'Release object references
+        Set WS = Nothing
+    'Publish the collection
+        Set TST_DP_FindNewWorksheets = ResultList
+    'Clear any suppressed scan error
+        Err.Clear
+
+End Function
 
 Private Sub TST_DP_ActivateWorksheetForTest(ByVal TargetSheet As Excel.Worksheet)
 

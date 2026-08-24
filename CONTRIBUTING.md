@@ -293,6 +293,34 @@ stricter treatment than the UI.
 - `M_WriteBack_Apply` captures and restores the caller's `EnableEvents` state,
   including on the failure path. Preserve that.
 
+### Settings persistence
+
+`DP_SETTINGS_APP_NAME` is a stable legacy identifier and the default application
+name. It does not change.
+
+Four rules, all settled:
+
+- **Resolution stays centralized.** Every registry read and write obtains its
+  application name from `M_Settings_GetEffectiveAppName`. A namespace applied at
+  28 call sites would eventually be wrong at one of them.
+- **The namespace locks after load.** `M_Settings_SetNamespace` raises once
+  settings are in memory. Repointing afterwards would write values read from one
+  namespace into another.
+- **Runtime identity is never persisted here.** The one-provider lease in
+  [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37) is runtime
+  state that dies with Excel. A registry-backed lease would survive a restart and
+  block startup forever. A settings namespace is persistent by design; a lease
+  must not be.
+- **Nothing is migrated automatically.** A new namespace starts from defaults.
+  Copying the shared namespace across would reintroduce the coupling — the
+  integration toggles and `HolidayCallback` especially — that the namespace exists
+  to remove.
+
+> [!NOTE]
+> Persistence scope and runtime ownership are different identities with different
+> lifetimes. [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14)
+> will need both; it must not use one as the other.
+
 ### The keyboard shortcut
 
 `Application.OnKey` holds one assignment per key for the Excel session, and Excel

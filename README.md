@@ -546,6 +546,50 @@ VBA_DATETIMEPICKER
 
 This preserves compatibility with existing saved settings.
 
+### Persistence is scoped to the Windows user, not the workbook
+
+By default every DatePicker deployment under the same Windows account reads and
+writes that one location. Two workbooks that never run at the same time can still
+change each other's saved preferences, because loading settings normalizes and
+re-saves them.
+
+Some of what is stored is a reasonable user-wide preference — first day of week,
+local names, weekend highlighting. Some describes one deployment: the right-click
+entry, the in-grid icon, the keyboard shortcut, WinAPI styling, and the holiday
+callback name, which the picker later executes.
+
+### Isolating one deployment's settings
+
+Configure a namespace **before anything loads settings**, which includes ordinary
+DatePicker startup:
+
+```vb
+M_Settings_SetNamespace "TreasuryTool"
+```
+
+That deployment then persists under:
+
+```text
+HKCU\Software\VB and VBA Program Settings\VBA_DATETIMEPICKER__TreasuryTool
+```
+
+Points worth knowing:
+
+- **The default is unchanged.** Configure no namespace and the add-in reads and
+  writes exactly where it always did.
+- **The namespace locks once settings load.** Changing it afterwards is refused,
+  because values read from one namespace would then be written into another.
+- **A new namespace starts from defaults.** Nothing is copied from the shared
+  location — importing it would carry across the very settings the namespace
+  exists to separate, the holiday callback included.
+- **You choose the namespace.** It is never derived from the workbook name or
+  path, which change when a file is renamed, moved or copied and would make
+  settings appear to vanish. The release version is not used either, which would
+  make every upgrade look like a reset.
+- **This is not the same as running two copies at once.** Namespacing settings
+  does not make two simultaneous DatePicker providers supported; see
+  [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37).
+
 Typical settings include:
 
 | Area | Setting | Description |

@@ -408,6 +408,122 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🐛 Fixed
 
+- Fixed every deployment sharing one persisted settings namespace. All registry
+  reads and writes used the fixed application name:
+
+  ```text
+  HKCU\Software\VB and VBA Program Settings\VBA_DATETIMEPICKER
+  ```
+
+  so the persistence scope was the Windows user, not the workbook, the add-in or
+  the deployment. Two copies that never ran at the same time could still change
+  each other's saved preferences — and `M_Settings_Load` ends by calling
+  `M_Settings_Save` to persist the values it normalized, so merely *reading*
+  settings rewrote the shared location.
+
+  The coupling matters most for `HolidayCallback`, which is persisted as a
+  callback name and later executed through `Application.Run`. A callback chosen
+  for one workbook could be inherited by another purely through shared storage.
+  The integration toggles — right-click, in-grid icon, keyboard shortcut, WinAPI
+  — describe one deployment rather than a user preference and had the same
+  problem.
+
+  A caller can now isolate its own settings:
+
+  ```vb
+  M_Settings_SetNamespace "TreasuryTool"
+  ```
+
+  ```text
+  no namespace configured   VBA_DATETIMEPICKER
+  namespace "TreasuryTool"  VBA_DATETIMEPICKER__TreasuryTool
+  ```
+
+  Resolution is centralized in `M_Settings_GetEffectiveAppName`, and all 28 call
+  sites obtain the name from it — `DP_SETTINGS_APP_NAME` now appears only inside
+  the resolver. A namespace applied at each call site would eventually be wrong
+  at one of them.
+
+  The namespace locks once settings are loaded. Changing it afterwards is refused
+  with a descriptive error, because values read from one namespace would then be
+  written into another. Validation trims, bounds the length, and rejects control
+  characters, path separators and the reserved `__` separator, so two valid
+  namespaces can never resolve to one effective name.
+
+  Deliberately **not** done: no automatic migration from the shared namespace
+  into a new one, because importing it would carry across exactly the settings
+  the namespace exists to separate. No namespace derived from workbook name or
+  path, which change on rename, move or copy and would make settings appear to
+  vanish. No version-specific namespace, which would make every upgrade look like
+  a reset.
+  ([#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26))
+
+- Fixed harness setup aborting a run over a worksheet Excel had already created.
+  `Worksheets.Add` in `TST_DP_PrepareScratchSheet` intermittently reports `1004`
+  **having created the worksheet anyway**. Captured:
+
+  ```text
+  Step=Add scratch worksheet | WorksheetsBefore=3 | WorksheetsAfter=4
+      | OriginalSource=VBAProject | Cleanup=Sheet74 (deleted)
+  ```
+
+  The workbook mutation happens; only the call's completion does not. Every
+  occurrence previously leaked an unnamed worksheet, and preflight could not see
+  it — it looks for `TST_DP_SCRATCH` by name and the leftover is called
+  `SheetNN`.
+
+  Scratch-sheet setup is now one transaction. Protecting the `Add` alone was not
+  enough: the rename, initialization, formatting and activation can each fail
+  after a successful `Add` and leak the same worksheet.
+
+  On failure, the worksheet this call created is identified by **object
+  identity** against a pre-call snapshot, not by name. A worksheet name can
+  contain any delimiter a string encoding would use, Excel compares names
+  case-insensitively, and a rename would make a pre-existing sheet look new.
+
+  What happens next depends on what is found:
+
+  ```text
+  no new worksheet          genuine failure; raise
+  exactly one, validated    adopt it, record the anomaly, continue
+  exactly one, unusable     delete that one; raise the original failure
+  more than one             ambiguous; delete nothing; raise
+  ```
+
+  Adoption is confined to a failure of the `Add` itself, and the candidate must
+  answer a rename, a write and a column-width change before it is accepted —
+  Excel has been reported to create a worksheet that then cannot be renamed. A
+  failure at the rename step is not adopted, because repeating an operation that
+  was already refused would be a retry rather than a completion.
+
+  Deleting every worksheet absent from the snapshot would assume this routine
+  created them. That assumption is unavailable while a re-entrancy hypothesis is
+  open, so two or more candidates are reported and none is deleted.
+
+  A recovered run records what happened rather than looking clean:
+
+  ```text
+  INFO | Harness | Scratch sheet | Worksheets.Add reported 1004 after creating
+  Sheet74. The worksheet was validated and adopted; WorksheetsBefore=3,
+  WorksheetsAfter=4.
+  ```
+
+  Setup also rejects a protected workbook structure by name rather than surfacing
+  a bare `1004` from the `Add`, checks the scratch name against `Sheets` rather
+  than `Worksheets` because chart sheets share the name namespace, and anchors
+  the `Add` on `Sheets(Sheets.Count)` so a trailing chart sheet is handled.
+
+  The fresh-sheet lifecycle is deliberately preserved. `TST_DP_SCRATCH` is
+  created at setup and deleted at successful teardown, because
+  [#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19) uses its
+  presence as the dirty-start evidence that survives a VBA project reset. A
+  persistent worksheet would collapse that signal and would introduce residue
+  between runs, which is a worse failure than an intermittent one because it
+  fails quietly.
+
+  The underlying Excel behavior is not explained by this change.
+  ([#45](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/45))
+
 - Fixed write-back destroying formulas. Nothing inspected whether a target cell
   held one: the per-cell writer refused missing cells, protected locked cells and
   array-formula cells, and wrote over everything else.
@@ -980,6 +1096,10 @@ backward-compatible capability, 💥 **major** may break callers.
   right-click, in-grid icon and keyboard shortcut all disabled is now permitted
   and preserved. Anything relying on the shortcut re-enabling itself when the
   other two were disabled must now set `EnableKeyboardShortcut` explicitly.
+- **Settings persistence is unchanged by default.** An installation that
+  configures no namespace reads and writes exactly where earlier releases did.
+  `DP_SETTINGS_APP_NAME` keeps its value and meaning. Isolation is opt-in through
+  `M_Settings_SetNamespace`, which must be called before anything loads settings.
 - **Formula cells are no longer overwritten.** Code relying on write-back
   replacing a formula must now pass `OverwriteFormulas:=True` to
   `M_WriteBack_Apply` or `DP_FillTableColumn`. A fill that previously reported

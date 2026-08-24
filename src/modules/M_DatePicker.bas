@@ -270,6 +270,7 @@ Option Explicit
 
 
     Public Const DP_SETTINGS_APP_NAME              As String = "VBA_DATETIMEPICKER"      'Legacy registry application name
+    Private Const DP_SETTINGS_NAMESPACE_SEPARATOR  As String = "__"                      'Separates the legacy name from an optional namespace
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
     Public Const DP_MSGBOX_TITLE                   As String = "Date / Time Picker"      'Message-box title
 
@@ -388,6 +389,7 @@ Option Explicit
 ' PRIVATE STATE
 '------------------------------------------------------------------------------
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
+    Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
     Private mDP_TimerIsRunning          As Boolean              'Timer running flag
     Private mDP_TimerProcedureName      As String               'Qualified OnTime timer procedure name
@@ -412,6 +414,308 @@ Option Explicit
 '                                   SETTINGS
 '
 '------------------------------------------------------------------------------
+
+Private Function M_Settings_GetEffectiveAppName() As String
+
+'
+'------------------------------------------------------------------------------
+'                     RESOLVE EFFECTIVE APPLICATION NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the VBA registry application name every settings read and write uses
+'
+' WHY THIS EXISTS
+'   Every deployment persisted to one application name, so two workbooks that
+'   never ran at the same time could still overwrite each other's preferences.
+'   Loading is itself a write boundary here, because M_Settings_Load persists the
+'   normalized values it just read
+'
+'   Resolution is centralized so no call site constructs the name itself. A
+'   namespace applied at 28 call sites would be wrong at one of them eventually
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The legacy application name when no namespace is configured
+'
+'   The namespaced application name otherwise
+'
+' BEHAVIOR
+'   Appends the configured namespace to the legacy identifier
+'
+' ERROR POLICY
+'   Does not raise. The namespace was validated when it was configured
+'
+' DEPENDENCIES
+'   DP_SETTINGS_APP_NAME
+'   mDP_SettingsNamespace
+'
+' NOTES
+'   DP_SETTINGS_APP_NAME is unchanged and still means the default application
+'   name. An installation that configures no namespace reads and writes exactly
+'   where earlier releases did
+'
+'   The separator is a double underscore, which the namespace validator rejects
+'   inside a namespace, so two different namespaces cannot resolve to one
+'   effective name
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Use the legacy application name when nothing is configured
+        If VBA.LenB(mDP_SettingsNamespace) = 0 Then
+            M_Settings_GetEffectiveAppName = DP_SETTINGS_APP_NAME
+        Else
+            M_Settings_GetEffectiveAppName = DP_SETTINGS_APP_NAME & _
+                DP_SETTINGS_NAMESPACE_SEPARATOR & mDP_SettingsNamespace
+        End If
+
+End Function
+
+Public Sub M_Settings_SetNamespace(ByVal NamespaceName As String)
+
+'
+'------------------------------------------------------------------------------
+'                        SET SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Isolates this deployment's persisted settings from every other deployment
+'   running under the same Windows user
+'
+' WHY THIS EXISTS
+'   The default persistence scope is the Windows user, not the workbook. Some
+'   settings are plausible user preferences; others describe one deployment's
+'   integration, and HolidayCallback is a callback name this component later
+'   executes through Application.Run. A callback chosen for one workbook should
+'   not be inherited by another merely because both persist to the same place
+'
+' INPUTS
+'   NamespaceName
+'     Caller-supplied persistence scope. An empty string restores the legacy
+'     default
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Validates and stores the namespace, which every later settings read and write
+'   resolves through
+'
+' ERROR POLICY
+'   Raises when called after settings have been loaded, and when the supplied
+'   namespace cannot be used
+'
+' DEPENDENCIES
+'   mSettingsLoaded
+'   M_Settings_ValidateNamespace
+'
+' NOTES
+'   Call this before anything that loads settings, which includes ordinary
+'   DatePicker startup. Changing the namespace after a load would leave values
+'   read from one namespace being written into another, so it is refused rather
+'   than silently reinterpreted
+'
+'   The namespace is chosen by the caller. It is never derived from
+'   ThisWorkbook.Name, FullName or any path: those change when a file is renamed,
+'   moved or copied, and settings would appear to vanish. Nor is the release
+'   version appended, which would make every upgrade look like a settings reset
+'
+'   This is a persistence scope, not a runtime owner token. The one-provider
+'   lease in #37 is runtime state that must not reach the registry, because a
+'   persisted lease would survive an Excel restart and block startup forever
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_SetNamespace"
+
+    Dim Normalized      As String       'Validated namespace
+
+'------------------------------------------------------------------------------
+' REJECT A LATE CHANGE
+'------------------------------------------------------------------------------
+    'Settings already in memory came from the current namespace. Repointing now
+    'would write them into a different one
+        If mSettingsLoaded Then
+            Err.Raise vbObjectError + 2601, PROC_NAME, _
+                "The settings namespace cannot be changed after settings have " & _
+                "been loaded. Configure it before any DatePicker entry point runs."
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Resolve the namespace this deployment will persist under
+        Normalized = M_Settings_ValidateNamespace(NamespaceName)
+
+'------------------------------------------------------------------------------
+' STORE
+'------------------------------------------------------------------------------
+    'Apply the validated namespace to every later read and write
+        mDP_SettingsNamespace = Normalized
+
+End Sub
+
+Public Function M_Settings_GetNamespace() As String
+
+'
+'------------------------------------------------------------------------------
+'                        GET SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the configured settings namespace
+'
+' WHY THIS EXISTS
+'   A caller that configured a namespace, and a diagnostic reading where settings
+'   came from, both need to see it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The configured namespace, or an empty string when the legacy default is in
+'   use
+'
+' BEHAVIOR
+'   Returns the stored value without resolving it to an application name
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   mDP_SettingsNamespace
+'
+' NOTES
+'   An empty result means the deployment persists exactly where earlier releases
+'   did
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN NAMESPACE
+'------------------------------------------------------------------------------
+    'Report the configured namespace
+        M_Settings_GetNamespace = mDP_SettingsNamespace
+
+End Function
+
+Private Function M_Settings_ValidateNamespace( _
+    ByVal NamespaceName As String) As String
+
+'
+'------------------------------------------------------------------------------
+'                       VALIDATE SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Normalizes a caller-supplied namespace and rejects one that cannot be used
+'
+' WHY THIS EXISTS
+'   The namespace becomes part of a registry application name. A value containing
+'   a path separator, a control character or the reserved separator would either
+'   fail unpredictably or let two different namespaces resolve to the same
+'   effective name, which would defeat the isolation entirely
+'
+' INPUTS
+'   NamespaceName
+'     Caller-supplied namespace
+'
+' RETURNS
+'   The normalized namespace
+'
+'   An empty string when the caller supplied only whitespace or nothing, which
+'   selects the legacy default
+'
+' BEHAVIOR
+'   Trims surrounding whitespace, then rejects a value that is too long or
+'   contains a character that would make the effective name ambiguous
+'
+' ERROR POLICY
+'   Raises a descriptive error naming the offending condition
+'
+' DEPENDENCIES
+'   DP_SETTINGS_NAMESPACE_SEPARATOR
+'
+' NOTES
+'   Validation is deterministic: the same input always resolves to the same
+'   namespace, and two different valid namespaces never resolve to one effective
+'   application name
+'
+'   An empty namespace is not an error. It is how a caller returns to the legacy
+'   default before settings load
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_ValidateNamespace"
+    Const MAX_LENGTH        As Long = 64            'Longest supported namespace
+
+    Dim Normalized          As String       'Trimmed namespace
+    Dim CharIndex           As Long         'Current character position
+    Dim CharCode            As Long         'Current character code
+
+'------------------------------------------------------------------------------
+' NORMALIZE
+'------------------------------------------------------------------------------
+    'Trim surrounding whitespace so " Books " and "Books" are one namespace
+        Normalized = VBA.Trim$(NamespaceName)
+    'An empty namespace selects the legacy default and is not an error
+        If VBA.LenB(Normalized) = 0 Then
+            M_Settings_ValidateNamespace = VBA.vbNullString
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Bound the length so the effective application name stays usable
+        If VBA.Len(Normalized) > MAX_LENGTH Then
+            Err.Raise vbObjectError + 2602, PROC_NAME, _
+                "The settings namespace cannot exceed " & VBA.CStr(MAX_LENGTH) & _
+                " characters."
+        End If
+    'Reject the reserved separator, which would let two namespaces collide
+        If VBA.InStr(1, Normalized, DP_SETTINGS_NAMESPACE_SEPARATOR, vbBinaryCompare) > 0 Then
+            Err.Raise vbObjectError + 2603, PROC_NAME, _
+                "The settings namespace cannot contain " & _
+                DP_SETTINGS_NAMESPACE_SEPARATOR & "."
+        End If
+    'Reject characters that would make the registry location ambiguous
+        For CharIndex = 1 To VBA.Len(Normalized)
+            CharCode = VBA.Asc(VBA.Mid$(Normalized, CharIndex, 1))
+            If CharCode < 32 Then
+                Err.Raise vbObjectError + 2604, PROC_NAME, _
+                    "The settings namespace cannot contain control characters."
+            End If
+            Select Case VBA.Mid$(Normalized, CharIndex, 1)
+                Case "\", "/", ":", "*", "?", """", "<", ">", "|"
+                    Err.Raise vbObjectError + 2605, PROC_NAME, _
+                        "The settings namespace cannot contain the character " & _
+                        VBA.Mid$(Normalized, CharIndex, 1) & "."
+            End Select
+        Next CharIndex
+
+'------------------------------------------------------------------------------
+' RETURN NORMALIZED NAMESPACE
+'------------------------------------------------------------------------------
+    'Return the validated namespace
+        M_Settings_ValidateNamespace = Normalized
+
+End Function
 
 Public Sub M_Settings_Load()
 
@@ -512,7 +816,7 @@ Public Sub M_Settings_Load()
 
     'Read the first-day-of-week setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_FIRST_DAY_OF_WEEK, _
             VBA.CStr(DP_DEFAULT_FIRST_DAY_OF_WEEK))
@@ -527,7 +831,7 @@ Public Sub M_Settings_Load()
         HandlerStep = "Load local-name setting"
     'Read the local-name setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_USE_LOCAL_NAMES, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_USE_LOCAL_NAMES))
@@ -543,7 +847,7 @@ Public Sub M_Settings_Load()
 
     'Read the weekend-highlight setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_HIGHLIGHT_WEEKENDS, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_HIGHLIGHT_WEEKENDS))
@@ -562,14 +866,14 @@ Public Sub M_Settings_Load()
 
     'Read the outside-month setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
                 M_Settings_BooleanToStorageValue(DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION))
@@ -586,14 +890,14 @@ Public Sub M_Settings_Load()
         
     'Read the close-after-selection setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOSE_AFTER_SELECTION, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_CLOSE_AFTER_SELECTION, _
                 M_Settings_BooleanToStorageValue(DP_DEFAULT_CLOSE_AFTER_SELECTION))
@@ -610,14 +914,14 @@ Public Sub M_Settings_Load()
 
     'Read the clock mode setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOCK_MODE, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_CLOCK_MODE, _
                 VBA.CStr(VBA.CLng(DP_ClockMode_Static)))
@@ -638,7 +942,7 @@ Public Sub M_Settings_Load()
 
     'Read the size mode setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_SIZE_MODE, _
             VBA.vbNullString)
@@ -646,7 +950,7 @@ Public Sub M_Settings_Load()
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_SIZE_MODE, _
                 VBA.CStr(VBA.CLng(DP_SizeMode_Normal)))
@@ -670,7 +974,7 @@ Public Sub M_Settings_Load()
 
     'Read the right-click setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_RIGHT_CLICK, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_RIGHT_CLICK))
@@ -686,7 +990,7 @@ Public Sub M_Settings_Load()
 
     'Read the grid-icon setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_GRID_ICON, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_GRID_ICON))
@@ -702,7 +1006,7 @@ Public Sub M_Settings_Load()
 
     'Read the keyboard shortcut setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_ENABLE_KEYBOARD, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_ENABLE_KEYBOARD))
@@ -721,7 +1025,7 @@ Public Sub M_Settings_Load()
 
     'Read the WinAPI setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_USE_WINAPI, _
             M_Settings_BooleanToStorageValue(PlatformCanUseWinAPI))
@@ -737,7 +1041,7 @@ Public Sub M_Settings_Load()
 
     'Read the holiday callback setting
         gDP_HolidayCallbackName = VBA.Trim$(GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_HOLIDAY_CALLBACK, _
             DP_DEFAULT_HOLIDAY_CALLBACK))
@@ -920,7 +1224,7 @@ Public Sub M_Settings_Save()
 
     'Save the first-day-of-week setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_FIRST_DAY_OF_WEEK, _
             VBA.CStr(gDP_FirstDayOfWeek)
@@ -930,7 +1234,7 @@ Public Sub M_Settings_Save()
 
     'Save the local-name setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_USE_LOCAL_NAMES, _
             M_Settings_BooleanToStorageValue(gDP_UseLocalNames)
@@ -940,7 +1244,7 @@ Public Sub M_Settings_Save()
 
     'Save the weekend-highlight setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_HIGHLIGHT_WEEKENDS, _
             M_Settings_BooleanToStorageValue(gDP_HighlightWeekends)
@@ -953,7 +1257,7 @@ Public Sub M_Settings_Save()
 
     'Save the outside-month setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
             M_Settings_BooleanToStorageValue(gDP_AllowOutsideMonthSelection)
@@ -963,7 +1267,7 @@ Public Sub M_Settings_Save()
 
     'Save the close-after-selection setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOSE_AFTER_SELECTION, _
             M_Settings_BooleanToStorageValue(gDP_CloseAfterSelection)
@@ -973,7 +1277,7 @@ Public Sub M_Settings_Save()
 
     'Save the clock mode setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOCK_MODE, _
             VBA.CStr(VBA.CLng(gDP_ClockMode))
@@ -983,7 +1287,7 @@ Public Sub M_Settings_Save()
 
     'Save the size mode setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_SIZE_MODE, _
             VBA.CStr(VBA.CLng(gDP_SizeMode))
@@ -996,7 +1300,7 @@ Public Sub M_Settings_Save()
 
     'Save the right-click setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_RIGHT_CLICK, _
             M_Settings_BooleanToStorageValue(gDP_ShowRightClick)
@@ -1006,7 +1310,7 @@ Public Sub M_Settings_Save()
 
     'Save the grid-icon setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_GRID_ICON, _
             M_Settings_BooleanToStorageValue(gDP_ShowGridIcon)
@@ -1016,7 +1320,7 @@ Public Sub M_Settings_Save()
 
     'Save the keyboard shortcut setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_ENABLE_KEYBOARD, _
             M_Settings_BooleanToStorageValue(gDP_EnableKeyboardShortcut)
@@ -1029,7 +1333,7 @@ Public Sub M_Settings_Save()
 
     'Save the WinAPI setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_USE_WINAPI, _
             M_Settings_BooleanToStorageValue(gDP_UseWinAPI)
@@ -1039,7 +1343,7 @@ Public Sub M_Settings_Save()
 
     'Save the holiday callback setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_HOLIDAY_CALLBACK, _
             gDP_HolidayCallbackName
