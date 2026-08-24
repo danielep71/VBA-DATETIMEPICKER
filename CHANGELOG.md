@@ -1176,6 +1176,30 @@ backward-compatible capability, 💥 **major** may break callers.
   anchor links resolve, and none of the superseded claims survive.
   ([#41](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/41))
 
+- Hardened `.gitignore`. The previous version covered little beyond Office
+  temporary files, so a workbook saved at the repository root, a local `.env`, an
+  editor workspace or a crash dump could all be staged without anything objecting.
+
+  The policy is now source-first and stated at the top of the file: exported VBA
+  source, `.frx` form binaries, RibbonX, demo builders, the regression harness,
+  documentation and workflows are version-controlled; generated Office binaries
+  are release assets, not source.
+
+  Office binary rules are global rather than scoped to `demo/` or `dist/`, so a
+  workbook saved anywhere in the tree stays untracked. `dist/README.md` remains
+  trackable because the rules target extensions rather than the directory, and
+  `*.frx` is deliberately trackable despite being binary — a `.frm` without its
+  companion is a broken form.
+
+  The file also carries a safety rule against adding broad patterns for `*.bas`,
+  `*.cls`, `*.frm`, `*.frx`, `*.xml`, `*.md`, `assets/`, `images/` or `.github/`,
+  and a closing inventory of the paths that must stay trackable. A binary fixture
+  that ever genuinely belongs in source control is re-included by explicit path,
+  so the exception is visible in review.
+
+  Verified: no tracked file matches any ignore rule, and every source path checked
+  individually remains trackable.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
