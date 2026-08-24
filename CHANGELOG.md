@@ -456,6 +456,29 @@ backward-compatible capability, 💥 **major** may break callers.
 
 ### 🐛 Fixed
 
+- Fixed the settings-namespace regression suite leaking registry keys. It created
+  two temporary application namespaces to prove isolation and left both behind
+  after every run, while reporting no cleanup failure:
+
+  ```text
+  VBA_DATETIMEPICKER__TST_DP_NS_A
+  VBA_DATETIMEPICKER__TST_DP_NS_B
+  ```
+
+  `DeleteSetting` was called with an application name **and** a section, which
+  removes that section and leaves an empty application key. The verification then
+  looked for the probe value, found it absent, and concluded the namespace was
+  gone — so the check meant to catch the leak was looking in the wrong place.
+
+  Deletion now passes the application name alone, and verification uses
+  `GetAllSettings`, which returns an unassigned `Variant` when the application key
+  is absent and an array when it exists. That detects an empty leftover key,
+  which a value lookup cannot.
+
+  Found by inspecting the registry during the manual validation, not by the suite,
+  which passed while leaking.
+  ([#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26))
+
 - Fixed every deployment sharing one persisted settings namespace. All registry
   reads and writes used the fixed application name:
 

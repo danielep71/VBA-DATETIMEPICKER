@@ -2007,6 +2007,41 @@ SuiteFail:
 
 End Sub
 
+Private Function TST_DP_RegistryAppExists( _
+    ByVal ApplicationName As String) As Boolean
+
+'
+'==============================================================================
+'                       REGISTRY APPLICATION EXISTS
+'==============================================================================
+'   Reports whether a VBA registry application key still exists.
+'
+'   GetAllSettings returns an unassigned Variant when the application key is
+'   absent, and an array when it exists, so it detects an empty leftover key that
+'   a value lookup cannot.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Sections        As Variant      'Sections under the application key
+
+'------------------------------------------------------------------------------
+' PROBE
+'------------------------------------------------------------------------------
+    'Never let a cleanup probe raise
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_RegistryAppExists = False
+    'Read the sections, which is empty when the application key is absent
+        Sections = GetAllSettings(ApplicationName, "Display")
+    'An assigned result means something is still there
+        TST_DP_RegistryAppExists = Not VBA.IsEmpty(Sections)
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
 Private Sub TST_DP_DeleteNamespaceProbe( _
     ByVal ApplicationName As String, _
     ByVal SectionName As String)
@@ -2016,6 +2051,11 @@ Private Sub TST_DP_DeleteNamespaceProbe( _
 '                      DELETE NAMESPACE PROBE KEY
 '==============================================================================
 '   Removes a temporary registry namespace the suite created.
+'
+'   DeleteSetting is called with the application name alone. Passing a section as
+'   well deletes only that section and leaves an empty application key behind,
+'   which is a leak the old check could not see: it looked for the value, and the
+'   value was gone.
 '
 '   A leftover key is counted as a cleanup failure rather than left for the next
 '   run, because the suite's whole point is that persisted state does not leak
@@ -2028,18 +2068,16 @@ Private Sub TST_DP_DeleteNamespaceProbe( _
     'Suppress the error raised when the key was never created
         On Error Resume Next
         Err.Clear
-    'Remove the whole temporary application namespace
-        DeleteSetting ApplicationName, SectionName
-    'Report a key this suite could not remove
-        If Err.Number <> 0 Then
-            Err.Clear
-            If GetSetting(ApplicationName, SectionName, "TST_DP_NamespaceProbe", _
-                "<absent>") <> "<absent>" Then
-                mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
-                TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Namespace probe", _
-                    "Temporary registry namespace " & ApplicationName & _
-                    " could not be removed"
-            End If
+    'Remove the whole temporary application key, not just one section
+        DeleteSetting ApplicationName
+        Err.Clear
+    'Verify the application key is gone rather than trusting the delete. A section
+    'delete leaves an empty application key that a value lookup cannot detect
+        If TST_DP_RegistryAppExists(ApplicationName) Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Namespace probe", _
+                "Temporary registry namespace " & ApplicationName & _
+                " could not be removed"
         End If
     'Clear any suppressed cleanup error
         Err.Clear
