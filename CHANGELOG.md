@@ -211,6 +211,12 @@ refactor and no new features. Corrections are published against the released
   report more than 25 addresses in a category while the classification totals stay
   exact. Moving to one cap per operation is tracked for `v1.2.2`.
 
+- `Installation-and-Import` showed a repository tree containing a tracked
+  `demo/DatePicker Demo.xlsm`. No demo workbook is tracked: `demo/` holds the VBA
+  source that builds it and the built file is a Release asset, as the root
+  `README` already states. The tree now matches the repository, including `test/`,
+  `dist/` and `images/`, and no longer implies the Wiki is a folder inside it.
+
 - `Testing-and-Demo-Guide` moves from 16 suites and `Run=302` to 24 standard
   suites and `Run=431`, and lists the six suites added by this patch against their
   issues. The 16 was already stale when published: the runner ran 18 standard
