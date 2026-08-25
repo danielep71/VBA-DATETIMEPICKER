@@ -992,6 +992,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "Settings"
     'Run the settings namespace isolation suite
         TST_DP_RunSuiteSafe "SettingsNamespace"
+    'Run settings-panel save resolution checks
+        TST_DP_RunSuiteSafe "SettingsSaveResolution"
     'Run date-selection policy checks
         TST_DP_RunSuiteSafe "DatePolicy"
     'Run holiday callback dispatch and fail-safe checks
@@ -1275,6 +1277,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "ENVIRONMENT"
                 TST_DP_RunSuite_Environment
+
+            Case "SETTINGSSAVERESOLUTION"
+                TST_DP_RunSuite_SettingsSaveResolution
 
             Case "SETTINGSNAMESPACE"
                 TST_DP_RunSuite_SettingsNamespace
@@ -1850,6 +1855,173 @@ SuiteFail:
         TST_DP_RecordFail "Settings suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
         Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_SettingsSaveResolution()
+
+'
+'==============================================================================
+'                    SETTINGS SAVE RESOLUTION SUITE
+'==============================================================================
+' PURPOSE
+'   Proves a settings-panel save preserves an explicitly disabled keyboard
+'   shortcut, including when right-click and the grid icon are also disabled
+'
+' WHY THIS EXISTS
+'   #42 was closed at v1.2.0 on the strength of module-setter coverage. The
+'   fallback had been removed from M_Settings_SetShowRightClick and
+'   M_Settings_SetShowGridIcon but not from the UserForm save path, so the
+'   setters passed while the real panel still forced the shortcut back on
+'
+'   This suite drives M_Settings_ResolveKeyboardShortcutOnSave, which is the
+'   same code the UserForm save handler executes, rather than the setters
+'
+' NOTES
+'   Application.OnKey has no read-back API and the component tracks no
+'   registration flag, so the registration criterion is asserted through the
+'   setting that selects the register/remove branch. This is a real limitation
+'   of the platform, not of the suite, and the manual matrix covers the rest
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RightClickState     As Boolean      'Swept right-click input
+    Dim GridIconState       As Boolean      'Swept grid-icon input
+    Dim CurrentState        As Boolean      'Swept current keyboard setting
+    Dim Resolved            As Boolean      'Value the save path would persist
+    Dim SweepHeld           As Boolean      'True while every combination is invariant
+    Dim RightClickIndex     As Long         'Sweep index for right-click
+    Dim GridIconIndex       As Long         'Sweep index for grid icon
+    Dim CurrentIndex        As Long         'Sweep index for the current setting
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "SettingsSaveResolution"
+
+'------------------------------------------------------------------------------
+' THE SEAM IS INVARIANT ACROSS EVERY INTEGRATION COMBINATION
+'------------------------------------------------------------------------------
+    'The two integration arguments must never change the answer. Sweeping all
+    'eight combinations is what makes a reintroduced fallback fail here
+        SweepHeld = True
+        For CurrentIndex = 0 To 1
+            CurrentState = (CurrentIndex = 1)
+            For RightClickIndex = 0 To 1
+                RightClickState = (RightClickIndex = 1)
+                For GridIconIndex = 0 To 1
+                    GridIconState = (GridIconIndex = 1)
+                    Resolved = M_Settings_ResolveKeyboardShortcutOnSave( _
+                        CurrentState, RightClickState, GridIconState)
+                    If Resolved <> CurrentState Then
+                        SweepHeld = False
+                    End If
+                Next GridIconIndex
+            Next RightClickIndex
+        Next CurrentIndex
+        TST_DP_AssertTrue _
+            "Save resolution preserves the keyboard setting in all 8 combinations", _
+            SweepHeld
+
+'------------------------------------------------------------------------------
+' THE FORMER FALLBACK CASE SPECIFICALLY
+'------------------------------------------------------------------------------
+    'This is the exact input triple that was forced to True at v1.2.0
+        TST_DP_AssertFalse _
+            "All three disabled resolves the shortcut to False, not True", _
+            M_Settings_ResolveKeyboardShortcutOnSave(False, False, False)
+
+'------------------------------------------------------------------------------
+' ALL THREE ENTRY PATHS DISABLED IS A VALID PERSISTED CONFIGURATION
+'------------------------------------------------------------------------------
+    'Drive the real setters into the state the panel would save
+        M_Settings_SetShowRightClick False
+        M_Settings_SetShowGridIcon False
+        M_Settings_SetEnableKeyboardShortcut False
+        TST_DP_AssertFalse "Right-click stays disabled", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertFalse "Grid icon stays disabled", _
+            M_Settings_GetShowGridIcon()
+        TST_DP_AssertFalse "Keyboard shortcut stays disabled", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+'------------------------------------------------------------------------------
+' A SAVE IN THAT STATE CHANGES NOTHING
+'------------------------------------------------------------------------------
+    'Resolve exactly as the panel save would, then apply it
+        Resolved = M_Settings_ResolveKeyboardShortcutOnSave( _
+            M_Settings_GetEnableKeyboardShortcut(), _
+            M_Settings_GetShowRightClick(), _
+            M_Settings_GetShowGridIcon())
+        M_Settings_SetEnableKeyboardShortcut Resolved
+        TST_DP_AssertFalse _
+            "Saving the panel does not re-enable the keyboard shortcut", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+'------------------------------------------------------------------------------
+' THE SETTING SURVIVES A PERSISTENCE ROUND TRIP
+'------------------------------------------------------------------------------
+    'Reload from persisted storage and confirm the disabled value came back
+        M_Settings_Save
+        M_Settings_Load
+        TST_DP_AssertFalse _
+            "Persisted settings reload with the keyboard shortcut disabled", _
+            M_Settings_GetEnableKeyboardShortcut()
+        TST_DP_AssertFalse "Persisted right-click reloads disabled", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertFalse "Persisted grid icon reloads disabled", _
+            M_Settings_GetShowGridIcon()
+
+'------------------------------------------------------------------------------
+' UPDATE FOLLOWS THE REMOVAL BRANCH IN THIS STATE
+'------------------------------------------------------------------------------
+    'Application.OnKey cannot be read back, so assert the setting that selects
+    'the branch rather than claiming to observe the registration itself
+        M_KeyboardShortcut_Update
+        TST_DP_AssertFalse _
+            "Update leaves the shortcut disabled with zero entry paths", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+'------------------------------------------------------------------------------
+' EXPLICIT OPT-IN STILL WORKS
+'------------------------------------------------------------------------------
+    'Removing the fallback must not make the shortcut unreachable
+        M_Settings_SetEnableKeyboardShortcut True
+        TST_DP_AssertTrue "Explicit opt-in still enables the shortcut", _
+            M_Settings_GetEnableKeyboardShortcut()
+        TST_DP_AssertTrue _
+            "Opt-in survives a save with both integrations disabled", _
+            M_Settings_ResolveKeyboardShortcutOnSave( _
+                M_Settings_GetEnableKeyboardShortcut(), False, False)
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Restore working defaults for the suites that follow
+        M_Settings_SetShowRightClick True
+        M_Settings_SetShowGridIcon True
+        M_Settings_SetEnableKeyboardShortcut True
+        M_KeyboardShortcut_Update
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Settings save resolution suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore settings regardless
+        Resume SuiteExit
 
 End Sub
 

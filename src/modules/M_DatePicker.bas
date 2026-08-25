@@ -1940,6 +1940,75 @@ ErrorHandler:
 
 End Sub
 
+Public Function M_Settings_ResolveKeyboardShortcutOnSave( _
+    ByVal CurrentEnableKeyboard As Boolean, _
+    ByVal ResolvedShowRightClick As Boolean, _
+    ByVal ResolvedShowGridIcon As Boolean) As Boolean
+
+'
+'==============================================================================
+'                 RESOLVE KEYBOARD SHORTCUT ON SETTINGS SAVE
+'==============================================================================
+' PURPOSE
+'   Resolves the keyboard shortcut setting a settings save should persist
+'
+' WHY THIS EXISTS
+'   The settings panel has no keyboard checkbox. The shortcut is set through
+'   M_Settings_SetEnableKeyboardShortcut, and a panel save must carry the
+'   current value forward untouched
+'
+'   At v1.2.0 the UserForm save path instead forced the value back to True
+'   whenever right-click and the grid icon were both disabled, then persisted it
+'   and registered Application.OnKey. A user who had deliberately disabled all
+'   three built-in entry points could not keep that configuration
+'
+'   The equivalent block was already removed from M_Settings_SetShowRightClick
+'   and M_Settings_SetShowGridIcon, which is why those setters still carry an
+'   empty PROTECT MANUAL ACCESS PATH banner. The UserForm copy was missed
+'
+' INPUTS
+'   CurrentEnableKeyboard
+'       The keyboard shortcut setting as currently resolved
+'
+'   ResolvedShowRightClick
+'       The right-click setting the save is about to persist
+'
+'   ResolvedShowGridIcon
+'       The grid-icon setting the save is about to persist
+'
+' RETURNS
+'   CurrentEnableKeyboard, unchanged, for every combination of the other two
+'
+' BEHAVIOR
+'   Zero built-in entry paths is a valid configuration. The DatePicker remains
+'   reachable through DP_Show, DP_Click and the Ribbon, so no combination of
+'   integration settings justifies overriding an explicit user choice
+'
+' ERROR POLICY
+'   Pure. Does not raise, read global state or mutate anything
+'
+' NOTES
+'   The two integration arguments are accepted deliberately even though they do
+'   not affect the result. They are the exact inputs the removed fallback
+'   consulted, so this signature states the contract that they must never affect
+'   it, and lets a regression sweep every combination
+'
+'   This is the seam the settings-save regression drives. It is the same code
+'   the real UserForm save handler executes, not a module-level setter standing
+'   in for it. Classify internal under #25
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Preserve the explicitly resolved setting exactly as the user chose it
+        M_Settings_ResolveKeyboardShortcutOnSave = CurrentEnableKeyboard
+
+End Function
+
 Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As Boolean)
 
 '
@@ -2052,6 +2121,10 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
+    'Deliberately empty. An earlier design forced the keyboard shortcut back on
+    'when right-click and the grid icon were both disabled. Zero built-in entry
+    'paths is a valid configuration, so the resolved value above is carried
+    'forward unchanged. Do not reintroduce a fallback here: see #42
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAG
 '------------------------------------------------------------------------------
@@ -3342,6 +3415,10 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
+    'Deliberately empty. An earlier design forced the keyboard shortcut back on
+    'when right-click and the grid icon were both disabled. Zero built-in entry
+    'paths is a valid configuration, so the resolved value above is carried
+    'forward unchanged. Do not reintroduce a fallback here: see #42
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -3555,6 +3632,10 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
+    'Deliberately empty. An earlier design forced the keyboard shortcut back on
+    'when right-click and the grid icon were both disabled. Zero built-in entry
+    'paths is a valid configuration, so the resolved value above is carried
+    'forward unchanged. Do not reintroduce a fallback here: see #42
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------

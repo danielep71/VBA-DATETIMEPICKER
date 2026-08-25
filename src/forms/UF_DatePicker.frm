@@ -13,8 +13,6 @@ Attribute VB_GlobalNameSpace = False
 Attribute VB_Creatable = False
 Attribute VB_PredeclaredId = True
 Attribute VB_Exposed = False
-
-
 '------------------------------------------------------------------------------
 ' MODULE: UF_DatePicker
 '------------------------------------------------------------------------------
@@ -10911,16 +10909,11 @@ Private Sub UF_SettingsPanel_Save()
         NewShowGridIcon = CBool(Chk_InGridIcon.Value = True)
     'Resolve the WinAPI styling setting
         NewUseWinAPI = CBool(Chk_WinAPIStyle.Value = True)
-    'Keep the current keyboard setting unless the fallback must be forced
-        NewEnableKeyboard = gDP_EnableKeyboardShortcut
-    'Force keyboard fallback when both visual/contextual entry points are disabled
-        If Not NewShowRightClick Then
-            If Not NewShowGridIcon Then
-                If Not NewEnableKeyboard Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
+    'Resolve the keyboard shortcut setting through the shared save-resolution
+    'seam. Zero built-in entry paths is a valid configuration, so the panel
+    'preserves an explicitly disabled shortcut instead of forcing it back on
+        NewEnableKeyboard = M_Settings_ResolveKeyboardShortcutOnSave( _
+            gDP_EnableKeyboardShortcut, NewShowRightClick, NewShowGridIcon)
 
 '------------------------------------------------------------------------------
 ' CAPTURE CURRENT SETTINGS
@@ -14796,4 +14789,6 @@ Private Sub UF_Validate_CalendarLayoutConstants(ByVal CallerName As String)
         End If
 
 End Sub
+
+
 
