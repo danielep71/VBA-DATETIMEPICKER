@@ -1360,6 +1360,53 @@ backward-compatible capability, 💥 **major** may break callers.
   Verified against source: every procedure, enum, run state and result type
   named in the template exists and matches its described contract.
 
+- Rebuilt `.github/ISSUE_TEMPLATE/bug_report.md`. The previous template asked
+  for steps, expected and observed behavior, and an Excel version. None of the
+  states this release made observable had anywhere to go, so a reporter had no
+  way to describe a partial write, a refused startup, or a run that failed
+  before it started.
+
+  The core sections stay required and the fourteen subsystem sections are
+  collapsed and optional, so the template asks a reporter for the detail their
+  own defect needs rather than all of it.
+
+  **Recovery result** asks which of `DP_Close`, `DP_Stop`, `DP_RepairRuntime`,
+  reopening the workbook or restarting Excel actually restored the session, on
+  the stated principle that a defect leaving a session hard to recover matters
+  more than a cosmetic one. `DP_ForceReleaseProviderLease` is gated rather than
+  offered: the reporter is asked to explain how they knew no other live provider
+  owned the session, and told that restarting Excel is the safer step when
+  ownership is uncertain.
+
+  The harness section names all five run states and singles out
+  `FAIL_DIRTY_START` as not ordinary assertion evidence for the current code. It
+  asks whether `TST_DP_SCRATCH` existed before the run and whether it exists
+  after — the observable form of the dirty-start signal
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19)) — and, for
+  a `Worksheets.Add` failure, asks for the worksheet count before and after,
+  whether a new worksheet appeared despite the error, and whether more than one
+  candidate appeared
+  ([#45](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/45)).
+
+  `DP_WriteResult` and `DP_WindowStyleResult` are requested field by field
+  rather than as a summary, so a count that disagrees with an address list is
+  visible in the report itself.
+
+  Two instructions exist to protect evidence: paste the call that actually
+  reproduced the issue rather than the form the project appears to intend, and
+  do not rerun a setup failure repeatedly before inspecting the workbook. The
+  header redirects suspected vulnerabilities and credential exposure to
+  `SECURITY.md`, matching the private-reporting link already in `config.yml`.
+
+  Verified against source: every procedure named in the template exists and is
+  `Public`; the `DP_FillTableColumn` call matches its signature, including the
+  `ValueToWrite` and `ConfirmFill` arguments and the `DP_WriteResult` return;
+  all seven `DP_WindowStyleResult` members and all five `DP_WriteResult` members
+  cited match their declarations; no fault-injection seam appears; and the
+  harness's stated dependency on `demo/M_DEMO_BUILDER.bas` is real —
+  `DEMO_Sheet_BuildTemplate` is called by both `TST_DP_RunAll` and
+  `TST_DP_RunAll_WithUISmoke`.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
