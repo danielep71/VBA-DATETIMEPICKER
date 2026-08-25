@@ -362,7 +362,7 @@ backward-compatible capability, 💥 **major** may break callers.
 
 - Added three-way write-scope coverage to the `WriteBack` suite. The existing
   expansion test passes `NoTableGrow:=False` explicitly, so it kept passing
-  through the behaviour change and proved nothing about the new default. Eleven
+  through the behavior change and proved nothing about the new default. Eleven
   assertions now cover each path independently:
 
   ```text
@@ -457,7 +457,7 @@ backward-compatible capability, 💥 **major** may break callers.
   A formatted range would not exercise the table write-back path, which is the
   reason that section exists. Its Expiry Date column is deliberately empty:
   selecting one of those cells is the shortest route to observing the
-  write-scope behaviour described in
+  write-scope behavior described in
   [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13).
 
 ### 🐛 Fixed
@@ -888,7 +888,7 @@ backward-compatible capability, 💥 **major** may break callers.
   dialog stopping the run. Developer `Debug.Print` diagnostics remain.
   ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
 
-- Fixed six README statements describing `M_Picker_EnsureManager` behaviour that
+- Fixed six README statements describing `M_Picker_EnsureManager` behavior that
   `v1.1.1` removed. The routine no longer forces
   `Application.EnableEvents = True`, but the public API table, the validation
   checklist, the troubleshooting table and a feature list still said it did.
@@ -900,7 +900,7 @@ backward-compatible capability, 💥 **major** may break callers.
   that, by design, does nothing to event state.
 
   The Known limitations section was audited when it was written; the rest of the
-  file was not. The release documented its own behaviour change while
+  file was not. The release documented its own behavior change while
   contradicting it four sections above the disclosure.
   ([#41](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/41))
 - Fixed four documents describing `demo/DATEPICKER.xlsm` as a tracked file after
@@ -928,7 +928,7 @@ backward-compatible capability, 💥 **major** may break callers.
   M_Picker_SelectDate SomeDate          'now writes one cell, previously expanded
   ```
 
-  Only omitted arguments change, which is exactly the behaviour this release
+  Only omitted arguments change, which is exactly the behavior this release
   intends to change.
 
   No persisted setting governs this. The scope of a destructive write should not
@@ -981,7 +981,7 @@ backward-compatible capability, 💥 **major** may break callers.
 
   A new private resolver decides the host workbook once, so the four routines
   cannot disagree about which workbook they are operating on. Embedded, it
-  returns `ThisWorkbook` and behaviour is unchanged. As an add-in, it returns
+  returns `ThisWorkbook` and behavior is unchanged. As an add-in, it returns
   the first open workbook already holding the demo sheet, and adds a new
   workbook when none does.
 
@@ -1090,7 +1090,7 @@ backward-compatible capability, 💥 **major** may break callers.
   The pull request template's demo section now asks the questions that matter
   for generated output — rebuilt and visually checked, idempotent across two
   rebuilds, `OnAction` targets wired, and whether it still demonstrates current
-  behaviour rather than superseded behaviour.
+  behavior rather than superseded behavior.
 
 - Separated write-back target resolution from mutation.
   `M_WriteBack_ResolveAndApplyTarget` resolved the target and wrote to it in one
@@ -1112,7 +1112,7 @@ backward-compatible capability, 💥 **major** may break callers.
   `513` unsupported action, `514` no selection, `515` non-range selection, `516`
   unresolved target, `517` empty target.
 
-  No behaviour change. This is the seam that the write-scope fix
+  No behavior change. This is the seam that the write-scope fix
   ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13)) uses to
   describe a resolved scope before writing it, and that the structured write
   result ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
@@ -1275,13 +1275,98 @@ backward-compatible capability, 💥 **major** may break callers.
   Verified against source: every procedure and repository path named in the guide
   exists, no internal test seam appears, and all fifteen internal links resolve.
 
+- Rebuilt `SECURITY.md` from a disclosure policy into a security policy. The
+  previous file explained how to report a vulnerability and said almost nothing
+  about what the component actually does to a user's workbook, so a reader
+  assessing it for a controlled environment had no document to read.
+
+  **Runtime security boundaries** is the new center of the file, and states the
+  five places the component reaches outside its own form: worksheet write-back,
+  `Application.EnableEvents`, the application-wide keyboard shortcut,
+  `Application.OnTime`, and context-menu and worksheet `Shape` ownership. Each
+  says what is touched, what is restored, and what a caller keeps responsibility
+  for.
+
+  Three sections exist to refuse a security claim rather than make one. The
+  provider lease is **not a security sandbox**: it prevents one current-version
+  copy from displacing another and nothing else. Settings namespaces are **not
+  an access-control mechanism**: a namespace separates configuration, it does
+  not protect it. Native window styling is **not an elevation mechanism**: the
+  WinAPI calls restyle a form the process already owns. Mixed-version sessions
+  get their own section, because a pre-`v1.2.0` copy does not participate in the
+  lease protocol and such a session must not be assumed protected.
+
+  **Exact artifact provenance** names a gap instead of papering over it: that a
+  source regression at a given SHA does not establish that a later saved `.xlam`
+  or `.xlsm` was built from it. Until a release publishes that binding, the
+  document says not to overstate what a source run proves about a binary. This
+  is the requirement that
+  [#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16) exists to
+  close.
+
+  The reporting path gains GitHub private vulnerability reporting alongside
+  email, guidance on safe reproduction material, six categories of qualifying
+  issue, and an explicit boundary against ordinary bugs. Also adds a policy for
+  supported versions and security fixes, release verification steps, eight
+  safe-use rules, secret-handling rules, logging and diagnostics guidance, the harness's
+  dirty-start and worksheet-creation recovery considerations, disclosure
+  coordination, and a maintainer review checklist.
+
+  The automation section now carries the full credential model for
+  `daily-traffic.yml` as a table, a 90-day rotation policy with eight triggers
+  that force rotation early, and a rule that the analytics credential must not
+  be extended to build, test, packaging or signing work.
+
+  Verified against source: the credential table matches
+  `.github/workflows/daily-traffic.yml` — `TRAFFIC_TOKEN` as a fine-grained
+  token scoped to `Administration: read`, the `analytics` environment, the
+  `contents: write` and `issues: write` workflow permissions, and
+  `actions/checkout` pinned to a full commit SHA. Every procedure, run state and
+  repository path named in the policy exists.
+
+- Rebuilt `.github/PULL_REQUEST_TEMPLATE.md` into a review gate for the
+  contracts this release established. The previous template predated most of
+  them: it asked about the demo sheet, WinAPI, the harness and the Ribbon, and
+  had nowhere to record write scope, formula handling, provider ownership or
+  settings namespace.
+
+  **Harness verdict** now asks for the actual summary line rather than a claim
+  about it, names all five run states, and states that `FAIL`, `FAIL_CLEANUP`,
+  `FAIL_DIRTY_START` and `INCOMPLETE_SKIPPED` are not release-quality evidence
+  even when some or all executed assertions passed. The recorded `v1.2.0`
+  baseline is included as history and labeled as not a required assertion count.
+
+  **Evidence classification** makes the author state what kind of evidence was
+  produced — compile, automated regression, UI smoke, manual scenario, source
+  inspection, package-level, or documented platform contract — with a checkbox
+  for `Unresolved hypothesis remains` and an instruction not to call a source
+  inspection tested, or a single-host non-reproduction verified everywhere.
+
+  **Known boundary / not proved by this PR** is a required field rather than an
+  optional note. Three times this cycle a passing check was found to be
+  asserting a different proposition than the one claimed, and in each case the
+  gap was visible at the time and simply unrecorded.
+
+  Seventeen subsystem sections replace the previous four, one per contract:
+  write-back and table scope with its regression cases, formula policy and
+  `DP_WriteResult`, settings persistence and namespace, runtime provider
+  ownership, keyboard and access paths, in-grid icon and worksheet lifecycle,
+  application events and manager lifecycle, timer and `Application.OnTime`,
+  WinAPI and `DP_WindowStyleResult`, the regression harness including
+  `Worksheets.Add` partial-success recovery, the UserForm, RibbonX, demo source,
+  release engineering and provenance, security and repository automation, and
+  documentation consistency.
+
+  Verified against source: every procedure, enum, run state and result type
+  named in the template exists and matches its described contract.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
 - `DP_Demo_CreateDemoSheet` and `DP_Demo_EnsureDemoSheet` are new, and live in
   `demo/`. Versioning covers the public VBA API of the component in `src/`;
   `demo/` is example material that ships as a workbook.
-- Embedded behaviour is unchanged. The add-in gains a Demo button that works.
+- Embedded behavior is unchanged. The add-in gains a Demo button that works.
 - The harness summary line gained `State=` and `CleanupFailures=` fields. Any
   tooling that parses it by position rather than by name will need updating.
 - **`DP_FillTableColumn` is a new public procedure in `src/`.** Under the
