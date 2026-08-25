@@ -576,7 +576,8 @@ Private Sub UserForm_Initialize()
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "UF_DatePicker.UserForm_Initialize"
 
-    Dim InitialDate     As Date     'Initial date consumed from the form bridge or system date
+    Dim InitialDate     As Date                     'Initial date consumed from the form bridge or system date
+    Dim WindowResult    As DP_WindowStyleResult     'Structured outcome of the native styling attempt
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -629,8 +630,30 @@ Private Sub UserForm_Initialize()
 '------------------------------------------------------------------------------
 ' APPLY WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Apply borderless window styling only when enabled and supported
-        If M_Platform_ShouldUseWinAPI Then M_Window_RemoveTitleBar Me
+    'Apply borderless window styling only when enabled and supported, and capture
+    'the structured outcome instead of discarding it
+        If M_Platform_ShouldUseWinAPI Then
+            WindowResult = M_Window_RemoveTitleBar(Me)
+        End If
+    'Act on the outcome. Applied, RolledBack and a non-attempt are all known
+    'states and continue normally: the form is either borderless as requested or
+    'still wearing its original native chrome. RecoveryRequired is the one state
+    'that is neither, so the load fails rather than presenting a window whose
+    'native style could not be applied or restored
+        If WindowResult.RecoveryRequired Then
+            'Record the actionable detail before unwinding
+                Debug.Print PROC_NAME & _
+                    " | Window recovery required | FailedStep=" & WindowResult.FailedStep & _
+                    " | LastApiError=" & VBA.CStr(WindowResult.LastApiError)
+            'Fail the load. Initialize cannot safely unload the instance it is
+            'still constructing, so aborting here is what keeps the unknown-state
+            'window from ever being shown
+                Err.Raise vbObjectError + 640, PROC_NAME, _
+                    "DatePicker window styling left the native window in no known " & _
+                    "good state and the form was not loaded. FailedStep=" & _
+                    WindowResult.FailedStep & "; LastApiError=" & _
+                    VBA.CStr(WindowResult.LastApiError)
+        End If
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -704,6 +727,8 @@ Private Sub UserForm_Activate()
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "UF_DatePicker.UserForm_Activate"
 
+    Dim WindowResult    As DP_WindowStyleResult     'Structured outcome of the native styling attempt
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -715,8 +740,34 @@ Private Sub UserForm_Activate()
 '------------------------------------------------------------------------------
 ' APPLY OPTIONAL WINDOW STYLE
 '------------------------------------------------------------------------------
-    'Retry title-bar removal only when borderless styling is enabled and supported
-        If M_Platform_ShouldUseWinAPI Then M_Window_RemoveTitleBar Me
+    'Retry title-bar removal only when borderless styling is enabled and
+    'supported, and capture the structured outcome instead of discarding it
+        If M_Platform_ShouldUseWinAPI Then
+            WindowResult = M_Window_RemoveTitleBar(Me)
+        End If
+    'Act on the outcome. Applied, RolledBack and a non-attempt are known states
+    'and activation continues. RecoveryRequired means the native style is neither
+    'applied nor restored, so the form is torn down rather than left visible and
+    'interactive in a state nothing can describe
+        If WindowResult.RecoveryRequired Then
+            'Record the actionable detail before unwinding
+                Debug.Print PROC_NAME & _
+                    " | Window recovery required | FailedStep=" & WindowResult.FailedStep & _
+                    " | LastApiError=" & VBA.CStr(WindowResult.LastApiError)
+            'Consume the one-time activation guard first. A re-entrant Activate
+            'raised during teardown exits at the guard above, so the unload below
+            'cannot drive a recursive activate/unload loop
+                mHasActivated = True
+            'Suppress teardown errors: the window is already in an unknown state
+            'and a failed unload must not replace that diagnostic with its own
+                On Error Resume Next
+            'Remove the form rather than continuing post-show initialization
+                Unload Me
+            'Clear any suppressed teardown error
+                Err.Clear
+            'Exit because this instance is terminating
+                Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' POSITION USERFORM
@@ -14789,6 +14840,8 @@ Private Sub UF_Validate_CalendarLayoutConstants(ByVal CallerName As String)
         End If
 
 End Sub
+
+
 
 
 

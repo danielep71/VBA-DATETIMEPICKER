@@ -1027,6 +1027,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "ApplicationState"
     'Run the borderless window-style transaction suite
         TST_DP_RunSuiteSafe "WindowStyle"
+    'Run form-level window recovery checks
+        TST_DP_RunSuiteSafe "WindowRecovery"
     'Run the harness run-state and preflight self-checks
         TST_DP_RunSuiteSafe "HarnessSelfCheck"
     'Run optional UF_DatePicker open / close smoke check when requested
@@ -1330,6 +1332,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RunSuite_SelectDate
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
+            Case "WINDOWRECOVERY"
+                TST_DP_RunSuite_WindowRecovery
+
             Case "WINDOWSTYLE"
                 TST_DP_RunSuite_WindowStyle
             Case "HARNESSSELFCHECK"
@@ -4449,6 +4454,82 @@ Private Function TST_DP_IsPickerFormLoadedForTest() As Boolean
 
 End Function
 
+Private Function TST_DP_IsPickerFormVisibleForTest() As Boolean
+
+'
+'==============================================================================
+'                   IS A PICKER FORM VISIBLE (TEST)
+'==============================================================================
+'   Reports whether any loaded DatePicker instance is actually visible.
+'
+'   Presence in VBA.UserForms is not the same question. A Load that raises from
+'   UserForm_Initialize leaves an orphaned instance in that collection which the
+'   project cannot reach by name, so "loaded" over-reports. Visibility is the
+'   property that matters for #47: the contract is that a window in no known good
+'   state is never presented to the user.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LoadedForm      As Object       'Iterated loaded form
+
+'------------------------------------------------------------------------------
+' SEARCH
+'------------------------------------------------------------------------------
+    'Never let a lookup raise into an assertion
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_IsPickerFormVisibleForTest = False
+    'Report the first visible DatePicker instance found
+        For Each LoadedForm In VBA.UserForms
+            If VBA.StrComp(LoadedForm.Name, "UF_DatePicker", vbTextCompare) = 0 Then
+                If LoadedForm.Visible Then
+                    TST_DP_IsPickerFormVisibleForTest = True
+                    Exit For
+                End If
+            End If
+        Next LoadedForm
+    'Clear any suppressed enumeration error
+        Err.Clear
+
+End Function
+
+Private Sub TST_DP_UnloadAllPickerFormsForTest()
+
+'
+'==============================================================================
+'                   UNLOAD EVERY PICKER INSTANCE (TEST)
+'==============================================================================
+'   Removes every DatePicker instance in VBA.UserForms, including one orphaned
+'   by a Load that raised from UserForm_Initialize.
+'
+'   Unload UF_DatePicker only reaches the default instance. An orphan left by a
+'   failed Load survives that call and would otherwise leak into later suites,
+'   so this walks the collection by index in reverse and unloads what it finds.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Index           As Long         'Reverse index into the loaded-form collection
+
+'------------------------------------------------------------------------------
+' UNLOAD
+'------------------------------------------------------------------------------
+    'Never let teardown raise into a suite
+        On Error Resume Next
+    'Walk backwards because unloading removes entries from the collection
+        For Index = VBA.UserForms.Count - 1 To 0 Step -1
+            If VBA.StrComp(VBA.UserForms(Index).Name, "UF_DatePicker", vbTextCompare) = 0 Then
+                Unload VBA.UserForms(Index)
+            End If
+        Next Index
+    'Clear any suppressed teardown error
+        Err.Clear
+
+End Sub
+
 Private Function TST_DP_ReadLeaseOwnerForTest() As String
 
 '
@@ -5391,6 +5472,163 @@ Private Function TST_DP_ReadWindowStyle(ByVal WindowHandle As Long) As Long
         Err.Clear
 
 End Function
+
+Private Sub TST_DP_RunSuite_WindowRecovery()
+
+'
+'==============================================================================
+'                       WINDOW RECOVERY SUITE
+'==============================================================================
+' PURPOSE
+'   Proves the UserForm acts on DP_WindowStyleResult instead of discarding it
+'
+' WHY THIS EXISTS
+'   The WindowStyle suite calls M_Window_RemoveTitleBar directly and asserts the
+'   returned UDT. That proved the transaction was observable, not that anything
+'   consumed it. At v1.2.0 both production call sites in UF_DatePicker invoked
+'   the Function as a statement and threw the result away, so a window left in no
+'   known good state still produced a visible, interactive form
+'
+'   This suite drives the real form integration path: it arms the same fault
+'   injection the WindowStyle suite uses, then loads the form and asserts what
+'   the form actually did
+'
+' NOTES
+'   Fault injection is one-shot. UserForm_Initialize consumes the armed fault, so
+'   these cases exercise the initialization call site
+'
+'   The activation call site applies the same rule and is covered by inspection
+'   and by the manual UI matrix. Driving it here would require showing a form
+'   that then unloads itself from inside its own Activate event, which is not a
+'   state worth creating inside an unattended run
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const FAULT_SET_WINDOW_POS  As Long = 3         'Matches M_DatePicker
+    Const FAULT_ROLLBACK_STYLE  As Long = 1         'Matches M_DatePicker
+
+    Dim LoadRaised              As Boolean          'True when the form load failed
+    Dim OldUseWinAPI            As Boolean          'WinAPI styling setting on entry
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "WindowRecovery"
+
+'------------------------------------------------------------------------------
+' START FROM A KNOWN STATE
+'------------------------------------------------------------------------------
+    'Record the setting so the suite can restore it
+        OldUseWinAPI = M_Settings_GetUseWinAPI()
+    'Styling must be enabled for the call site to be reached at all
+        M_Settings_SetUseWinAPI True
+    'Begin with no form loaded
+        On Error Resume Next
+        Unload UF_DatePicker
+        Err.Clear
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' A CLEAN CALL LOADS THE FORM
+'------------------------------------------------------------------------------
+    'No fault armed: styling applies and the form loads normally
+        Load UF_DatePicker
+        TST_DP_AssertTrue "Clean styling loads the form", _
+            TST_DP_IsPickerFormLoadedForTest()
+        Unload UF_DatePicker
+        TST_DP_AssertFalse "Clean styling unloads cleanly", _
+            TST_DP_IsPickerFormLoadedForTest()
+
+'------------------------------------------------------------------------------
+' A ROLLED-BACK CALL STILL LOADS THE FORM
+'------------------------------------------------------------------------------
+    'A primary failure whose rollback succeeds leaves the window in its known
+    'original state, which is a supported outcome and must not block the load
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS
+        Load UF_DatePicker
+        TST_DP_AssertTrue "Rolled-back styling still loads the form", _
+            TST_DP_IsPickerFormLoadedForTest()
+        Unload UF_DatePicker
+
+'------------------------------------------------------------------------------
+' A RECOVERY-REQUIRED CALL FAILS THE LOAD
+'------------------------------------------------------------------------------
+    'A primary failure whose rollback also fails leaves no known good state. The
+    'form must not be presented, so the load itself has to fail
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_STYLE
+        LoadRaised = False
+        On Error Resume Next
+        Load UF_DatePicker
+        LoadRaised = (Err.Number <> 0)
+        Err.Clear
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Recovery-required styling fails the form load", _
+            LoadRaised
+    'The contract is that the unknown-state window is never presented. A Load
+    'that raises from UserForm_Initialize leaves an orphaned instance in
+    'VBA.UserForms that the project cannot reach by name, so presence in that
+    'collection over-reports. Visibility is the property #47 actually promises
+        TST_DP_AssertFalse "Recovery-required styling presents no visible form", _
+            TST_DP_IsPickerFormVisibleForTest()
+    'Clear the orphan so it cannot leak into the cases below
+        TST_DP_UnloadAllPickerFormsForTest
+
+'------------------------------------------------------------------------------
+' THE ARMED FAULT IS CONSUMED, NOT STICKY
+'------------------------------------------------------------------------------
+    'The next load must succeed, proving the failure came from the injected fault
+    'and not from a state this suite left behind
+        Load UF_DatePicker
+        TST_DP_AssertTrue "The next load after a recovery failure succeeds", _
+            TST_DP_IsPickerFormLoadedForTest()
+        Unload UF_DatePicker
+
+'------------------------------------------------------------------------------
+' A NON-ATTEMPT REMAINS SAFE
+'------------------------------------------------------------------------------
+    'With styling disabled the call site is never reached, so the form loads with
+    'its native chrome and nothing is treated as a recovery condition
+        M_Settings_SetUseWinAPI False
+        Load UF_DatePicker
+        TST_DP_AssertTrue "WinAPI-disabled styling still loads the form", _
+            TST_DP_IsPickerFormLoadedForTest()
+        TST_DP_UnloadAllPickerFormsForTest
+        TST_DP_AssertFalse "WinAPI-disabled load unloads cleanly", _
+            TST_DP_IsPickerFormLoadedForTest()
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm any fault the suite armed and leave no loaded form behind, including
+    'an instance orphaned by a Load that raised from UserForm_Initialize
+        On Error Resume Next
+        M_Window_Test_SetFaultInjection 0, 0
+        TST_DP_UnloadAllPickerFormsForTest
+        M_Settings_SetUseWinAPI OldUseWinAPI
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Window recovery suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore state regardless
+        Resume SuiteExit
+
+End Sub
 
 Private Sub TST_DP_RunSuite_WindowStyle()
 
