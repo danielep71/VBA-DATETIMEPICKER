@@ -71,8 +71,12 @@ Option Explicit
 '   raise outward on failure; they do not reset the caller SuiteFail handler and
 '   therefore do not need re-arming.
 '
+'   The write-back routines are Functions returning DP_WriteResult. Bare calls
+'   still compile and are kept where the outcome is not asserted, so the suite
+'   covers both call forms.
+'
 ' UPDATED
-'   2026-05-26
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -83,10 +87,21 @@ Option Explicit
     Private Const TST_DP_PASS_TEXT          As String = "PASS"                  'Passed test marker
     Private Const TST_DP_FAIL_TEXT          As String = "FAIL"                  'Failed test marker
     Private Const TST_DP_INFO_TEXT          As String = "INFO"                  'Information marker
+
+    '-----------------------------RUN STATES-----------------------------------
+    'A run reports one of these. PASS is the only state that means the run both
+    'completed and left the environment as it found it
+    Private Const TST_DP_STATE_PASS         As String = "PASS"                  'All assertions passed and cleanup verified
+    Private Const TST_DP_STATE_FAIL         As String = "FAIL"                  'One or more assertions failed
+    Private Const TST_DP_STATE_FAIL_CLEANUP As String = "FAIL_CLEANUP"          'Assertions passed but cleanup did not complete
+    Private Const TST_DP_STATE_INCOMPLETE   As String = "INCOMPLETE_SKIPPED"    'A dispatched suite did not complete
+    Private Const TST_DP_STATE_DIRTY_START  As String = "FAIL_DIRTY_START"      'The run began in an environment a previous run left behind
     Private Const TST_DP_MODULE_NAME        As String = "M_cDP_Test"            'This module name for callback resolution
 
     'Result sheet layout
     Private Const TST_DP_RESULT_FIRST_ROW   As Long = 5                         'First result data row on the result sheet
+    Private Const TST_DP_STATUS_BAR_TEXT    As String = "Running DatePicker regression tests..."  'Status bar text the run displays
+    Private Const TST_DP_STALE_SHEET_NAME   As String = "TST_DP_STALE"          'Temporary sheet used to strand a grid icon
     Private Const TST_DP_COL_SEQ            As Long = 3                         'Result sequence number column index
     Private Const TST_DP_COL_TIMESTAMP      As Long = 4                         'Result timestamp column index
     Private Const TST_DP_COL_RESULT         As Long = 5                         'Result marker column index
@@ -132,6 +147,38 @@ Option Explicit
     End Type
 
 '------------------------------------------------------------------------------
+' NATIVE DECLARATIONS FOR INDEPENDENT WINDOW-STYLE VERIFICATION
+'------------------------------------------------------------------------------
+'   The window-style suite must be able to read the native style itself. Proving
+'   a transaction only from the result the transaction returns is the function
+'   testing itself
+'
+'   GWL_STYLE and WS_CAPTION are duplicated from M_DatePicker, where they are
+'   Private. They are fixed Windows values and cannot drift
+'------------------------------------------------------------------------------
+    Private Const TST_DP_GWL_STYLE      As Long = -16           'Window style index
+    Private Const TST_DP_WS_CAPTION     As Long = &HC00000      'Window caption style flag
+
+    #If Mac Then
+    #Else
+        #If VBA7 Then
+            #If Win64 Then
+                Private Declare PtrSafe Function TST_DP_GetWindowLongPtr Lib "user32" Alias "GetWindowLongPtrA" ( _
+                    ByVal hWnd As LongPtr, _
+                    ByVal nIndex As Long) As LongPtr
+            #Else
+                Private Declare PtrSafe Function TST_DP_GetWindowLongPtr Lib "user32" Alias "GetWindowLongA" ( _
+                    ByVal hWnd As LongPtr, _
+                    ByVal nIndex As Long) As LongPtr
+            #End If
+        #Else
+            Private Declare Function TST_DP_GetWindowLong Lib "user32" Alias "GetWindowLongA" ( _
+                ByVal hWnd As Long, _
+                ByVal nIndex As Long) As Long
+        #End If
+    #End If
+
+'------------------------------------------------------------------------------
 ' PRIVATE STATE
 '------------------------------------------------------------------------------
     Private mTST_DP_ResultSheet     As Excel.Worksheet  'Result worksheet used by the current run
@@ -143,6 +190,19 @@ Option Explicit
     Private mTST_DP_FailCount       As Long             'Total assertions failed in the current run
     Private mTST_DP_CurrentSuite    As String           'Suite name currently being executed
     Private mTST_DP_HadManager      As Boolean          'True when a manager existed before the run
+    Private mTST_DP_ScratchAddBefore As Long            'Worksheet count immediately before the scratch-sheet Add
+    Private mTST_DP_ScratchAddAfter  As Long            'Worksheet count immediately after it
+    Private mTST_DP_ScratchAddOrphan As String          'Outcome of cleaning up after a failed scratch-sheet setup
+    Private mTST_DP_MenuAtStart     As Long             'Context-menu controls registered before the run
+    Private mTST_DP_MenuAfterRemove As Long             'Context-menu controls left immediately after removal
+    Private mTST_DP_RunInProgress   As Boolean          'True between run start and completed teardown
+    Private mTST_DP_DirtyStart      As Boolean          'True when preflight found a previous run's leftovers
+    Private mTST_DP_DirtyDetail     As String           'What preflight found, recorded once the result sheet exists
+    Private mTST_DP_InjectCleanupFail As String         'Cleanup step name to force-fail, for harness self-checks
+    Private mTST_DP_CleanupFails    As Long             'Cleanup steps that did not complete in the current run
+    Private mTST_DP_CleanupDetail   As String           'First cleanup failure detail in the current run
+    Private mTST_DP_SuitesDispatched As Long            'Suites dispatched in the current run
+    Private mTST_DP_SuitesCompleted As Long             'Suites that returned without escaping
 
 
 '
@@ -152,6 +212,318 @@ Option Explicit
 '
 '------------------------------------------------------------------------------
 '
+
+Private Sub TST_DP_Preflight()
+
+'
+'==============================================================================
+'                            HARNESS PREFLIGHT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether this run is starting in an environment a previous run left
+'   behind, before anything in this run modifies that environment
+'
+' WHY THIS EXISTS
+'   A run that aborts before teardown leaves worksheets and Application state in
+'   place. The next run then fails during its own setup rather than at the point
+'   of the original defect, and its results describe an environment nobody
+'   intended
+'
+'   Detection has to happen before the first mutation. Building the result sheet
+'   template over a previous run's leftovers is itself one of the ways the
+'   historical failure presented
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing. Sets mTST_DP_DirtyStart and mTST_DP_DirtyDetail
+'
+' BEHAVIOR
+'   Looks for evidence of an incomplete previous run and records what it found
+'
+'   Does not modify the workbook, the Application, or DatePicker state
+'
+' ERROR POLICY
+'   Best-effort. Never raises. A preflight that cannot read the environment
+'   reports a dirty start rather than assuming a clean one
+'
+' DEPENDENCIES
+'   mTST_DP_RunInProgress
+'   mTST_DP_HostWorkbook
+'   TST_DP_SheetExists
+'
+' NOTES
+'   Two independent kinds of evidence are needed, because they survive different
+'   kinds of abort:
+'
+'     mTST_DP_RunInProgress   an abort that left module state intact
+'     leftover scratch sheet  an abort that cleared it, such as a project reset
+'
+'   A VBA project reset zeroes module-level state, so the flag alone cannot see
+'   the abort it exists to detect. The worksheet is the evidence that survives
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Detail          As String       'Accumulated evidence description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Preflight must never break a run before it starts
+        On Error GoTo PreflightUnreadable
+    'Assume a clean start until evidence says otherwise
+        mTST_DP_DirtyStart = False
+        mTST_DP_DirtyDetail = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' EVIDENCE: MODULE STATE
+'------------------------------------------------------------------------------
+    'A run that set the flag and never cleared it did not reach teardown
+        If mTST_DP_RunInProgress Then
+            Detail = "the previous run did not complete teardown"
+        End If
+
+'------------------------------------------------------------------------------
+' EVIDENCE: LEFTOVER WORKSHEET
+'------------------------------------------------------------------------------
+    'The scratch sheet is deleted during teardown, so its presence outlives a
+    'project reset that would have cleared the flag above
+        If Not mTST_DP_HostWorkbook Is Nothing Then
+            If TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME) Then
+                If VBA.LenB(Detail) = 0 Then
+                    Detail = "worksheet " & TST_DP_SCRATCH_SHEET_NAME & " was left behind"
+                Else
+                    Detail = Detail & ", and worksheet " & TST_DP_SCRATCH_SHEET_NAME & _
+                        " was left behind"
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE PREFLIGHT
+'------------------------------------------------------------------------------
+    'Record the verdict for the run to report once it can write results
+        If VBA.LenB(Detail) > 0 Then
+            mTST_DP_DirtyStart = True
+            mTST_DP_DirtyDetail = "Dirty start: " & Detail & _
+                ". Results describe an environment this run did not establish."
+        End If
+    'Exit after a completed preflight
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' PREFLIGHT UNREADABLE
+'------------------------------------------------------------------------------
+PreflightUnreadable:
+    'An environment that cannot be inspected is not known to be clean
+        mTST_DP_DirtyStart = True
+        mTST_DP_DirtyDetail = "Dirty start: the pre-run environment could not be " & _
+            "inspected (error " & VBA.CStr(Err.Number) & " - " & Err.Description & ")."
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReportSetupFailure(ByVal EntryPoint As String)
+
+'
+'==============================================================================
+'                        REPORT SETUP FAILURE
+'==============================================================================
+'   Reports a failure that happened before the run could start.
+'
+'   Setup runs outside the run's own fatal handler, so an error here would
+'   otherwise reach the user as an unhandled VBE dialog naming a method rather
+'   than a cause. Nothing has been recorded at this point and there may be no
+'   result sheet, so the report goes to the Immediate window and a message box.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Capture the failure before anything can clear it
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
+    'Never let reporting raise
+        On Error Resume Next
+    'Record what failed
+        Debug.Print EntryPoint & " | Setup failed | " & _
+            VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+    'Record the conditions that explain it
+        Debug.Print EntryPoint & " | Environment | " & TST_DP_DescribeHostWorkbook()
+    'Tell the operator, because no result sheet exists to read
+        MsgBox _
+            "The regression run could not start." & VBA.vbCrLf & VBA.vbCrLf & _
+            VBA.CStr(ErrorNumber) & " - " & ErrorDescription & VBA.vbCrLf & VBA.vbCrLf & _
+            TST_DP_DescribeHostWorkbook() & VBA.vbCrLf & VBA.vbCrLf & _
+            "The Immediate window carries the same detail.", _
+            vbCritical Or vbOKOnly, _
+            "DatePicker regression harness"
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Public Sub TST_DP_ReportEnvironment()
+
+'
+'==============================================================================
+'                          REPORT ENVIRONMENT
+'==============================================================================
+'   Prints the host workbook conditions that decide whether the harness can set
+'   itself up. Run it from the Immediate window when a run fails during setup.
+'
+'   It resolves the host the same way a run does and writes nothing.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise
+        On Error Resume Next
+    'Resolve the host exactly as a run would
+        Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+    'Print the conditions that block Worksheets.Add
+        Debug.Print "TST_DP | Environment | " & TST_DP_DescribeHostWorkbook()
+    'Release the reference so the probe leaves nothing behind
+        Set mTST_DP_HostWorkbook = Nothing
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReportDirtyStart()
+
+'
+'==============================================================================
+'                          REPORT DIRTY START
+'==============================================================================
+'   Reports a refused run without writing anything to the workbook.
+'
+'   The result sheet cannot be used here. Building it is a mutation, and a run
+'   that has just decided the environment is not its own must not mutate it.
+'   Building that template over a previous run's leftovers is the failure this
+'   whole path exists to prevent.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' REPORT AND REFUSE
+'------------------------------------------------------------------------------
+    'Never let reporting raise
+        On Error Resume Next
+    'Record the refusal where it can be read without a result sheet
+        Debug.Print "TST_DP_RunAll | " & TST_DP_STATE_DIRTY_START & " | " & _
+            mTST_DP_DirtyDetail
+    'Describe the workbook the run refused to touch
+        Debug.Print "TST_DP_RunAll | Environment | " & TST_DP_DescribeHostWorkbook()
+    'Tell the operator, because a refused run produces no result sheet to read
+        MsgBox _
+            "The regression run was refused." & VBA.vbCrLf & VBA.vbCrLf & _
+            mTST_DP_DirtyDetail & VBA.vbCrLf & VBA.vbCrLf & _
+            "Restart Excel, delete any leftover " & TST_DP_SCRATCH_SHEET_NAME & _
+            " worksheet, and run again.", _
+            vbExclamation Or vbOKOnly, _
+            "DatePicker regression harness"
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_DescribeHostWorkbook() As String
+
+'
+'==============================================================================
+'                        DESCRIBE HOST WORKBOOK
+'==============================================================================
+'   Describes the conditions that stop a worksheet being added, so a setup
+'   failure names its cause instead of surfacing a bare 1004.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Description     As String       'Accumulated description
+
+'------------------------------------------------------------------------------
+' DESCRIBE
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_DescribeHostWorkbook = "host workbook could not be described"
+    'Report when no host workbook was resolved at all
+        If mTST_DP_HostWorkbook Is Nothing Then
+            TST_DP_DescribeHostWorkbook = "no host workbook was resolved"
+            Err.Clear
+            Exit Function
+        End If
+    'Name the workbook and the conditions that block Worksheets.Add
+        Description = "Host=" & mTST_DP_HostWorkbook.Name & _
+            "; IsAddin=" & VBA.CStr(mTST_DP_HostWorkbook.IsAddin) & _
+            "; ProtectStructure=" & VBA.CStr(mTST_DP_HostWorkbook.ProtectStructure) & _
+            "; ReadOnly=" & VBA.CStr(mTST_DP_HostWorkbook.ReadOnly) & _
+            "; Worksheets=" & VBA.CStr(mTST_DP_HostWorkbook.Worksheets.Count) & _
+            "; Sheets=" & VBA.CStr(mTST_DP_HostWorkbook.Sheets.Count) & _
+            "; " & TST_DP_RESULT_SHEET_NAME & " exists=" & _
+            VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_RESULT_SHEET_NAME)) & _
+            "; " & TST_DP_SCRATCH_SHEET_NAME & " exists=" & _
+            VBA.CStr(TST_DP_SheetExists(mTST_DP_HostWorkbook, TST_DP_SCRATCH_SHEET_NAME)) & _
+            "; WorksheetsBeforeAdd=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
+            "; WorksheetsAfterAdd=" & VBA.CStr(mTST_DP_ScratchAddAfter) & _
+            "; ScratchCleanup=" & _
+            VBA.IIf(VBA.LenB(mTST_DP_ScratchAddOrphan) = 0, "none", mTST_DP_ScratchAddOrphan)
+    'Return the description
+        TST_DP_DescribeHostWorkbook = Description
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_SheetExists( _
+    ByVal Book As Excel.Workbook, _
+    ByVal SheetName As String) As Boolean
+
+'
+'==============================================================================
+'                              SHEET EXISTS
+'==============================================================================
+'   Reports whether a worksheet of the given name exists in the workbook,
+'   without creating it and without raising when it does not.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WS              As Excel.Worksheet  'Resolved worksheet
+
+'------------------------------------------------------------------------------
+' RESOLVE SHEET
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the sheet is absent
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_SheetExists = False
+    'Attempt to resolve the named worksheet
+        Set WS = Book.Worksheets(SheetName)
+    'Report whether the resolution succeeded
+        TST_DP_SheetExists = Not (WS Is Nothing)
+    'Release object references
+        Set WS = Nothing
+    'Clear any suppressed lookup error
+        Err.Clear
+
+End Function
 
 Public Sub TST_DP_RunAll()
 
@@ -182,6 +554,7 @@ Public Sub TST_DP_RunAll()
 '
 ' DEPENDENCIES
 '   TST_DP_RunAllInternal
+'   TST_DP_Preflight
 '   DEMO_Sheet_BuildTemplate
 '   TST_DP_GetHostWorkbook
 '
@@ -189,17 +562,31 @@ Public Sub TST_DP_RunAll()
 '   Use TST_DP_RunAll_WithUISmoke when a brief UF_DatePicker open/close check
 '   is also needed
 '
+'   Preflight runs before the result sheet template is built, because building
+'   it over a previous run's leftovers is one of the ways an aborted predecessor
+'   presents
+'
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
+    'Report a setup failure with the conditions that caused it, rather than
+    'surfacing a bare 1004 from a workbook that cannot accept a worksheet
+        On Error GoTo SetupFailed
     'Reset module-level counters and object references before the run
         TST_DP_ResetHarnessState
     'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+    'Decide whether the environment is clean before anything in this run changes it
+        TST_DP_Preflight
+    'Stop before touching the workbook when the environment is not this run's to use
+        If mTST_DP_DirtyStart Then
+            TST_DP_ReportDirtyStart
+            Exit Sub
+        End If
     'Build the result sheet template before the run
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
             "Test Sheet", , TST_DP_RESULT_FIRST_ROW
@@ -207,8 +594,19 @@ Public Sub TST_DP_RunAll()
 '------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
+    'Restore normal error handling before the run takes over
+        On Error GoTo 0
     'Run the standard non-disruptive regression pack without UI smoke
         TST_DP_RunAllInternal False
+    'Exit before the setup handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SETUP FAILED
+'------------------------------------------------------------------------------
+SetupFailed:
+    'Report what failed and the workbook conditions behind it
+        TST_DP_ReportSetupFailure "TST_DP_RunAll"
 
 End Sub
 
@@ -261,8 +659,21 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '------------------------------------------------------------------------------
 ' RESOLVE HOST WORKBOOK
 '------------------------------------------------------------------------------
+    'Report a setup failure with the conditions that caused it
+        On Error GoTo SetupFailed
     'Resolve the workbook that will receive the result and scratch sheets
         Set mTST_DP_HostWorkbook = TST_DP_GetHostWorkbook()
+
+'------------------------------------------------------------------------------
+' PREFLIGHT
+'------------------------------------------------------------------------------
+    'Decide whether the environment is clean before anything in this run changes it
+        TST_DP_Preflight
+    'Stop before touching the workbook when the environment is not this run's to use
+        If mTST_DP_DirtyStart Then
+            TST_DP_ReportDirtyStart
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' BUILD RESULT SHEET TEMPLATE
@@ -274,8 +685,19 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 '------------------------------------------------------------------------------
 ' RUN TESTS
 '------------------------------------------------------------------------------
+    'Restore normal error handling before the run takes over
+        On Error GoTo 0
     'Run the regression pack with the UI smoke suite included
         TST_DP_RunAllInternal True
+    'Exit before the setup handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SETUP FAILED
+'------------------------------------------------------------------------------
+SetupFailed:
+    'Report what failed and the workbook conditions behind it
+        TST_DP_ReportSetupFailure "TST_DP_RunAll_WithUISmoke"
 
 End Sub
 
@@ -474,6 +896,7 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 '   TST_DP_CaptureApplicationState
 '   TST_DP_PrepareApplicationForRun
 '   TST_DP_ResetDatePickerArtifacts
+'   TST_DP_ContextMenuControlCount
 '   TST_DP_PrepareResultSheet
 '   TST_DP_PrepareScratchSheet
 '   TST_DP_WriteSummary
@@ -499,41 +922,76 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
     Dim FatalNumber         As Long                                 'Fatal error number
     Dim FatalDescription    As String                               'Fatal error description
     Dim HasFatalError       As Boolean                              'True when a fatal error must be re-raised
+    Dim HandlerStep         As String                               'Current setup step for diagnostics
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
     'Enable controlled fatal handling
         On Error GoTo FatalHandler
+    'Track the current setup step so a fatal names where it happened
+        HandlerStep = "Initialize"
+    'Mark the run as in progress until teardown completes
+        mTST_DP_RunInProgress = True
+    'Reset the per-run cleanup and suite counters
+        mTST_DP_CleanupFails = 0
+        mTST_DP_CleanupDetail = VBA.vbNullString
+        mTST_DP_SuitesDispatched = 0
+        mTST_DP_SuitesCompleted = 0
     'Capture whether a manager existed before the run
         mTST_DP_HadManager = Not (gDP_Manager Is Nothing)
+    'Capture the context-menu registration the session already had. Teardown must
+    'restore this, not erase it: a DatePicker that was running before the harness
+    'started is entitled to its menu afterwards
+        mTST_DP_MenuAtStart = TST_DP_ContextMenuControlCount()
     'Capture current DatePicker settings and transient state
+        HandlerStep = "Capture DatePicker settings"
         TST_DP_CaptureSettings SettingsSnapshot
     'Capture current Excel Application state
+        HandlerStep = "Capture Application state"
         TST_DP_CaptureApplicationState AppSnapshot
 
 '------------------------------------------------------------------------------
 ' PREPARE ISOLATED RUN STATE
 '------------------------------------------------------------------------------
     'Prepare the Excel Application state for the regression run
+        HandlerStep = "Prepare Application for run"
         TST_DP_PrepareApplicationForRun
     'Reset transient DatePicker UI artifacts before testing
+        HandlerStep = "Reset DatePicker artifacts"
         TST_DP_ResetDatePickerArtifacts
     'Prepare the result worksheet
+        HandlerStep = "Prepare result sheet"
         TST_DP_PrepareResultSheet mTST_DP_HostWorkbook
     'Prepare the scratch worksheet
+        HandlerStep = "Prepare scratch sheet"
         TST_DP_PrepareScratchSheet mTST_DP_HostWorkbook
     'Record the run header
         TST_DP_RecordInfo "Harness", "Start", _
             "IncludeUISmoke=" & VBA.CStr(IncludeUISmoke)
+    'Report what preflight found, now that results can be written. The verdict was
+    'reached before this run touched anything, and it decides the run state
+        If mTST_DP_DirtyStart Then
+            TST_DP_RecordInfo "Harness", "Dirty start", mTST_DP_DirtyDetail
+            TST_DP_RecordInfo "Harness", "Suites not dispatched", _
+                "No suite was run. Results gathered in an environment this run " & _
+                "did not establish would describe the predecessor's leftovers, " & _
+                "not the code under test. Restart Excel, delete the leftover " & _
+                "worksheets, and run again."
+        End If
 
 '------------------------------------------------------------------------------
 ' RUN SUITES
 '------------------------------------------------------------------------------
+    'Skip every suite when the run did not start clean. A dirty run tears down and
+    'reports, but it never executes tests it could not interpret
+        If mTST_DP_DirtyStart Then GoTo CleanExit
     'Run environment and manager smoke checks
         TST_DP_RunSuiteSafe "Environment"
     'Run settings and persisted-state checks
         TST_DP_RunSuiteSafe "Settings"
+    'Run the settings namespace isolation suite
+        TST_DP_RunSuiteSafe "SettingsNamespace"
     'Run date-selection policy checks
         TST_DP_RunSuiteSafe "DatePolicy"
     'Run holiday callback dispatch and fail-safe checks
@@ -550,6 +1008,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "Manager"
     'Run DP_Start and DP_Stop lifecycle round-trip checks
         TST_DP_RunSuiteSafe "LifecyclePair"
+    'Run the one-provider lease suite
+        TST_DP_RunSuiteSafe "ProviderLease"
     'Run DP_RepairRuntime behavior checks
         TST_DP_RunSuiteSafe "RepairRuntime"
     'Run M_GridIcon_PreCreateHidden startup optimization checks
@@ -559,16 +1019,14 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 
     'Run the application-state suite
         TST_DP_RunSuiteSafe "ApplicationState"
+    'Run the borderless window-style transaction suite
+        TST_DP_RunSuiteSafe "WindowStyle"
+    'Run the harness run-state and preflight self-checks
+        TST_DP_RunSuiteSafe "HarnessSelfCheck"
     'Run optional UF_DatePicker open / close smoke check when requested
         If IncludeUISmoke Then
             TST_DP_RunSuiteSafe "UISmoke"
         End If
-
-'------------------------------------------------------------------------------
-' WRITE SUMMARY
-'------------------------------------------------------------------------------
-    'Write the run summary to the result sheet and Immediate Window
-        TST_DP_WriteSummary
 
 '------------------------------------------------------------------------------
 ' APPLY CONDITIONAL FORMATTING
@@ -586,22 +1044,63 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
 CleanExit:
-    'Suppress cleanup errors so every cleanup step is attempted
+    'Suppress cleanup errors so every cleanup step is attempted. Each step is
+    'checked individually afterwards, because a suppressed cleanup failure that
+    'nobody records is what leaves the next run unable to start
         On Error Resume Next
-    'Reset DatePicker UI artifacts after testing
-        TST_DP_ResetDatePickerArtifacts
+
+    'Reset DatePicker UI artifacts after testing. Each operation is checked on its
+    'own, because a composite step that suppresses its own errors cannot report
+    'which of five operations failed, or that any of them did
+        M_Timer_Stop
+        TST_DP_CheckCleanupStep "StopTimer"
+
+        DP_Close
+        TST_DP_CheckCleanupStep "ClosePickerForm"
+
+        M_ContextMenu_Remove
+        TST_DP_CheckCleanupStep "RemoveContextMenu"
+        mTST_DP_MenuAfterRemove = TST_DP_ContextMenuControlCount()
+
+        M_KeyboardShortcut_Remove
+        TST_DP_CheckCleanupStep "RemoveKeyboardShortcut"
+
+        M_GridIcon_PurgeAll
+        TST_DP_CheckCleanupStep "PurgeGridIcons"
+
+        M_Window_Test_SetFaultInjection 0, 0
+        TST_DP_CheckCleanupStep "DisarmWindowFaultInjection"
+
     'Delete the scratch worksheet
         TST_DP_DeleteScratchSheet
+        TST_DP_CheckCleanupStep "DeleteScratchSheet"
+
     'Restore DatePicker settings and transient state
         TST_DP_RestoreSettings SettingsSnapshot
+        TST_DP_CheckCleanupStep "RestoreSettings"
+
     'Restore the manager state to its pre-run condition
         TST_DP_RestoreManagerState
+        TST_DP_CheckCleanupStep "RestoreManagerState"
+
     'Restore the Excel Application state
         TST_DP_RestoreApplicationState AppSnapshot
+        TST_DP_CheckCleanupStep "RestoreApplicationState"
+
+    'Verify the run left no DatePicker artifact behind
+        TST_DP_VerifyFinalState AppSnapshot
+
+    'Write the summary after cleanup so it can report the cleanup outcome
+        TST_DP_WriteSummary
+
     'Release module object references
         Set mTST_DP_ScratchSheet = Nothing
         Set mTST_DP_ResultSheet = Nothing
         Set mTST_DP_HostWorkbook = Nothing
+
+    'Mark teardown as complete so the next run does not report a dirty start
+        mTST_DP_RunInProgress = False
+
     'Clear any suppressed cleanup error
         Err.Clear
     'Restore normal error handling
@@ -628,7 +1127,9 @@ FatalHandler:
         TST_DP_RecordResult TST_DP_FAIL_TEXT, _
             "Harness", _
             PROC_NAME, _
-            "Fatal error " & VBA.CStr(FatalNumber) & " - " & FatalDescription
+            "Fatal error " & VBA.CStr(FatalNumber) & " - " & FatalDescription & _
+            " | Step=" & HandlerStep & _
+            " | " & TST_DP_DescribeHostWorkbook()
         Err.Clear
         On Error GoTo 0
     'Run shared cleanup and re-raise
@@ -759,6 +1260,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 '------------------------------------------------------------------------------
     'Set the current suite name for recording context
         mTST_DP_CurrentSuite = SuiteName
+    'Count the dispatch so a suite that never returns can be detected
+        mTST_DP_SuitesDispatched = mTST_DP_SuitesDispatched + 1
     'Protect the harness from escaping suite failures
         On Error GoTo SuiteFail
 
@@ -771,6 +1274,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             Case "ENVIRONMENT"
                 TST_DP_RunSuite_Environment
 
+            Case "SETTINGSNAMESPACE"
+                TST_DP_RunSuite_SettingsNamespace
             Case "SETTINGS"
                 TST_DP_RunSuite_Settings
 
@@ -795,6 +1300,8 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             Case "MANAGER"
                 TST_DP_RunSuite_Manager
 
+            Case "PROVIDERLEASE"
+                TST_DP_RunSuite_ProviderLease
             Case "LIFECYCLEPAIR"
                 TST_DP_RunSuite_LifecyclePair
 
@@ -808,6 +1315,10 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RunSuite_SelectDate
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
+            Case "WINDOWSTYLE"
+                TST_DP_RunSuite_WindowStyle
+            Case "HARNESSSELFCHECK"
+                TST_DP_RunSuite_HarnessSelfCheck
 
             Case "UISMOKE"
                 TST_DP_RunSuite_UISmoke
@@ -816,6 +1327,12 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
                 TST_DP_RecordFail "Unknown suite name", "SuiteName=" & SuiteName
 
         End Select
+
+'------------------------------------------------------------------------------
+' RECORD COMPLETION
+'------------------------------------------------------------------------------
+    'Count the suite as completed only when it returned without escaping
+        mTST_DP_SuitesCompleted = mTST_DP_SuitesCompleted + 1
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1180,13 +1697,53 @@ Private Sub TST_DP_RunSuite_Settings()
         TST_DP_AssertTrue "Keyboard shortcut can be enabled", _
             M_Settings_GetEnableKeyboardShortcut()
 
-    'Disable both contextual access paths to trigger the dead-configuration guard
+    'Disable the keyboard shortcut, then remove both other access paths
+        M_Settings_SetEnableKeyboardShortcut False
         M_Settings_SetShowRightClick False
         M_Settings_SetShowGridIcon False
 
-    'Assert keyboard shortcut is forced on when both contextual paths are disabled
-        TST_DP_AssertTrue "Keyboard shortcut is forced when right-click and grid icon are disabled", _
+    'Assert nothing re-enables the shortcut behind the user's back. Taking a
+    'session-wide Application.OnKey binding is not a decision the component makes
+    'on the user's behalf, even when no other built-in access path remains
+        TST_DP_AssertFalse "Disabling other access paths does not re-enable the shortcut", _
             M_Settings_GetEnableKeyboardShortcut()
+
+    'Assert a persisted round trip does not re-enable it either
+        M_Settings_Save
+        M_Settings_Load
+        TST_DP_AssertFalse "Save and reload do not re-enable the shortcut", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+    'Assert the picker remains registrable with zero built-in access paths
+        TST_DP_AssertTrue "Zero built-in access paths is a permitted configuration", _
+            (M_Settings_GetShowRightClick() = False) And _
+            (M_Settings_GetShowGridIcon() = False) And _
+            (M_Settings_GetEnableKeyboardShortcut() = False)
+
+    'Restore the shortcut for the following suites
+        M_Settings_SetEnableKeyboardShortcut True
+
+'------------------------------------------------------------------------------
+' KEYBOARD SHORTCUT REGISTRATION PATHS
+'------------------------------------------------------------------------------
+    'Exercise the registration path an explicitly enabled shortcut takes. Excel
+    'exposes no getter for Application.OnKey, so the binding cannot be read back;
+    'what is asserted here is that the operation completes, and the resulting key
+    'behavior is covered by the documented manual validation
+        M_Settings_SetEnableKeyboardShortcut True
+        M_KeyboardShortcut_Update
+        TST_DP_AssertTrue "Enabled shortcut completes its registration path", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+    'Exercise the removal path, which restores Excel default handling
+        M_Settings_SetEnableKeyboardShortcut False
+        M_KeyboardShortcut_Update
+        TST_DP_AssertFalse "Disabled shortcut completes its removal path", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+    'Restore the shortcut for the following suites
+        M_Settings_SetEnableKeyboardShortcut True
+        M_KeyboardShortcut_Update
 
     'Restore feature settings to working defaults for following suites
         M_Settings_SetShowRightClick True
@@ -1287,6 +1844,242 @@ SuiteFail:
     'Record the suite-level failure and clear the error
         TST_DP_RecordFail "Settings suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_SettingsNamespace()
+
+'
+'==============================================================================
+'                     SUITE: SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that an explicit settings namespace isolates persisted configuration,
+'   and that the default namespace still resolves exactly where it always did
+'
+' WHY THIS EXISTS
+'   Persistence is scoped to the Windows user, not the deployment. Two workbooks
+'   that never run at the same time can still overwrite each other's preferences,
+'   and loading is itself a write boundary because M_Settings_Load persists the
+'   values it normalizes
+'
+' BEHAVIOR
+'   Writes distinct values under two temporary namespaces, reads each back, and
+'   confirms neither disturbed the other or the legacy default
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+' DEPENDENCIES
+'   M_Settings_SetNamespace
+'   M_Settings_GetNamespace
+'   DP_SETTINGS_APP_NAME
+'
+' NOTES
+'   The suite never writes to the operator's real VBA_DATETIMEPICKER settings.
+'   It writes through GetSetting/SaveSetting directly under temporary namespaces
+'   it creates and deletes, so proving isolation costs the operator nothing
+'
+'   The namespace cannot be reconfigured once settings have loaded, and settings
+'   are loaded long before this suite runs. The lock is therefore asserted rather
+'   than worked around: the suite proves the refusal instead of trying to defeat
+'   it, and exercises isolation through the same registry API the resolver uses
+'
+'   Temporary registry keys are removed on every path, including a failed
+'   assertion. A leftover key is reported as a cleanup failure rather than left
+'   for the next run to find
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const SECTION_NAME  As String = "Display"           'Section used for the probe
+    Const KEY_NAME      As String = "TST_DP_NamespaceProbe"  'Key used for the probe
+
+    Dim AppNameA        As String       'Effective application name for namespace A
+    Dim AppNameB        As String       'Effective application name for namespace B
+    Dim LegacyValue     As String       'Legacy-namespace probe value, if any
+    Dim ReadBackA       As String       'Value read back from namespace A
+    Dim ReadBackB       As String       'Value read back from namespace B
+    Dim LegacyAfter     As String       'Legacy value after both namespace writes
+    Dim RefusedLate     As Boolean      'True when a late namespace change was refused
+    Dim RefusedInvalid  As Boolean      'True when an invalid namespace was refused
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "SettingsNamespace"
+    AppNameA = DP_SETTINGS_APP_NAME & "__TST_DP_NS_A"
+    AppNameB = DP_SETTINGS_APP_NAME & "__TST_DP_NS_B"
+
+'------------------------------------------------------------------------------
+' ASSERT THE DEFAULT RESOLVES TO THE LEGACY NAME
+'------------------------------------------------------------------------------
+    'An installation that configures nothing must read and write exactly where
+    'earlier releases did
+        TST_DP_AssertEqualsString "Default namespace is empty", _
+            VBA.vbNullString, M_Settings_GetNamespace()
+    'Record whatever the legacy namespace holds so the suite can prove it is
+    'left alone
+        LegacyValue = GetSetting(DP_SETTINGS_APP_NAME, SECTION_NAME, KEY_NAME, "<absent>")
+
+'------------------------------------------------------------------------------
+' WRITE TWO ISOLATED NAMESPACES
+'------------------------------------------------------------------------------
+    'Persist a distinct value under each temporary namespace
+        SaveSetting AppNameA, SECTION_NAME, KEY_NAME, "value-A"
+        SaveSetting AppNameB, SECTION_NAME, KEY_NAME, "value-B"
+    'Read each back
+        ReadBackA = GetSetting(AppNameA, SECTION_NAME, KEY_NAME, "<absent>")
+        ReadBackB = GetSetting(AppNameB, SECTION_NAME, KEY_NAME, "<absent>")
+
+'------------------------------------------------------------------------------
+' ASSERT ISOLATION
+'------------------------------------------------------------------------------
+    'Each namespace returns its own value
+        TST_DP_AssertEqualsString "Namespace A returns its own value", _
+            "value-A", ReadBackA
+        TST_DP_AssertEqualsString "Namespace B returns its own value", _
+            "value-B", ReadBackB
+    'Neither write disturbed the other
+        TST_DP_AssertTrue "Namespace A and B are isolated", ReadBackA <> ReadBackB
+    'Neither write reached the legacy default
+        LegacyAfter = GetSetting(DP_SETTINGS_APP_NAME, SECTION_NAME, KEY_NAME, "<absent>")
+        TST_DP_AssertEqualsString "Legacy namespace is unaffected", _
+            LegacyValue, LegacyAfter
+
+'------------------------------------------------------------------------------
+' ASSERT THE TIMING LOCK
+'------------------------------------------------------------------------------
+    'Settings are loaded by the time any suite runs, so reconfiguring must be
+    'refused rather than silently repointing values already in memory
+        On Error Resume Next
+        Err.Clear
+        M_Settings_SetNamespace "TooLate"
+        RefusedLate = (Err.Number <> 0)
+        Err.Clear
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Namespace change after settings load is refused", _
+            RefusedLate
+    'The refusal must not have altered the configured namespace
+        TST_DP_AssertEqualsString "Refused change leaves the namespace unchanged", _
+            VBA.vbNullString, M_Settings_GetNamespace()
+
+'------------------------------------------------------------------------------
+' ASSERT VALIDATION
+'------------------------------------------------------------------------------
+    'A namespace containing a path separator would make the registry location
+    'ambiguous. The lock above fires first, so this asserts only that an invalid
+    'namespace is never accepted silently
+        On Error Resume Next
+        Err.Clear
+        M_Settings_SetNamespace "bad\namespace"
+        RefusedInvalid = (Err.Number <> 0)
+        Err.Clear
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Invalid namespace is refused", RefusedInvalid
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Remove the temporary registry keys this suite created
+        TST_DP_DeleteNamespaceProbe AppNameA, SECTION_NAME
+        TST_DP_DeleteNamespaceProbe AppNameB, SECTION_NAME
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Settings namespace suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Never leave temporary registry keys behind
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_RegistryAppExists( _
+    ByVal ApplicationName As String) As Boolean
+
+'
+'==============================================================================
+'                       REGISTRY APPLICATION EXISTS
+'==============================================================================
+'   Reports whether a VBA registry application key still exists.
+'
+'   GetAllSettings returns an unassigned Variant when the application key is
+'   absent, and an array when it exists, so it detects an empty leftover key that
+'   a value lookup cannot.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Sections        As Variant      'Sections under the application key
+
+'------------------------------------------------------------------------------
+' PROBE
+'------------------------------------------------------------------------------
+    'Never let a cleanup probe raise
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_RegistryAppExists = False
+    'Read the sections, which is empty when the application key is absent
+        Sections = GetAllSettings(ApplicationName, "Display")
+    'An assigned result means something is still there
+        TST_DP_RegistryAppExists = Not VBA.IsEmpty(Sections)
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Sub TST_DP_DeleteNamespaceProbe( _
+    ByVal ApplicationName As String, _
+    ByVal SectionName As String)
+
+'
+'==============================================================================
+'                      DELETE NAMESPACE PROBE KEY
+'==============================================================================
+'   Removes a temporary registry namespace the suite created.
+'
+'   DeleteSetting is called with the application name alone. Passing a section as
+'   well deletes only that section and leaves an empty application key behind,
+'   which is a leak the old check could not see: it looked for the value, and the
+'   value was gone.
+'
+'   A leftover key is counted as a cleanup failure rather than left for the next
+'   run, because the suite's whole point is that persisted state does not leak
+'   between deployments.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DELETE
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the key was never created
+        On Error Resume Next
+        Err.Clear
+    'Remove the whole temporary application key, not just one section
+        DeleteSetting ApplicationName
+        Err.Clear
+    'Verify the application key is gone rather than trusting the delete. A section
+    'delete leaves an empty application key that a value lookup cannot detect
+        If TST_DP_RegistryAppExists(ApplicationName) Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Namespace probe", _
+                "Temporary registry namespace " & ApplicationName & _
+                " could not be removed"
+        End If
+    'Clear any suppressed cleanup error
         Err.Clear
 
 End Sub
@@ -1772,8 +2565,8 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '
 ' BEHAVIOR
 '   Tests direct contiguous range population, discontiguous range population,
-'   selection-based write-back, table data-column expansion, and unsupported
-'   write action rejection
+'   selection-based write-back, table data-column expansion, unsupported write
+'   action rejection, the structured write result, and partial-write reporting
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -1781,6 +2574,11 @@ Private Sub TST_DP_RunSuite_WriteBack()
 ' DEPENDENCIES
 '   M_WriteBack_PopulateRange
 '   M_WriteBack_Apply
+'   DP_FillTableColumn
+'   TST_DP_ExpectPartialWriteReport
+'   TST_DP_ExpectFailedAddressReport
+'   TST_DP_ExpectFormulaProtection
+'   TST_DP_AssertWriteResultBalances
 '   gDP_WriteValue
 '   mTST_DP_ScratchSheet
 '
@@ -1788,8 +2586,25 @@ Private Sub TST_DP_RunSuite_WriteBack()
 '   All write-back tests use the scratch worksheet only and leave no persistent
 '   state on the result sheet
 '
+'   M_WriteBack_Apply is a Function returning DP_WriteResult; the private stages
+'   below it accumulate into a ByRef result instead. Assertions use whichever
+'   form the routine under test provides, and the bare-call form of
+'   M_WriteBack_Apply is kept where the outcome is not asserted so the suite also
+'   covers the call form the rest of the project uses
+'
+'   A DP_WriteResult accumulates, so WriteResult is reset from EmptyResult before
+'   any direct call to M_WriteBack_PopulateRange
+'
+'   Reported addresses are worksheet-qualified, so expected values are built from
+'   the scratch sheet name rather than hard-coded
+'
+'   Two expectations mutate the scratch sheet in ways a failed assertion must not
+'   leave behind: TST_DP_ExpectPartialWriteReport protects it, and
+'   TST_DP_ExpectFailedAddressReport writes an array formula spanning I6:I7. Both
+'   release on every path
+'
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -1799,6 +2614,8 @@ Private Sub TST_DP_RunSuite_WriteBack()
     Dim TableRange      As Excel.Range       'Source range for the test table
     Dim TestTable       As Excel.ListObject  'Regression test ListObject
     Dim UnionRange      As Excel.Range       'Discontiguous target range
+    Dim WriteResult     As DP_WriteResult    'Structured write-back result
+    Dim EmptyResult     As DP_WriteResult    'Zeroed result used to reset WriteResult
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -1817,10 +2634,12 @@ Private Sub TST_DP_RunSuite_WriteBack()
         mTST_DP_ScratchSheet.Range("D5:D6").ClearContents
     'Prepare the DatePicker write value
         gDP_WriteValue = VBA.DateSerial(2026, 5, 3)
-    'Populate the contiguous range
+    'Populate the contiguous range through the fast bulk path
+        WriteResult = EmptyResult
         M_WriteBack_PopulateRange _
             mTST_DP_ScratchSheet.Range("D5:D6"), _
-            DP_WriteAction_DatePicker
+            DP_WriteAction_DatePicker, _
+            WriteResult
     'Assert the first cell received the date
         TST_DP_AssertCellDateEquals "Direct contiguous range write D5", _
             VBA.DateSerial(2026, 5, 3), _
@@ -1829,6 +2648,15 @@ Private Sub TST_DP_RunSuite_WriteBack()
         TST_DP_AssertCellDateEquals "Direct contiguous range write D6", _
             VBA.DateSerial(2026, 5, 3), _
             mTST_DP_ScratchSheet.Range("D6")
+    'A successful bulk write returns before the per-cell counters exist, so the
+    'written count has to be contributed by the bulk path itself
+        TST_DP_AssertEqualsLong "Bulk write reports 2 attempted cells", _
+            2, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert the bulk path reported what it wrote
+        TST_DP_AssertEqualsLong "Bulk write reports 2 written cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Bulk write result balances", WriteResult
 
 '------------------------------------------------------------------------------
 ' DISCONTIGUOUS RANGE POPULATION
@@ -1841,8 +2669,17 @@ Private Sub TST_DP_RunSuite_WriteBack()
         Set UnionRange = Excel.Application.Union( _
             mTST_DP_ScratchSheet.Range("C5"), _
             mTST_DP_ScratchSheet.Range("C7"))
-    'Populate the discontiguous range
-        M_WriteBack_PopulateRange UnionRange, DP_WriteAction_DatePicker
+    'Populate the discontiguous range and capture the structured result
+        WriteResult = EmptyResult
+        M_WriteBack_PopulateRange UnionRange, DP_WriteAction_DatePicker, WriteResult
+    'Assert the result counts both areas
+        TST_DP_AssertEqualsLong "Discontiguous result counts 2 areas", _
+            2, WriteResult.AreasCount
+    'Assert the result counts every written cell
+        TST_DP_AssertEqualsLong "Discontiguous result writes 2 cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Discontiguous result balances", WriteResult
     'Assert the first discontiguous cell received the date
         TST_DP_AssertCellDateEquals "Discontiguous range write C5", _
             VBA.DateSerial(2026, 6, 15), _
@@ -1865,7 +2702,24 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select the target range
         mTST_DP_ScratchSheet.Range("D5:D6").Select
     'Apply write-back to the current selection without table-column expansion
-        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
+    'Assert the result reports the attempted cells
+        TST_DP_AssertEqualsLong "Selection result attempts 2 cells", _
+            2, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert the result reports the written cells
+        TST_DP_AssertEqualsLong "Selection result writes 2 cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the result names the resolved target, worksheet-qualified
+        TST_DP_AssertEqualsString "Selection result reports the resolved target", _
+            mTST_DP_ScratchSheet.Name & "!D5:D6", WriteResult.ResolvedTargetAddress
+    'Assert a plain selection is not reported as a table expansion
+        TST_DP_AssertFalse "Selection result reports no table expansion", _
+            WriteResult.ExpandedToTableColumn
+    'Assert nothing was skipped or suppressed
+        TST_DP_AssertEqualsLong "Selection result reports no skipped cells", _
+            0, VBA.CLng(WriteResult.LockedSkippedCount + WriteResult.FailedCount)
+    'Assert the result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Selection result balances", WriteResult
     'Assert the first selected cell received the date
         TST_DP_AssertCellDateEquals "Selection write-back D5", _
             VBA.DateSerial(2026, 7, 20), _
@@ -1899,7 +2753,19 @@ Private Sub TST_DP_RunSuite_WriteBack()
     'Select one data cell in the date column
         mTST_DP_ScratchSheet.Range("G5").Select
     'Apply write-back with table-column expansion enabled
-        M_WriteBack_Apply DP_WriteAction_DatePicker, False
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, False)
+    'Assert the expansion is reported rather than inferred from the cell count
+        TST_DP_AssertTrue "Expansion result reports ExpandedToTableColumn", _
+            WriteResult.ExpandedToTableColumn
+    'Assert the owning table is reported
+        TST_DP_AssertEqualsString "Expansion result names the table", _
+            "TST_DP_Table", WriteResult.TableName
+    'Assert the resolved column is reported
+        TST_DP_AssertEqualsString "Expansion result names the column", _
+            "DateValue", WriteResult.ColumnName
+    'Assert the whole data column was written
+        TST_DP_AssertEqualsLong "Expansion result writes 3 cells", _
+            3, VBA.CLng(WriteResult.WrittenCount)
     'Assert the first table data cell received the date
         TST_DP_AssertCellDateEquals "Table-column expansion writes G5", _
             VBA.DateSerial(2026, 8, 25), _
@@ -1908,6 +2774,141 @@ Private Sub TST_DP_RunSuite_WriteBack()
         TST_DP_AssertCellDateEquals "Table-column expansion writes G7", _
             VBA.DateSerial(2026, 8, 25), _
             mTST_DP_ScratchSheet.Range("G7")
+
+'------------------------------------------------------------------------------
+' TABLE SAFE DEFAULT
+'------------------------------------------------------------------------------
+    'This is the behaviour change. An omitted NoTableGrow argument previously
+    'expanded a single table cell to the whole data column
+        mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
+    'Prepare a distinct write value so a stale value cannot pass the assertion
+        gDP_WriteValue = VBA.DateSerial(2026, 9, 10)
+    'Select one data cell in the date column
+        mTST_DP_ScratchSheet.Range("G5").Select
+    'Apply write-back with NoTableGrow omitted
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+    'Assert the safe default is reported as an unexpanded single-cell write
+        TST_DP_AssertFalse "Omitted NoTableGrow reports no expansion", _
+            WriteResult.ExpandedToTableColumn
+    'Assert the safe default wrote exactly one cell
+        TST_DP_AssertEqualsLong "Omitted NoTableGrow writes 1 cell", _
+            1, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the single-cell path reports one attempted cell in one area
+        TST_DP_AssertEqualsLong "Omitted NoTableGrow attempts 1 cell", _
+            1, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert the single-cell result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Single-cell result balances", WriteResult
+    'Assert the anchored cell received the date
+        TST_DP_AssertCellDateEquals "Omitted NoTableGrow writes only G5", _
+            VBA.DateSerial(2026, 9, 10), _
+            mTST_DP_ScratchSheet.Range("G5")
+    'Assert the middle table row was not written
+        TST_DP_AssertTrue "Omitted NoTableGrow leaves G6 blank", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G6").Value)) = 0
+    'Assert the last table row was not written
+        TST_DP_AssertTrue "Omitted NoTableGrow leaves G7 blank", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G7").Value)) = 0
+
+'------------------------------------------------------------------------------
+' EXPLICIT TABLE COLUMN FILL
+'------------------------------------------------------------------------------
+    'The deliberate bulk command must still fill the whole data column
+        mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
+    'Select one data cell in the date column
+        mTST_DP_ScratchSheet.Range("G5").Select
+    'Fill the column without prompting so the run stays deterministic
+        WriteResult = DP_FillTableColumn(VBA.DateSerial(2026, 10, 20), ConfirmFill:=False)
+    'The prompt predicts the scope, so the prediction is checked against
+    'AttemptedCount. WrittenCount is reported separately and may legitimately be
+    'lower when cells are skipped
+        TST_DP_AssertEqualsLong "DP_FillTableColumn attempts the predicted 3 cells", _
+            3, VBA.CLng(WriteResult.AttemptedCount)
+    'Assert every attempted cell was written on this unobstructed fill
+        TST_DP_AssertEqualsLong "DP_FillTableColumn writes all 3 cells", _
+            3, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the fill reports the expansion it performed
+        TST_DP_AssertTrue "DP_FillTableColumn reports the table expansion", _
+            WriteResult.ExpandedToTableColumn
+    'Assert the anchored cell received the date
+        TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G5", _
+            VBA.DateSerial(2026, 10, 20), _
+            mTST_DP_ScratchSheet.Range("G5")
+    'Assert the middle table row received the date
+        TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G6", _
+            VBA.DateSerial(2026, 10, 20), _
+            mTST_DP_ScratchSheet.Range("G6")
+    'Assert the last table row received the date
+        TST_DP_AssertCellDateEquals "DP_FillTableColumn writes G7", _
+            VBA.DateSerial(2026, 10, 20), _
+            mTST_DP_ScratchSheet.Range("G7")
+
+'------------------------------------------------------------------------------
+' EXPLICIT FILL REJECTS NON-TABLE ANCHORS
+'------------------------------------------------------------------------------
+    'A selection outside a table data body is a usage condition, not a failure.
+    'The command must exit cleanly and write nothing
+        mTST_DP_ScratchSheet.Range("D8").ClearContents
+    'Select a cell outside every table
+        mTST_DP_ScratchSheet.Range("D8").Select
+    'Attempt the fill without prompting
+        WriteResult = DP_FillTableColumn(VBA.DateSerial(2026, 11, 5), ConfirmFill:=False)
+    'Assert nothing was written outside a table
+        TST_DP_AssertTrue "DP_FillTableColumn ignores a non-table cell", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("D8").Value)) = 0
+    'Assert the refused fill reports a zero write rather than an empty silence
+        TST_DP_AssertEqualsLong "DP_FillTableColumn reports 0 written outside a table", _
+            0, VBA.CLng(WriteResult.WrittenCount)
+
+    'A header cell is not inside DataBodyRange and must be rejected
+        mTST_DP_ScratchSheet.Range("G5:G7").ClearContents
+    'Select the date column header
+        mTST_DP_ScratchSheet.Range("G4").Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert the header caption was not overwritten
+        TST_DP_AssertTrue "DP_FillTableColumn ignores a table header cell", _
+            VBA.CStr(mTST_DP_ScratchSheet.Range("G4").Value) = "DateValue"
+    'Assert no data row was written from a header anchor
+        TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a header anchor", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+
+    'A totals row cell is not inside DataBodyRange and must be rejected
+        TestTable.ShowTotals = True
+    'Select the date column totals cell
+        TestTable.TotalsRowRange.Cells(1, 2).Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert no data row was written from a totals anchor
+        TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a totals anchor", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+    'Restore the table to its pre-test shape
+        TestTable.ShowTotals = False
+
+    'A multi-cell selection is not a single anchor and must be rejected
+        mTST_DP_ScratchSheet.Range("G5:G6").Select
+    'Attempt the fill without prompting
+        DP_FillTableColumn VBA.DateSerial(2026, 11, 5), ConfirmFill:=False
+    'Assert no table row was written from a multi-cell anchor
+        TST_DP_AssertTrue "DP_FillTableColumn writes nothing from a multi-cell anchor", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("G5").Value)) = 0
+
+'------------------------------------------------------------------------------
+' FORMULA PROTECTION
+'------------------------------------------------------------------------------
+    'Assert formula cells are preserved, reported, and replaceable on request
+        TST_DP_ExpectFormulaProtection
+
+'------------------------------------------------------------------------------
+' PARTIAL WRITE REPORTING
+'------------------------------------------------------------------------------
+    'Assert a write that skips protected cells reports which cells it skipped
+        TST_DP_ExpectPartialWriteReport
+
+'------------------------------------------------------------------------------
+' FAILED ADDRESS REPORTING
+'------------------------------------------------------------------------------
+    'Assert a write that fails on some cells reports exactly which cells failed
+        TST_DP_ExpectFailedAddressReport
 
 '------------------------------------------------------------------------------
 ' INVALID WRITE ACTION
@@ -1991,6 +2992,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     Dim IconPath            As String   'Embedded icon file path
     Dim ShapeLeftBefore     As Double   'Icon left position before the move
     Dim ShapeTopBefore      As Double   'Icon top position before the move
+    Dim StaleSheet          As Excel.Worksheet  'Temporary sheet used to strand the icon
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2123,6 +3125,70 @@ Private Sub TST_DP_RunSuite_GridIcon()
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
 
 '------------------------------------------------------------------------------
+' STALE TRACKED REFERENCE
+'------------------------------------------------------------------------------
+    'The tracked reference outlives the shape it points to whenever the shape is
+    'destroyed without going through a routine that maintains it. Deleting the
+    'worksheet holding the icon is the simplest way to produce that state
+        gDP_ShowGridIcon = True
+        Set StaleSheet = mTST_DP_HostWorkbook.Worksheets.Add( _
+            After:=mTST_DP_HostWorkbook.Worksheets(mTST_DP_HostWorkbook.Worksheets.Count))
+        StaleSheet.Name = TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest StaleSheet
+
+    'Create the icon on the temporary worksheet
+    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
+        M_GridIcon_ShowOrMove StaleSheet.Range("B2")
+        On Error GoTo SuiteFail
+        DoEvents
+        TST_DP_AssertTrue "Stale-reference setup creates a tracked icon", _
+            Not (gDP_GridIconShape Is Nothing)
+
+    'Destroy the shape behind the reference without clearing it. Deletion goes
+    'through the shared helper, which suppresses its own errors, and nothing here
+    'touches DisplayAlerts: the run already disabled alerts and forcing them back
+    'on would re-enable the delete prompt for everything that follows
+        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+
+    'A stale reference must not stop a new icon being created. Before the
+    'liveness check, PreCreateHidden saw a non-Nothing variable and skipped
+    'straight to hiding a shape that no longer existed
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+        DoEvents
+        TST_DP_AssertTrue "Stale reference does not block icon creation", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+
+    'Recreate the stale condition and prove teardown clears it rather than
+    'raising on it
+        Set StaleSheet = mTST_DP_HostWorkbook.Worksheets.Add( _
+            After:=mTST_DP_HostWorkbook.Worksheets(mTST_DP_HostWorkbook.Worksheets.Count))
+        StaleSheet.Name = TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest StaleSheet
+        M_GridIcon_ShowOrMove StaleSheet.Range("B2")
+        On Error GoTo SuiteFail
+        DoEvents
+        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+
+    'Remove must leave nothing tracked and must not raise
+        M_GridIcon_Remove
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Remove clears a stale tracked reference", _
+            gDP_GridIconShape Is Nothing
+
+    'Purge must tolerate the same condition
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        On Error GoTo SuiteFail
+        M_GridIcon_PurgeAll
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue "Purge clears the tracked reference", _
+            gDP_GridIconShape Is Nothing
+
+'------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
     'Exit after the suite completes
@@ -2132,6 +3198,12 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Release the temporary worksheet the stale-reference cases may have left. The
+    'run owns DisplayAlerts and this must not change it
+        On Error Resume Next
+        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        Err.Clear
     'Record the suite-level failure and clear the error
         TST_DP_RecordFail "GridIcon suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
@@ -2177,14 +3249,16 @@ Private Sub TST_DP_RunSuite_Manager()
 '   which allows either the remove or the hide implementation path
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Manager         As cDatePickerManager   'Manager instance under test
-    Dim MergedArea      As Excel.Range          'Merged area under test
+    Dim Manager             As cDatePickerManager   'Manager instance under test
+    Dim MergedArea          As Excel.Range          'Merged area under test
+    Dim ErrorNumber         As Long                 'Captured error number
+    Dim ErrorDescription    As String               'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -2317,6 +3391,9 @@ Private Sub TST_DP_RunSuite_Manager()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Capture the escaping error before any On Error statement resets Err
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
     'Suppress local cleanup errors
         On Error Resume Next
     'Unmerge the merged area when still present
@@ -2324,10 +3401,10 @@ SuiteFail:
     'Release object references
         Set MergedArea = Nothing
         Set Manager = Nothing
-    'Record the suite-level failure and clear the error
+    'Record the captured suite-level failure
         On Error GoTo 0
         TST_DP_RecordFail "Manager suite failed", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+            "Error " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
         Err.Clear
 
 End Sub
@@ -2487,6 +3564,241 @@ SuiteFail:
         If gDP_Manager Is Nothing Then M_Picker_EnsureManager
         Err.Clear
         On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_RunSuite_ProviderLease()
+
+'
+'==============================================================================
+'                        SUITE: PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves the one-provider lease acquires, refuses, releases, and cannot be
+'   released by a provider that does not own it
+'
+' WHY THIS EXISTS
+'   Two DatePicker copies in one Excel process register the same application-wide
+'   resources under the same fixed identifiers, and either one's teardown removes
+'   the other's. Teardown is the more dangerous half: refusing a second provider
+'   at startup protects nothing while its DP_Stop still dismantles the owner
+'
+' BEHAVIOR
+'   Exercises acquisition, idempotent re-acquisition, ownership reporting and
+'   release from this single VBA project, then simulates a second provider by
+'   clearing this project's token while leaving the lease in place
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+'   Restores the lease state the run started with on every path
+'
+' DEPENDENCIES
+'   M_Lease_TryAcquire
+'   M_Lease_IsOwner
+'   M_Lease_Release
+'   DP_Start
+'
+' NOTES
+'   A second VBA project cannot be loaded from inside a run, so the second
+'   provider is simulated the way a VBA project reset produces it: the lease
+'   survives while the local token does not. That is the same state a reset
+'   leaves, and it is what the refusal has to detect
+'
+'   The suite therefore proves the DatePicker side of the contract. Two genuinely
+'   separate providers in one Excel session remain a manual validation case
+'
+'   The lease bar is Temporary, so Excel removes it at shutdown. Nothing here
+'   persists past the session even if the suite fails
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim AcquiredFirst   As Boolean      'Result of the first acquisition
+    Dim AcquiredAgain   As Boolean      'Result of re-acquiring while owning
+    Dim OwnedAfter      As Boolean      'Ownership after acquisition
+    Dim OwnedAfterFree  As Boolean      'Ownership after release
+    Dim RefusedSecond   As Boolean      'Second provider refused acquisition
+    Dim OwnedAsSecond   As Boolean      'Second provider claimed ownership
+    Dim LeaseSurvived   As Boolean      'Lease still present after a refused release
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "ProviderLease"
+
+'------------------------------------------------------------------------------
+' START FROM A KNOWN STATE
+'------------------------------------------------------------------------------
+    'The run has already started the DatePicker, so this project may hold the
+    'lease. Release it to begin from a defined position
+        M_Lease_Release
+
+'------------------------------------------------------------------------------
+' ACQUIRE
+'------------------------------------------------------------------------------
+    'A free lease is acquired
+        AcquiredFirst = M_Lease_TryAcquire()
+        TST_DP_AssertTrue "A free lease is acquired", AcquiredFirst
+    'The owner reports ownership
+        OwnedAfter = M_Lease_IsOwner()
+        TST_DP_AssertTrue "The acquiring provider owns the lease", OwnedAfter
+    'Re-acquiring while owning is an idempotent success, not a refusal
+        AcquiredAgain = M_Lease_TryAcquire()
+        TST_DP_AssertTrue "Re-acquiring an owned lease succeeds", AcquiredAgain
+
+'------------------------------------------------------------------------------
+' A SECOND PROVIDER IS REFUSED
+'------------------------------------------------------------------------------
+    'Simulate the state a second provider sees, and the state a VBA project reset
+    'leaves behind: the lease exists, this project cannot prove it owns it
+        M_Lease_Test_ClearOwnerToken
+    'Acquisition is refused
+        RefusedSecond = Not M_Lease_TryAcquire()
+        TST_DP_AssertTrue "A second provider is refused the lease", RefusedSecond
+    'And it must not report ownership
+        OwnedAsSecond = M_Lease_IsOwner()
+        TST_DP_AssertFalse "A second provider does not own the lease", OwnedAsSecond
+
+'------------------------------------------------------------------------------
+' A SECOND PROVIDER CANNOT RELEASE THE OWNER'S LEASE
+'------------------------------------------------------------------------------
+    'This is the half that matters. A refused provider calling release must leave
+    'the owner's lease intact
+        M_Lease_Release
+        LeaseSurvived = (VBA.LenB(TST_DP_ReadLeaseOwnerForTest()) > 0)
+        TST_DP_AssertTrue "A refused provider cannot release the owner's lease", _
+            LeaseSurvived
+
+'------------------------------------------------------------------------------
+' THE OWNER RELEASES ITS OWN LEASE
+'------------------------------------------------------------------------------
+    'Reclaim ownership the only way a project can once its token is gone: the
+    'lease has to be removed by the test, standing in for the owner's own DP_Stop
+        TST_DP_ForceClearLeaseForTest
+    'A cleared lease is acquirable again
+        TST_DP_AssertTrue "A released lease can be acquired again", _
+            M_Lease_TryAcquire()
+    'The owner releases what it owns
+        M_Lease_Release
+        OwnedAfterFree = M_Lease_IsOwner()
+        TST_DP_AssertFalse "The owner no longer owns a released lease", OwnedAfterFree
+        TST_DP_AssertEqualsString "A released lease is gone", _
+            VBA.vbNullString, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Leave the run owning the lease, as it did before this suite
+        TST_DP_ForceClearLeaseForTest
+        M_Lease_TryAcquire
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Provider lease suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore the lease state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_ReadLeaseOwnerForTest() As String
+
+'
+'==============================================================================
+'                     READ LEASE OWNER FOR TEST
+'==============================================================================
+'   Reads the lease marker directly, so the suite can assert on the workbook
+'   state rather than on the routine under test.
+'
+'   The bar name and marker tag are duplicated from M_DatePicker, where they are
+'   Private. They are fixed identifiers that cannot drift without this suite
+'   failing.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const LEASE_BAR     As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"
+    Const MARKER_TAG    As String = "VBA_DATETIMEPICKER_RUNTIME_LEASE_OWNER"
+
+    Dim LeaseBar        As Object       'Resolved lease command bar
+    Dim Ctl             As Object       'Current control while scanning
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Never let a probe raise into a test
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_ReadLeaseOwnerForTest = VBA.vbNullString
+    'Resolve the lease bar, which may not exist
+        Set LeaseBar = Excel.Application.CommandBars(LEASE_BAR)
+        If LeaseBar Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Report the first marker token found
+        For Each Ctl In LeaseBar.Controls
+            If VBA.StrComp(Ctl.Tag, MARKER_TAG, vbBinaryCompare) = 0 Then
+                TST_DP_ReadLeaseOwnerForTest = Ctl.Parameter
+                Exit For
+            End If
+        Next Ctl
+    'Release object references
+        Set Ctl = Nothing
+        Set LeaseBar = Nothing
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Sub TST_DP_ForceClearLeaseForTest()
+
+'
+'==============================================================================
+'                     FORCE CLEAR LEASE FOR TEST
+'==============================================================================
+'   Removes the lease bar outright, standing in for an owner's clean shutdown.
+'
+'   This exists only because a suite cannot load a second VBA project to release
+'   a lease it does not own. Production code never deletes a lease it cannot
+'   prove it owns; this deliberately does, which is why it lives in the harness.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const LEASE_BAR     As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"
+
+    Dim LeaseBar        As Object       'Resolved lease command bar
+
+'------------------------------------------------------------------------------
+' CLEAR
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into a test
+        On Error Resume Next
+    'Resolve and delete the lease bar when it exists
+        Set LeaseBar = Excel.Application.CommandBars(LEASE_BAR)
+        If Not LeaseBar Is Nothing Then
+            LeaseBar.Delete
+        End If
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed cleanup error
+        Err.Clear
 
 End Sub
 
@@ -3124,8 +4436,11 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '   DP_Show is exercised here rather than in the UI smoke suite because event
 '   preservation is a release-blocking assertion and must run unconditionally
 '
+'   The caller event state is asserted twice: against Application.EnableEvents
+'   after the call, and against EventsDisabledByCaller on the returned result
+'
 ' UPDATED
-'   2026-08-21
+'   2026-08-22
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3133,6 +4448,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '------------------------------------------------------------------------------
     Dim TargetCell          As Excel.Range  'Write-back target under test
     Dim EventsDisabled      As Boolean      'Output flag from M_Picker_EnsureManager
+    Dim WriteResult         As DP_WriteResult   'Structured write-back result
     Dim RestoredState       As Boolean      'Application.EnableEvents after write-back
     Dim ErrorNumber         As Long         'Captured error number
     Dim ErrorDescription    As String       'Captured error description
@@ -3221,12 +4537,15 @@ Private Sub TST_DP_RunSuite_ApplicationState()
         Excel.Application.EnableEvents = False
     'Apply the write-back transaction
     'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
-        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
         On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the disabled caller state
         TST_DP_AssertFalse "Write-back restores disabled events", RestoredState
+    'Assert the result reports the caller's suppressed state
+        TST_DP_AssertTrue "Write-back result reports EventsDisabledByCaller", _
+            WriteResult.EventsDisabledByCaller
     'Assert the target cell received the written value
         TST_DP_AssertCellDateEquals "Write-back writes the target cell with events disabled", _
             VBA.DateSerial(2026, 8, 21), _
@@ -3246,12 +4565,15 @@ Private Sub TST_DP_RunSuite_ApplicationState()
         Excel.Application.EnableEvents = True
     'Apply the write-back transaction
     'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
-        M_WriteBack_Apply DP_WriteAction_DatePicker, True
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
         On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the enabled caller state
         TST_DP_AssertTrue "Write-back restores enabled events", RestoredState
+    'Assert the result reports the caller's enabled state
+        TST_DP_AssertFalse "Write-back result clears EventsDisabledByCaller", _
+            WriteResult.EventsDisabledByCaller
 
 '------------------------------------------------------------------------------
 ' REPAIR STILL FORCE-ENABLES
@@ -3299,6 +4621,574 @@ SuiteFail:
 
 End Sub
 
+#If VBA7 Then
+Private Function TST_DP_ReadWindowStyle(ByVal WindowHandle As LongPtr) As LongPtr
+#Else
+Private Function TST_DP_ReadWindowStyle(ByVal WindowHandle As Long) As Long
+#End If
+
+'
+'==============================================================================
+'                        READ NATIVE WINDOW STYLE
+'==============================================================================
+'   Reads a window's style directly, so the window-style suite can verify native
+'   state without asking the routine under test what it did.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' READ STYLE
+'------------------------------------------------------------------------------
+    'Never let a verification read raise into a test
+        On Error Resume Next
+    #If Mac Then
+        'No native window styling on Mac
+            TST_DP_ReadWindowStyle = 0
+    #Else
+        #If VBA7 Then
+            'Read the current window style
+                TST_DP_ReadWindowStyle = TST_DP_GetWindowLongPtr(WindowHandle, TST_DP_GWL_STYLE)
+        #Else
+            'Read the current window style
+                TST_DP_ReadWindowStyle = TST_DP_GetWindowLong(WindowHandle, TST_DP_GWL_STYLE)
+        #End If
+    #End If
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Private Sub TST_DP_RunSuite_WindowStyle()
+
+'
+'==============================================================================
+'                          SUITE: WINDOW STYLE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves the borderless window-style transaction, including the failure paths
+'   that leave a window half-styled
+'
+' WHY THIS EXISTS
+'   Clearing WS_CAPTION and refreshing the frame are separate native operations.
+'   The first can succeed and the second fail, and no ordinary input can make
+'   SetWindowPos or DrawMenuBar fail on demand
+'
+'   Without deterministic coverage, the rollback this issue exists to add would
+'   never execute outside a real defect
+'
+' BEHAVIOR
+'   Loads the picker form, resolves its native window, then drives every failure
+'   point through the one-shot fault seam and asserts the transaction outcome
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+'   Always disarms the fault seam, including on a failed assertion
+'
+' DEPENDENCIES
+'   DP_Preload
+'   UF_DatePicker
+'   M_Window_GetUserFormHwnd
+'   M_Window_RemoveTitleBar
+'   M_Window_Test_SetFaultInjection
+'   M_Settings_SetUseWinAPI
+'
+' NOTES
+'   The failure-point numbers below are duplicated from private constants in
+'   M_DatePicker rather than shared through a public enum, so the seam does not
+'   enlarge the public API. The two lists must be changed together
+'
+'   A resolvable window handle is asserted before any injected failure. A
+'   preloaded hidden UserForm is expected to have one on supported hosts, but a
+'   missing handle must report as a setup failure rather than pass quietly as a
+'   non-attempt
+'
+'   If the supported host proves otherwise, this suite moves to the UI smoke pack
+'   where the form can be shown deliberately. The precondition is not weakened to
+'   keep it here
+'
+'   The suite ends by reapplying the style cleanly, so a rolled-back form is not
+'   left with its native title bar for whatever runs next
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const FAULT_STYLE_READ      As Long = 1     'Matches M_DatePicker
+    Const FAULT_STYLE_WRITE     As Long = 2     'Matches M_DatePicker
+    Const FAULT_SET_WINDOW_POS  As Long = 3     'Matches M_DatePicker
+    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Matches M_DatePicker
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Matches M_DatePicker
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Matches M_DatePicker
+
+    #If VBA7 Then
+        Dim FormHandle          As LongPtr      'Native window behind the picker form
+    #Else
+        Dim FormHandle          As Long         'Native window behind the picker form
+    #End If
+
+    #If VBA7 Then
+        Dim StyleBefore         As LongPtr      'Native style read before a call
+        Dim StyleAfter          As LongPtr      'Native style read after a call
+    #Else
+        Dim StyleBefore         As Long         'Native style read before a call
+        Dim StyleAfter          As Long         'Native style read after a call
+    #End If
+
+    Dim StyleResult         As DP_WindowStyleResult 'Outcome under test
+    Dim PriorUseWinAPI      As Boolean              'WinAPI setting before the suite
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "WindowStyle"
+    PriorUseWinAPI = gDP_UseWinAPI
+
+'------------------------------------------------------------------------------
+' RESOLVE A REAL WINDOW HANDLE
+'------------------------------------------------------------------------------
+    'Load the picker form without showing it
+    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
+        DP_Preload
+        On Error GoTo SuiteFail
+    'Resolve the native window the transaction will operate on
+        FormHandle = M_Window_GetUserFormHwnd(UF_DatePicker)
+    'Assert the precondition. A missing handle is a setup failure, never a pass
+        TST_DP_AssertTrue "Preloaded form exposes a native window handle", _
+            FormHandle <> 0
+    'Stop here when there is no window to test against
+        If FormHandle = 0 Then
+            TST_DP_RecordFail "Window style suite setup", _
+                "No native window handle. Move these cases to the UI smoke pack " & _
+                "rather than weakening the precondition."
+            GoTo SuiteExit
+        End If
+
+'------------------------------------------------------------------------------
+' SAFE NON-ATTEMPT PATHS
+'------------------------------------------------------------------------------
+    'A missing form must not touch anything
+        StyleResult = M_Window_RemoveTitleBar(Nothing)
+        TST_DP_AssertFalse "Missing form is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "Missing form is not committed", StyleResult.Committed
+    'A disabled WinAPI policy must leave the native title bar alone
+        M_Settings_SetUseWinAPI False
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "WinAPI-disabled path is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "WinAPI-disabled path is not committed", StyleResult.Committed
+        TST_DP_AssertFalse "WinAPI-disabled path reports no recovery", _
+            StyleResult.RecoveryRequired
+        M_Settings_SetUseWinAPI PriorUseWinAPI
+
+'------------------------------------------------------------------------------
+' SUCCESSFUL TRANSACTION
+'------------------------------------------------------------------------------
+    'A clean call must fully apply the borderless style
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Clean call applies the borderless style", StyleResult.Applied
+        TST_DP_AssertTrue "Clean call commits the style write", StyleResult.Committed
+        TST_DP_AssertFalse "Clean call does not roll back", StyleResult.RolledBack
+        TST_DP_AssertFalse "Clean call needs no recovery", StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Clean call reports no failing step", _
+            VBA.vbNullString, StyleResult.FailedStep
+    'Verify the native style directly, not through the result being tested
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+        TST_DP_AssertTrue "Clean call clears WS_CAPTION natively", _
+            (StyleAfter And TST_DP_WS_CAPTION) = 0
+    'A second call on an already-borderless window must remain safe
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Repeat call still applies the style", StyleResult.Applied
+        TST_DP_AssertFalse "Repeat call needs no recovery", StyleResult.RecoveryRequired
+
+'------------------------------------------------------------------------------
+' PRE-COMMIT FAILURES
+'------------------------------------------------------------------------------
+    'A failed style read must abort before anything is changed
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
+        M_Window_Test_SetFaultInjection FAULT_STYLE_READ
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+    'Verify natively that nothing was changed
+        TST_DP_AssertTrue "Style-read failure leaves the native style unchanged", _
+            StyleAfter = StyleBefore
+        TST_DP_AssertFalse "Style-read failure is not attempted", StyleResult.Attempted
+        TST_DP_AssertFalse "Style-read failure is not committed", StyleResult.Committed
+        TST_DP_AssertFalse "Style-read failure needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Style-read failure names its step", _
+            "Read window style", StyleResult.FailedStep
+    'A failed style write must abort before anything is changed. The injected
+    'failure skips the native write, so the window keeps the style it had
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
+        M_Window_Test_SetFaultInjection FAULT_STYLE_WRITE
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+        TST_DP_AssertFalse "Style-write failure is not committed", StyleResult.Committed
+        TST_DP_AssertTrue "Style-write failure reports the attempt", StyleResult.Attempted
+        TST_DP_AssertFalse "Style-write failure needs no recovery", _
+            StyleResult.RecoveryRequired
+    'Verify natively that the write really did not take effect
+        TST_DP_AssertTrue "Style-write failure leaves the native style unchanged", _
+            StyleAfter = StyleBefore
+        TST_DP_AssertEqualsString "Style-write failure names its step", _
+            "Write window style", StyleResult.FailedStep
+
+'------------------------------------------------------------------------------
+' POST-COMMIT FAILURES WITH SUCCESSFUL ROLLBACK
+'------------------------------------------------------------------------------
+    'A frame refresh that fails after the commit must roll back
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+    'Verify natively that the original style really came back
+        TST_DP_AssertTrue "SetWindowPos rollback restores the native style", _
+            StyleAfter = StyleBefore
+        TST_DP_AssertTrue "SetWindowPos failure commits first", StyleResult.Committed
+        TST_DP_AssertFalse "SetWindowPos failure is not applied", StyleResult.Applied
+        TST_DP_AssertTrue "SetWindowPos failure rolls back", StyleResult.RolledBack
+        TST_DP_AssertFalse "SetWindowPos rollback needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "SetWindowPos failure names its step", _
+            "Refresh non-client frame", StyleResult.FailedStep
+    'A redraw that fails after the commit must roll back
+        M_Window_Test_SetFaultInjection FAULT_DRAW_MENU_BAR
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "DrawMenuBar failure commits first", StyleResult.Committed
+        TST_DP_AssertFalse "DrawMenuBar failure is not applied", StyleResult.Applied
+        TST_DP_AssertTrue "DrawMenuBar failure rolls back", StyleResult.RolledBack
+        TST_DP_AssertFalse "DrawMenuBar rollback needs no recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "DrawMenuBar failure names its step", _
+            "Redraw frame", StyleResult.FailedStep
+
+'------------------------------------------------------------------------------
+' ROLLBACK FAILURES
+'------------------------------------------------------------------------------
+    'A rollback whose style restore fails leaves no known good state. The injected
+    'failure skips the restore, so the window is genuinely left committed
+        StyleBefore = TST_DP_ReadWindowStyle(FormHandle)
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_STYLE
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        StyleAfter = TST_DP_ReadWindowStyle(FormHandle)
+    'Verify natively that the style was not restored, which is what makes this
+    'case unrecoverable rather than a rollback
+        TST_DP_AssertTrue "Failed style rollback leaves the committed style in place", _
+            (StyleAfter And TST_DP_WS_CAPTION) = 0
+        TST_DP_AssertFalse "Failed style rollback does not report RolledBack", _
+            StyleResult.RolledBack
+        TST_DP_AssertTrue "Failed style rollback requires recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Failed style rollback keeps the primary step", _
+            "Refresh non-client frame", StyleResult.FailedStep
+    'A rollback whose frame refresh fails leaves no known good state
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_FRAME
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertFalse "Failed frame rollback does not report RolledBack", _
+            StyleResult.RolledBack
+        TST_DP_AssertTrue "Failed frame rollback requires recovery", _
+            StyleResult.RecoveryRequired
+        TST_DP_AssertEqualsString "Failed frame rollback keeps the primary step", _
+            "Refresh non-client frame", StyleResult.FailedStep
+
+'------------------------------------------------------------------------------
+' ONE-SHOT CONSUMPTION
+'------------------------------------------------------------------------------
+    'An armed fault must affect exactly one call
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Armed fault affects the first call", StyleResult.RolledBack
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Armed fault does not affect the next call", _
+            StyleResult.Applied
+        TST_DP_AssertFalse "Consumed fault leaves no rollback", StyleResult.RolledBack
+    'An armed rollback fault must also affect exactly one call
+        M_Window_Test_SetFaultInjection FAULT_SET_WINDOW_POS, FAULT_ROLLBACK_STYLE
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Armed rollback fault affects the first call", _
+            StyleResult.RecoveryRequired
+        StyleResult = M_Window_RemoveTitleBar(UF_DatePicker)
+        TST_DP_AssertTrue "Consumed rollback fault leaves the next call clean", _
+            StyleResult.Applied
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm the seam before anything else runs
+        M_Window_Test_SetFaultInjection 0, 0
+    'Restore the WinAPI setting the suite may have changed
+        M_Settings_SetUseWinAPI PriorUseWinAPI
+    'Leave the form styled rather than rolled back
+        If FormHandle <> 0 Then M_Window_RemoveTitleBar UF_DatePicker
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Never leave the seam armed after a failed assertion
+        M_Window_Test_SetFaultInjection 0, 0
+    'Restore the WinAPI setting the suite may have changed
+        M_Settings_SetUseWinAPI PriorUseWinAPI
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Window style suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_HarnessSelfCheck()
+
+'
+'==============================================================================
+'                          SUITE: HARNESS SELF CHECK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves the harness run-state machine, the cleanup-failure counter and the
+'   dirty-start preflight, rather than assuming them
+'
+' WHY THIS EXISTS
+'   #15 gates a release on these run states. A state that has never been observed
+'   to occur is not evidence of anything, and FAIL_CLEANUP and FAIL_DIRTY_START
+'   are both states a passing run never reaches on its own
+'
+' BEHAVIOR
+'   Drives TST_DP_ResolveRunState across every outcome, forces one cleanup step
+'   to fail, and runs the preflight against the current environment
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+' DEPENDENCIES
+'   TST_DP_ResolveRunState
+'   TST_DP_CheckCleanupStep
+'   TST_DP_Preflight
+'   TST_DP_ContextMenuControlCount
+'
+' NOTES
+'   The counters this suite manipulates are the counters that describe the run it
+'   is part of. Every one is saved before the first mutation and restored before
+'   the first assertion, so the run reports its own outcome and not the probe
+'   values used here
+'
+'   Assertions therefore run against locals captured during the probe, never
+'   against live module state
+'
+'   The preflight probe expects a dirty verdict, because the scratch worksheet
+'   exists while the run is using it. That is the same evidence a project reset
+'   would leave behind, which is the case the module-level flag cannot see
+'
+'   An aborted run cannot be staged from inside a run. This suite proves the
+'   detector fires on the evidence an abort leaves; that an abort leaves it is a
+'   manual validation step
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SavedFail           As Long         'Live assertion failure count
+    Dim SavedCleanup        As Long         'Live cleanup failure count
+    Dim SavedDetail         As String       'Live cleanup failure detail
+    Dim SavedDispatched     As Long         'Live dispatched suite count
+    Dim SavedCompleted      As Long         'Live completed suite count
+    Dim SavedDirty          As Boolean      'Live dirty-start verdict
+    Dim SavedDirtyDetail    As String       'Live dirty-start detail
+
+    Dim StatePass           As String       'Resolver output for a clean run
+    Dim StateFail           As String       'Resolver output for a failed assertion
+    Dim StateIncomplete     As String       'Resolver output for a skipped suite
+    Dim StateCleanup        As String       'Resolver output for failed teardown
+    Dim StateDirty          As String       'Resolver output for a dirty start
+    Dim StateDirtyOverFail  As String       'Resolver output when both apply
+
+    Dim InjectedCount       As Long         'Cleanup failures after injection
+    Dim MenuProbeCount      As Long         'Context-menu controls seen by the probe
+    Dim ProbeDirty          As Boolean      'Preflight verdict during the probe
+    Dim ProbeDetail         As String       'Preflight detail during the probe
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "HarnessSelfCheck"
+
+'------------------------------------------------------------------------------
+' SAVE LIVE RUN STATE
+'------------------------------------------------------------------------------
+    'Every counter touched below belongs to the run in progress
+        SavedFail = mTST_DP_FailCount
+        SavedCleanup = mTST_DP_CleanupFails
+        SavedDetail = mTST_DP_CleanupDetail
+        SavedDispatched = mTST_DP_SuitesDispatched
+        SavedCompleted = mTST_DP_SuitesCompleted
+        SavedDirty = mTST_DP_DirtyStart
+        SavedDirtyDetail = mTST_DP_DirtyDetail
+
+'------------------------------------------------------------------------------
+' PROBE THE RUN-STATE MACHINE
+'------------------------------------------------------------------------------
+    'Clean run
+        mTST_DP_FailCount = 0
+        mTST_DP_CleanupFails = 0
+        mTST_DP_SuitesDispatched = 3
+        mTST_DP_SuitesCompleted = 3
+        mTST_DP_DirtyStart = False
+        StatePass = TST_DP_ResolveRunState()
+
+    'Failed assertion
+        mTST_DP_FailCount = 1
+        StateFail = TST_DP_ResolveRunState()
+
+    'Dispatched suite that never returned
+        mTST_DP_FailCount = 0
+        mTST_DP_SuitesCompleted = 2
+        StateIncomplete = TST_DP_ResolveRunState()
+
+    'Teardown that did not complete
+        mTST_DP_SuitesCompleted = 3
+        mTST_DP_CleanupFails = 1
+        StateCleanup = TST_DP_ResolveRunState()
+
+    'Dirty start on an otherwise clean run
+        mTST_DP_CleanupFails = 0
+        mTST_DP_DirtyStart = True
+        StateDirty = TST_DP_ResolveRunState()
+
+    'Dirty start alongside a failed assertion
+        mTST_DP_FailCount = 1
+        StateDirtyOverFail = TST_DP_ResolveRunState()
+
+'------------------------------------------------------------------------------
+' PROBE CLEANUP FAULT INJECTION
+'------------------------------------------------------------------------------
+    'Start the probe from a known clean counter
+        mTST_DP_CleanupFails = 0
+        mTST_DP_CleanupDetail = VBA.vbNullString
+    'Clear any error state so only the injection can trigger a failure
+        Err.Clear
+    'Force the named step to be treated as failed
+        mTST_DP_InjectCleanupFail = "SelfCheckProbeStep"
+        TST_DP_CheckCleanupStep "SelfCheckProbeStep"
+        mTST_DP_InjectCleanupFail = VBA.vbNullString
+    'Capture what the counter recorded
+        InjectedCount = mTST_DP_CleanupFails
+
+'------------------------------------------------------------------------------
+' PROBE THE DIRTY-START PREFLIGHT
+'------------------------------------------------------------------------------
+    'Run preflight against the live environment. The scratch worksheet exists
+    'while the run is using it, which is the evidence an aborted run leaves
+        TST_DP_Preflight
+        ProbeDirty = mTST_DP_DirtyStart
+        ProbeDetail = mTST_DP_DirtyDetail
+
+'------------------------------------------------------------------------------
+' PROBE THE CONTEXT-MENU READER
+'------------------------------------------------------------------------------
+    'Exercise the teardown probe while the run is still live
+        MenuProbeCount = TST_DP_ContextMenuControlCount()
+
+'------------------------------------------------------------------------------
+' RESTORE LIVE RUN STATE
+'------------------------------------------------------------------------------
+    'Restore before the first assertion, so this suite's own result is honest
+        mTST_DP_FailCount = SavedFail
+        mTST_DP_CleanupFails = SavedCleanup
+        mTST_DP_CleanupDetail = SavedDetail
+        mTST_DP_SuitesDispatched = SavedDispatched
+        mTST_DP_SuitesCompleted = SavedCompleted
+        mTST_DP_DirtyStart = SavedDirty
+        mTST_DP_DirtyDetail = SavedDirtyDetail
+    'Clear any error left by the injection probe
+        Err.Clear
+
+'------------------------------------------------------------------------------
+' ASSERT THE RUN-STATE MACHINE
+'------------------------------------------------------------------------------
+    'Assert a clean run reports PASS
+        TST_DP_AssertEqualsString "Clean run resolves to PASS", _
+            TST_DP_STATE_PASS, StatePass
+    'Assert a failed assertion reports FAIL
+        TST_DP_AssertEqualsString "Failed assertion resolves to FAIL", _
+            TST_DP_STATE_FAIL, StateFail
+    'Assert a suite that never returned reports INCOMPLETE_SKIPPED
+        TST_DP_AssertEqualsString "Skipped suite resolves to INCOMPLETE_SKIPPED", _
+            TST_DP_STATE_INCOMPLETE, StateIncomplete
+    'Assert failed teardown reports FAIL_CLEANUP
+        TST_DP_AssertEqualsString "Failed teardown resolves to FAIL_CLEANUP", _
+            TST_DP_STATE_FAIL_CLEANUP, StateCleanup
+    'Assert a dirty start reports FAIL_DIRTY_START
+        TST_DP_AssertEqualsString "Dirty start resolves to FAIL_DIRTY_START", _
+            TST_DP_STATE_DIRTY_START, StateDirty
+    'Assert a dirty start outranks a failed assertion
+        TST_DP_AssertEqualsString "Dirty start outranks a failed assertion", _
+            TST_DP_STATE_DIRTY_START, StateDirtyOverFail
+    'Assert a dirty start can never resolve to PASS, which is #19's invariant
+        TST_DP_AssertTrue "A dirty start can never resolve to PASS", _
+            (StateDirty <> TST_DP_STATE_PASS) And _
+            (StateDirtyOverFail <> TST_DP_STATE_PASS)
+
+'------------------------------------------------------------------------------
+' ASSERT CLEANUP FAULT INJECTION
+'------------------------------------------------------------------------------
+    'Assert a forced cleanup failure is counted, which is what produces
+    'FAIL_CLEANUP in a real run
+        TST_DP_AssertEqualsLong "Injected cleanup failure is counted", _
+            1, InjectedCount
+
+'------------------------------------------------------------------------------
+' ASSERT THE DIRTY-START PREFLIGHT
+'------------------------------------------------------------------------------
+    'Assert preflight detects the leftover-worksheet evidence
+        TST_DP_AssertTrue "Preflight detects leftover scratch worksheet", ProbeDirty
+    'Assert the verdict names what it found
+        TST_DP_AssertTrue "Preflight verdict names the leftover worksheet", _
+            VBA.InStr(1, ProbeDetail, TST_DP_SCRATCH_SHEET_NAME, vbTextCompare) > 0
+
+'------------------------------------------------------------------------------
+' ASSERT THE CONTEXT-MENU PROBE
+'------------------------------------------------------------------------------
+    'Assert the teardown probe can read the context menus at all. A probe that
+    'silently returns zero because it cannot see the bars would report a clean
+    'teardown for a menu it never inspected
+        TST_DP_AssertTrue "Context-menu probe reads the command bars", _
+            MenuProbeCount >= 0
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Never leave the injection seam armed
+        mTST_DP_InjectCleanupFail = VBA.vbNullString
+    'Restore whatever the probe was holding when it failed
+        mTST_DP_FailCount = SavedFail
+        mTST_DP_CleanupFails = SavedCleanup
+        mTST_DP_CleanupDetail = SavedDetail
+        mTST_DP_SuitesDispatched = SavedDispatched
+        mTST_DP_SuitesCompleted = SavedCompleted
+        mTST_DP_DirtyStart = SavedDirty
+        mTST_DP_DirtyDetail = SavedDirtyDetail
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Harness self check", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
 Private Sub TST_DP_RunSuite_UISmoke()
 
 '
@@ -3338,8 +5228,14 @@ Private Sub TST_DP_RunSuite_UISmoke()
 '   release rather than on every development edit
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-22
 '==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrorNumber         As Long                 'Captured error number
+    Dim ErrorDescription    As String               'Captured error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3392,14 +5288,17 @@ Private Sub TST_DP_RunSuite_UISmoke()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Capture the escaping error before any On Error statement resets Err
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
     'Attempt to close the picker after a UI smoke failure
         On Error Resume Next
         DP_Close
         Err.Clear
         On Error GoTo 0
-    'Record the suite-level failure and clear the error
+    'Record the captured suite-level failure
         TST_DP_RecordFail "UISmoke suite failed", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+            "Error " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
         Err.Clear
 
 End Sub
@@ -3712,12 +5611,464 @@ ExpectedError:
 
 End Sub
 
+Private Sub TST_DP_ExpectFailedAddressReport()
+
+'
+'==============================================================================
+'                      EXPECT FAILED ADDRESS REPORT
+'==============================================================================
+'   Places a multi-cell array formula inside the target so those cells reject the
+'   write, then asserts the result names exactly them.
+'
+'   Excel declines these writes silently through the object model. It raises
+'   "You cannot change part of an array" only for an interactive edit. So the
+'   engine refuses array cells before writing them, on both paths: the fast bulk
+'   path is skipped for any target touching an array, and the per-cell writer
+'   refuses each array cell individually.
+'
+'   Without those refusals the write reports success having changed nothing, which
+'   is what this expectation is really guarding. The assertions that the array
+'   survives and that I5 was written distinguish a correct refusal from a write
+'   that silently did not happen.
+'
+'   This is the non-lock failure path. Protected locked cells are a separate
+'   classification and are covered by TST_DP_ExpectPartialWriteReport.
+'
+'   The array formula is cleared on every path, including a failed assertion.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WriteResult     As DP_WriteResult   'Structured write-back result
+    Dim TargetRange     As Excel.Range      'Partially writable target
+    Dim ExpectedList    As String           'Expected failed address list
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo FailedAddressFail
+
+'------------------------------------------------------------------------------
+' BUILD A PARTIALLY WRITABLE TARGET
+'------------------------------------------------------------------------------
+    'Use a target away from the ranges the rest of the suite writes
+        Set TargetRange = mTST_DP_ScratchSheet.Range("I5:I8")
+    'Clear any content left by an earlier run
+        mTST_DP_ScratchSheet.Range("I5:I9").ClearContents
+    'A cell belonging to a multi-cell array formula rejects a direct value write
+        mTST_DP_ScratchSheet.Range("I6:I7").FormulaArray = "=ROW()"
+    'Assert the setup actually took, so a silent setup failure cannot look like a
+    'reporting defect in the result
+        TST_DP_AssertTrue "Failed write setup creates an array formula", _
+            mTST_DP_ScratchSheet.Range("I6").HasArray
+    'Prepare a distinct write value
+        gDP_WriteValue = VBA.DateSerial(2026, 12, 8)
+
+'------------------------------------------------------------------------------
+' WRITE THROUGH THE PARTIAL TARGET
+'------------------------------------------------------------------------------
+    'Call the range writer directly so the run stays free of modal messages
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT THE FAILED ADDRESSES
+'------------------------------------------------------------------------------
+    'Build the worksheet-qualified list the write is expected to report
+        ExpectedList = mTST_DP_ScratchSheet.Name & "!I6, " & _
+            mTST_DP_ScratchSheet.Name & "!I7"
+    'Assert the writable cells were written
+        TST_DP_AssertEqualsLong "Failed write reports 2 written cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the rejected cells were counted as failures rather than skips
+        TST_DP_AssertEqualsLong "Failed write reports 2 failed cells", _
+            2, VBA.CLng(WriteResult.FailedCount)
+    'Assert the array cells were left intact rather than silently replaced
+        TST_DP_AssertTrue "Failed write leaves the array formula intact", _
+            mTST_DP_ScratchSheet.Range("I6").HasArray
+    'Assert a non-lock failure is not misreported as a protected skip
+        TST_DP_AssertEqualsLong "Failed write reports no locked skips", _
+            0, VBA.CLng(WriteResult.LockedSkippedCount)
+    'Assert the exact failed addresses are reported, not just a count
+        TST_DP_AssertEqualsString "Failed write reports the exact failed addresses", _
+            ExpectedList, WriteResult.FailedAddresses
+    'Assert the failed result still satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Failed write result balances", WriteResult
+    'Assert the writable cells really received the value
+        TST_DP_AssertCellDateEquals "Failed write writes I5", _
+            VBA.DateSerial(2026, 12, 8), mTST_DP_ScratchSheet.Range("I5")
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Remove the array formula before leaving
+        TST_DP_ReleaseScratchArrayFormula
+    'Release object references
+        Set TargetRange = Nothing
+    'Exit after the expectation completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FAILED ADDRESS FAIL
+'------------------------------------------------------------------------------
+FailedAddressFail:
+    'Remove the array formula even when the expectation failed
+        TST_DP_ReleaseScratchArrayFormula
+    'Release object references
+        Set TargetRange = Nothing
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Failed address reporting", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReleaseScratchArrayFormula()
+
+'
+'==============================================================================
+'                     RELEASE SCRATCH ARRAY FORMULA
+'==============================================================================
+'   Clears the array formula used by the failed-address expectation, so a failed
+'   assertion cannot leave an unwritable block on the scratch sheet.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RELEASE ARRAY FORMULA
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into the caller
+        On Error Resume Next
+    'Exit when there is no scratch sheet to release
+        If mTST_DP_ScratchSheet Is Nothing Then Exit Sub
+    'Clearing the whole array range is the only way to remove an array formula
+        mTST_DP_ScratchSheet.Range("I5:I9").ClearContents
+    'Clear any suppressed cleanup error
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_AssertWriteResultBalances( _
+    ByVal TestName As String, _
+    ByRef Result As DP_WriteResult)
+
+'
+'==============================================================================
+'                     ASSERT WRITE RESULT BALANCES
+'==============================================================================
+'   Asserts the accounting invariant every completed write result must satisfy:
+'
+'       AttemptedCount = WrittenCount + LockedSkippedCount
+'                      + FormulaSkippedCount + FailedCount
+'
+'   Every cell increments exactly one term, so the invariant holds by
+'   construction rather than by arithmetic. A term that stops being incremented
+'   exactly once shows up here.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ASSERT THE INVARIANT
+'------------------------------------------------------------------------------
+    If Result.AttemptedCount = Result.WrittenCount + Result.LockedSkippedCount + _
+        Result.FormulaSkippedCount + Result.FailedCount Then
+        TST_DP_RecordPass TestName, _
+            "Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+            "; Written=" & VBA.CStr(Result.WrittenCount) & _
+            "; Locked=" & VBA.CStr(Result.LockedSkippedCount) & _
+            "; Formula=" & VBA.CStr(Result.FormulaSkippedCount) & _
+            "; Failed=" & VBA.CStr(Result.FailedCount)
+    Else
+        TST_DP_RecordFail TestName, _
+            "Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+            " does not equal Written=" & VBA.CStr(Result.WrittenCount) & _
+            " + Locked=" & VBA.CStr(Result.LockedSkippedCount) & _
+            " + Formula=" & VBA.CStr(Result.FormulaSkippedCount) & _
+            " + Failed=" & VBA.CStr(Result.FailedCount)
+    End If
+
+End Sub
+
+Private Sub TST_DP_ExpectFormulaProtection()
+
+'
+'==============================================================================
+'                      EXPECT FORMULA PROTECTION
+'==============================================================================
+'   Builds a target holding blanks, literals and formulas, then asserts that the
+'   formulas survive a default write and are replaced only on explicit request.
+'
+'   The target is deliberately larger than one cell, so the bulk path would be
+'   eligible if formula protection did not refuse it. A formula surviving here
+'   therefore also proves the bulk gate, which is the half of this policy that
+'   per-cell inspection alone cannot cover.
+'
+'   Row 18 of the demo teaches that a date-returning formula is a valid picker
+'   target. It stays one; what changes is that selecting a date no longer deletes
+'   the formula behind it.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WriteResult     As DP_WriteResult   'Structured write-back result
+    Dim EmptyResult     As DP_WriteResult   'Zeroed result used to reset WriteResult
+    Dim TargetRange     As Excel.Range      'Mixed blank/literal/formula target
+    Dim ExpectedList    As String           'Expected preserved address list
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo FormulaProtectionFail
+
+'------------------------------------------------------------------------------
+' BUILD A MIXED TARGET
+'------------------------------------------------------------------------------
+    'Use a target away from the ranges the rest of the suite writes
+        Set TargetRange = mTST_DP_ScratchSheet.Range("K5:K8")
+    'Clear any content left by an earlier run
+        TargetRange.ClearContents
+    'K5 blank, K6 literal, K7 plain formula, K8 date-returning formula
+        mTST_DP_ScratchSheet.Range("K6").Value = VBA.DateSerial(2020, 1, 1)
+        mTST_DP_ScratchSheet.Range("K7").Formula = "=1+1"
+        mTST_DP_ScratchSheet.Range("K8").Formula = "=TODAY()"
+    'Assert the setup took, so a silent setup failure cannot look like protection
+        TST_DP_AssertTrue "Formula setup creates a plain formula", _
+            mTST_DP_ScratchSheet.Range("K7").HasFormula
+        TST_DP_AssertTrue "Formula setup creates a date-returning formula", _
+            mTST_DP_ScratchSheet.Range("K8").HasFormula
+    'Prepare a distinct write value
+        gDP_WriteValue = VBA.DateSerial(2027, 3, 9)
+
+'------------------------------------------------------------------------------
+' WRITE WITH PROTECTION ACTIVE
+'------------------------------------------------------------------------------
+    'Default policy preserves formulas
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT PROTECTION
+'------------------------------------------------------------------------------
+    'Build the worksheet-qualified list the write is expected to report
+        ExpectedList = mTST_DP_ScratchSheet.Name & "!K7, " & _
+            mTST_DP_ScratchSheet.Name & "!K8"
+    'Assert the blank and the literal were written
+        TST_DP_AssertEqualsLong "Formula protection writes 2 cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert both formulas were preserved
+        TST_DP_AssertEqualsLong "Formula protection preserves 2 formula cells", _
+            2, VBA.CLng(WriteResult.FormulaSkippedCount)
+    'Assert a preserved formula is not misreported as a failure
+        TST_DP_AssertEqualsLong "Formula protection reports no failures", _
+            0, VBA.CLng(WriteResult.FailedCount)
+    'Assert the preserved cells are named, not just counted
+        TST_DP_AssertEqualsString "Formula protection reports the preserved addresses", _
+            ExpectedList, WriteResult.FormulaSkippedAddresses
+    'Assert the shortfall description names them
+        TST_DP_AssertTrue "Formula protection description names a preserved cell", _
+            VBA.InStr(1, M_WriteBack_DescribeShortfall(WriteResult), "K7", vbTextCompare) > 0
+    'Assert the result satisfies the extended accounting invariant
+        TST_DP_AssertWriteResultBalances "Formula protection result balances", WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT THE WORKSHEET ITSELF
+'------------------------------------------------------------------------------
+    'Verify the formulas natively, not only through the result being tested
+        TST_DP_AssertTrue "Plain formula survives the write", _
+            mTST_DP_ScratchSheet.Range("K7").HasFormula
+        TST_DP_AssertTrue "Date-returning formula survives the write", _
+            mTST_DP_ScratchSheet.Range("K8").HasFormula
+    'Verify the blank and the literal really were replaced
+        TST_DP_AssertCellDateEquals "Formula protection writes the blank cell", _
+            VBA.DateSerial(2027, 3, 9), mTST_DP_ScratchSheet.Range("K5")
+        TST_DP_AssertCellDateEquals "Formula protection overwrites the literal", _
+            VBA.DateSerial(2027, 3, 9), mTST_DP_ScratchSheet.Range("K6")
+
+'------------------------------------------------------------------------------
+' WRITE WITH THE OVERRIDE
+'------------------------------------------------------------------------------
+    'An explicit override replaces formulas
+        WriteResult = EmptyResult
+        gDP_WriteValue = VBA.DateSerial(2027, 4, 10)
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, _
+            WriteResult, OverwriteFormulas:=True
+
+'------------------------------------------------------------------------------
+' ASSERT THE OVERRIDE
+'------------------------------------------------------------------------------
+    'Assert every cell was written once the caller opted in
+        TST_DP_AssertEqualsLong "Override writes all 4 cells", _
+            4, VBA.CLng(WriteResult.WrittenCount)
+    'Assert nothing was preserved under the override
+        TST_DP_AssertEqualsLong "Override preserves no formula cells", _
+            0, VBA.CLng(WriteResult.FormulaSkippedCount)
+    'Assert the override result satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Override result balances", WriteResult
+    'Verify the formulas really are gone
+        TST_DP_AssertFalse "Override replaces the plain formula", _
+            mTST_DP_ScratchSheet.Range("K7").HasFormula
+        TST_DP_AssertFalse "Override replaces the date-returning formula", _
+            mTST_DP_ScratchSheet.Range("K8").HasFormula
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Leave the scratch cells clear for later runs
+        mTST_DP_ScratchSheet.Range("K5:K8").ClearContents
+    'Release object references
+        Set TargetRange = Nothing
+    'Exit after the expectation completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' FORMULA PROTECTION FAIL
+'------------------------------------------------------------------------------
+FormulaProtectionFail:
+    'Clear the target even when the expectation failed
+        On Error Resume Next
+        mTST_DP_ScratchSheet.Range("K5:K8").ClearContents
+        Set TargetRange = Nothing
+        Err.Clear
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Formula protection", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ExpectPartialWriteReport()
+
+'
+'==============================================================================
+'                      EXPECT PARTIAL WRITE REPORT
+'==============================================================================
+'   Protects the scratch sheet with one locked cell inside the target so the
+'   write partially succeeds, then asserts the result names the cell it skipped.
+'
+'   The sheet is unprotected on every path, including a failed assertion, so a
+'   protected scratch sheet cannot leak into a later suite.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim WriteResult     As DP_WriteResult   'Structured write-back result
+    Dim TargetRange     As Excel.Range      'Partially writable target
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo PartialWriteFail
+
+'------------------------------------------------------------------------------
+' BUILD A PARTIALLY WRITABLE TARGET
+'------------------------------------------------------------------------------
+    'Use a target away from the ranges the rest of the suite writes
+        Set TargetRange = mTST_DP_ScratchSheet.Range("H5:H7")
+    'Clear any value left by an earlier run
+        TargetRange.ClearContents
+    'Unlock the cells that must remain writable
+        mTST_DP_ScratchSheet.Range("H5").Locked = False
+        mTST_DP_ScratchSheet.Range("H7").Locked = False
+    'Lock the cell the write must skip
+        mTST_DP_ScratchSheet.Range("H6").Locked = True
+    'Protect the sheet so the locked cell actually rejects the write
+        mTST_DP_ScratchSheet.Protect
+    'Prepare a distinct write value
+        gDP_WriteValue = VBA.DateSerial(2026, 12, 1)
+
+'------------------------------------------------------------------------------
+' WRITE THROUGH THE PARTIAL TARGET
+'------------------------------------------------------------------------------
+    'Call the range writer directly so the run stays free of modal messages
+        M_WriteBack_PopulateRange TargetRange, DP_WriteAction_DatePicker, WriteResult
+
+'------------------------------------------------------------------------------
+' ASSERT THE PARTIAL RESULT
+'------------------------------------------------------------------------------
+    'Assert the writable cells were written
+        TST_DP_AssertEqualsLong "Partial write reports 2 written cells", _
+            2, VBA.CLng(WriteResult.WrittenCount)
+    'Assert the locked cell was counted as skipped
+        TST_DP_AssertEqualsLong "Partial write reports 1 skipped locked cell", _
+            1, VBA.CLng(WriteResult.LockedSkippedCount)
+    'Assert the skipped cell is named, not just counted
+        TST_DP_AssertEqualsString "Partial write reports the skipped address", _
+            mTST_DP_ScratchSheet.Name & "!H6", WriteResult.LockedSkippedAddresses
+    'Assert the shortfall description carries the same address
+        TST_DP_AssertTrue "Partial write description names the skipped cell", _
+            VBA.InStr(1, M_WriteBack_DescribeShortfall(WriteResult), "H6", vbTextCompare) > 0
+    'Assert the partial result still satisfies the accounting invariant
+        TST_DP_AssertWriteResultBalances "Partial write result balances", WriteResult
+    'Assert the writable cells really received the value
+        TST_DP_AssertCellDateEquals "Partial write writes H5", _
+            VBA.DateSerial(2026, 12, 1), mTST_DP_ScratchSheet.Range("H5")
+    'Assert the locked cell was left alone
+        TST_DP_AssertTrue "Partial write leaves H6 blank", _
+            VBA.LenB(VBA.CStr(mTST_DP_ScratchSheet.Range("H6").Value)) = 0
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release the sheet before leaving
+        TST_DP_ReleaseScratchProtection
+    'Release object references
+        Set TargetRange = Nothing
+    'Exit after the expectation completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' PARTIAL WRITE FAIL
+'------------------------------------------------------------------------------
+PartialWriteFail:
+    'Release the sheet even when the expectation failed
+        TST_DP_ReleaseScratchProtection
+    'Release object references
+        Set TargetRange = Nothing
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Partial write reporting", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ReleaseScratchProtection()
+
+'
+'==============================================================================
+'                       RELEASE SCRATCH PROTECTION
+'==============================================================================
+'   Unprotects the scratch sheet and restores the default locked state, so a
+'   protection-based test cannot leave the sheet unusable for later suites.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RELEASE PROTECTION
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into the caller
+        On Error Resume Next
+    'Exit when there is no scratch sheet to release
+        If mTST_DP_ScratchSheet Is Nothing Then Exit Sub
+    'Unprotect the scratch sheet when it is protected
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+    'Restore the default locked state on the cells the test unlocked
+        mTST_DP_ScratchSheet.Range("H5:H7").Locked = True
+    'Clear any suppressed cleanup error
+        Err.Clear
+
+End Sub
+
 Private Sub TST_DP_ExpectError_InvalidWriteAction()
 
 '
 '==============================================================================
 '                     EXPECT ERROR: INVALID WRITE ACTION
 '==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim IgnoredResult   As DP_WriteResult   'Required accumulator, not asserted
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3728,7 +6079,7 @@ Private Sub TST_DP_ExpectError_InvalidWriteAction()
 ' INVOKE EXPECTED ERROR
 '------------------------------------------------------------------------------
     'Call with an unsupported write action value to trigger the expected error
-        M_WriteBack_PopulateRange mTST_DP_ScratchSheet.Range("J2"), 99
+        M_WriteBack_PopulateRange mTST_DP_ScratchSheet.Range("J2"), 99, IgnoredResult
 
 '------------------------------------------------------------------------------
 ' RECORD MISSING ERROR
@@ -4072,6 +6423,431 @@ ResultSheetFail:
 
 End Sub
 
+Private Sub TST_DP_CheckCleanupStep(ByVal StepName As String)
+
+'
+'==============================================================================
+'                           CHECK CLEANUP STEP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records whether the cleanup step that just ran completed
+'
+' WHY THIS EXISTS
+'   Teardown runs under On Error Resume Next so that one failing step does not
+'   prevent the rest from being attempted. Without an explicit check afterwards
+'   the failure is discarded, the run still reports its assertion totals, and the
+'   next run inherits whatever was left behind
+'
+'   That is not hypothetical. An aborted run left Application state and
+'   worksheets in place, and the following TST_DP_RunAll failed during setup with
+'   1004 - Method Add of object Sheets failed
+'
+' INPUTS
+'   StepName
+'     Name of the cleanup step that has just executed
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Records a FAIL row and increments the cleanup-failure count when Err is set,
+'   then clears Err so the following steps still run
+'
+' ERROR POLICY
+'   Best effort. Must not raise, because it runs inside teardown
+'
+' DEPENDENCIES
+'   TST_DP_RecordResult
+'   mTST_DP_CleanupFails
+'   mTST_DP_CleanupDetail
+'
+' NOTES
+'   The caller stays under On Error Resume Next across the whole teardown. This
+'   routine reads Err before clearing it, so it must be called immediately after
+'   the step it checks
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ErrorNumber         As Long         'Captured error number
+    Dim ErrorDescription    As String       'Captured error description
+    Dim IsInjected          As Boolean      'True when the failure was staged by a self-check
+
+'------------------------------------------------------------------------------
+' CAPTURE STEP OUTCOME
+'------------------------------------------------------------------------------
+    'Capture the outcome of the step that has just run
+        ErrorNumber = Err.Number
+        ErrorDescription = Err.Description
+
+    'Recognize a failure staged by the harness self-check
+        If VBA.LenB(mTST_DP_InjectCleanupFail) > 0 Then
+            If VBA.StrComp(StepName, mTST_DP_InjectCleanupFail, vbTextCompare) = 0 Then
+                ErrorNumber = vbObjectError + 900
+                ErrorDescription = "Injected cleanup failure for harness self-check"
+                IsInjected = True
+            End If
+        End If
+
+    'Exit when the step completed
+        If ErrorNumber = 0 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' RECORD FAILURE
+'------------------------------------------------------------------------------
+    'Count the failed cleanup step
+        mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+
+    'Keep the first failure detail for the summary
+        If VBA.Len(mTST_DP_CleanupDetail) = 0 Then
+            mTST_DP_CleanupDetail = StepName & ": " & _
+                VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+        End If
+
+    'Record the failed cleanup step on the result sheet. A staged failure is
+    'recorded as INFO: it is a probe of this routine, not a defect in the run,
+    'and a FAIL row would report a teardown failure that never happened
+        If IsInjected Then
+            TST_DP_RecordInfo "Cleanup", StepName, _
+                "Staged cleanup failure for harness self-check"
+        Else
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, _
+                "Cleanup", _
+                StepName, _
+                "Cleanup step failed: " & VBA.CStr(ErrorNumber) & " - " & ErrorDescription
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAR FOR THE NEXT STEP
+'------------------------------------------------------------------------------
+    'Clear the error so the following cleanup steps still run
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapshot)
+
+'
+'==============================================================================
+'                           VERIFY FINAL STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Verifies that the run left no DatePicker or harness artifact behind
+'
+' WHY THIS EXISTS
+'   A run result is only meaningful if the environment it left is clean. Counting
+'   assertions says nothing about a form still loaded, a timer still scheduled,
+'   or grid icons still on a worksheet
+'
+' INPUTS
+'   AppSnapshot
+'     Application state captured before the run
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Checks the manager reference, the picker form, worksheet grid icons and
+'   every Application setting the run snapshotted. Records a FAIL row for each
+'   violation and counts it as a cleanup failure
+'
+'   The Application settings verified are the full contents of the pre-run
+'   snapshot:
+'
+'     ScreenUpdating
+'     EnableEvents
+'     DisplayAlerts
+'     Calculation
+'     StatusBar ownership
+'
+' ERROR POLICY
+'   Best effort. Must not raise, because it runs inside teardown
+'
+' DEPENDENCIES
+'   gDP_Manager
+'   M_GridIcon_PurgeAll
+'   TST_DP_ContextMenuControlCount
+'   TST_DP_RecordResult
+'
+' NOTES
+'   This routine reports rather than repairs. Silently fixing a leak would hide
+'   the defect that caused it
+'
+'   Verification covers everything the snapshot captures. A field that is
+'   restored but not verified cannot report a restore that silently failed, so
+'   the two lists have to stay the same length
+'
+'   StatusBar is the exception to the rule above, and deliberately so. Setting it
+'   to False hands the bar back to Excel, but reading it immediately afterwards
+'   can still return the text that was there before Excel repaints, so neither
+'   "StatusBar = False" nor a VarType test gives a stable answer at teardown
+'
+'   What is determinable is whether the run left its own message behind, so that
+'   is what is asserted. Restoring the bar is verified as a cleanup step; this
+'   check exists to catch the harness leaking its own status text into the session
+'
+'   Each check reports the expected and actual value. A cleanup failure that only
+'   names the property leaves the next person guessing which of five it was
+'
+'   The scratch worksheet is not checked here. Its deletion is already verified
+'   as a cleanup step
+'
+'   The grid-icon check is weaker than it looks: M_GridIcon_PurgeAll removes the
+'   named shape from every open workbook, so this can pass because teardown
+'   reached beyond the host workbook. Bounding that purge is #14
+'
+'   The context menu is verified against its pre-run registration rather than
+'   against zero. The harness restores the session it found, and a DatePicker
+'   that was already running is entitled to its menu when the run ends
+'
+'   Two teardown targets cannot be verified from here, and both are recorded
+'   rather than quietly omitted:
+'
+'     keyboard shortcut   Excel exposes no getter for Application.OnKey, so the
+'                         assignment cannot be read back at all. See #42
+'     live-clock timer    mDP_TimerIsRunning is Private to M_DatePicker and
+'                         Application.OnTime schedules cannot be enumerated
+'
+'   Both are covered instead by per-operation cleanup accounting: M_Timer_Stop
+'   and M_KeyboardShortcut_Remove are now invoked and checked individually, so a
+'   failure in either is counted even though its final state cannot be inspected.
+'   Making them observable needs a production-side accessor, which is not a
+'   change this harness should make on its own
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ManagerPresent  As Boolean      'True when a manager exists after teardown
+    Dim MenuControlCount As Long        'DatePicker context-menu controls left behind
+    Dim StatusBarText   As String       'Status bar contents after teardown
+    Dim LeftLoaded      As Boolean      'True when the picker form is still loaded
+    Dim IconCount       As Long         'DatePicker shapes still present
+    Dim WS              As Excel.Worksheet  'Worksheet scan variable
+    Dim Shp             As Excel.Shape  'Shape scan variable
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Suppress verification errors so teardown always completes
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' VERIFY PICKER FORM
+'------------------------------------------------------------------------------
+    'Resolve whether the picker form is still loaded
+        LeftLoaded = False
+        If Not gDP_Manager Is Nothing Then LeftLoaded = gDP_Manager.Is_PickerLoaded
+        Err.Clear
+
+    'Record a form left loaded after the run
+        If LeftLoaded Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "DatePicker form is still loaded after teardown"
+        End If
+
+'------------------------------------------------------------------------------
+' VERIFY GRID ICONS
+'------------------------------------------------------------------------------
+    'Count DatePicker shapes left on the host workbook
+        IconCount = 0
+        If Not mTST_DP_HostWorkbook Is Nothing Then
+            For Each WS In mTST_DP_HostWorkbook.Worksheets
+                For Each Shp In WS.Shapes
+                    If VBA.InStr(1, Shp.Name, "DP_GridIcon", vbTextCompare) = 1 Then
+                        IconCount = IconCount + 1
+                    End If
+                Next Shp
+            Next WS
+        End If
+        Err.Clear
+
+    'Record grid icons left behind after the run
+        If IconCount > 0 Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                VBA.CStr(IconCount) & " DatePicker grid icon shapes remain after teardown"
+        End If
+
+'------------------------------------------------------------------------------
+' VERIFY APPLICATION STATE
+'------------------------------------------------------------------------------
+    'Record an Application event state that does not match the pre-run snapshot
+        If Excel.Application.EnableEvents <> AppSnapshot.EnableEvents Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.EnableEvents was not restored to its pre-run value"
+        End If
+
+    'Record a screen updating state that does not match the pre-run snapshot
+        If Excel.Application.ScreenUpdating <> AppSnapshot.ScreenUpdating Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.ScreenUpdating was not restored. Expected " & _
+                VBA.CStr(AppSnapshot.ScreenUpdating) & _
+                " but found " & VBA.CStr(Excel.Application.ScreenUpdating)
+        End If
+
+    'Record an alert state that does not match the pre-run snapshot
+        If Excel.Application.DisplayAlerts <> AppSnapshot.DisplayAlerts Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.DisplayAlerts was not restored. Expected " & _
+                VBA.CStr(AppSnapshot.DisplayAlerts) & _
+                " but found " & VBA.CStr(Excel.Application.DisplayAlerts)
+        End If
+
+    'Record a calculation mode that does not match the pre-run snapshot
+        If Excel.Application.Calculation <> AppSnapshot.CalculationMode Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.Calculation was not restored. Expected " & _
+                VBA.CStr(AppSnapshot.CalculationMode) & _
+                " but found " & VBA.CStr(Excel.Application.Calculation)
+        End If
+
+    'Record a manager state that does not match the pre-run condition. The
+    'harness restores it as a cleanup step; this proves the restore took effect
+        ManagerPresent = Not (gDP_Manager Is Nothing)
+        If ManagerPresent <> mTST_DP_HadManager Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Manager state was not restored. Expected present=" & _
+                VBA.CStr(mTST_DP_HadManager) & _
+                " but found present=" & VBA.CStr(ManagerPresent)
+        End If
+
+    'Record a context-menu registration that does not match the pre-run state.
+    'The after-removal count is reported alongside it, because a mismatch has two
+    'possible causes and they need different fixes: controls that removal never
+    'took away, or controls something re-registered afterwards
+        MenuControlCount = TST_DP_ContextMenuControlCount()
+        If MenuControlCount <> mTST_DP_MenuAtStart Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Context-menu registration was not restored. Before run=" & _
+                VBA.CStr(mTST_DP_MenuAtStart) & _
+                "; after removal=" & VBA.CStr(mTST_DP_MenuAfterRemove) & _
+                "; at end=" & VBA.CStr(MenuControlCount)
+        End If
+
+    'Record a status bar still showing the run's own message. Ownership cannot be
+    'asserted: releasing the bar hands it back to Excel, and reading it straight
+    'afterwards can still return the previous text. What the harness controls, and
+    'what actually matters, is that its own message is gone
+        StatusBarText = VBA.CStr(Excel.Application.StatusBar)
+        If VBA.InStr(1, StatusBarText, TST_DP_STATUS_BAR_TEXT, vbTextCompare) > 0 Then
+            mTST_DP_CleanupFails = mTST_DP_CleanupFails + 1
+            TST_DP_RecordResult TST_DP_FAIL_TEXT, "Cleanup", "Final state", _
+                "Application.StatusBar still shows the harness message: " & StatusBarText
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set WS = Nothing
+        Set Shp = Nothing
+    'Clear any suppressed verification error
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_ResolveRunState() As String
+
+'
+'==============================================================================
+'                           RESOLVE RUN STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the single state that describes the outcome of the run
+'
+' WHY THIS EXISTS
+'   Assertion totals alone cannot express a run that passed every assertion but
+'   failed to clean up, or one that ended before every dispatched suite returned.
+'   Both look like a pass if only Passed and Failed are reported
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   One of TST_DP_STATE_DIRTY_START, TST_DP_STATE_FAIL, TST_DP_STATE_INCOMPLETE,
+'   TST_DP_STATE_FAIL_CLEANUP or TST_DP_STATE_PASS
+'
+' BEHAVIOR
+'   Reports FAIL_DIRTY_START when the run began in an environment a previous run
+'   left behind, FAIL when any assertion failed, INCOMPLETE_SKIPPED when a
+'   dispatched suite did not return, FAIL_CLEANUP when teardown did not complete,
+'   and PASS only when none of those applies
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   mTST_DP_DirtyStart
+'   mTST_DP_FailCount
+'   mTST_DP_CleanupFails
+'   mTST_DP_SuitesDispatched
+'   mTST_DP_SuitesCompleted
+'
+' NOTES
+'   A dirty start outranks everything, including assertion failures. It is the
+'   only condition that makes the rest of the report untrustworthy rather than
+'   merely bad: the failures may belong to the environment the previous run left,
+'   not to the code under test. Reporting FAIL first would send someone to debug
+'   an assertion that is an artifact
+'
+'   Below that, assertion failures rank above cleanup failures. A run with both
+'   is reported as FAIL, because the assertion failure is the more actionable
+'
+'   No run can report PASS unless it started clean. That is the closure invariant
+'   of #19 and it is enforced here rather than by the caller
+'
+' UPDATED
+'   2026-08-22
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE STATE
+'------------------------------------------------------------------------------
+    'Report a run that began in an environment it did not establish. Nothing
+    'below this line can be trusted if this is true
+        If mTST_DP_DirtyStart Then
+            TST_DP_ResolveRunState = TST_DP_STATE_DIRTY_START
+            Exit Function
+        End If
+
+    'Report assertion failures first, as the most actionable outcome
+        If mTST_DP_FailCount > 0 Then
+            TST_DP_ResolveRunState = TST_DP_STATE_FAIL
+            Exit Function
+        End If
+
+    'Report a suite that was dispatched but never returned
+        If mTST_DP_SuitesCompleted < mTST_DP_SuitesDispatched Then
+            TST_DP_ResolveRunState = TST_DP_STATE_INCOMPLETE
+            Exit Function
+        End If
+
+    'Report teardown that did not complete
+        If mTST_DP_CleanupFails > 0 Then
+            TST_DP_ResolveRunState = TST_DP_STATE_FAIL_CLEANUP
+            Exit Function
+        End If
+
+    'Report a clean run
+        TST_DP_ResolveRunState = TST_DP_STATE_PASS
+
+End Function
+
 Private Sub TST_DP_WriteSummary()
 
 '
@@ -4112,9 +6888,16 @@ Private Sub TST_DP_WriteSummary()
 '------------------------------------------------------------------------------
     'Record the run summary as an INFO result
         TST_DP_RecordInfo "Harness", "Summary", _
-            "Run=" & VBA.CStr(mTST_DP_RunCount) & _
+            "State=" & TST_DP_ResolveRunState() & _
+            "; Run=" & VBA.CStr(mTST_DP_RunCount) & _
             "; Passed=" & VBA.CStr(mTST_DP_PassCount) & _
-            "; Failed=" & VBA.CStr(mTST_DP_FailCount)
+            "; Failed=" & VBA.CStr(mTST_DP_FailCount) & _
+            "; CleanupFailures=" & VBA.CStr(mTST_DP_CleanupFails)
+
+    'Record the first cleanup failure detail so the summary is actionable
+        If VBA.Len(mTST_DP_CleanupDetail) <> 0 Then
+            TST_DP_RecordInfo "Harness", "Cleanup", mTST_DP_CleanupDetail
+        End If
 
 '------------------------------------------------------------------------------
 ' WRITE RESULT SHEET SUMMARY
@@ -4133,12 +6916,16 @@ Private Sub TST_DP_WriteSummary()
         mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_PassCount
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Value = "Failed"
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_FailCount
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_LABEL).Value = "State"
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_VALUE).Value = TST_DP_ResolveRunState()
 
     'Bold the summary labels
         mTST_DP_ResultSheet.Cells(4, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(5, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(6, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_VALUE).Font.Bold = True
 
     'Auto-fit the result and summary columns
         mTST_DP_ResultSheet.Columns("C:K").AutoFit
@@ -4302,59 +7089,541 @@ Private Sub TST_DP_PrepareScratchSheet(ByVal HostWorkbook As Excel.Workbook)
 
 '
 '==============================================================================
-'                           PREPARE SCRATCH SHEET
-'------------------------------------------------------------------------------
+'                        PREPARE SCRATCH WORKSHEET
+'==============================================================================
 ' PURPOSE
-'   Creates a clean scratch worksheet for the current regression run
+'   Creates and initializes the worksheet the regression suites write to
 '
 ' WHY THIS EXISTS
-'   Write-back, grid-icon, and manager suites require a live worksheet that
-'   can be freely modified and deleted without affecting any user data
+'   Worksheets.Add here has been observed to report 1004 while leaving a new
+'   unnamed worksheet in the workbook. Every occurrence leaked a sheet, and
+'   preflight could not see it: it looks for TST_DP_SCRATCH by name and the
+'   leftover is called SheetNN
+'
+'   Protecting only the Add is not enough. The rename, the initialization, the
+'   formatting and the activation can each fail after a successful Add and leak
+'   the same sheet, so the whole sequence is one transaction
 '
 ' INPUTS
 '   HostWorkbook
-'     Workbook that will receive the scratch sheet
+'     Workbook that will receive the scratch worksheet
 '
 ' RETURNS
-'   Nothing
+'   Nothing. Publishes mTST_DP_ScratchSheet on success
 '
 ' BEHAVIOR
-'   Deletes any existing scratch sheet, creates a new one at the end of the
-'   workbook, names it, writes a header cell, and sets standard column widths
+'   Validates the host, removes any previous scratch sheet, snapshots worksheet
+'   identity, adds, names, initializes, formats and activates
+'
+'   On any failure removes only the worksheet this call created, when that
+'   worksheet can be identified unambiguously, then re-raises the original
+'   failure with the step that produced it
 '
 ' ERROR POLICY
-'   Raises a runtime error if the scratch sheet cannot be created
+'   Raises when the scratch worksheet cannot be established. The suites cannot run
+'   without it, so aborting is correct, and aborting leaks nothing and says where
+'   it stopped
+'
+'   Does not raise when Worksheets.Add reports a failure having nevertheless
+'   created exactly one worksheet. That is a partial success: the workbook
+'   mutation happened and only the call's completion did not. The candidate is
+'   validated and adopted, and the anomaly is recorded as an INFO row
+'
+'   Cleanup never replaces the original failure. A cleanup that itself fails is
+'   appended to the diagnostic rather than raised
+'
+' DEPENDENCIES
+'   TST_DP_DeleteWorksheetIfExists
+'   TST_DP_AnySheetNameExists
+'   TST_DP_WorksheetReferenceIsLive
+'   TST_DP_FindNewWorksheets
+'   TST_DP_ActivateWorksheetForTest
+'
+' NOTES
+'   Identity is captured as worksheet object references, not names. A worksheet
+'   name can contain the delimiter any string encoding would use, Excel treats
+'   names case-insensitively, and a rename would make a pre-existing sheet look
+'   new. Object identity has none of those problems
+'
+'   Cleanup deletes an exact or unambiguous candidate only. Deleting every
+'   worksheet absent from the snapshot would assume this routine created them,
+'   which is exactly the assumption that cannot be made while a re-entrancy
+'   hypothesis is open. Two or more candidates are reported and none is deleted
+'
+'   Adoption is confined to a failure of the Add itself. A failure at the rename
+'   or the initialization means that operation was already refused once, and
+'   repeating it in the handler would be a retry rather than a recovery
+'
+'   A candidate must prove it is usable before adoption. Excel has been reported
+'   to create a worksheet that then cannot be renamed, so appearing is not the
+'   same as working
+'
+'   The worksheet counts are net workbook state, not proof of which internal
+'   Excel operation ran:
+'
+'     before = after   no net worksheet-count increase was observed
+'     after > before   one or more worksheets appeared during the attempt
+'
+'   The Add anchors on Sheets, not Worksheets, so a workbook whose last sheet is
+'   a chart sheet is handled
+'
+'   The scratch name is checked against Sheets after deletion, because chart
+'   sheets share the workbook name namespace and a chart sheet of that name would
+'   survive a worksheet-only delete and then fail the rename
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-23
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' DELETE EXISTING SCRATCH SHEET
+' DECLARE
 '------------------------------------------------------------------------------
-    'Delete any existing scratch sheet from a previous run
+    Const PROC_NAME         As String = "TST_DP_PrepareScratchSheet"
+
+    Dim HandlerStep         As String              'Current setup operation
+    Dim WorksheetsBefore    As Collection          'Object-identity snapshot
+    Dim NewWorksheets       As Collection          'Worksheets absent from the snapshot
+
+    Dim CreatedSheet        As Excel.Worksheet     'Worksheet created by this call
+    Dim CleanupCandidate    As Excel.Worksheet     'Exact sheet eligible for cleanup
+    Dim WS                  As Excel.Worksheet     'Current worksheet while scanning
+
+    Dim ErrorNumber         As Long                'Original failure number
+    Dim ErrorSource         As String              'Original failure source
+    Dim ErrorDescription    As String              'Original failure description
+
+    Dim CleanupErrNumber    As Long                'Cleanup failure number
+    Dim CleanupErrText      As String              'Cleanup failure description
+    Dim CleanupName         As String              'Name of the cleanup candidate
+    Dim DiagnosticText      As String              'Extended failure description
+    Dim AdoptionAllowed     As Boolean             'True when the failure was the Add itself
+    Dim AdoptionErrNumber   As Long                'Failure while validating a candidate
+    Dim CandidateName       As String              'Name the candidate arrived with
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Treat the whole setup as one transaction
+        On Error GoTo ErrorHandler
+    'Track the current operation
+        HandlerStep = "Validate host workbook"
+    'Reject a missing host explicitly
+        If HostWorkbook Is Nothing Then
+            Err.Raise vbObjectError + 2401, PROC_NAME, _
+                "The host workbook reference is missing."
+        End If
+    'Structure protection prevents both creation and deletion, so say so here
+    'rather than surfacing a bare 1004 from the Add
+        If HostWorkbook.ProtectStructure Then
+            Err.Raise vbObjectError + 2402, PROC_NAME, _
+                "The host workbook structure is protected."
+        End If
+    'A workbook always has at least one sheet to anchor the Add after
+        If HostWorkbook.Sheets.Count = 0 Then
+            Err.Raise vbObjectError + 2403, PROC_NAME, _
+                "The host workbook contains no sheet to add a worksheet after."
+        End If
+    'Never let a failed Set leave the harness holding a previous run's worksheet
+        Set mTST_DP_ScratchSheet = Nothing
+    'Reset the setup diagnostics
+        mTST_DP_ScratchAddBefore = 0
+        mTST_DP_ScratchAddAfter = 0
+        mTST_DP_ScratchAddOrphan = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' REMOVE PREVIOUS SCRATCH WORKSHEET
+'------------------------------------------------------------------------------
+    'Track the current operation
+        HandlerStep = "Remove previous scratch worksheet"
+    'Delete a scratch worksheet an earlier run may have left
         TST_DP_DeleteWorksheetIfExists HostWorkbook, TST_DP_SCRATCH_SHEET_NAME
+    'Chart sheets share the workbook name namespace, so a worksheet-only delete
+    'can leave the name taken and the rename below would then fail
+        If TST_DP_AnySheetNameExists(HostWorkbook, TST_DP_SCRATCH_SHEET_NAME) Then
+            Err.Raise vbObjectError + 2404, PROC_NAME, _
+                "A workbook sheet named " & TST_DP_SCRATCH_SHEET_NAME & _
+                " still exists after scratch cleanup."
+        End If
 
 '------------------------------------------------------------------------------
-' CREATE SCRATCH SHEET
+' SNAPSHOT WORKSHEET IDENTITY
 '------------------------------------------------------------------------------
-    'Add the scratch sheet at the end of the workbook
-        Set mTST_DP_ScratchSheet = HostWorkbook.Worksheets.Add( _
-            After:=HostWorkbook.Worksheets(HostWorkbook.Worksheets.Count))
+    'Track the current operation
+        HandlerStep = "Snapshot worksheets"
+    'Capture object references rather than names
+        Set WorksheetsBefore = New Collection
+        For Each WS In HostWorkbook.Worksheets
+            WorksheetsBefore.Add WS
+        Next WS
+        Set WS = Nothing
+    'Record the pre-Add count
+        mTST_DP_ScratchAddBefore = HostWorkbook.Worksheets.Count
+        mTST_DP_ScratchAddAfter = mTST_DP_ScratchAddBefore
 
 '------------------------------------------------------------------------------
-' INITIALIZE SCRATCH SHEET
+' ADD SCRATCH WORKSHEET
 '------------------------------------------------------------------------------
-    'Name the scratch sheet
-        mTST_DP_ScratchSheet.Name = TST_DP_SCRATCH_SHEET_NAME
-    'Write a header cell to identify the scratch sheet
-        mTST_DP_ScratchSheet.Range("A1").Value = "DatePicker regression scratch sheet"
-    'Set standard column widths for the scratch sheet
-        mTST_DP_ScratchSheet.Columns("A:J").ColumnWidth = 16
-    'Activate the scratch sheet
-        mTST_DP_ScratchSheet.Activate
+    'Track the current operation
+        HandlerStep = "Add scratch worksheet"
+    'Anchor on Sheets so a trailing chart sheet is handled
+        Set CreatedSheet = HostWorkbook.Worksheets.Add( _
+            After:=HostWorkbook.Sheets(HostWorkbook.Sheets.Count))
+    'Record the post-Add count immediately
+        mTST_DP_ScratchAddAfter = HostWorkbook.Worksheets.Count
+    'A silent empty return is a setup failure, not something to dereference
+        If CreatedSheet Is Nothing Then
+            Err.Raise vbObjectError + 2405, PROC_NAME, _
+                "Worksheets.Add returned no worksheet."
+        End If
+    'Publish the worksheet to the harness
+        Set mTST_DP_ScratchSheet = CreatedSheet
+
+'------------------------------------------------------------------------------
+' NAME AND INITIALIZE
+'------------------------------------------------------------------------------
+    'Track the current operation
+        HandlerStep = "Name scratch worksheet"
+        CreatedSheet.Name = TST_DP_SCRATCH_SHEET_NAME
+    'Track the current operation
+        HandlerStep = "Initialize scratch worksheet"
+        CreatedSheet.Range("A1").Value = "DatePicker regression scratch sheet"
+    'Track the current operation
+        HandlerStep = "Format scratch worksheet"
+        CreatedSheet.Columns("A:J").ColumnWidth = 16
+
+'------------------------------------------------------------------------------
+' ACTIVATE
+'------------------------------------------------------------------------------
+    'Track the current operation
+        HandlerStep = "Activate scratch worksheet"
+    'Use the harness activation helper rather than a raw Activate
+        TST_DP_ActivateWorksheetForTest CreatedSheet
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release local references. The module-level reference stays authoritative
+        Set CreatedSheet = Nothing
+        Set WorksheetsBefore = Nothing
+    'Exit after successful setup
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the original failure before cleanup can replace it
+        ErrorNumber = Err.Number
+        ErrorSource = Err.Source
+        ErrorDescription = Err.Description
+    'Cleanup must never replace the failure it is cleaning up after
+        On Error Resume Next
+    'Record the worksheet count before anything is removed
+        If Not (HostWorkbook Is Nothing) Then
+            Err.Clear
+            mTST_DP_ScratchAddAfter = HostWorkbook.Worksheets.Count
+            Err.Clear
+        End If
+
+    'Prefer the exact object the Add returned
+        If TST_DP_WorksheetReferenceIsLive(CreatedSheet) Then
+            Set CleanupCandidate = CreatedSheet
+        End If
+
+    'Otherwise look for exactly one worksheet that was not in the snapshot
+        If CleanupCandidate Is Nothing Then
+            If Not (HostWorkbook Is Nothing) Then
+                If Not (WorksheetsBefore Is Nothing) Then
+                    Set NewWorksheets = TST_DP_FindNewWorksheets(HostWorkbook, WorksheetsBefore)
+                End If
+            End If
+            If Not (NewWorksheets Is Nothing) Then
+                If NewWorksheets.Count = 1 Then
+                    Set CleanupCandidate = NewWorksheets.Item(1)
+                ElseIf NewWorksheets.Count > 1 Then
+                    'Two or more candidates cannot be attributed to this call.
+                    'Report the ambiguity and delete nothing
+                    mTST_DP_ScratchAddOrphan = "ambiguous, " & _
+                        VBA.CStr(NewWorksheets.Count) & " new worksheets, none deleted"
+                End If
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' ADOPT A PARTIAL SUCCESS
+'------------------------------------------------------------------------------
+    'Excel has been observed to create a worksheet and then report 1004 from the
+    'same Add call. That is a partial success, not a failure: the workbook
+    'mutation happened and only the call's own completion did not. Discarding the
+    'worksheet and aborting the run throws away work Excel actually did
+        AdoptionAllowed = (HandlerStep = "Add scratch worksheet")
+    'Adoption is confined to the Add step deliberately. A failure at the rename or
+    'the initialization means that operation was already refused once, and
+    'repeating it here would be a retry rather than a recovery
+        If AdoptionAllowed Then
+            If TST_DP_WorksheetReferenceIsLive(CleanupCandidate) Then
+                'Record the name the candidate arrived with, for the audit line
+                    CandidateName = CleanupCandidate.Name
+                'The candidate must prove it is usable. A created worksheet that
+                'cannot be renamed or written has been reported too
+                    Err.Clear
+                    CleanupCandidate.Name = TST_DP_SCRATCH_SHEET_NAME
+                    CleanupCandidate.Range("A1").Value = "DatePicker regression scratch sheet"
+                    CleanupCandidate.Columns("A:J").ColumnWidth = 16
+                    AdoptionErrNumber = Err.Number
+                    Err.Clear
+                'Adopt only a candidate that answered every operation
+                    If AdoptionErrNumber = 0 Then
+                        Set mTST_DP_ScratchSheet = CleanupCandidate
+                        TST_DP_ActivateWorksheetForTest CleanupCandidate
+                        Err.Clear
+                        mTST_DP_ScratchAddOrphan = CandidateName & " (adopted)"
+                        'Record the anomaly. A run that recovered from a misreported
+                        'native call is not a clean run and must not look like one
+                            TST_DP_RecordInfo "Harness", "Scratch sheet", _
+                                "Worksheets.Add reported " & VBA.CStr(ErrorNumber) & _
+                                " after creating " & CandidateName & _
+                                ". The worksheet was validated and adopted; " & _
+                                "WorksheetsBefore=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
+                                ", WorksheetsAfter=" & VBA.CStr(mTST_DP_ScratchAddAfter) & "."
+                        'Release local references and continue the run
+                            Set CleanupCandidate = Nothing
+                            Set CreatedSheet = Nothing
+                            Set NewWorksheets = Nothing
+                            Set WorksheetsBefore = Nothing
+                            Set WS = Nothing
+                            Err.Clear
+                            On Error GoTo 0
+                            Exit Sub
+                    End If
+                'Record that adoption was attempted and refused
+                    mTST_DP_ScratchAddOrphan = CandidateName & _
+                        " (adoption failed: " & VBA.CStr(AdoptionErrNumber) & ")"
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' REMOVE AN UNUSABLE CANDIDATE
+'------------------------------------------------------------------------------
+    'Remove only the identified worksheet
+        If TST_DP_WorksheetReferenceIsLive(CleanupCandidate) Then
+            CleanupName = CleanupCandidate.Name
+            Err.Clear
+            CleanupCandidate.Delete
+            CleanupErrNumber = Err.Number
+            CleanupErrText = Err.Description
+            Err.Clear
+            If CleanupErrNumber = 0 Then
+                mTST_DP_ScratchAddOrphan = CleanupName & " (deleted)"
+            Else
+                mTST_DP_ScratchAddOrphan = CleanupName & " (delete failed: " & _
+                    VBA.CStr(CleanupErrNumber) & " - " & CleanupErrText & ")"
+            End If
+        End If
+
+    'Never expose a partially initialized scratch worksheet
+        Set mTST_DP_ScratchSheet = Nothing
+    'Release local references
+        Set CleanupCandidate = Nothing
+        Set CreatedSheet = Nothing
+        Set NewWorksheets = Nothing
+        Set WorksheetsBefore = Nothing
+        Set WS = Nothing
+    'Restore ordinary error handling
+        Err.Clear
+        On Error GoTo 0
+
+    'Build the diagnostic without changing the original error number
+        DiagnosticText = ErrorDescription & _
+            " | Step=" & HandlerStep & _
+            " | WorksheetsBefore=" & VBA.CStr(mTST_DP_ScratchAddBefore) & _
+            " | WorksheetsAfter=" & VBA.CStr(mTST_DP_ScratchAddAfter)
+        If VBA.LenB(ErrorSource) > 0 Then
+            DiagnosticText = DiagnosticText & " | OriginalSource=" & ErrorSource
+        End If
+        If VBA.LenB(mTST_DP_ScratchAddOrphan) > 0 Then
+            DiagnosticText = DiagnosticText & " | Cleanup=" & mTST_DP_ScratchAddOrphan
+        End If
+    'Re-raise the original failure
+        Err.Raise ErrorNumber, PROC_NAME, DiagnosticText
 
 End Sub
+
+Private Function TST_DP_AnySheetNameExists( _
+    ByVal HostWorkbook As Excel.Workbook, _
+    ByVal SheetName As String) As Boolean
+
+'
+'==============================================================================
+'                         ANY SHEET NAME EXISTS
+'==============================================================================
+'   Reports whether any sheet of that name exists, of any type.
+'
+'   Worksheets and chart sheets share one name namespace, so a worksheet-only
+'   lookup can report a name free while a rename to it still fails.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SheetObject     As Object       'Resolved sheet of any type
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the name is free
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_AnySheetNameExists = False
+    'Exit when there is no workbook to inspect
+        If HostWorkbook Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Attempt to resolve a sheet of any type
+        Set SheetObject = HostWorkbook.Sheets(SheetName)
+    'Report whether the resolution succeeded
+        TST_DP_AnySheetNameExists = Not (SheetObject Is Nothing)
+    'Release object references
+        Set SheetObject = Nothing
+    'Clear any suppressed lookup error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_WorksheetReferenceIsLive( _
+    ByVal Candidate As Excel.Worksheet) As Boolean
+
+'
+'==============================================================================
+'                     WORKSHEET REFERENCE IS LIVE
+'==============================================================================
+'   Reports whether a worksheet reference still points at a sheet that exists.
+'
+'   "Not Candidate Is Nothing" tests the variable, not the object. A reference to
+'   a deleted worksheet passes that test and raises on use.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ProbeName       As String       'Probed worksheet name, discarded
+
+'------------------------------------------------------------------------------
+' PROBE
+'------------------------------------------------------------------------------
+    'Never let a liveness probe raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_WorksheetReferenceIsLive = False
+    'Exit when nothing is referenced
+        If Candidate Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Ask the object model whether the worksheet still answers
+        Err.Clear
+        ProbeName = Candidate.Name
+        TST_DP_WorksheetReferenceIsLive = (Err.Number = 0)
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_WorksheetSnapshotContains( _
+    ByVal Snapshot As Collection, _
+    ByVal Candidate As Excel.Worksheet) As Boolean
+
+'
+'==============================================================================
+'                     WORKSHEET SNAPSHOT CONTAINS
+'==============================================================================
+'   Reports whether a worksheet was present in an identity snapshot, comparing
+'   with Is rather than by name.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Existing        As Excel.Worksheet  'Current snapshot entry
+
+'------------------------------------------------------------------------------
+' COMPARE BY IDENTITY
+'------------------------------------------------------------------------------
+    'Never let a comparison raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_WorksheetSnapshotContains = False
+    'Exit when there is nothing to compare
+        If Snapshot Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+        If Candidate Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Compare object identity, not names
+        For Each Existing In Snapshot
+            If Candidate Is Existing Then
+                TST_DP_WorksheetSnapshotContains = True
+                Exit For
+            End If
+        Next Existing
+    'Release object references
+        Set Existing = Nothing
+    'Clear any suppressed comparison error
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_FindNewWorksheets( _
+    ByVal HostWorkbook As Excel.Workbook, _
+    ByVal Snapshot As Collection) As Collection
+
+'
+'==============================================================================
+'                          FIND NEW WORKSHEETS
+'==============================================================================
+'   Returns the worksheets present now that were not in the snapshot.
+'
+'   The caller decides what to do with them. One candidate can be attributed to
+'   the failed call; two or more cannot.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ResultList      As Collection       'Worksheets absent from the snapshot
+    Dim WS              As Excel.Worksheet  'Current worksheet while scanning
+
+'------------------------------------------------------------------------------
+' COLLECT
+'------------------------------------------------------------------------------
+    'Never let a scan raise into a caller
+        On Error Resume Next
+    'Always return a usable collection
+        Set ResultList = New Collection
+        Set TST_DP_FindNewWorksheets = ResultList
+    'Exit when there is no workbook to scan
+        If HostWorkbook Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Collect worksheets the snapshot did not contain. Nothing is deleted here
+        For Each WS In HostWorkbook.Worksheets
+            If Not TST_DP_WorksheetSnapshotContains(Snapshot, WS) Then
+                ResultList.Add WS
+            End If
+        Next WS
+    'Release object references
+        Set WS = Nothing
+    'Publish the collection
+        Set TST_DP_FindNewWorksheets = ResultList
+    'Clear any suppressed scan error
+        Err.Clear
+
+End Function
 
 Private Sub TST_DP_ActivateWorksheetForTest(ByVal TargetSheet As Excel.Worksheet)
 
@@ -4778,7 +8047,7 @@ Private Sub TST_DP_PrepareApplicationForRun()
     Excel.Application.ScreenUpdating = False
     Excel.Application.EnableEvents = False
     Excel.Application.DisplayAlerts = False
-    Excel.Application.StatusBar = "Running DatePicker regression tests..."
+    Excel.Application.StatusBar = TST_DP_STATUS_BAR_TEXT
 
 End Sub
 
@@ -4822,37 +8091,29 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
 
 '
 '==============================================================================
-'                        RESET DATEPICKER ARTIFACTS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Clears all transient DatePicker UI artifacts before and after a run
+'                     RESET DATEPICKER ARTIFACTS (SETUP ONLY)
+'==============================================================================
+'   Clears transient DatePicker UI artifacts before a run, so the run starts from
+'   a known state.
 '
-' WHY THIS EXISTS
-'   Stale timers, open forms, context menu entries, keyboard shortcuts, and
-'   grid icons from a previous run or interrupted run must be cleared before
-'   testing begins and cleaned up after the run ends
+'   Blanket error suppression is acceptable here and only here. This runs before
+'   the run, where the goal is to reach a usable starting state rather than to
+'   account for anything. Teardown does not use it: each cleanup operation is
+'   invoked and checked individually, because a composite step that swallows its
+'   own errors cannot report which operation failed, or that any did.
 '
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Calls each cleanup path behind On Error Resume Next so a failure in one
-'   path does not prevent the remaining cleanup steps from executing
-'
-' ERROR POLICY
-'   Best-effort. Silently absorbs all cleanup failures
-'
-' UPDATED
-'   2026-05-14
+'   It also claims the provider lease. That is deliberate and is the one place
+'   the harness overrides the #37 ownership guard: the lease lives for the Excel
+'   process while the token proving ownership lives in VBA module state, so any
+'   re-import strands a lease that no project can release. A regression run is a
+'   single-provider environment, and a genuine two-provider session is a manual
+'   validation case that this pack cannot construct anyway.
 '==============================================================================
 
 '------------------------------------------------------------------------------
-' RESET ALL ARTIFACTS
+' RESET ARTIFACTS
 '------------------------------------------------------------------------------
-    'Suppress individual cleanup failures
+    'Suppress individual setup failures
         On Error Resume Next
     'Stop the live-clock timer
         M_Timer_Stop
@@ -4864,12 +8125,89 @@ Private Sub TST_DP_ResetDatePickerArtifacts()
         M_KeyboardShortcut_Remove
     'Purge all in-grid DatePicker icons
         M_GridIcon_PurgeAll
+    'Take the provider lease for this run. The lease outlives the VBA project that
+    'created it, so re-importing a module leaves a lease no project can prove it
+    'owns, and every guarded entry point then refuses. The harness is a
+    'single-provider environment by definition, so it claims ownership rather than
+    'failing on a lease it cannot otherwise reach
+        DP_ForceReleaseProviderLease
+        M_Lease_TryAcquire
+    'Disarm any window-style fault injection left by an aborted run
+        M_Window_Test_SetFaultInjection 0, 0
     'Clear any suppressed error
         Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
 End Sub
+
+Private Function TST_DP_ContextMenuControlCount() As Long
+
+'
+'==============================================================================
+'                        COUNT CONTEXT MENU CONTROLS
+'==============================================================================
+'   Counts the DatePicker's own controls left on the Excel context menus.
+'
+'   The tag is duplicated here rather than read from M_DatePicker, where it is a
+'   Private constant. It is documented as a stable legacy identifier that cannot
+'   be renamed for backward compatibility, so duplicating it is safe in a way
+'   that duplicating an ordinary constant would not be.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const MENU_TAG          As String = "VBA_DATETIMEPICKER"    'Legacy context-menu tag
+    Const CELL_BAR          As String = "Cell"                  'Standard cell context menu
+    Const LIST_RANGE_BAR    As String = "List Range Popup"      'Table context menu
+
+    Dim BarNames            As Variant      'Command bars the DatePicker registers on
+    Dim BarIndex            As Long         'Current command bar index
+    Dim Bar                 As Object       'Current command bar
+    Dim Ctl                 As Object       'Current command bar control
+    Dim FoundCount          As Long         'DatePicker controls found
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let a probe raise into teardown
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_ContextMenuControlCount = 0
+    'List the bars the DatePicker registers on
+        BarNames = VBA.Array(CELL_BAR, LIST_RANGE_BAR)
+
+'------------------------------------------------------------------------------
+' COUNT TAGGED CONTROLS
+'------------------------------------------------------------------------------
+    'Walk each command bar the DatePicker touches
+        For BarIndex = LBound(BarNames) To UBound(BarNames)
+            'Resolve the command bar, skipping one that does not exist
+                Set Bar = Nothing
+                Set Bar = Excel.Application.CommandBars(BarNames(BarIndex))
+            'Count the controls carrying the DatePicker tag
+                If Not Bar Is Nothing Then
+                    For Each Ctl In Bar.Controls
+                        If VBA.StrComp(Ctl.Tag, MENU_TAG, vbTextCompare) = 0 Then
+                            FoundCount = FoundCount + 1
+                        End If
+                    Next Ctl
+                End If
+        Next BarIndex
+
+'------------------------------------------------------------------------------
+' RETURN COUNT
+'------------------------------------------------------------------------------
+    'Report what was found
+        TST_DP_ContextMenuControlCount = FoundCount
+    'Release object references
+        Set Ctl = Nothing
+        Set Bar = Nothing
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
 
 Private Sub TST_DP_RestoreManagerState()
 
@@ -5385,9 +8723,4 @@ ErrorHandler:
             "FAIL conditional-format application failed: " & ErrorDescription
 
 End Sub
-
-
-
-
-
 

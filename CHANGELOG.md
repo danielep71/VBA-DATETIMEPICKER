@@ -12,13 +12,15 @@
 
 ---
 
-Versioning applies to the **public VBA API** — every `DP_…` procedure, the
-`M_Settings_…` getters and setters, the `DP_WriteAction`, `DP_ClockMode` and
-`DP_SizeMode` enums, and the two stable legacy identifiers `VBA_DATETIMEPICKER`
-used as the registry application name and the command-bar tag.
+Versioning applies to the **documented supported consumer API and its established
+behavioral contracts**. A member that is technically `Public` only because Excel,
+Office, RibbonX, `Application.Run`, CommandBars, `OnTime`, Shape callbacks, or
+test infrastructure must resolve it is **not automatically supported API**.
 
-Internal module boundaries are not covered by it. A release that changes nothing
-public may still require every component in `src/` to be re-imported together.
+Compatibility-sensitive contracts include documented API names/signatures,
+public enums and result types, established defaults, write-back semantics,
+settings persistence, runtime ownership, and the stable
+`VBA_DATETIMEPICKER` identifiers.
 
 <details>
 <summary><strong>Section legend</strong></summary>
@@ -27,22 +29,330 @@ public may still require every component in `src/` to be re-imported together.
 
 | Section | Contains |
 |---|---|
-| ➕ **Added** | New members, suites, workflows or files |
-| 🔧 **Changed** | Behavior or contract changes to something that already existed |
-| 🐛 **Fixed** | Defects, each citing its issue |
-| 📖 **Documentation** | Corrections and additions to prose, with no code effect |
-| ✅ **Verified — no action required** | Reported defects that did not reproduce, with the evidence |
-| 🧪 **Validation** | The evidence the release was actually tested on |
-| 🔗 **Compatibility** | What upgrading requires, and what becomes newly observable |
-| ⚠️ **Known limitations** | What is deliberately not fixed, and where it is tracked |
-
-Release types follow semver: 🩹 **patch** corrects defects, ✨ **minor** adds
-backward-compatible capability, 💥 **major** may break callers.
+| ➕ **Added** | New supported capabilities, types, files or test capabilities |
+| 🔧 **Changed** | Final behavior or contract changes |
+| 🐛 **Fixed** | Defects corrected, with issue links for engineering detail |
+| 📖 **Documentation** | Current-state user, contributor and repository documentation |
+| 🧪 **Validation** | Evidence actually produced |
+| 🔗 **Compatibility** | Upgrade impact |
+| ⚠️ **Known limitations** | Deliberate boundaries that remain |
 
 </details>
 
 ---
 
+## [1.2.0] - 2026-08-25
+
+> ✨ **Minor** · safety, observability and runtime-ownership release
+
+### 🧭 Release intent
+
+`v1.2.0` makes four contracts explicit:
+
+1. **what the DatePicker writes** — safe selected-cell defaults, explicit broad
+   Table scope and formula preservation;
+2. **what it owns** — one participating current-version provider per Excel
+   process;
+3. **what happened** — structured worksheet/native outcomes and a harness whose
+   `PASS` includes clean start, completion and cleanup;
+4. **what the repository proves** — source, package validation and release
+   provenance are kept as distinct claims.
+
+This entry records the **final release state**. Detailed rationale, implementation
+history, exact commits and closure evidence remain in the linked GitHub issues.
+
+#### At a glance
+
+| Area | Final v1.2.0 outcome | Issue |
+|---|---|---|
+| Table scope | Normal write-back is selected/resolved-cell; Table-column fill is explicit | [#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13) |
+| Wiki | Full v1.2.0 rewrite with page-level source baseline | [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17) |
+| Harness errors | Real escaping error number/description preserved | [#18](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/18) |
+| Harness verdict | Five states; dirty start and cleanup affect `PASS` | [#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19) |
+| Native styling | Transactional result, rollback and `RecoveryRequired` | [#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20) |
+| Write observability | `DP_WriteResult`, counts and bounded addresses | [#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21) |
+| Formula safety | Preserve by default; explicit override | [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22) |
+| Demo | Source-built and add-in-safe | [#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23) |
+| Settings | Optional stable persistence namespace | [#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26) |
+| Provider ownership | Second v1.2.0 provider refused safely | [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37) |
+| README drift | API/event/write-scope text reconciled | [#41](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/41) |
+| Keyboard | Shortcut follows explicit configuration only | [#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42) |
+| Grid icon | Stale Shape references detected and cleared | [#44](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/44) |
+| Harness setup | Partial-success `Worksheets.Add` handled transactionally | [#45](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/45) |
+
+Repository findings [#33](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/33),
+[#34](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/34) and
+[#38](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/38) were
+consolidated into their owning provenance/workflow follow-up work. The automated
+traffic alert [#39](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/39)
+was classified as operational analytics rather than DatePicker remediation.
+
+---
+
+### ➕ Added
+
+- **`DP_FillTableColumn`** — explicit supported whole-Table-data-column write:
+
+  ```vb
+  Public Function DP_FillTableColumn( _
+      ByVal ValueToWrite As Date, _
+      Optional ByVal ConfirmFill As Boolean = True, _
+      Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult
+  ```
+
+  Confirmation describes the resolved Table/column scope before mutation, and
+  the applied target is checked against predicted `AttemptedCount`.
+  ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13),
+  [#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21),
+  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22))
+
+- **`DP_WriteResult`** — one structured write outcome covering attempted,
+  written, locked-skipped, formula-skipped and failed cells; worksheet-qualified
+  addresses; resolved target/Table metadata; area count; and caller event state.
+
+  Final accounting invariant:
+
+  ```text
+  AttemptedCount =
+      WrittenCount +
+      LockedSkippedCount +
+      FormulaSkippedCount +
+      FailedCount
+  ```
+
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21),
+  [#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22))
+
+- **`DP_WindowStyleResult`** — structured native-window outcome with
+  `Attempted`, `Applied`, `Committed`, `RolledBack`, `RecoveryRequired`,
+  `FailedStep` and `LastApiError`.
+  ([#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20))
+
+- **Settings namespaces** — `M_Settings_SetNamespace` /
+  `M_Settings_GetNamespace` isolate persistent preferences while retaining
+  `VBA_DATETIMEPICKER` as the backward-compatible default. Namespace selection
+  must happen before settings load; no automatic migration occurs.
+  ([#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26))
+
+- **One-provider lease** — a temporary process-visible CommandBar lease is
+  acquired before shared registrations. A second participating `v1.2.0`
+  provider is refused; `DP_Stop` and `DP_RepairRuntime` are ownership-guarded.
+  `DP_ForceReleaseProviderLease` is explicit operator-only recovery.
+  ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37))
+
+- **Source-built demo and stronger harness tooling** — the demo is generated from
+  `M_DEMO_BUILDER.bas` / `M_DP_DEMO.bas`; the harness adds clean-start
+  preflight, setup/environment diagnostics, self-checks and final-state
+  verification. Its verdict states are `PASS`, `FAIL`, `FAIL_CLEANUP`,
+  `FAIL_DIRTY_START` and `INCOMPLETE_SKIPPED`.
+  ([#18](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/18),
+  [#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19),
+  [#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23))
+
+---
+
+### 🔧 Changed
+
+- **Table writes are safe by default.** Calendar selection, `DP_Today` and
+  `DP_Now` no longer infer a whole Table data-column write from one selected
+  Table cell. Use `DP_FillTableColumn` when broad scope is intended.
+  ([#13](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/13))
+
+- **Formulas are preserved by default.** Ordinary and date-returning formulas
+  are reported as formula skips; ordinary formulas can be replaced only through
+  an explicit `OverwriteFormulas:=True` call where supported. Array formulas
+  remain non-overridable write failures.
+  ([#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22))
+
+- **Keyboard access is explicit.** `Ctrl + Shift + D` is no longer forced on
+  when right-click and the grid icon are disabled. Zero built-in interactive
+  access paths is a valid configuration. Removal restores Excel default handling,
+  not an unobservable third-party predecessor.
+  ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42))
+
+- **Borderless styling is transactional.** A post-commit native failure attempts
+  rollback; rollback failure produces `RecoveryRequired=True` without replacing
+  the original failure diagnostic.
+  ([#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20))
+
+- **Distribution is source-first.** Generated `.xlam` and demo `.xlsm` files are
+  release assets; committed VBA/Ribbon/UserForm/demo/test source remains the
+  reviewable source of truth.
+  ([#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23))
+
+---
+
+### 🐛 Fixed
+
+- **Write-back integrity:** fixed silent/non-raising Excel write outcomes around
+  array formulas, incorrect bulk-path written counts, and per-area shortfall
+  dialogs. `WrittenCount` now represents observed logical writes and one
+  interactive operation produces one shortfall summary.
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21))
+
+- **Formula destruction:** both bulk and per-cell paths now enforce the same
+  default preservation policy.
+  ([#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22))
+
+- **Harness error evidence:** suite handlers no longer erase the original error
+  before recording it.
+  ([#18](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/18))
+
+- **Harness run integrity:** cleanup failures, incomplete suites and dirty
+  predecessor state can no longer result in `PASS`; final observable state is
+  verified after teardown where Excel exposes it.
+  ([#19](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/19))
+
+- **Scratch-sheet setup:** an observed `Worksheets.Add` partial-success condition
+  is recovered only when one new worksheet can be identified and validated.
+  Zero candidates fail; multiple candidates are ambiguous and none is deleted.
+  No blind retry is performed.
+  ([#45](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/45))
+
+- **Settings isolation/cleanup:** deployments can opt into independent persistence,
+  and regression namespace cleanup no longer leaves empty test application keys.
+  ([#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26))
+
+- **Grid-icon lifecycle:** stale retained `Shape` references no longer raise
+  teardown noise or suppress future icon creation; stale state is detected and
+  cleared before use.
+  ([#44](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/44))
+
+- **Documentation/source drift:** README statements and the full Wiki were
+  reconciled with the final v1.2.0 API and behavior.
+  ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17),
+  [#41](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/41))
+
+---
+
+### 📖 Documentation
+
+- Rebuilt `README.md` as the current technical landing page.
+- Added `INSTALLATION.md` for source/add-in deployment, upgrade and recovery.
+- Rebuilt `CONTRIBUTING.md` around v1.2.0 engineering contracts.
+- Expanded `SECURITY.md` and `CODE_OF_CONDUCT.md` around trust boundaries and
+  evidence-led collaboration.
+- Rebuilt the pull-request, bug-report and feature-request templates around
+  write scope, formulas, provider ownership, namespaces, native outcomes and
+  harness evidence.
+- Hardened `.gitignore` for the source-first repository policy.
+- Completed the Wiki rewrite against source baseline:
+
+  ```text
+  6435c9170f1707a6269f2e307d158a0faf0cae21
+  ```
+
+  All 21 substantive pages carry:
+
+  ```text
+  Applies to:      v1.2.0
+  Reviewed commit: 6435c91
+  ```
+
+  ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17))
+
+---
+
+### 🧪 Validation
+
+Final recorded standard source regression:
+
+```text
+State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+```
+
+Additional recorded evidence includes formula/literal/array-formula write
+classification, independent native-window state verification, settings namespace
+isolation/cleanup, and a real two-project `v1.2.0` provider matrix covering
+refusal, refused teardown/repair, ownership transfer, stale-lease failure,
+Excel-restart recovery, WinAPI-disabled operation and clean release.
+([#20](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/20),
+[#22](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/22),
+[#26](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/26),
+[#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37))
+
+The final packaged `v1.2.0` `.xlam` remains a **release-certification boundary**:
+source regression does not by itself establish package-specific smoke or exact
+source↔asset provenance.
+
+---
+
+### 🔗 Compatibility
+
+`v1.2.0` is a **minor release**.
+
+- No existing documented supported consumer member is removed or renamed.
+- New supported capabilities/types include:
+
+  ```text
+  DP_FillTableColumn
+  DP_WriteResult
+  DP_WindowStyleResult
+  M_Settings_SetNamespace
+  M_Settings_GetNamespace
+  DP_ForceReleaseProviderLease
+  ```
+
+- **Table scope:** existing code relying on omitted/default arguments to fill a
+  whole Table column must move to explicit `DP_FillTableColumn` or an intentional
+  internal broad-scope call.
+
+- **Formulas:** code intentionally replacing ordinary formulas must explicitly
+  opt in to formula overwrite on a supported write path.
+
+- **Keyboard:** code relying on the shortcut re-enabling itself must now enable it
+  explicitly.
+
+- **Providers:** only one participating current-version provider may own an Excel
+  process. A second is refused and cannot tear down/repair the owner.
+
+- **Settings:** installations that configure no namespace keep the exact legacy
+  persistence location/meaning. Isolation is opt-in and must be selected before
+  settings load.
+
+- **Partial writes:** skipped/failed cells are now observable through
+  `DP_WriteResult`; interactive reporting is consolidated once per operation.
+
+- **Harness consumers:** parse the named `State=...` verdict and fields rather
+  than treating assertion totals alone as certification.
+
+Technically `Public` callbacks/test seams and undocumented `M_...` helpers are not
+automatically part of the supported consumer contract; code calling them directly
+should be reviewed when upgrading.
+
+---
+
+### ⚠️ Known limitations
+
+- **True multi-provider coexistence is not implemented.** v1.2.0 provides one
+  owner plus refusal, not arbitration.
+  ([#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14))
+
+- **Mixed-version sessions are unprotected.** A pre-v1.2.0 provider does not
+  participate in the lease protocol.
+
+- **`Application.OnKey` predecessor state is unobservable.** Teardown restores
+  Excel default handling, not an unknown displaced macro.
+
+- **Default settings are still Windows-user-global** unless a stable namespace is
+  configured before settings load.
+
+- **Exact source↔release-asset provenance is not yet guaranteed.**
+  ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16))
+
+- **Automated software-quality / release certification is still incomplete.**
+  Traffic analytics is operational telemetry, not DatePicker CI.
+  ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15))
+
+- **The technically `Public` surface remains larger than the supported API.**
+  Formal supported/callback/internal classification remains follow-up work.
+  ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25))
+
+- **Accessibility, high-DPI and high-contrast behavior is not fully certified**
+  across Office/display configurations.
+  ([#29](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/29))
+
+---
 ## [1.1.1] - 2026-08-22
 
 > 🩹 **Patch** · correctness and disclosure release · public API unchanged
@@ -395,7 +705,8 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.0.0

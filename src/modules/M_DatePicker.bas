@@ -53,8 +53,11 @@ Option Explicit
 '   Registry and context-menu identifiers retain VBA_DATETIMEPICKER as stable
 '   legacy names for backward compatibility
 '
+'   DP_WriteResult is the one structured outcome of a write-back. Later write
+'   policies extend it rather than adding a parallel reporting mechanism
+'
 ' UPDATED
-'   2026-05-06
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -267,6 +270,10 @@ Option Explicit
 
 
     Public Const DP_SETTINGS_APP_NAME              As String = "VBA_DATETIMEPICKER"      'Legacy registry application name
+    Private Const DP_SETTINGS_NAMESPACE_SEPARATOR  As String = "__"                      'Separates the legacy name from an optional namespace
+    Private Const DP_LEASE_BAR_NAME                As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"  'Application-wide provider lease
+    Private Const DP_LEASE_MARKER_TAG              As String = "VBA_DATETIMEPICKER_RUNTIME_LEASE_OWNER"         'Identifies the lease marker control
+    Private Const DP_LEASE_AMBIGUOUS               As String = "?"                       'Sentinel for a lease that cannot be read
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
     Public Const DP_MSGBOX_TITLE                   As String = "Date / Time Picker"      'Message-box title
 
@@ -316,6 +323,46 @@ Option Explicit
     End Enum
 
 '------------------------------------------------------------------------------
+' PUBLIC TYPES
+'------------------------------------------------------------------------------
+    'Structured outcome of one borderless-window styling operation
+    Public Type DP_WindowStyleResult
+        Attempted               As Boolean      'True when the native style was actually touched
+        Applied                 As Boolean      'True when the borderless style is fully in effect
+        Committed               As Boolean      'True once the style write succeeded
+        RolledBack              As Boolean      'True when the original style was restored
+        RecoveryRequired        As Boolean      'True when the window is in no known good state
+        FailedStep              As String       'Step that failed, empty on success
+        LastApiError            As Long         'WinAPI last-error behind the failure
+    End Type
+
+    'Structured outcome of one DatePicker write-back operation
+    Public Type DP_WriteResult
+        AttemptedCount          As Double       'Cells the write-back targeted
+        WrittenCount            As Double       'Cells that received the value
+        LockedSkippedCount      As Double       'Protected locked cells skipped
+        LockedSkippedAddresses  As String       'Addresses of the skipped locked cells
+        FormulaSkippedCount     As Double       'Formula cells preserved by policy
+        FormulaSkippedAddresses As String       'Addresses of the preserved formula cells
+        FailedCount             As Double       'Other suppressed write failures
+        FailedAddresses         As String       'Addresses of the failed cells
+        ResolvedTargetAddress   As String       'Address of the resolved target
+        ExpandedToTableColumn   As Boolean      'True when a table column was resolved
+        TableName               As String       'Owning table when expanded
+        ColumnName              As String       'Resolved column when expanded
+        AreasCount              As Long         'Discontiguous areas in the target
+        EventsDisabledByCaller  As Boolean      'True when events were already off
+    End Type
+
+'------------------------------------------------------------------------------
+' TEST FAULT INJECTION STATE
+'------------------------------------------------------------------------------
+    'Armed failure point for the next borderless-styling call, zero when disarmed
+    Private mDP_TestWindowPrimaryFailure    As Long
+    'Armed rollback failure point for that same call, zero when disarmed
+    Private mDP_TestWindowRollbackFailure   As Long
+
+'------------------------------------------------------------------------------
 ' PUBLIC STATE
 '------------------------------------------------------------------------------
     Public gDP_Manager                  As cDatePickerManager   'DatePicker manager/controller
@@ -345,6 +392,8 @@ Option Explicit
 ' PRIVATE STATE
 '------------------------------------------------------------------------------
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
+    Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
+    Private mDP_RuntimeOwnerId          As String               'Ephemeral lease token, non-empty only while this project owns the lease
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
     Private mDP_TimerIsRunning          As Boolean              'Timer running flag
     Private mDP_TimerProcedureName      As String               'Qualified OnTime timer procedure name
@@ -369,6 +418,308 @@ Option Explicit
 '                                   SETTINGS
 '
 '------------------------------------------------------------------------------
+
+Private Function M_Settings_GetEffectiveAppName() As String
+
+'
+'------------------------------------------------------------------------------
+'                     RESOLVE EFFECTIVE APPLICATION NAME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the VBA registry application name every settings read and write uses
+'
+' WHY THIS EXISTS
+'   Every deployment persisted to one application name, so two workbooks that
+'   never ran at the same time could still overwrite each other's preferences.
+'   Loading is itself a write boundary here, because M_Settings_Load persists the
+'   normalized values it just read
+'
+'   Resolution is centralized so no call site constructs the name itself. A
+'   namespace applied at 28 call sites would be wrong at one of them eventually
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The legacy application name when no namespace is configured
+'
+'   The namespaced application name otherwise
+'
+' BEHAVIOR
+'   Appends the configured namespace to the legacy identifier
+'
+' ERROR POLICY
+'   Does not raise. The namespace was validated when it was configured
+'
+' DEPENDENCIES
+'   DP_SETTINGS_APP_NAME
+'   mDP_SettingsNamespace
+'
+' NOTES
+'   DP_SETTINGS_APP_NAME is unchanged and still means the default application
+'   name. An installation that configures no namespace reads and writes exactly
+'   where earlier releases did
+'
+'   The separator is a double underscore, which the namespace validator rejects
+'   inside a namespace, so two different namespaces cannot resolve to one
+'   effective name
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Use the legacy application name when nothing is configured
+        If VBA.LenB(mDP_SettingsNamespace) = 0 Then
+            M_Settings_GetEffectiveAppName = DP_SETTINGS_APP_NAME
+        Else
+            M_Settings_GetEffectiveAppName = DP_SETTINGS_APP_NAME & _
+                DP_SETTINGS_NAMESPACE_SEPARATOR & mDP_SettingsNamespace
+        End If
+
+End Function
+
+Public Sub M_Settings_SetNamespace(ByVal NamespaceName As String)
+
+'
+'------------------------------------------------------------------------------
+'                        SET SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Isolates this deployment's persisted settings from every other deployment
+'   running under the same Windows user
+'
+' WHY THIS EXISTS
+'   The default persistence scope is the Windows user, not the workbook. Some
+'   settings are plausible user preferences; others describe one deployment's
+'   integration, and HolidayCallback is a callback name this component later
+'   executes through Application.Run. A callback chosen for one workbook should
+'   not be inherited by another merely because both persist to the same place
+'
+' INPUTS
+'   NamespaceName
+'     Caller-supplied persistence scope. An empty string restores the legacy
+'     default
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Validates and stores the namespace, which every later settings read and write
+'   resolves through
+'
+' ERROR POLICY
+'   Raises when called after settings have been loaded, and when the supplied
+'   namespace cannot be used
+'
+' DEPENDENCIES
+'   mSettingsLoaded
+'   M_Settings_ValidateNamespace
+'
+' NOTES
+'   Call this before anything that loads settings, which includes ordinary
+'   DatePicker startup. Changing the namespace after a load would leave values
+'   read from one namespace being written into another, so it is refused rather
+'   than silently reinterpreted
+'
+'   The namespace is chosen by the caller. It is never derived from
+'   ThisWorkbook.Name, FullName or any path: those change when a file is renamed,
+'   moved or copied, and settings would appear to vanish. Nor is the release
+'   version appended, which would make every upgrade look like a settings reset
+'
+'   This is a persistence scope, not a runtime owner token. The one-provider
+'   lease in #37 is runtime state that must not reach the registry, because a
+'   persisted lease would survive an Excel restart and block startup forever
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Settings_SetNamespace"
+
+    Dim Normalized      As String       'Validated namespace
+
+'------------------------------------------------------------------------------
+' REJECT A LATE CHANGE
+'------------------------------------------------------------------------------
+    'Settings already in memory came from the current namespace. Repointing now
+    'would write them into a different one
+        If mSettingsLoaded Then
+            Err.Raise vbObjectError + 2601, PROC_NAME, _
+                "The settings namespace cannot be changed after settings have " & _
+                "been loaded. Configure it before any DatePicker entry point runs."
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Resolve the namespace this deployment will persist under
+        Normalized = M_Settings_ValidateNamespace(NamespaceName)
+
+'------------------------------------------------------------------------------
+' STORE
+'------------------------------------------------------------------------------
+    'Apply the validated namespace to every later read and write
+        mDP_SettingsNamespace = Normalized
+
+End Sub
+
+Public Function M_Settings_GetNamespace() As String
+
+'
+'------------------------------------------------------------------------------
+'                        GET SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the configured settings namespace
+'
+' WHY THIS EXISTS
+'   A caller that configured a namespace, and a diagnostic reading where settings
+'   came from, both need to see it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The configured namespace, or an empty string when the legacy default is in
+'   use
+'
+' BEHAVIOR
+'   Returns the stored value without resolving it to an application name
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   mDP_SettingsNamespace
+'
+' NOTES
+'   An empty result means the deployment persists exactly where earlier releases
+'   did
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETURN NAMESPACE
+'------------------------------------------------------------------------------
+    'Report the configured namespace
+        M_Settings_GetNamespace = mDP_SettingsNamespace
+
+End Function
+
+Private Function M_Settings_ValidateNamespace( _
+    ByVal NamespaceName As String) As String
+
+'
+'------------------------------------------------------------------------------
+'                       VALIDATE SETTINGS NAMESPACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Normalizes a caller-supplied namespace and rejects one that cannot be used
+'
+' WHY THIS EXISTS
+'   The namespace becomes part of a registry application name. A value containing
+'   a path separator, a control character or the reserved separator would either
+'   fail unpredictably or let two different namespaces resolve to the same
+'   effective name, which would defeat the isolation entirely
+'
+' INPUTS
+'   NamespaceName
+'     Caller-supplied namespace
+'
+' RETURNS
+'   The normalized namespace
+'
+'   An empty string when the caller supplied only whitespace or nothing, which
+'   selects the legacy default
+'
+' BEHAVIOR
+'   Trims surrounding whitespace, then rejects a value that is too long or
+'   contains a character that would make the effective name ambiguous
+'
+' ERROR POLICY
+'   Raises a descriptive error naming the offending condition
+'
+' DEPENDENCIES
+'   DP_SETTINGS_NAMESPACE_SEPARATOR
+'
+' NOTES
+'   Validation is deterministic: the same input always resolves to the same
+'   namespace, and two different valid namespaces never resolve to one effective
+'   application name
+'
+'   An empty namespace is not an error. It is how a caller returns to the legacy
+'   default before settings load
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_Settings_ValidateNamespace"
+    Const MAX_LENGTH        As Long = 64            'Longest supported namespace
+
+    Dim Normalized          As String       'Trimmed namespace
+    Dim CharIndex           As Long         'Current character position
+    Dim CharCode            As Long         'Current character code
+
+'------------------------------------------------------------------------------
+' NORMALIZE
+'------------------------------------------------------------------------------
+    'Trim surrounding whitespace so " Books " and "Books" are one namespace
+        Normalized = VBA.Trim$(NamespaceName)
+    'An empty namespace selects the legacy default and is not an error
+        If VBA.LenB(Normalized) = 0 Then
+            M_Settings_ValidateNamespace = VBA.vbNullString
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' VALIDATE
+'------------------------------------------------------------------------------
+    'Bound the length so the effective application name stays usable
+        If VBA.Len(Normalized) > MAX_LENGTH Then
+            Err.Raise vbObjectError + 2602, PROC_NAME, _
+                "The settings namespace cannot exceed " & VBA.CStr(MAX_LENGTH) & _
+                " characters."
+        End If
+    'Reject the reserved separator, which would let two namespaces collide
+        If VBA.InStr(1, Normalized, DP_SETTINGS_NAMESPACE_SEPARATOR, vbBinaryCompare) > 0 Then
+            Err.Raise vbObjectError + 2603, PROC_NAME, _
+                "The settings namespace cannot contain " & _
+                DP_SETTINGS_NAMESPACE_SEPARATOR & "."
+        End If
+    'Reject characters that would make the registry location ambiguous
+        For CharIndex = 1 To VBA.Len(Normalized)
+            CharCode = VBA.Asc(VBA.Mid$(Normalized, CharIndex, 1))
+            If CharCode < 32 Then
+                Err.Raise vbObjectError + 2604, PROC_NAME, _
+                    "The settings namespace cannot contain control characters."
+            End If
+            Select Case VBA.Mid$(Normalized, CharIndex, 1)
+                Case "\", "/", ":", "*", "?", """", "<", ">", "|"
+                    Err.Raise vbObjectError + 2605, PROC_NAME, _
+                        "The settings namespace cannot contain the character " & _
+                        VBA.Mid$(Normalized, CharIndex, 1) & "."
+            End Select
+        Next CharIndex
+
+'------------------------------------------------------------------------------
+' RETURN NORMALIZED NAMESPACE
+'------------------------------------------------------------------------------
+    'Return the validated namespace
+        M_Settings_ValidateNamespace = Normalized
+
+End Function
 
 Public Sub M_Settings_Load()
 
@@ -426,12 +777,17 @@ Public Sub M_Settings_Load()
 '   Settings are saved after load so invalid, missing, legacy, or unsupported
 '   values are normalized in persistent storage
 '
-'   If right-click integration and in-grid icon integration are both disabled,
-'   keyboard shortcut access is forced on to avoid a configuration with no
-'   practical manual DatePicker entry point
+'   Access-path settings reflect explicit configuration. Disabling right-click
+'   and in-grid icon access no longer re-enables the keyboard shortcut, because
+'   Application.OnKey is a session-wide binding and the DatePicker must not take
+'   it on behalf of a user who did not choose it
+'
+'   Zero built-in interactive access paths is a permitted configuration. The
+'   picker is then opened through DP_Show, a Ribbon integration, or a
+'   caller-supplied entry point
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -464,7 +820,7 @@ Public Sub M_Settings_Load()
 
     'Read the first-day-of-week setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_FIRST_DAY_OF_WEEK, _
             VBA.CStr(DP_DEFAULT_FIRST_DAY_OF_WEEK))
@@ -479,7 +835,7 @@ Public Sub M_Settings_Load()
         HandlerStep = "Load local-name setting"
     'Read the local-name setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_USE_LOCAL_NAMES, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_USE_LOCAL_NAMES))
@@ -495,7 +851,7 @@ Public Sub M_Settings_Load()
 
     'Read the weekend-highlight setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_HIGHLIGHT_WEEKENDS, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_HIGHLIGHT_WEEKENDS))
@@ -514,14 +870,14 @@ Public Sub M_Settings_Load()
 
     'Read the outside-month setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
                 M_Settings_BooleanToStorageValue(DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION))
@@ -538,14 +894,14 @@ Public Sub M_Settings_Load()
         
     'Read the close-after-selection setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOSE_AFTER_SELECTION, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_CLOSE_AFTER_SELECTION, _
                 M_Settings_BooleanToStorageValue(DP_DEFAULT_CLOSE_AFTER_SELECTION))
@@ -562,14 +918,14 @@ Public Sub M_Settings_Load()
 
     'Read the clock mode setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOCK_MODE, _
             VBA.vbNullString)
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_CLOCK_MODE, _
                 VBA.CStr(VBA.CLng(DP_ClockMode_Static)))
@@ -590,7 +946,7 @@ Public Sub M_Settings_Load()
 
     'Read the size mode setting from the Behavior section
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_SIZE_MODE, _
             VBA.vbNullString)
@@ -598,7 +954,7 @@ Public Sub M_Settings_Load()
     'Fall back to the legacy Display section when needed
         If VBA.LenB(RawValue) = 0 Then
             RawValue = GetSetting( _
-                DP_SETTINGS_APP_NAME, _
+                M_Settings_GetEffectiveAppName(), _
                 DP_SETTINGS_SECTION_DISPLAY, _
                 DP_SETTING_SIZE_MODE, _
                 VBA.CStr(VBA.CLng(DP_SizeMode_Normal)))
@@ -622,7 +978,7 @@ Public Sub M_Settings_Load()
 
     'Read the right-click setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_RIGHT_CLICK, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_RIGHT_CLICK))
@@ -638,7 +994,7 @@ Public Sub M_Settings_Load()
 
     'Read the grid-icon setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_GRID_ICON, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_SHOW_GRID_ICON))
@@ -654,7 +1010,7 @@ Public Sub M_Settings_Load()
 
     'Read the keyboard shortcut setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_ENABLE_KEYBOARD, _
             M_Settings_BooleanToStorageValue(DP_DEFAULT_ENABLE_KEYBOARD))
@@ -673,7 +1029,7 @@ Public Sub M_Settings_Load()
 
     'Read the WinAPI setting
         RawValue = GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_USE_WINAPI, _
             M_Settings_BooleanToStorageValue(PlatformCanUseWinAPI))
@@ -689,23 +1045,10 @@ Public Sub M_Settings_Load()
 
     'Read the holiday callback setting
         gDP_HolidayCallbackName = VBA.Trim$(GetSetting( _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_HOLIDAY_CALLBACK, _
             DP_DEFAULT_HOLIDAY_CALLBACK))
-
-'------------------------------------------------------------------------------
-' NORMALIZE ACCESS SETTINGS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Normalize access settings"
-
-    'Force keyboard access when both contextual and visible entry points are disabled
-        If Not gDP_ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                gDP_EnableKeyboardShortcut = True
-            End If
-        End If
 
 '------------------------------------------------------------------------------
 ' FINALIZE SETTINGS LOAD
@@ -782,15 +1125,20 @@ Public Sub M_Settings_Save()
 '   Behavior settings are persisted under the Behavior section. The load path
 '   still supports the previous Display-section location for migration purposes
 '
-'   If right-click menu and in-grid icon access are both disabled, keyboard
-'   shortcut access is forced on to avoid a configuration with no practical
-'   manual DatePicker entry point
+'   Access-path settings reflect explicit configuration. Disabling right-click
+'   and in-grid icon access no longer re-enables the keyboard shortcut, because
+'   Application.OnKey is a session-wide binding and the DatePicker must not take
+'   it on behalf of a user who did not choose it
+'
+'   Zero built-in interactive access paths is a permitted configuration. The
+'   picker is then opened through DP_Show, a Ribbon integration, or a
+'   caller-supplied entry point
 '
 '   WinAPI styling is saved as disabled when the current platform does not
 '   support WinAPI helpers
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -831,19 +1179,6 @@ Public Sub M_Settings_Save()
     'Disable WinAPI styling when the current platform does not support it
         If Not PlatformCanUseWinAPI Then
             gDP_UseWinAPI = False
-        End If
-
-'------------------------------------------------------------------------------
-' NORMALIZE ACCESS SETTINGS
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Normalize access settings"
-
-    'Keep the keyboard shortcut enabled when all visible/contextual entry points are disabled
-        If Not gDP_ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                gDP_EnableKeyboardShortcut = True
-            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -893,7 +1228,7 @@ Public Sub M_Settings_Save()
 
     'Save the first-day-of-week setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_FIRST_DAY_OF_WEEK, _
             VBA.CStr(gDP_FirstDayOfWeek)
@@ -903,7 +1238,7 @@ Public Sub M_Settings_Save()
 
     'Save the local-name setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_USE_LOCAL_NAMES, _
             M_Settings_BooleanToStorageValue(gDP_UseLocalNames)
@@ -913,7 +1248,7 @@ Public Sub M_Settings_Save()
 
     'Save the weekend-highlight setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_DISPLAY, _
             DP_SETTING_HIGHLIGHT_WEEKENDS, _
             M_Settings_BooleanToStorageValue(gDP_HighlightWeekends)
@@ -926,7 +1261,7 @@ Public Sub M_Settings_Save()
 
     'Save the outside-month setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_ALLOW_OUTSIDE_MONTH_SELECTION, _
             M_Settings_BooleanToStorageValue(gDP_AllowOutsideMonthSelection)
@@ -936,7 +1271,7 @@ Public Sub M_Settings_Save()
 
     'Save the close-after-selection setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOSE_AFTER_SELECTION, _
             M_Settings_BooleanToStorageValue(gDP_CloseAfterSelection)
@@ -946,7 +1281,7 @@ Public Sub M_Settings_Save()
 
     'Save the clock mode setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_CLOCK_MODE, _
             VBA.CStr(VBA.CLng(gDP_ClockMode))
@@ -956,7 +1291,7 @@ Public Sub M_Settings_Save()
 
     'Save the size mode setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_BEHAVIOR, _
             DP_SETTING_SIZE_MODE, _
             VBA.CStr(VBA.CLng(gDP_SizeMode))
@@ -969,7 +1304,7 @@ Public Sub M_Settings_Save()
 
     'Save the right-click setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_RIGHT_CLICK, _
             M_Settings_BooleanToStorageValue(gDP_ShowRightClick)
@@ -979,7 +1314,7 @@ Public Sub M_Settings_Save()
 
     'Save the grid-icon setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_SHOW_GRID_ICON, _
             M_Settings_BooleanToStorageValue(gDP_ShowGridIcon)
@@ -989,7 +1324,7 @@ Public Sub M_Settings_Save()
 
     'Save the keyboard shortcut setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_FEATURES, _
             DP_SETTING_ENABLE_KEYBOARD, _
             M_Settings_BooleanToStorageValue(gDP_EnableKeyboardShortcut)
@@ -1002,7 +1337,7 @@ Public Sub M_Settings_Save()
 
     'Save the WinAPI setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_USE_WINAPI, _
             M_Settings_BooleanToStorageValue(gDP_UseWinAPI)
@@ -1012,7 +1347,7 @@ Public Sub M_Settings_Save()
 
     'Save the holiday callback setting
         SaveSetting _
-            DP_SETTINGS_APP_NAME, _
+            M_Settings_GetEffectiveAppName(), _
             DP_SETTINGS_SECTION_ADVANCED, _
             DP_SETTING_HOLIDAY_CALLBACK, _
             gDP_HolidayCallbackName
@@ -1068,11 +1403,17 @@ Private Sub M_Settings_InitializeDefaults()
 ' NOTES
 '   This routine changes in-memory settings only
 '
-'   The keyboard shortcut is forced on if both right-click menu and in-grid icon
-'   access are disabled
+'   Access-path settings reflect explicit configuration. Disabling right-click
+'   and in-grid icon access no longer re-enables the keyboard shortcut, because
+'   Application.OnKey is a session-wide binding and the DatePicker must not take
+'   it on behalf of a user who did not choose it
+'
+'   Zero built-in interactive access paths is a permitted configuration. The
+'   picker is then opened through DP_Show, a Ribbon integration, or a
+'   caller-supplied entry point
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -1123,12 +1464,6 @@ Private Sub M_Settings_InitializeDefaults()
         gDP_ShowGridIcon = DP_DEFAULT_SHOW_GRID_ICON
     'Initialize the keyboard shortcut feature setting
         gDP_EnableKeyboardShortcut = DP_DEFAULT_ENABLE_KEYBOARD
-    'Force keyboard access when both visual/contextual entry points are disabled
-        If Not gDP_ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                gDP_EnableKeyboardShortcut = True
-            End If
-        End If
 
 '------------------------------------------------------------------------------
 ' INITIALIZE ADVANCED SETTINGS
@@ -1613,8 +1948,10 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '   Sets and saves whether the DatePicker keyboard shortcut is enabled
 '
 ' WHY THIS EXISTS
-'   The keyboard shortcut is the safe fallback entry point when optional visual
-'   integrations such as the in-grid icon and right-click menu are disabled
+'   The keyboard shortcut is one of three interactive entry points, alongside the
+'   in-grid icon and the right-click menu. Disabling the other two no longer
+'   enables it: Application.OnKey is a session-wide binding, and the component
+'   does not take it on behalf of a user who did not ask for it
 '
 '   Caller code, demo sheets, settings panels, and host workbooks need one
 '   controlled public entry point to update keyboard shortcut integration without
@@ -1667,7 +2004,7 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '   another add-in, workbook activation, or teardown logic
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -1713,17 +2050,6 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve access fallback"
-    'Keep keyboard access enabled when both visual entry points are disabled
-        If Not NewEnableKeyboard Then
-            If Not gDP_ShowRightClick Then
-                If Not gDP_ShowGridIcon Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
-
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAG
 '------------------------------------------------------------------------------
@@ -2959,7 +3285,7 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '   workbook activation, or application-level cleanup
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3014,18 +3340,6 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve access fallback"
-
-    'Keep keyboard access enabled when both visible entry points are disabled
-        If Not ShowRightClick Then
-            If Not gDP_ShowGridIcon Then
-                If Not NewEnableKeyboard Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
-
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -3184,7 +3498,7 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '   expected to occur through the manager selection / context refresh path
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3239,18 +3553,6 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Resolve access fallback"
-
-    'Keep keyboard access enabled when both visible entry points are disabled
-        If Not ShowGridIcon Then
-            If Not gDP_ShowRightClick Then
-                If Not NewEnableKeyboard Then
-                    NewEnableKeyboard = True
-                End If
-            End If
-        End If
-
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -5491,6 +5793,616 @@ FailSafe:
 
 End Sub
 
+Public Sub DP_ForceReleaseProviderLease()
+
+'
+'------------------------------------------------------------------------------
+'                     FORCE RELEASE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes the one-provider lease regardless of who owns it, so an operator can
+'   recover a session the automatic policy has locked out
+'
+' WHY THIS EXISTS
+'   The lease lives for the Excel process; the token proving ownership lives in
+'   VBA module state. A VBA project reset destroys the token and leaves the lease,
+'   after which the provider that created it can no longer prove ownership and
+'   every entry point refuses
+'
+'   That is correct for a crashed provider and unusable during development, where
+'   re-importing a module resets the project several times an hour. Restarting
+'   Excel is a poor answer to a self-inflicted lockout
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Deletes the lease and clears this project''s token, whether or not this
+'   project owned it
+'
+' ERROR POLICY
+'   Does not raise. A lease that is absent or already gone is not an error
+'
+' DEPENDENCIES
+'   M_Lease_GetBar
+'
+' NOTES
+'   This is the one place the component deliberately breaks its own rule that a
+'   lease is never deleted unless ownership can be proved. That is safe only
+'   because it is an explicit operator action, never called automatically and
+'   never called by DP_Start, DP_Stop or DP_RepairRuntime
+'
+'   Call it only when no other copy of the DatePicker is running. Calling it
+'   while a live provider owns the lease will let a second provider acquire one,
+'   which is exactly the unsupported configuration #37 exists to prevent
+'
+'   Restarting Excel achieves the same thing without the risk, because the lease
+'   is Temporary. Prefer that when in doubt
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "DP_ForceReleaseProviderLease"
+
+    Dim LeaseBar        As Object       'Lease command bar
+
+'------------------------------------------------------------------------------
+' FORCE RELEASE
+'------------------------------------------------------------------------------
+    'Never let a recovery action raise
+        On Error Resume Next
+    'Delete the lease whoever owns it
+        Set LeaseBar = M_Lease_GetBar()
+        If Not LeaseBar Is Nothing Then
+            LeaseBar.Delete
+            Debug.Print PROC_NAME & " | Provider lease released by operator request"
+        Else
+            Debug.Print PROC_NAME & " | No provider lease was present"
+        End If
+    'Drop this project's claim as well
+        mDP_RuntimeOwnerId = VBA.vbNullString
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed release error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Lease_Test_ClearOwnerToken()
+
+'
+'==============================================================================
+'                     CLEAR LOCAL OWNER TOKEN (TEST)
+'==============================================================================
+'   Drops this project's lease token without touching the lease itself.
+'
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
+'   must be classified internal under #25.
+'
+'   It exists because a regression suite cannot load a second VBA project. This
+'   reproduces exactly the state a second provider sees, and the state a VBA
+'   project reset leaves behind:
+'
+'       the lease survives, the local token does not
+'
+'   It never deletes, creates or rewrites a lease. Clearing a token can only ever
+'   make this project less privileged, so a stray call cannot seize ownership or
+'   destroy another provider's registrations.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLEAR
+'------------------------------------------------------------------------------
+    'Drop this project's claim, leaving the lease untouched
+        mDP_RuntimeOwnerId = VBA.vbNullString
+
+End Sub
+
+Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
+
+'
+'==============================================================================
+'                          REPORT LEASE REFUSAL
+'==============================================================================
+'   Tells the operator why a DatePicker entry point declined to act.
+'
+'   A refused provider produces no visible change, so without this it would look
+'   like the DatePicker simply failed to start.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Never let reporting raise into a refusal
+        On Error Resume Next
+    'Record the refusal for diagnostics
+        Debug.Print EntryPoint & " | Refused | Another DatePicker provider owns " & _
+            "this Excel session, or ownership could not be verified"
+    'Tell the operator, because nothing else in the session will
+        MsgBox _
+            "Another copy of the DatePicker is already active in this Excel " & _
+            "session, or its ownership could not be verified." & VBA.vbCrLf & VBA.vbCrLf & _
+            "Running two copies at once is not supported: they share the same " & _
+            "keyboard shortcut, right-click entry and grid icons, and either " & _
+            "one's shutdown would remove the other's." & VBA.vbCrLf & VBA.vbCrLf & _
+            "Close the other copy and restart Excel." & VBA.vbCrLf & VBA.vbCrLf & _
+            "If you are certain no other copy is running - for example after " & _
+            "resetting the VBA project - run:" & VBA.vbCrLf & VBA.vbCrLf & _
+            "    DP_ForceReleaseProviderLease", _
+            vbExclamation Or vbOKOnly, _
+            DP_MSGBOX_TITLE
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Private Function M_Lease_NewOwnerId() As String
+
+'
+'------------------------------------------------------------------------------
+'                          NEW RUNTIME OWNER ID
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Generates the ephemeral token that identifies this provider while it holds
+'   the runtime lease
+'
+' WHY THIS EXISTS
+'   The lease has to distinguish "I own this" from "someone else owns this", and
+'   the answer must not survive the VBA project that produced it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   A token for this acquisition attempt
+'
+' BEHAVIOR
+'   Combines the clock, the sub-second timer and a random component
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The token deliberately carries no workbook identity. ThisWorkbook.Name and
+'   FullName change on rename, move and save-as, and none of those should alter
+'   ownership during a live Excel session
+'
+'   A GUID would be stronger, but CoCreateGuid is WinAPI and the lease must work
+'   with WinAPI disabled by setting or by platform. Two providers starting within
+'   the same millisecond would need the random component to collide as well,
+'   and a collision fails closed: the second provider reads a marker equal to its
+'   own token, believes it already owns the lease, and stops. It does not seize
+'   anything
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' GENERATE
+'------------------------------------------------------------------------------
+    'Never let token generation raise
+        On Error Resume Next
+    'Seed from the system timer so two projects do not share a sequence
+        Randomize
+    'Combine clock, sub-second timer and a random component
+        M_Lease_NewOwnerId = VBA.Format$(VBA.Now, "yyyymmddhhnnss") & "-" & _
+            VBA.Format$(VBA.Timer * 1000, "00000000") & "-" & _
+            VBA.Hex$(VBA.Int(VBA.Rnd() * 2147483647#))
+    'Clear any suppressed generation error
+        Err.Clear
+
+End Function
+
+Private Function M_Lease_GetBar() As Object
+
+'
+'==============================================================================
+'                            GET LEASE BAR
+'==============================================================================
+'   Returns the lease command bar, or Nothing when no bar of that name exists.
+'
+'   Resolving by name never creates anything: absence is an ordinary answer.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Suppress the error raised when the bar does not exist
+        On Error Resume Next
+    'Set safe default result
+        Set M_Lease_GetBar = Nothing
+    'Attempt to resolve the lease bar
+        Set M_Lease_GetBar = Excel.Application.CommandBars(DP_LEASE_BAR_NAME)
+    'Clear any suppressed lookup error
+        Err.Clear
+
+End Function
+
+Private Function M_Lease_ReadOwner() As String
+
+'
+'------------------------------------------------------------------------------
+'                          READ LEASE OWNER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports which provider currently holds the runtime lease
+'
+' WHY THIS EXISTS
+'   Every ownership decision, on acquisition and on release, needs one answer to
+'   this question, and it must distinguish "free" from "held by someone" from
+'   "cannot tell"
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   An empty string when no lease exists
+'
+'   The owner token when exactly one well-formed marker is present
+'
+'   DP_LEASE_AMBIGUOUS when a bar exists whose marker is missing, malformed or
+'   duplicated
+'
+' BEHAVIOR
+'   Scans the lease bar for controls carrying the marker tag and reports what it
+'   finds
+'
+' ERROR POLICY
+'   Does not raise. An unreadable lease is reported as ambiguous, never as free
+'
+' DEPENDENCIES
+'   M_Lease_GetBar
+'
+' NOTES
+'   Ambiguous is not the same as free, and the difference is the whole safety
+'   property. A bar this component cannot interpret belongs to something, and
+'   treating it as garbage to clear would be exactly the destruction #37 exists
+'   to prevent
+'
+'   Two markers mean two writers, which is unverifiable rather than resolvable
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeaseBar        As Object       'Resolved lease command bar
+    Dim Ctl             As Object       'Current control while scanning
+    Dim FoundToken      As String       'Token read from the marker
+    Dim FoundCount      As Long         'Markers found
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Never let a lease read raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_ReadOwner = VBA.vbNullString
+    'Resolve the lease bar
+        Set LeaseBar = M_Lease_GetBar()
+    'No bar means no lease, which is the only "free" answer
+        If LeaseBar Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Count the marker controls and capture the token
+        For Each Ctl In LeaseBar.Controls
+            If VBA.StrComp(Ctl.Tag, DP_LEASE_MARKER_TAG, vbBinaryCompare) = 0 Then
+                FoundCount = FoundCount + 1
+                FoundToken = Ctl.Parameter
+            End If
+        Next Ctl
+        Set Ctl = Nothing
+    'A bar exists, so something owns it. Anything but one readable marker is
+    'unverifiable rather than free
+        If Err.Number <> 0 Then
+            M_Lease_ReadOwner = DP_LEASE_AMBIGUOUS
+        ElseIf FoundCount <> 1 Then
+            M_Lease_ReadOwner = DP_LEASE_AMBIGUOUS
+        ElseIf VBA.LenB(FoundToken) = 0 Then
+            M_Lease_ReadOwner = DP_LEASE_AMBIGUOUS
+        Else
+            M_Lease_ReadOwner = FoundToken
+        End If
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Public Function M_Lease_IsOwner() As Boolean
+
+'
+'==============================================================================
+'                              IS LEASE OWNER
+'==============================================================================
+'   Reports whether this VBA project currently holds the runtime lease.
+'
+'   Both halves must agree: this project must hold a token, and the lease must
+'   still carry that same token. A project reset clears the first, and another
+'   provider's lease fails the second.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' COMPARE
+'------------------------------------------------------------------------------
+    'Never let an ownership check raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_IsOwner = False
+    'A project holding no token cannot be the owner
+        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
+            Err.Clear
+            Exit Function
+        End If
+    'The lease must still carry this project's token
+        M_Lease_IsOwner = (VBA.StrComp(M_Lease_ReadOwner(), mDP_RuntimeOwnerId, _
+            vbBinaryCompare) = 0)
+    'Clear any suppressed comparison error
+        Err.Clear
+
+End Function
+
+Public Function M_Lease_TryAcquire() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                          ACQUIRE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Claims the one-provider runtime lease, or reports that another provider holds
+'   it
+'
+' WHY THIS EXISTS
+'   Two DatePicker copies in one Excel process register the same application-wide
+'   resources under the same fixed identifiers, and either one's teardown removes
+'   the other's. Detection has to happen before the first shared registration
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when this project owns the lease, including when it already did
+'
+'   False when another provider owns it, or when ownership cannot be verified
+'
+' BEHAVIOR
+'   Reads the lease, and when it is free creates the bar, writes the marker, then
+'   re-reads to confirm the marker is this project's before claiming ownership
+'
+' ERROR POLICY
+'   Does not raise. Refusal is an ordinary answer that the caller reports
+'
+'   Fails closed: an unverifiable lease refuses rather than assuming it is free
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_GetBar
+'   M_Lease_NewOwnerId
+'
+' NOTES
+'   The bar and its control are Temporary, so Excel deletes them when it closes.
+'   The lease therefore cannot survive into the next Excel process, which is what
+'   makes a registry-backed lease the wrong shape: that one would outlive the
+'   process and block startup permanently
+'
+'   A VBA project reset clears mDP_RuntimeOwnerId while the bar survives, so the
+'   former owner can no longer prove ownership and startup refuses. That is the
+'   specified policy: fail closed, and restart Excel to recover. Automatic
+'   reclamation of a stale lease belongs to #14
+'
+'   The bar name is fixed rather than carrying the token, which gives the object
+'   model a uniqueness point during acquisition. Owner identity lives on the
+'   control
+'
+'   Creation is verified by re-reading. If something appeared between the lookup
+'   and the create, the re-read classifies it rather than the code retrying
+'
+'   A CommandBar is not indestructible: other VBA in the process can delete
+'   custom bars, and published examples do exactly that while sweeping invisible
+'   ones. That is external tampering. What this component guarantees is that it
+'   never deletes a lease it cannot prove it owns
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Lease_TryAcquire"
+
+    Dim CurrentOwner    As String       'Owner token currently on the lease
+    Dim Candidate       As String       'Token this attempt would claim
+    Dim LeaseBar        As Object       'Lease command bar
+    Dim Marker          As Object       'Marker control
+    Dim CreatedBar      As Boolean      'True when this attempt created the bar
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let acquisition raise into startup
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_TryAcquire = False
+
+'------------------------------------------------------------------------------
+' CLASSIFY THE EXISTING LEASE
+'------------------------------------------------------------------------------
+    'Read what currently holds the lease
+        CurrentOwner = M_Lease_ReadOwner()
+    'An existing lease carrying this project's token is an idempotent success
+        If VBA.LenB(mDP_RuntimeOwnerId) > 0 Then
+            If VBA.StrComp(CurrentOwner, mDP_RuntimeOwnerId, vbBinaryCompare) = 0 Then
+                M_Lease_TryAcquire = True
+                Err.Clear
+                Exit Function
+            End If
+        End If
+    'A lease held by anyone else refuses this provider
+        If VBA.LenB(CurrentOwner) > 0 Then
+            Debug.Print PROC_NAME & _
+                " | Refused | Lease held by " & _
+                VBA.IIf(CurrentOwner = DP_LEASE_AMBIGUOUS, _
+                    "an unverifiable owner", "another provider")
+            Err.Clear
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' CREATE THE LEASE
+'------------------------------------------------------------------------------
+    'Generate the token this attempt will claim
+        Candidate = M_Lease_NewOwnerId()
+    'Create a temporary, hidden, application-wide bar
+        Err.Clear
+        Set LeaseBar = Excel.Application.CommandBars.Add( _
+            Name:=DP_LEASE_BAR_NAME, Temporary:=True)
+    'Something may have created the lease between the read and this call
+        If Err.Number <> 0 Or LeaseBar Is Nothing Then
+            Err.Clear
+            Debug.Print PROC_NAME & " | Refused | Lease appeared during acquisition"
+            Set LeaseBar = Nothing
+            Exit Function
+        End If
+        CreatedBar = True
+    'Keep the lease invisible. A new custom bar is hidden by default; this is
+    'explicit so a later change cannot surface it
+        LeaseBar.Visible = False
+
+'------------------------------------------------------------------------------
+' WRITE THE MARKER
+'------------------------------------------------------------------------------
+    'Add one hidden temporary control to carry ownership
+        Set Marker = LeaseBar.Controls.Add(Temporary:=True)
+        If Not Marker Is Nothing Then
+            Marker.Tag = DP_LEASE_MARKER_TAG
+            Marker.Parameter = Candidate
+            Marker.Visible = False
+        End If
+        Set Marker = Nothing
+
+'------------------------------------------------------------------------------
+' VERIFY BEFORE CLAIMING
+'------------------------------------------------------------------------------
+    'Re-read rather than trusting the writes above
+        Err.Clear
+        If VBA.StrComp(M_Lease_ReadOwner(), Candidate, vbBinaryCompare) = 0 Then
+            mDP_RuntimeOwnerId = Candidate
+            M_Lease_TryAcquire = True
+        Else
+            'Remove only the bar this attempt created, and only when it is still
+            'the object this attempt created
+                If CreatedBar Then
+                    If Not LeaseBar Is Nothing Then
+                        LeaseBar.Delete
+                    End If
+                End If
+                mDP_RuntimeOwnerId = VBA.vbNullString
+                Debug.Print PROC_NAME & " | Refused | Lease could not be verified after creation"
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed acquisition error
+        Err.Clear
+
+End Function
+
+Public Sub M_Lease_Release()
+
+'
+'------------------------------------------------------------------------------
+'                          RELEASE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Gives up the runtime lease, but only when this project can prove it holds it
+'
+' WHY THIS EXISTS
+'   This is the more important half of the model. Refusing a second provider at
+'   startup protects nothing if that same provider can later release the owner's
+'   lease and dismantle its registrations
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Deletes the lease bar when its marker matches this project's token, and does
+'   nothing otherwise
+'
+' ERROR POLICY
+'   Does not raise. A lease this project does not own is left alone silently
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_GetBar
+'
+' NOTES
+'   Three conditions each mean "do not touch it": no local token, a marker that
+'   differs, and an unverifiable lease. Only an exact match releases
+'
+'   A refused provider therefore cannot release the owner's lease through DP_Stop
+'   or DP_RepairRuntime, because it never held a token to match with
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeaseBar        As Object       'Lease command bar
+
+'------------------------------------------------------------------------------
+' RELEASE ONLY WHAT THIS PROJECT OWNS
+'------------------------------------------------------------------------------
+    'Never let release raise into teardown
+        On Error Resume Next
+    'A project holding no token has nothing to release
+        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
+            Err.Clear
+            Exit Sub
+        End If
+    'The lease must still carry this project's token
+        If VBA.StrComp(M_Lease_ReadOwner(), mDP_RuntimeOwnerId, vbBinaryCompare) <> 0 Then
+            mDP_RuntimeOwnerId = VBA.vbNullString
+            Err.Clear
+            Exit Sub
+        End If
+    'Delete the lease this project owns
+        Set LeaseBar = M_Lease_GetBar()
+        If Not LeaseBar Is Nothing Then
+            LeaseBar.Delete
+        End If
+    'Clear the local token whether or not the delete succeeded
+        mDP_RuntimeOwnerId = VBA.vbNullString
+    'Release object references
+        Set LeaseBar = Nothing
+    'Clear any suppressed release error
+        Err.Clear
+
+End Sub
+
 Public Sub DP_Start()
 
 '
@@ -5560,6 +6472,19 @@ Public Sub DP_Start()
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' ACQUIRE PROVIDER LEASE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Acquire provider lease"
+    'Claim the one-provider lease before touching anything application-wide. A
+    'second copy that registered first and discovered the conflict afterwards
+    'would already have displaced the owner's keyboard shortcut
+        If Not M_Lease_TryAcquire() Then
+            M_Lease_ReportRefusal "DP_Start"
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' ENSURE MANAGER
@@ -6108,6 +7033,16 @@ Public Sub DP_RepairRuntime()
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' VERIFY PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Repair rebuilds application-wide registrations, so it is at least as
+    'destructive as teardown and needs the same guard
+        If Not M_Lease_IsOwner() Then
+            M_Lease_ReportRefusal "DP_RepairRuntime"
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
 ' RE-ENABLE EXCEL EVENTS
 '------------------------------------------------------------------------------
     'Re-enable Excel events required by the DatePicker manager
@@ -6418,6 +7353,17 @@ Public Sub DP_Stop()
         On Error Resume Next
 
 '------------------------------------------------------------------------------
+' VERIFY PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'A provider that does not own the lease must not tear down the owner's
+    'registrations. Refusing a second provider at startup protects nothing while
+    'its teardown remains destructive
+        If Not M_Lease_IsOwner() Then
+            M_Lease_ReportRefusal "DP_Stop"
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
 ' RELEASE MANAGER
 '------------------------------------------------------------------------------
     'Release the Application event manager and trigger its teardown path
@@ -6446,6 +7392,13 @@ Public Sub DP_Stop()
 '------------------------------------------------------------------------------
     'Clear cached workbook-qualified callback names
         M_GetQualifiedMacroName_ClearCache
+
+'------------------------------------------------------------------------------
+' RELEASE PROVIDER LEASE
+'------------------------------------------------------------------------------
+    'Give up the lease last, so this provider still owns it while tearing its own
+    'registrations down
+        M_Lease_Release
 
 '------------------------------------------------------------------------------
 ' EXIT
@@ -6515,7 +7468,7 @@ End Function
 
 Public Sub M_Picker_SelectDate( _
     ByVal SelectedDate As Date, _
-    Optional ByVal NoTableGrow As Boolean = False)
+    Optional ByVal NoTableGrow As Boolean = True)
 
 '
 '------------------------------------------------------------------------------
@@ -6564,6 +7517,7 @@ Public Sub M_Picker_SelectDate( _
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_WriteBack_Apply
+'   M_WriteBack_ReportShortfall
 '   DP_Close
 '   M_FormBridge_AfterSuccessfulSelection
 '
@@ -6573,8 +7527,11 @@ Public Sub M_Picker_SelectDate( _
 '   SelectedDate is normalized once and the normalized value is reused for
 '   write-back, selected-state storage, and optional open-form refresh
 '
+'   This is an interactive entry point, so it reports a partial write once, after
+'   the whole operation. The write engine collects the facts and displays nothing
+'
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -6583,6 +7540,7 @@ Public Sub M_Picker_SelectDate( _
     Const PROC_NAME         As String = "M_Picker_SelectDate"
 
     Dim SelectedDateOnly    As Date         'Selected date without time
+    Dim WriteResult         As DP_WriteResult   'Structured write-back outcome
     Dim OldSelectedDate     As Date         'Previous selected date
     Dim OldHasSelectedDate  As Boolean      'Previous selected-date availability
     Dim OldWriteValue       As Variant      'Previous transient write value
@@ -6638,7 +7596,7 @@ Public Sub M_Picker_SelectDate( _
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
     'Write the selected date to the current Excel target
-        M_WriteBack_Apply DP_WriteAction_DatePicker, NoTableGrow
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, NoTableGrow)
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -6665,6 +7623,12 @@ Public Sub M_Picker_SelectDate( _
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Report once for the whole operation when some cells were not written
+        M_WriteBack_ReportShortfall WriteResult
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6768,8 +7732,10 @@ Public Sub DP_Today()
 '------------------------------------------------------------------------------
 ' WRITE TODAY
 '------------------------------------------------------------------------------
-    'Delegate date-only write-back to the canonical DatePicker selection routine
-        M_Picker_SelectDate TodayDate, False
+    'Delegate date-only write-back to the canonical DatePicker selection routine.
+    'NoTableGrow is deliberately omitted so Today inherits the safe single-cell
+    'default rather than opting into table-column expansion
+        M_Picker_SelectDate TodayDate
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6828,6 +7794,7 @@ Public Sub DP_Now()
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_WriteBack_Apply
+'   M_WriteBack_ReportShortfall
 '   DP_Close
 '   M_FormBridge_AfterSuccessfulSelection
 '
@@ -6836,8 +7803,11 @@ Public Sub DP_Now()
 '
 '   Selected-date highlighting uses only the date portion of the timestamp
 '
+'   This is an interactive entry point, so it reports a partial write once, after
+'   the whole operation. The write engine collects the facts and displays nothing
+'
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -6847,6 +7817,7 @@ Public Sub DP_Now()
 
     Dim NowValue            As Date                 'Current system date-time
     Dim NowDate             As Date                 'Date-only part of current timestamp
+    Dim WriteResult         As DP_WriteResult       'Structured write-back outcome
     Dim OldSelectedDate     As Date                 'Previous selected date
     Dim OldHasSelectedDate  As Boolean              'Previous selected-date availability
     Dim OldWriteValue       As Variant              'Previous transient write value
@@ -6895,8 +7866,10 @@ Public Sub DP_Now()
 '------------------------------------------------------------------------------
 ' WRITE TO EXCEL
 '------------------------------------------------------------------------------
-    'Apply the date-time value to the current Excel target
-        M_WriteBack_Apply DP_WriteAction_DatePicker, False
+    'Apply the date-time value to the current Excel target. NoTableGrow is
+    'deliberately omitted so Now inherits the safe single-cell default rather
+    'than opting into table-column expansion
+        WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
 
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
@@ -6923,6 +7896,12 @@ Public Sub DP_Now()
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Report once for the whole operation when some cells were not written
+        M_WriteBack_ReportShortfall WriteResult
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -6955,9 +7934,257 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, "DatePicker Now command failed: " & ErrorDescription
 
 End Sub
-Public Sub M_WriteBack_Apply( _
+Public Function DP_FillTableColumn( _
+    ByVal ValueToWrite As Date, _
+    Optional ByVal ConfirmFill As Boolean = True, _
+    Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult
+
+'
+'------------------------------------------------------------------------------
+'                           FILL TABLE COLUMN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes one date to every cell of the Excel Table data column containing the
+'   current selection
+'
+' WHY THIS EXISTS
+'   Filling a table column is a legitimate operation, but it used to happen
+'   implicitly: selecting one cell inside a table and picking a date wrote the
+'   whole column, with nothing to indicate the scope
+'
+'   That default is now single-cell. This routine is the deliberate way to ask
+'   for the broad write, so the scope comes from the command the user invoked
+'   rather than from hidden state
+'
+' INPUTS
+'   ValueToWrite
+'     Date to write to every cell of the resolved table column
+'
+'   ConfirmFill
+'     True to describe the resolved scope and require confirmation, and to report
+'     a non-table selection with a message
+'
+'     False for a non-interactive call. Suppresses both prompts, which is what
+'     makes the routine usable from the regression harness
+'
+' RETURNS
+'   DP_WriteResult describing the fill
+'
+'   A zeroed result when the selection was not a table data cell or the user
+'   declined the described scope. WrittenCount is then zero and nothing was
+'   written
+'
+' BEHAVIOR
+'   Resolves the table column owning the selection. Reports and exits when the
+'   selection is not a table data cell. Otherwise confirms the scope, writes
+'   through the normal write-back engine with table expansion explicitly enabled,
+'   checks the predicted scope against AttemptedCount, and reports a partial write
+'   once for the whole operation
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error for a zero date and for genuine write
+'   failures
+'
+'   A selection outside a table data body is an ordinary usage condition, not an
+'   error. It reports and exits cleanly
+'
+'   A partial write is reported, not raised. The engine already raised if nothing
+'   at all could be written
+'
+'   A predicted scope that does not match AttemptedCount is a detectable
+'   inconsistency rather than a partial write, and is reported as one
+'
+' DEPENDENCIES
+'   M_WriteBack_TryResolveTableColumn
+'   M_WriteBack_Apply
+'   M_WriteBack_ReportShortfall
+'   gDP_WriteValue
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   The write itself is delegated to M_WriteBack_Apply with NoTableGrow:=False
+'   rather than writing the resolved range directly. That reuses the existing
+'   event suppression, value validation and rollback rather than duplicating
+'   them, and keeps one write engine
+'
+'   The resolved column is used for the confirmation text. The engine resolves it
+'   again when it writes, which is cheap and avoids two routines disagreeing
+'   about the target
+'
+'   The predicted cell count is resolved on both paths, not only when prompting,
+'   so the non-interactive path can make the same comparison. That is what turns
+'   the confirmation prompt into a check
+'
+'   The prediction is checked against AttemptedCount, not WrittenCount. A fill
+'   that legitimately skips protected cells writes fewer cells than it predicted
+'   and is still a correct prediction:
+'
+'     Predicted scope / AttemptedCount   247
+'     WrittenCount                       244
+'     LockedSkippedCount                   3
+'
+'   A prediction that does not match AttemptedCount means the target changed
+'   between preview and application, or that the two resolution paths diverged
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "DP_FillTableColumn"
+
+    Dim FillResult          As DP_WriteResult   'Structured outcome of the fill
+    Dim TargetColumn        As Range        'Resolved table data column
+    Dim TableName           As String       'Owning table name
+    Dim ColumnName          As String       'Resolved column name
+    Dim CellCount           As Long         'Cells the fill would affect
+    Dim OldWriteValue       As Date         'Previous pending write value
+    Dim ValueApplied        As Boolean      'True once the write value was replaced
+    Dim PromptText          As String       'Confirmation prompt text
+    Dim HandlerStep         As String       'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE INPUT
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate value"
+    'Reject a zero date, which the write engine also rejects
+        If ValueToWrite = 0 Then
+            Err.Raise vbObjectError + 530, PROC_NAME, "ValueToWrite cannot be zero"
+        End If
+
+'------------------------------------------------------------------------------
+' RESOLVE TABLE COLUMN
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve table column"
+    'Report and exit when the selection is not a table data cell
+        If Not M_WriteBack_TryResolveTableColumn(TargetColumn, TableName, ColumnName) Then
+            'Tell the user what is required, but only on the interactive path
+                If ConfirmFill Then
+                    VBA.MsgBox _
+                        "A table data cell is required." & VBA.vbCrLf & VBA.vbCrLf & _
+                        "Select a cell in the Excel Table column you want to fill, " & _
+                        "then try again.", _
+                        vbExclamation, _
+                        DP_MSGBOX_TITLE
+                End If
+            'Exit cleanly. This is a usage condition, not a failure
+                GoTo CleanExit
+        End If
+
+'------------------------------------------------------------------------------
+' CONFIRM SCOPE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Confirm fill scope"
+    'Resolve how many cells the fill is expected to affect
+        CellCount = VBA.CLng(TargetColumn.Cells.CountLarge)
+    'Describe the resolved scope before writing it
+        If ConfirmFill Then
+            'Build the confirmation text from the resolved target
+                PromptText = "Fill " & VBA.CStr(CellCount) & " cells in " & _
+                    TableName & "[" & ColumnName & "] with " & _
+                    VBA.Format$(ValueToWrite, "dd-mmm-yyyy") & "?"
+            'Exit when the user declines the described scope
+                If VBA.MsgBox(PromptText, vbQuestion Or vbYesNo, DP_MSGBOX_TITLE) <> vbYes Then
+                    GoTo CleanExit
+                End If
+        End If
+
+'------------------------------------------------------------------------------
+' APPLY FILL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Apply table column fill"
+    'Preserve the pending write value so it can be restored on failure
+        OldWriteValue = gDP_WriteValue
+    'Stage the value the write engine will apply
+        gDP_WriteValue = ValueToWrite
+        ValueApplied = True
+    'Write through the normal engine with table expansion explicitly enabled
+        FillResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, _
+            NoTableGrow:=False, OverwriteFormulas:=OverwriteFormulas)
+    'Publish the structured outcome
+        DP_FillTableColumn = FillResult
+
+'------------------------------------------------------------------------------
+' CHECK PREDICTED SCOPE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Check predicted fill scope"
+    'The prediction describes the scope, so it is checked against AttemptedCount
+        If FillResult.AttemptedCount <> CellCount Then
+            'Tell the user the described scope is not the scope that was written
+                If ConfirmFill Then
+                    VBA.MsgBox _
+                        "The fill scope changed after it was described." & _
+                        VBA.vbCrLf & VBA.vbCrLf & _
+                        "Described: " & VBA.CStr(CellCount) & " cells in " & _
+                        TableName & "[" & ColumnName & "]" & VBA.vbCrLf & _
+                        "Written to: " & VBA.CStr(FillResult.AttemptedCount) & " cells in " & _
+                        FillResult.ResolvedTargetAddress, _
+                        vbExclamation, _
+                        DP_MSGBOX_TITLE
+                End If
+            'Record the inconsistency on every path, including the harness
+                Debug.Print PROC_NAME & ": predicted " & VBA.CStr(CellCount) & _
+                    " cells but the engine targeted " & VBA.CStr(FillResult.AttemptedCount)
+        End If
+
+'------------------------------------------------------------------------------
+' REPORT PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Report partial fill"
+    'A legitimate partial write is reported once, and only on the interactive path
+        If ConfirmFill Then
+            M_WriteBack_ReportShortfall FillResult
+        End If
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set TargetColumn = Nothing
+    'Exit the procedure
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Restore the previous pending write value when the write failed
+        If ValueApplied Then
+            On Error Resume Next
+            gDP_WriteValue = OldWriteValue
+            Err.Clear
+            On Error GoTo 0
+        End If
+    'Release object references
+        Set TargetColumn = Nothing
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Table column fill failed: " & Err.Description
+
+End Function
+
+Public Function M_WriteBack_Apply( _
     ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = False)
+    Optional ByVal NoTableGrow As Boolean = True, _
+    Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult
 
 '
 '------------------------------------------------------------------------------
@@ -6982,7 +8209,14 @@ Public Sub M_WriteBack_Apply( _
 '     data column when applicable
 '
 ' RETURNS
-'   Nothing
+'   DP_WriteResult describing the completed write-back
+'
+'     AttemptedCount, WrittenCount
+'     LockedSkippedCount, LockedSkippedAddresses
+'     FormulaSkippedCount, FormulaSkippedAddresses
+'     FailedCount, FailedAddresses
+'     ResolvedTargetAddress, ExpandedToTableColumn, TableName, ColumnName
+'     AreasCount, EventsDisabledByCaller
 '
 ' BEHAVIOR
 '   Validates the requested write action
@@ -6999,6 +8233,9 @@ Public Sub M_WriteBack_Apply( _
 '
 '   Raises a cleanup error only when event restoration fails and no original
 '   write-back error exists
+'
+'   A raised error means nothing was written. A returned result with
+'   WrittenCount below AttemptedCount means a partial write
 '
 ' DEPENDENCIES
 '   gDP_WriteValue
@@ -7018,14 +8255,32 @@ Public Sub M_WriteBack_Apply( _
 '   Unsupported write actions are rejected explicitly instead of silently doing
 '   nothing
 '
+'   This is a Function so callers can inspect the outcome, but bare-call syntax
+'   still compiles. A caller that ignores the result behaves exactly as before
+'
+'   A ByRef output was rejected: VBA does not permit a user-defined type as an
+'   Optional parameter, so the argument would have to be required and every
+'   existing caller would need editing
+'
+'   This routine displays nothing. Programmatic callers must be able to consume
+'   the result without being taken through modal UI, so any interactive summary
+'   belongs to the entry point above, which calls M_WriteBack_ReportShortfall
+'   once for the whole operation
+'
+'   The returned result satisfies:
+'     AttemptedCount = WrittenCount + LockedSkippedCount
+'                    + FormulaSkippedCount + FailedCount
+'
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "M_WriteBack_Apply" 'Current procedure name
+
+    Dim Result                  As DP_WriteResult   'Structured write-back outcome
 
     Dim PreviousEvents          As Boolean      'Prior Application.EnableEvents state
     Dim EventsStateCaptured     As Boolean      'True when PreviousEvents is available
@@ -7099,7 +8354,23 @@ Public Sub M_WriteBack_Apply( _
     'Track the current handler step
         HandlerStep = "Resolve and apply write-back target"
     'Apply the requested action to the current selection
-        M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow
+        M_WriteBack_ResolveAndApplyTarget iType, NoTableGrow, OverwriteFormulas, Result
+    'Record the caller's event state in the same result
+        Result.EventsDisabledByCaller = Not PreviousEvents
+    'Publish the structured outcome
+        M_WriteBack_Apply = Result
+
+'------------------------------------------------------------------------------
+' LOG PARTIAL WRITE
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Log partial write"
+    'Record a partial write for the developer without interrupting the caller
+        If Result.WrittenCount < Result.AttemptedCount Then
+            Debug.Print PROC_NAME & ": wrote " & VBA.CStr(Result.WrittenCount) & _
+                " of " & VBA.CStr(Result.AttemptedCount) & " cells - " & _
+                M_WriteBack_DescribeShortfall(Result)
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -7137,7 +8408,7 @@ CleanExit:
                 CleanupErrDescription
         End If
     'Exit the procedure
-        Exit Sub
+        Exit Function
 
 '------------------------------------------------------------------------------
 ' ERROR HANDLER
@@ -7152,76 +8423,327 @@ ErrorHandler:
     'Resume through cleanup
         Resume CleanExit
 
-End Sub
-Private Sub M_WriteBack_ResolveAndApplyTarget( _
-    ByVal iType As DP_WriteAction, _
-    Optional ByVal NoTableGrow As Boolean = False)
+End Function
+
+Private Sub M_WriteBack_AppendAddress( _
+    ByRef AddressList As String, _
+    ByVal RecordedCount As Double, _
+    ByVal AddressText As String)
 
 '
 '------------------------------------------------------------------------------
-'                       RESOLVE AND APPLY WRITE-BACK TARGET
+'                          APPEND RESULT ADDRESS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Resolves the current Excel write-back target and applies the requested
-'   DatePicker write action
+'   Appends one cell address to a write-result address list
 '
 ' WHY THIS EXISTS
-'   DatePicker UI handlers should not write directly to Excel
-'
-'   This routine centralizes target shaping so single-cell, multi-cell,
-'   discontiguous-range, and table-column write-back behavior remains consistent
-'   across calendar clicks, Today, Now, keyboard shortcuts, context-menu actions,
-'   and public macro entry points
+'   A partial write has to report which cells were not written, but a failed
+'   write over a long table column would otherwise build an unbounded string
+'   inside the per-cell write loop
 '
 ' INPUTS
-'   iType
-'     DatePicker write action to apply
+'   AddressList
+'     Accumulated address list, modified in place
 '
-'   NoTableGrow
-'     True to keep a single selected table cell as a single-cell target
+'   RecordedCount
+'     Number of addresses counted for this list so far, including this one
 '
-'     False to expand a single selected table data-body cell to the full table
-'     data column
+'   AddressText
+'     Address to append
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Validates the requested write action, resolves the current Excel selection,
-'   rejects non-range selections, optionally expands a single table data-body
-'   cell to its full ListObject data column, and writes to each target area
+'   Appends the address until the reporting cap is reached, then appends a single
+'   ellipsis so a truncated list is still recognizable as truncated
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the write action is unsupported, if
-'   the current Excel selection is not a Range, if table target expansion fails,
-'   or if range population fails
+'   Best-effort. Never raises, because it runs inside a suppressed write loop
 '
 ' DEPENDENCIES
-'   M_WriteBack_PopulateRange
-'   Application.Selection
-'   Excel.Range
-'   Excel.ListObject
+'   None
 '
 ' NOTES
-'   This routine does not suppress Application events
+'   Addresses are worksheet-qualified by the caller, in the form SheetName!A1, so
+'   a reported address is unambiguous and stable enough to assert against
 '
-'   Application.EnableEvents is managed by M_WriteBack_Apply
-'
-'   This routine intentionally raises on non-Range selections so callers do not
-'   treat a no-op as a successful write-back
+'   The cap bounds the reported string, not the counters. WrittenCount,
+'   LockedSkippedCount and FailedCount stay exact however long the list gets
 '
 ' UPDATED
-'   2026-05-03
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME         As String = "M_WriteBack_ResolveAndApplyTarget"
+    Const ADDRESS_LIMIT As Long = 25            'Maximum addresses reported
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let diagnostics break a write
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' APPEND OR TRUNCATE
+'------------------------------------------------------------------------------
+    'Mark truncation once past the reporting cap
+        If RecordedCount > ADDRESS_LIMIT Then
+            If VBA.Right$(AddressList, 3) <> "..." Then
+                AddressList = AddressList & ", ..."
+            End If
+            Exit Sub
+        End If
+    'Start the list or extend it
+        If VBA.LenB(AddressList) = 0 Then
+            AddressList = AddressText
+        Else
+            AddressList = AddressList & ", " & AddressText
+        End If
+
+End Sub
+
+Public Sub M_WriteBack_ReportShortfall( _
+    ByRef Result As DP_WriteResult)
+
+'
+'------------------------------------------------------------------------------
+'                          REPORT WRITE SHORTFALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Shows one consolidated message describing the cells a write-back did not
+'   write
+'
+' WHY THIS EXISTS
+'   The write engine collects facts and returns them. Deciding whether a human is
+'   told about a partial write belongs to the entry point the human invoked
+'
+'   Reporting from inside the engine produced one dialog per target area, and
+'   forced every programmatic caller through modal UI
+'
+' INPUTS
+'   Result
+'     Completed DP_WriteResult to report
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Shows nothing when every attempted cell was written
+'
+'   Otherwise shows one message naming the counts and the addresses behind them
+'
+' ERROR POLICY
+'   Best-effort. Never raises, because a reporting failure must not turn a
+'   successful partial write into an error
+'
+' DEPENDENCIES
+'   M_WriteBack_DescribeShortfall
+'   DP_MSGBOX_TITLE
+'
+' NOTES
+'   Interactive entry points call this once, after the whole operation. A
+'   programmatic caller inspects the result and never calls it
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let reporting break a completed write
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' SKIP A COMPLETE WRITE
+'------------------------------------------------------------------------------
+    'Say nothing when every attempted cell was written
+        If Result.WrittenCount >= Result.AttemptedCount Then Exit Sub
+
+'------------------------------------------------------------------------------
+' REPORT THE SHORTFALL
+'------------------------------------------------------------------------------
+    'Describe the whole operation in one message
+        MsgBox _
+            "Wrote " & VBA.CStr(Result.WrittenCount) & " of " & _
+            VBA.CStr(Result.AttemptedCount) & " cells in " & _
+            Result.ResolvedTargetAddress & "." & VBA.vbCrLf & VBA.vbCrLf & _
+            M_WriteBack_DescribeShortfall(Result), _
+            vbInformation Or vbOKOnly, _
+            DP_MSGBOX_TITLE
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Public Function M_WriteBack_DescribeShortfall( _
+    ByRef Result As DP_WriteResult) As String
+
+'
+'------------------------------------------------------------------------------
+'                          DESCRIBE WRITE SHORTFALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds one human-readable description of the cells a write-back did not write
+'
+' WHY THIS EXISTS
+'   The skipped and failed cells are reported in more than one place. One
+'   formatter keeps those messages consistent and gives later write policies a
+'   single place to extend rather than a second reporting mechanism
+'
+' INPUTS
+'   Result
+'     Completed DP_WriteResult to describe
+'
+' RETURNS
+'   Description of the skipped and failed cells
+'
+'   An empty string when every attempted cell was written
+'
+' BEHAVIOR
+'   Describes the protected locked cells and the suppressed failures, each with
+'   the addresses recorded for them
+'
+' ERROR POLICY
+'   Best-effort. Never raises, because it is called while reporting an outcome
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Addresses are worksheet-qualified, in the form SheetName!A1
+'
+'   Address lists are capped by M_WriteBack_AppendAddress, so a long list ends
+'   with an ellipsis while the counts stay exact
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Description     As String       'Accumulated description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Never let reporting break a caller
+        On Error Resume Next
+    'Set safe default result
+        M_WriteBack_DescribeShortfall = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' DESCRIBE PROTECTED LOCKED CELLS
+'------------------------------------------------------------------------------
+    'Describe the protected locked cells that were skipped
+        If Result.LockedSkippedCount > 0 Then
+            Description = VBA.CStr(Result.LockedSkippedCount) & " protected locked: " & _
+                Result.LockedSkippedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' DESCRIBE PRESERVED FORMULA CELLS
+'------------------------------------------------------------------------------
+    'Describe the formula cells policy left in place
+        If Result.FormulaSkippedCount > 0 Then
+            If VBA.LenB(Description) > 0 Then
+                Description = Description & VBA.vbCrLf
+            End If
+            Description = Description & VBA.CStr(Result.FormulaSkippedCount) & _
+                " formula cells preserved: " & Result.FormulaSkippedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' DESCRIBE SUPPRESSED FAILURES
+'------------------------------------------------------------------------------
+    'Describe the cells that failed for another reason
+        If Result.FailedCount > 0 Then
+            If VBA.LenB(Description) > 0 Then
+                Description = Description & VBA.vbCrLf
+            End If
+            Description = Description & VBA.CStr(Result.FailedCount) & " failed: " & _
+                Result.FailedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN DESCRIPTION
+'------------------------------------------------------------------------------
+    'Return the accumulated description
+        M_WriteBack_DescribeShortfall = Description
+
+End Function
+
+Private Function M_WriteBack_TryResolveTableColumn( _
+    ByRef TargetColumn As Range, _
+    ByRef TableName As String, _
+    ByRef ColumnName As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   TRY RESOLVE SELECTED TABLE COLUMN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the table data column owning the current selection, reporting
+'   whether one was found rather than raising when none was
+'
+' WHY THIS EXISTS
+'   A selection outside a table is an ordinary usage condition, not a failure.
+'   DP_FillTableColumn needs to tell the user that plainly, and a raised runtime
+'   error is the wrong instrument for it
+'
+'   Separating the expected negative from a genuine fault also keeps the two
+'   distinguishable when the structured write result is added
+'
+' INPUTS
+'   TargetColumn
+'     Receives the resolved ListColumn data body range
+'
+'   TableName
+'     Receives the owning ListObject name
+'
+'   ColumnName
+'     Receives the resolved column name
+'
+' RETURNS
+'   True when the selection is a single cell inside a table data body
+'   False when it is a valid Range but not a table data cell
+'
+' BEHAVIOR
+'   Requires a single-cell selection inside ListObject.DataBodyRange. A header
+'   cell, a totals row cell, a multi-cell selection, or a cell outside any table
+'   all return False
+'
+' ERROR POLICY
+'   Raises only on genuinely abnormal conditions such as an unavailable or
+'   non-Range selection. An ordinary non-table selection returns False
+'
+' DEPENDENCIES
+'   Application.Selection
+'   Excel.ListObject
+'
+' NOTES
+'   A header cell is deliberately rejected. The command fills a
+'   ListColumn.DataBodyRange, so the anchor must itself be inside that range
+'
+'   This mirrors the expansion rule used by M_WriteBack_ResolveTarget, which
+'   also intersects against DataBodyRange rather than the whole table
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_WriteBack_TryResolveTableColumn"
 
     Dim SelectedObject      As Object           'Current Excel selection object
-    Dim Target              As Range            'Resolved target range
-    Dim Block               As Range            'Single target area
+    Dim Anchor              As Range            'Single selected cell
     Dim TargetTable         As ListObject       'Worksheet table being inspected
     Dim ColumnIndex         As Long             'Resolved table column index
     Dim HandlerStep         As String           'Current handler step for diagnostics
@@ -7231,32 +8753,19 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
-
     'Initialize diagnostic step
         HandlerStep = "Initialize"
-
-'------------------------------------------------------------------------------
-' VALIDATE WRITE ACTION
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Validate write action"
-
-    'Validate the requested write action
-        Select Case iType
-            Case DP_WriteAction_DatePicker
-                'Supported DatePicker write action
-            Case Else
-                'Reject unsupported write actions
-                    Err.Raise vbObjectError + 513, PROC_NAME, _
-                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
-        End Select
+    'Return the negative result unless a table column is resolved
+        M_WriteBack_TryResolveTableColumn = False
+        Set TargetColumn = Nothing
+        TableName = VBA.vbNullString
+        ColumnName = VBA.vbNullString
 
 '------------------------------------------------------------------------------
 ' RESOLVE CURRENT SELECTION
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve current Excel selection"
-
     'Suppress selection access errors temporarily
         On Error Resume Next
     'Capture the current Excel selection object
@@ -7265,6 +8774,186 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
+
+    'Reject missing selection objects
+        If SelectedObject Is Nothing Then
+            Err.Raise vbObjectError + 514, PROC_NAME, "Current Excel selection is not available"
+        End If
+    'Reject non-range selections
+        If VBA.TypeName(SelectedObject) <> "Range" Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "Current Excel selection must be a Range. Current selection type is '" & _
+                VBA.TypeName(SelectedObject) & "'"
+        End If
+    'Use the selection as the candidate anchor
+        Set Anchor = SelectedObject
+
+'------------------------------------------------------------------------------
+' REQUIRE A SINGLE ANCHOR CELL
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate anchor cell"
+    'Return the negative result for a multi-cell selection
+        If Anchor.Cells.CountLarge <> 1 Then Exit Function
+
+'------------------------------------------------------------------------------
+' RESOLVE OWNING TABLE COLUMN
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve owning table column"
+    'Loop through worksheet tables
+        For Each TargetTable In Anchor.Worksheet.ListObjects
+            'Consider only tables that have a data body
+                If Not TargetTable.DataBodyRange Is Nothing Then
+                    'Consider only an anchor inside the table data body
+                        If Not Application.Intersect(Anchor, TargetTable.DataBodyRange) Is Nothing Then
+                            'Resolve the anchored table column index
+                                ColumnIndex = Anchor.Column - TargetTable.DataBodyRange.Column + 1
+                            'Return the resolved column when the index is valid
+                                If ColumnIndex >= 1 Then
+                                    If ColumnIndex <= TargetTable.ListColumns.Count Then
+                                        Set TargetColumn = TargetTable.ListColumns(ColumnIndex).DataBodyRange
+                                        TableName = TargetTable.Name
+                                        ColumnName = TargetTable.ListColumns(ColumnIndex).Name
+                                        M_WriteBack_TryResolveTableColumn = True
+                                    End If
+                                End If
+                            'Stop after resolving the owning table
+                                Exit For
+                        End If
+                End If
+        Next TargetTable
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set TargetTable = Nothing
+        Set Anchor = Nothing
+        Set SelectedObject = Nothing
+    'Exit the function
+        Exit Function
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "Table column resolution failed: " & Err.Description
+
+End Function
+
+Private Sub M_WriteBack_ResolveTarget( _
+    ByRef ResolvedTarget As Range, _
+    ByRef ExpandedToTableColumn As Boolean, _
+    ByRef TableName As String, _
+    ByRef ColumnName As String, _
+    Optional ByVal NoTableGrow As Boolean = True)
+
+'
+'------------------------------------------------------------------------------
+'                       RESOLVE WRITE-BACK TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the range the DatePicker would write to, without writing anything
+'
+' WHY THIS EXISTS
+'   Resolving the target and mutating it were previously one routine, so nothing
+'   could ask what the target would be before it was written
+'
+'   Separating them gives callers a seam: a confirmation prompt can describe the
+'   resolved scope, and a structured write result can report it, without either
+'   feature needing to re-derive the target
+'
+' INPUTS
+'   ResolvedTarget
+'     Receives the range that would be written
+'
+'   ExpandedToTableColumn
+'     Receives True when a single selected table cell was expanded to its full
+'     data column
+'
+'   TableName
+'     Receives the owning ListObject name when expansion occurred
+'
+'   ColumnName
+'     Receives the expanded column name when expansion occurred
+'
+'   NoTableGrow
+'     True to keep a single selected table cell as a single-cell target
+'
+'     False to expand a single selected table data-body cell to the full table
+'     data column
+'
+' RETURNS
+'   Nothing. Results are returned through the ByRef arguments
+'
+' BEHAVIOR
+'   Resolves the current Excel selection, rejects non-range selections,
+'   optionally expands a single table data-body cell to its full ListObject data
+'   column, and reports what it resolved
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the current Excel selection is not a
+'   Range, or if the resolved target is missing or empty
+'
+' DEPENDENCIES
+'   Application.Selection
+'   Excel.Range
+'   Excel.ListObject
+'
+' NOTES
+'   This routine does not write, does not suppress Application events, and does
+'   not prompt. It is safe to call to find out what a write would affect
+'
+'   It intentionally raises on non-Range selections so callers do not treat a
+'   no-op as a successful resolution
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_WriteBack_ResolveTarget"
+
+    Dim SelectedObject      As Object           'Current Excel selection object
+    Dim Target              As Range            'Resolved target range
+    Dim TargetTable         As ListObject       'Worksheet table being inspected
+    Dim ColumnIndex         As Long             'Resolved table column index
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+    'Return the safe defaults unless expansion occurs
+        Set ResolvedTarget = Nothing
+        ExpandedToTableColumn = False
+        TableName = VBA.vbNullString
+        ColumnName = VBA.vbNullString
+
+'------------------------------------------------------------------------------
+' RESOLVE CURRENT SELECTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve current Excel selection"
+    'Suppress selection access errors temporarily
+        On Error Resume Next
+    'Capture the current Excel selection object
+        Set SelectedObject = Application.Selection
+    'Clear any suppressed selection access error
+        Err.Clear
+    'Restore controlled error handling
+        On Error GoTo ErrorHandler
+
     'Reject missing selection objects
         If SelectedObject Is Nothing Then
             Err.Raise vbObjectError + 514, PROC_NAME, "Current Excel selection is not available"
@@ -7283,7 +8972,6 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve optional table-column expansion"
-
     'Consider table expansion only for one selected cell when allowed
         If Target.Cells.CountLarge = 1 Then
             If Not NoTableGrow Then
@@ -7299,6 +8987,9 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
                                             If ColumnIndex >= 1 Then
                                                 If ColumnIndex <= TargetTable.ListColumns.Count Then
                                                     Set Target = TargetTable.ListColumns(ColumnIndex).DataBodyRange
+                                                    ExpandedToTableColumn = True
+                                                    TableName = TargetTable.Name
+                                                    ColumnName = TargetTable.ListColumns(ColumnIndex).Name
                                                 End If
                                             End If
                                         'Stop after resolving the owning table
@@ -7314,7 +9005,6 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Validate resolved write-back target"
-
     'Reject a missing resolved target
         If Target Is Nothing Then
             Err.Raise vbObjectError + 516, PROC_NAME, "Unable to resolve DatePicker write-back target"
@@ -7325,28 +9015,18 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
         End If
 
 '------------------------------------------------------------------------------
-' POPULATE TARGET AREAS
+' RETURN RESOLVED TARGET
 '------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Populate target areas"
-
-    'Loop through each discontiguous target area
-        For Each Block In Target.Areas
-            'Populate this target area
-                M_WriteBack_PopulateRange Block, iType
-        Next Block
+    'Return the resolved target to the caller
+        Set ResolvedTarget = Target
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
 CleanExit:
     'Release object references
-        Set Block = Nothing
-    'Release object references
         Set TargetTable = Nothing
-    'Release object references
         Set Target = Nothing
-    'Release object references
         Set SelectedObject = Nothing
     'Exit the procedure
         Exit Sub
@@ -7361,9 +9041,249 @@ ErrorHandler:
             "DatePicker write-back target resolution failed: " & Err.Description
 
 End Sub
+
+Private Sub M_WriteBack_ApplyResolvedTarget( _
+    ByVal Target As Range, _
+    ByVal iType As DP_WriteAction, _
+    ByVal OverwriteFormulas As Boolean, _
+    ByRef Result As DP_WriteResult)
+
+'
+'------------------------------------------------------------------------------
+'                       APPLY RESOLVED WRITE-BACK TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes the requested DatePicker value to an already-resolved target and
+'   accumulates one result describing the whole target
+'
+' WHY THIS EXISTS
+'   Mutation is separated from resolution so a caller can inspect or confirm the
+'   target before anything is written
+'
+' INPUTS
+'   Target
+'     Range resolved by M_WriteBack_ResolveTarget
+'
+'   iType
+'     DatePicker write action to apply
+'
+'   Result
+'     Accumulating DP_WriteResult, populated across every target area
+'
+' RETURNS
+'   Nothing. The outcome is accumulated into Result
+'
+' BEHAVIOR
+'   Validates the requested write action and the supplied target, writes to each
+'   discontiguous target area, and reports the whole target address
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error if the write action is unsupported, the
+'   target is missing or empty, or range population fails
+'
+' DEPENDENCIES
+'   M_WriteBack_PopulateRange
+'
+' NOTES
+'   This routine does not suppress Application events
+'
+'   Application.EnableEvents is managed by M_WriteBack_Apply
+'
+'   The write action is validated here rather than during resolution, so that
+'   resolving a target for inspection does not require a valid write action
+'
+'   One result is accumulated across every area, so a discontiguous target
+'   reports the whole write rather than its last area
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_WriteBack_ApplyResolvedTarget"
+
+    Dim Block               As Range            'Single target area
+    Dim HandlerStep         As String           'Current handler step for diagnostics
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+    'Initialize diagnostic step
+        HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' VALIDATE WRITE ACTION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate write action"
+    'Validate the requested write action
+        Select Case iType
+            Case DP_WriteAction_DatePicker
+                'Supported DatePicker write action
+            Case Else
+                'Reject unsupported write actions
+                    Err.Raise vbObjectError + 513, PROC_NAME, _
+                        "Unsupported DatePicker write action: " & VBA.CStr(VBA.CLng(iType))
+        End Select
+
+'------------------------------------------------------------------------------
+' VALIDATE TARGET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Validate supplied write-back target"
+    'Reject a missing target
+        If Target Is Nothing Then
+            Err.Raise vbObjectError + 516, PROC_NAME, "Unable to resolve DatePicker write-back target"
+        End If
+    'Reject empty targets
+        If Target.Cells.CountLarge = 0 Then
+            Err.Raise vbObjectError + 517, PROC_NAME, "Resolved DatePicker write-back target is empty"
+        End If
+
+'------------------------------------------------------------------------------
+' REPORT RESOLVED TARGET
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Report resolved target address"
+    'Report the whole target rather than the last area written
+        Result.ResolvedTargetAddress = Target.Worksheet.Name & "!" & _
+            Target.Address(False, False)
+
+'------------------------------------------------------------------------------
+' POPULATE TARGET AREAS
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Populate target areas"
+    'Loop through each discontiguous target area
+        For Each Block In Target.Areas
+            'Populate this target area into the accumulating result
+                M_WriteBack_PopulateRange Block, iType, Result, OverwriteFormulas
+        Next Block
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+CleanExit:
+    'Release object references
+        Set Block = Nothing
+    'Exit the procedure
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, _
+            PROC_NAME & " | Step=" & HandlerStep, _
+            "DatePicker write-back failed: " & Err.Description
+
+End Sub
+
+Private Sub M_WriteBack_ResolveAndApplyTarget( _
+    ByVal iType As DP_WriteAction, _
+    ByVal NoTableGrow As Boolean, _
+    ByVal OverwriteFormulas As Boolean, _
+    ByRef Result As DP_WriteResult)
+
+'
+'------------------------------------------------------------------------------
+'                       RESOLVE AND APPLY WRITE-BACK TARGET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the current Excel write-back target, applies the requested DatePicker
+'   write action, and reports both through one accumulating result
+'
+' WHY THIS EXISTS
+'   Most callers want resolution and mutation as one step. This routine keeps
+'   that convenience while the two stages remain separately callable
+'
+' INPUTS
+'   iType
+'     DatePicker write action to apply
+'
+'   NoTableGrow
+'     True to keep a single selected table cell as a single-cell target
+'
+'     False to expand a single selected table data-body cell to the full table
+'     data column
+'
+'   Result
+'     Accumulating DP_WriteResult, populated with the resolver metadata and the
+'     write counts
+'
+' RETURNS
+'   Nothing. The outcome is accumulated into Result
+'
+' BEHAVIOR
+'   Delegates to M_WriteBack_ResolveTarget and then to
+'   M_WriteBack_ApplyResolvedTarget, then attaches the resolver metadata to the
+'   result rather than discarding it
+'
+' ERROR POLICY
+'   Raises whatever the two stages raise, without adding a further wrapper
+'
+' DEPENDENCIES
+'   M_WriteBack_ResolveTarget
+'   M_WriteBack_ApplyResolvedTarget
+'
+' NOTES
+'   The resolver signature is unchanged. This routine consumes the metadata the
+'   resolver already produces instead of re-deriving it
+'
+'   NoTableGrow is required here because the only caller always supplies it. The
+'   safe default lives on the public entry points, not on this private stage
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Target              As Range            'Resolved target range
+    Dim Expanded            As Boolean          'True when expansion occurred
+    Dim TableName           As String           'Owning table name when expanded
+    Dim ColumnName          As String           'Expanded column name when expanded
+
+'------------------------------------------------------------------------------
+' RESOLVE TARGET
+'------------------------------------------------------------------------------
+    'Resolve the range that will receive the value
+        M_WriteBack_ResolveTarget Target, Expanded, TableName, ColumnName, NoTableGrow
+
+'------------------------------------------------------------------------------
+' ATTACH RESOLVER METADATA
+'------------------------------------------------------------------------------
+    'Report whether the selection was expanded to a table data column
+        Result.ExpandedToTableColumn = Expanded
+    'Report the owning table when expansion occurred
+        Result.TableName = TableName
+    'Report the resolved column when expansion occurred
+        Result.ColumnName = ColumnName
+
+'------------------------------------------------------------------------------
+' APPLY TO TARGET
+'------------------------------------------------------------------------------
+    'Write the value to the resolved range
+        M_WriteBack_ApplyResolvedTarget Target, iType, OverwriteFormulas, Result
+
+'------------------------------------------------------------------------------
+' CLEAN EXIT
+'------------------------------------------------------------------------------
+    'Release object references
+        Set Target = Nothing
+
+End Sub
 Public Sub M_WriteBack_PopulateRange( _
     ByVal oRange As Range, _
-    ByVal iType As DP_WriteAction)
+    ByVal iType As DP_WriteAction, _
+    ByRef Result As DP_WriteResult, _
+    Optional ByVal OverwriteFormulas As Boolean = False)
 
 '
 '------------------------------------------------------------------------------
@@ -7371,6 +9291,7 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Writes the current DatePicker value to every cell in a resolved Excel range
+'   and accumulates the outcome into the supplied write result
 '
 ' WHY THIS EXISTS
 '   DatePicker write-back can target:
@@ -7390,8 +9311,13 @@ Public Sub M_WriteBack_PopulateRange( _
 '   iType
 '     DatePicker write action used to resolve the value to write
 '
+'   Result
+'     Accumulating DP_WriteResult. Counts and addresses for this range are added
+'     to whatever the result already carries, so one result can describe a target
+'     written one area at a time
+'
 ' RETURNS
-'   Nothing
+'   Nothing. The outcome is accumulated into Result
 '
 ' BEHAVIOR
 '   Validates the target range and write action, resolves the DatePicker write
@@ -7401,32 +9327,60 @@ Public Sub M_WriteBack_PopulateRange( _
 '   Protected locked cells may be skipped by the fallback path when at least one
 '   target cell is written successfully
 '
+'   Formula cells are preserved unless the caller opted into replacing them
+'
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the target range is missing, the write
-'   action is unsupported, the write value cannot be resolved, or no cell can be
-'   written successfully
+'   action is unsupported, the write value cannot be resolved, or no cell in this
+'   range can be written successfully
 '
 '   Bulk-write failures are not raised directly because they are expected in
 '   mixed protected, validated, or partially writable ranges. The routine falls
 '   back to the existing per-cell write policy
 '
+'   A failed bulk write is not counted as a failed cell. The result describes the
+'   outcome of the logical write, not the optimization attempts behind it
+'
 ' DEPENDENCIES
 '   M_WriteBack_GetPickedValue
 '   M_WriteBack_TryBulkWriteRange
 '   M_WriteBack_TryWriteCell
-'   DP_MSGBOX_TITLE
 '
 ' NOTES
-'   Bulk write is used only as a fast path
+'   Counts are accumulated locally and added to Result once, so a raised error
+'   cannot leave Result holding half of this range
 '
-'   The fallback preserves the existing robust behavior for protected sheets,
-'   locked cells, validation failures, and partially writable selections
+'   WrittenCount counts the cells that reported a successful write. It is not
+'   derived by subtracting the skips and failures from the attempted count,
+'   because that derivation treats anything that did not raise as a success, and
+'   Excel declines some writes without raising
+'
+'   The bulk path contributes its full target count explicitly. It returns before
+'   the per-cell counters exist, so a result fed only by the fallback would report
+'   a successful bulk write as nothing written
+'
+'   The bulk path is refused when any target cell belongs to an array formula.
+'   A range assignment that overlaps an array neither raises nor writes, and a
+'   range assignment that covers one replaces it silently, so the fast path would
+'   report cells written that were not written. Range.HasArray returns Null for a
+'   mixed target, and an unreadable array state is also treated as a refusal
+'
+'   The bulk path is refused again when formula protection is active and the
+'   target holds any formula, because the bulk write never reaches per-cell
+'   inspection and would destroy them. Range.HasFormula follows the same
+'   True/False/Null convention, and Null is the mixed case that must refuse. A
+'   single formula therefore disables the fast path for the whole target: that is
+'   deliberate, and cheaper than a partition that could disagree with the write
+'
+'   This routine reports through Result and displays nothing. Deciding whether a
+'   human is told about a partial write belongs to the entry point that was
+'   invoked, which sees the whole operation rather than one area
 '
 '   This routine intentionally uses Range.Value rather than Range.Value2 so VBA
 '   Date and DateTime values are written through Excel's normal date handling
 '
 ' UPDATED
-'   2026-05-17
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7434,12 +9388,12 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "M_WriteBack_PopulateRange"
 
+    Dim AreaResult      As DP_WriteResult   'Outcome for this range only
     Dim Cell            As Range            'Current target cell
-    Dim LockedCount     As Long             'Protected locked cells skipped
-    Dim FailedCount     As Long             'Other write failures suppressed
-    Dim AttemptedCount  As Double           'Total target cells attempted
-    Dim WrittenCount    As Double           'Total target cells successfully written
     Dim WriteValue      As Variant          'Resolved write value
+    Dim ArrayState      As Variant          'Range.HasArray for the target
+    Dim FormulaState    As Variant          'Range.HasFormula for the target
+    Dim BulkAllowed     As Boolean          'True when the fast path may be used
     Dim HandlerStep     As String           'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
@@ -7460,11 +9414,13 @@ Public Sub M_WriteBack_PopulateRange( _
             Err.Raise vbObjectError + 513, PROC_NAME, "Target range cannot be Nothing"
         End If
     'Capture the number of target cells
-        AttemptedCount = oRange.Cells.CountLarge
+        AreaResult.AttemptedCount = oRange.Cells.CountLarge
     'Reject empty target ranges
-        If AttemptedCount <= 0 Then
+        If AreaResult.AttemptedCount <= 0 Then
             Err.Raise vbObjectError + 514, PROC_NAME, "Target range does not contain writable cells"
         End If
+    'Capture the discontiguous areas this range covers
+        AreaResult.AreasCount = oRange.Areas.Count
 
 '------------------------------------------------------------------------------
 ' RESOLVE WRITE VALUE
@@ -7488,9 +9444,50 @@ Public Sub M_WriteBack_PopulateRange( _
     'Track the current handler step
         HandlerStep = "Attempt fast bulk write"
     'Use the bulk path only when it can provide a meaningful benefit
-        If AttemptedCount > 1 Then
-            'Exit immediately when the fast bulk write succeeds
-                If M_WriteBack_TryBulkWriteRange(oRange, WriteValue) Then GoTo CleanExit
+        BulkAllowed = (AreaResult.AttemptedCount > 1)
+    'Resolve whether the target touches an array formula
+        If BulkAllowed Then
+            'Treat an unreadable array state as a reason to refuse the fast path
+                On Error Resume Next
+                ArrayState = oRange.HasArray
+                If Err.Number <> 0 Then
+                    ArrayState = Null
+                    Err.Clear
+                End If
+                On Error GoTo ErrorHandler
+            'Refuse the fast path when any target cell belongs to an array formula
+                If VBA.IsNull(ArrayState) Then
+                    BulkAllowed = False
+                ElseIf VBA.CBool(ArrayState) Then
+                    BulkAllowed = False
+                End If
+        End If
+    'Resolve whether the target holds formulas that policy protects
+        If BulkAllowed And Not OverwriteFormulas Then
+            'Treat an unreadable formula state as a reason to refuse the fast path
+                On Error Resume Next
+                FormulaState = oRange.HasFormula
+                If Err.Number <> 0 Then
+                    FormulaState = Null
+                    Err.Clear
+                End If
+                On Error GoTo ErrorHandler
+            'Refuse the fast path when any target cell holds a formula. Null is the
+            'mixed case and must refuse, not be coerced to False
+                If VBA.IsNull(FormulaState) Then
+                    BulkAllowed = False
+                ElseIf VBA.CBool(FormulaState) Then
+                    BulkAllowed = False
+                End If
+        End If
+    'Account for the whole range and exit when the fast bulk write succeeds
+        If BulkAllowed Then
+            If M_WriteBack_TryBulkWriteRange(oRange, WriteValue) Then
+                'The bulk write covered every target cell
+                    AreaResult.WrittenCount = AreaResult.AttemptedCount
+                'Skip the per-cell fallback
+                    GoTo AccumulateResult
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -7500,8 +9497,10 @@ Public Sub M_WriteBack_PopulateRange( _
         HandlerStep = "Populate target cells through safe fallback"
     'Loop through each target cell
         For Each Cell In oRange.Cells
-            'Attempt to write the resolved value to the current cell
-                M_WriteBack_TryWriteCell Cell, WriteValue, LockedCount, FailedCount
+            'Count only the cells that actually received the value
+                If M_WriteBack_TryWriteCell(Cell, WriteValue, OverwriteFormulas, AreaResult) Then
+                    AreaResult.WrittenCount = AreaResult.WrittenCount + 1
+                End If
         Next Cell
 
 '------------------------------------------------------------------------------
@@ -7509,32 +9508,55 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve write result"
-    'Calculate the number of successfully written cells
-        WrittenCount = AttemptedCount - LockedCount - FailedCount
     'Reject write-back attempts that did not write any cell
-        If WrittenCount <= 0 Then
+        If AreaResult.WrittenCount <= 0 Then
             Err.Raise vbObjectError + 516, PROC_NAME, _
                 "DatePicker write-back did not write any cell. Target cells: " & _
-                VBA.CStr(AttemptedCount) & "; protected locked cells skipped: " & _
-                VBA.CStr(LockedCount) & "; other failures: " & VBA.CStr(FailedCount)
+                VBA.CStr(AreaResult.AttemptedCount) & "; protected locked cells skipped: " & _
+                VBA.CStr(AreaResult.LockedSkippedCount) & "; formula cells preserved: " & _
+                VBA.CStr(AreaResult.FormulaSkippedCount) & "; other failures: " & _
+                VBA.CStr(AreaResult.FailedCount)
         End If
 
 '------------------------------------------------------------------------------
-' REPORT PARTIAL PROTECTED-CELL SKIPS
+' ACCUMULATE RESULT
 '------------------------------------------------------------------------------
-    'Show one summary message for protected locked cells that were skipped
-        If LockedCount > 0 Then
-            MsgBox VBA.CStr(LockedCount) & " protected locked cell(s) were skipped.", _
-                vbInformation Or vbOKOnly, DP_MSGBOX_TITLE
+AccumulateResult:
+    'Track the current handler step
+        HandlerStep = "Accumulate write result"
+    'Add this range to the running totals
+        Result.AttemptedCount = Result.AttemptedCount + AreaResult.AttemptedCount
+        Result.WrittenCount = Result.WrittenCount + AreaResult.WrittenCount
+        Result.LockedSkippedCount = Result.LockedSkippedCount + AreaResult.LockedSkippedCount
+        Result.FormulaSkippedCount = Result.FormulaSkippedCount + AreaResult.FormulaSkippedCount
+        Result.FailedCount = Result.FailedCount + AreaResult.FailedCount
+        Result.AreasCount = Result.AreasCount + AreaResult.AreasCount
+    'Join the skipped locked addresses
+        If VBA.LenB(AreaResult.LockedSkippedAddresses) > 0 Then
+            If VBA.LenB(Result.LockedSkippedAddresses) = 0 Then
+                Result.LockedSkippedAddresses = AreaResult.LockedSkippedAddresses
+            Else
+                Result.LockedSkippedAddresses = Result.LockedSkippedAddresses & ", " & _
+                    AreaResult.LockedSkippedAddresses
+            End If
         End If
-
-'------------------------------------------------------------------------------
-' LOG PARTIAL NON-LOCK FAILURES
-'------------------------------------------------------------------------------
-    'Write non-lock failures to the Immediate Window for diagnostics
-        If FailedCount > 0 Then
-            Debug.Print PROC_NAME & ": " & VBA.CStr(FailedCount) & _
-                " cell write failure(s) were suppressed."
+    'Join the preserved formula addresses
+        If VBA.LenB(AreaResult.FormulaSkippedAddresses) > 0 Then
+            If VBA.LenB(Result.FormulaSkippedAddresses) = 0 Then
+                Result.FormulaSkippedAddresses = AreaResult.FormulaSkippedAddresses
+            Else
+                Result.FormulaSkippedAddresses = Result.FormulaSkippedAddresses & ", " & _
+                    AreaResult.FormulaSkippedAddresses
+            End If
+        End If
+    'Join the failed addresses
+        If VBA.LenB(AreaResult.FailedAddresses) > 0 Then
+            If VBA.LenB(Result.FailedAddresses) = 0 Then
+                Result.FailedAddresses = AreaResult.FailedAddresses
+            Else
+                Result.FailedAddresses = Result.FailedAddresses & ", " & _
+                    AreaResult.FailedAddresses
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -7666,8 +9688,8 @@ End Function
 Private Function M_WriteBack_TryWriteCell( _
     ByVal TargetCell As Range, _
     ByVal WriteValue As Variant, _
-    ByRef LockedCount As Long, _
-    ByRef FailedCount As Long) As Boolean
+    ByVal OverwriteFormulas As Boolean, _
+    ByRef Result As DP_WriteResult) As Boolean
 
 '
 '------------------------------------------------------------------------------
@@ -7684,7 +9706,7 @@ Private Function M_WriteBack_TryWriteCell( _
 '   writable
 '
 '   This routine centralizes safe per-cell write behavior and reports the result
-'   through a Boolean return value plus failure counters
+'   through a Boolean return value plus the accumulating write result
 '
 ' INPUTS
 '   TargetCell
@@ -7693,11 +9715,12 @@ Private Function M_WriteBack_TryWriteCell( _
 '   WriteValue
 '     DatePicker value to write
 '
-'   LockedCount
-'     Counter incremented when a protected locked cell is skipped
+'   OverwriteFormulas
+'     False preserves a cell holding a formula. True replaces it
 '
-'   FailedCount
-'     Counter incremented when another cell-level write failure occurs
+'   Result
+'     Accumulating DP_WriteResult. Its skip and failure counters are incremented
+'     in place and the corresponding cell addresses are recorded
 '
 ' RETURNS
 '   True when the value was successfully written to TargetCell
@@ -7706,9 +9729,11 @@ Private Function M_WriteBack_TryWriteCell( _
 '   written
 '
 ' BEHAVIOR
-'   Validates the target cell, skips protected locked cells, writes the supplied
-'   value to writable cells, returns True only after a successful write, and logs
-'   suppressed write failures to the Immediate Window
+'   Validates the target cell, skips protected locked cells, refuses cells that
+'   belong to an array formula, preserves formula cells unless the caller opted
+'   into replacing them, writes the supplied value to writable cells, returns True
+'   only after a successful write, records the address behind every skip and
+'   failure, and logs suppressed write failures to the Immediate Window
 '
 ' ERROR POLICY
 '   Best-effort per-cell write
@@ -7717,9 +9742,13 @@ Private Function M_WriteBack_TryWriteCell( _
 '   caller can complete the range write-back and decide whether the aggregate
 '   result is acceptable
 '
+'   Every cell increments exactly one of the written, locked or failed counts, so
+'   the caller's result satisfies its accounting invariant by construction
+'
 ' DEPENDENCIES
 '   Excel.Range
 '   Excel.Worksheet.ProtectContents
+'   M_WriteBack_AppendAddress
 '
 ' NOTES
 '   This routine intentionally uses Range.Value rather than Range.Value2 so VBA
@@ -7727,8 +9756,26 @@ Private Function M_WriteBack_TryWriteCell( _
 '
 '   Application.EnableEvents is managed by M_WriteBack_Apply, not by this routine
 '
+'   Recorded addresses are worksheet-qualified, in the form SheetName!A1, so a
+'   reported address stays unambiguous and is stable enough to assert against
+'
+'   A cell belonging to an array formula is refused before the write rather than
+'   after it. Excel raises "You cannot change part of an array" for an
+'   interactive edit but declines the same assignment silently through the object
+'   model, so an attempted write would return success having changed nothing
+'
+'   The array gate runs before the formula gate deliberately. An array cell cannot
+'   be written at all, which is a stronger and non-overridable condition than a
+'   formula the caller could choose to replace. Reporting it as a failure stays
+'   correct whichever way OverwriteFormulas is set
+'
+'   Every cell increments exactly one of the written, locked, formula-skipped or
+'   failed counts, so the caller's accounting invariant holds by construction
+'
+'   Counters stay exact. Only the reported address lists are capped
+'
 ' UPDATED
-'   2026-05-03
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -7754,13 +9801,16 @@ Private Function M_WriteBack_TryWriteCell( _
 '------------------------------------------------------------------------------
     'Count and exit when no target cell is supplied
         If TargetCell Is Nothing Then
-            FailedCount = FailedCount + 1
+            Result.FailedCount = Result.FailedCount + 1
+            M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, "(no cell)"
             Debug.Print PROC_NAME & ": skipped missing target cell"
             Exit Function
         End If
     'Count and exit when a non-single-cell range is supplied unexpectedly
         If TargetCell.Cells.CountLarge <> 1 Then
-            FailedCount = FailedCount + 1
+            Result.FailedCount = Result.FailedCount + 1
+            M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, _
+                TargetCell.Worksheet.Name & "!" & TargetCell.Address(False, False)
             Debug.Print PROC_NAME & ": skipped non-single-cell target"
             Exit Function
         End If
@@ -7779,7 +9829,38 @@ Private Function M_WriteBack_TryWriteCell( _
     'Skip locked cells on protected sheets
         If TargetCell.Worksheet.ProtectContents Then
             If TargetCell.Locked Then
-                LockedCount = LockedCount + 1
+                Result.LockedSkippedCount = Result.LockedSkippedCount + 1
+                M_WriteBack_AppendAddress Result.LockedSkippedAddresses, _
+                    Result.LockedSkippedCount, TargetSheetName & "!" & TargetAddress
+                Exit Function
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' SKIP CELLS BELONGING TO AN ARRAY FORMULA
+'------------------------------------------------------------------------------
+    'Excel accepts a value assignment to an array cell without raising and without
+    'writing, so attempting one here would be counted as a successful write
+        If TargetCell.HasArray Then
+            Result.FailedCount = Result.FailedCount + 1
+            M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, _
+                TargetSheetName & "!" & TargetAddress
+            Debug.Print PROC_NAME & ": skipped array-formula cell " & _
+                TargetSheetName & "!" & TargetAddress
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' PRESERVE FORMULA CELLS
+'------------------------------------------------------------------------------
+    'Leave a formula in place unless the caller explicitly opted into replacing it.
+    'A formula that evaluates to a date is still a formula: the user may mean to
+    'replace the displayed date without meaning to delete what produced it
+        If Not OverwriteFormulas Then
+            If TargetCell.HasFormula Then
+                Result.FormulaSkippedCount = Result.FormulaSkippedCount + 1
+                M_WriteBack_AppendAddress Result.FormulaSkippedAddresses, _
+                    Result.FormulaSkippedCount, TargetSheetName & "!" & TargetAddress
                 Exit Function
             End If
         End If
@@ -7813,7 +9894,7 @@ WriteFail:
     'Suppress diagnostic failures
         On Error Resume Next
     'Increment the non-lock failure counter
-        FailedCount = FailedCount + 1
+        Result.FailedCount = Result.FailedCount + 1
     'Refresh diagnostic context if it was not captured before the failure
         If Len(TargetAddress) = 0 Then
             If Not TargetCell Is Nothing Then
@@ -7826,6 +9907,9 @@ WriteFail:
                 TargetSheetName = TargetCell.Worksheet.Name
             End If
         End If
+    'Record the address behind this failure
+        M_WriteBack_AppendAddress Result.FailedAddresses, Result.FailedCount, _
+            TargetSheetName & "!" & TargetAddress
     'Write diagnostics to the Immediate Window
         Debug.Print PROC_NAME & ": suppressed error " & VBA.CStr(ErrorNumber) & _
             " while writing " & TargetSheetName & "!" & TargetAddress & _
@@ -9420,108 +11504,363 @@ Public Function M_Platform_ShouldUseWinAPI() As Boolean
 
 End Function
 
-Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
+#If VBA7 Then
+Private Sub M_Window_RollbackStyle(ByVal hWndForm As LongPtr, ByVal OriginalStyle As LongPtr, ByVal FailedStep As String, ByVal FailedApiError As Long, ByVal RollbackFault As Long, ByRef Result As DP_WindowStyleResult)
+#Else
+Private Sub M_Window_RollbackStyle(ByVal hWndForm As Long, ByVal OriginalStyle As Long, ByVal FailedStep As String, ByVal FailedApiError As Long, ByVal RollbackFault As Long, ByRef Result As DP_WindowStyleResult)
+#End If
 
 '
-'==============================================================================
-'                           WINDOW REMOVE TITLE BAR
+'------------------------------------------------------------------------------
+'                        ROLLBACK WINDOW STYLE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Removes the native title bar from a DatePicker UserForm on Windows
+'   Restores the window style captured before a committed change, after a later
+'   step in the same operation failed
 '
 ' WHY THIS EXISTS
-'   The DatePicker can use a borderless visual style
-'
-'   Removing the native UserForm title bar requires Windows API calls and must
-'   therefore degrade safely on Mac or when WinAPI behavior is disabled by
-'   settings
+'   Clearing WS_CAPTION succeeds long before the frame is refreshed. A failure in
+'   between leaves a window whose style and frame disagree, which no later call
+'   detects and nothing repairs
 '
 ' INPUTS
-'   Frm
-'     UserForm instance whose native title bar should be removed
+'   hWndForm
+'     Native window handle being restored
+'
+'   OriginalStyle
+'     Style read before the change
+'
+'   FailedStep
+'     Step whose failure triggered this rollback
+'
+'   FailedApiError
+'     WinAPI error behind that failure
+'
+'   RollbackFault
+'     Regression fault-injection point, zero in normal use
+'
+'   Result
+'     Outcome to populate, modified in place
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Exits safely on Mac
-'   Exits safely when no form is supplied
-'   Exits safely when WinAPI usage is disabled
-'   Exits safely when the form window handle cannot be resolved
-'   Reads the current native window style
-'   Removes the WS_CAPTION style bit
-'   Writes the updated native window style
-'   Refreshes the non-client frame
-'   Redraws the menu bar / frame area
-'   Logs WinAPI return-code failures to the Immediate Window
+'   Restores the original style and refreshes the frame
+'
+'   Reports RolledBack when the window is back as it was found, and
+'   RecoveryRequired when it is not
 '
 ' ERROR POLICY
-'   Best-effort UI styling
-'   Suppresses unexpected WinAPI or form-handle errors
-'   Diagnoses both VBA runtime errors and WinAPI return-code failures
-'   Does not raise outward
+'   Does not raise. A rollback that fails is reported, not thrown, because the
+'   caller needs the original failure as well as this one
 '
 ' DEPENDENCIES
-'   M_Platform_ShouldUseWinAPI
-'   M_Window_GetUserFormHwnd
-'   GetWindowLongPtr / GetWindowLong
-'   SetWindowLongPtr / SetWindowLong
+'   SetWindowLong / SetWindowLongPtr
 '   SetWindowPos
-'   DrawMenuBar
-'   Err.LastDllError
-'   SetLastError
-'   GWL_STYLE
-'   WS_CAPTION
-'   SWP_NOMOVE
-'   SWP_NOSIZE
-'   SWP_NOZORDER
-'   SWP_NOACTIVATE
-'   SWP_FRAMECHANGED
 '
 ' NOTES
-'   This routine intentionally does nothing on Mac
+'   The original failure is what the caller has to act on, so FailedStep and
+'   LastApiError describe that failure and not this rollback. A rollback that
+'   fails is reported through RecoveryRequired
 '
-'   SetWindowLongPtr / SetWindowLong return the previous value, not a Boolean
-'   success flag
-'
-'   Because zero can theoretically be either a previous value or a failure, the
-'   routine clears the WinAPI last-error state before the call and then inspects
-'   Err.LastDllError when the return value is zero
-'
-'   SetWindowPos and DrawMenuBar return zero on failure
-'
-'   The routine does not raise outward because title-bar removal is visual polish,
-'   not a functional requirement for date selection
+'   A restored style still needs a frame refresh. Restoring the bits without it
+'   reproduces the same half-applied state in the opposite direction
 '
 ' UPDATED
-'   2026-08-21
-'==============================================================================
-
-#If Mac Then
-
+'   2026-08-23
 '------------------------------------------------------------------------------
-' MAC SAFE EXIT
-'------------------------------------------------------------------------------
-    'Do nothing on Mac
-        Exit Sub
-
-#Else
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "M_Window_RemoveTitleBar" 'Current procedure name
+    Const PROC_NAME             As String = "M_Window_RollbackStyle"
+
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Fail the rollback style restore
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Fail the rollback frame refresh
+
+    #If VBA7 Then
+        Dim RestoreResult       As LongPtr       'Previous style returned by the restore
+    #Else
+        Dim RestoreResult       As Long          'Previous style returned by the restore
+    #End If
+
+    Dim WindowFlags             As Long          'SetWindowPos flags
+    Dim ApiResult               As Long          'Generic WinAPI Boolean-style result
+    Dim LastApiError            As Long          'WinAPI last-error code
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'A rollback must never raise into the operation it is recovering
+        On Error Resume Next
+    'Report the failure that caused the rollback, not the rollback itself
+        Result.FailedStep = FailedStep
+        Result.LastApiError = FailedApiError
+
+'------------------------------------------------------------------------------
+' RESTORE ORIGINAL STYLE
+'------------------------------------------------------------------------------
+    'Clear the WinAPI last-error state before restoring
+        SetLastError 0
+    'Skip the restore entirely when a regression test has armed this point.
+    'Restoring and then reporting failure would leave the window back in its
+    'original state while the result claimed it could not be recovered
+        If RollbackFault = FAULT_ROLLBACK_STYLE Then
+            Debug.Print PROC_NAME & _
+                " | Step=Restore original style" & _
+                " | Injected failure, native restore skipped"
+            Result.RecoveryRequired = True
+            Err.Clear
+            Exit Sub
+        End If
+    #If VBA7 Then
+        'Restore the style captured before the change
+            RestoreResult = SetWindowLongPtr(hWndForm, GWL_STYLE, OriginalStyle)
+    #Else
+        'Restore the style captured before the change
+            RestoreResult = SetWindowLong(hWndForm, GWL_STYLE, OriginalStyle)
+    #End If
+    'Report an unrecoverable window when the style cannot be put back
+        If RestoreResult = 0 Then
+            LastApiError = Err.LastDllError
+            If LastApiError <> 0 Then
+                Debug.Print PROC_NAME & _
+                    " | Step=Restore original style" & _
+                    " | Api=SetWindowLong" & _
+                    " | LastError=" & VBA.CStr(LastApiError)
+                Result.RecoveryRequired = True
+                Err.Clear
+                Exit Sub
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' REFRESH RESTORED FRAME
+'------------------------------------------------------------------------------
+    'Build non-client refresh flags
+        WindowFlags = SWP_NOMOVE Or SWP_NOSIZE Or SWP_NOZORDER Or _
+            SWP_NOACTIVATE Or SWP_FRAMECHANGED
+    'Clear the WinAPI last-error state before SetWindowPos
+        SetLastError 0
+    'Skip the refresh entirely when a regression test has armed this point, so the
+    'injected state really is a restored style whose frame was never refreshed
+        If RollbackFault = FAULT_ROLLBACK_FRAME Then
+            ApiResult = 0
+        Else
+            'Make the restored style visible in the frame
+                ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+        End If
+    'Report an unrecoverable window when the restored frame cannot be refreshed
+        If ApiResult = 0 Then
+            LastApiError = Err.LastDllError
+            Debug.Print PROC_NAME & _
+                " | Step=Refresh restored frame" & _
+                " | Api=SetWindowPos" & _
+                " | LastError=" & VBA.CStr(LastApiError)
+            Result.RecoveryRequired = True
+            Err.Clear
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
+' REPORT ROLLBACK
+'------------------------------------------------------------------------------
+    'The window is back as it was found, so the native title bar is usable
+        Result.RolledBack = True
+    'Clear any suppressed rollback error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Window_Test_SetFaultInjection( _
+    ByVal PrimaryFailurePoint As Long, _
+    Optional ByVal RollbackFailurePoint As Long = 0)
+
+'
+'------------------------------------------------------------------------------
+'                    ARM WINDOW-STYLE FAULT INJECTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a single forced failure inside the next borderless-styling call
+'
+' WHY THIS EXISTS
+'   The failure paths this seam covers cannot be produced on demand. A window
+'   that refuses SetWindowPos after accepting a style write is not something a
+'   test can arrange, and those are exactly the paths where a partially applied
+'   style is possible
+'
+'   The regression module is a separate VBA module and cannot assign private
+'   state in M_DatePicker, so the setter has to be technically Public
+'
+' INPUTS
+'   PrimaryFailurePoint
+'     1 style read, 2 style write, 3 frame refresh, 4 redraw. Zero disarms
+'
+'   RollbackFailurePoint
+'     1 rollback style restore, 2 rollback frame refresh. Zero disarms
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the requested failure points for the next call only
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API,
+'   is classified internal under #25, and must not appear in the README public
+'   API table
+'
+'   Injection is one-shot. M_Window_RemoveTitleBar copies these values and
+'   clears them before touching the window, so an armed test cannot leak into a
+'   later real call
+'
+'   The required first argument keeps this out of the Alt+F8 macro list
+'
+'   Failure-point numbers are duplicated as private constants in the regression
+'   module rather than shared through a public enum, so this seam does not
+'   enlarge the public surface. The two lists must be changed together
+'
+'   No state is persisted. Nothing is written to the registry, a workbook, or
+'   any Excel object
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ARM INJECTION
+'------------------------------------------------------------------------------
+    'Arm the requested primary failure point for the next call only
+        mDP_TestWindowPrimaryFailure = PrimaryFailurePoint
+    'Arm the requested rollback failure point for the next call only
+        mDP_TestWindowRollbackFailure = RollbackFailurePoint
+
+End Sub
+
+Public Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleResult
+
+'
+'------------------------------------------------------------------------------
+'                      REMOVE USERFORM TITLE BAR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Applies the borderless DatePicker window style, as one transaction that
+'   either completes or leaves the window as it was found
+'
+' WHY THIS EXISTS
+'   Clearing WS_CAPTION and refreshing the frame are two separate native
+'   operations. The first can succeed and the second fail, leaving a window whose
+'   style says borderless and whose frame still shows a title bar
+'
+'   Reporting through Debug.Print alone made that state invisible: complete
+'   success, a safe abort before any change, and a half-applied style were
+'   indistinguishable to the caller
+'
+' INPUTS
+'   Frm
+'     UserForm whose native window should lose its title bar
+'
+' RETURNS
+'   DP_WindowStyleResult describing the outcome
+'
+'     Attempted           the native style was actually touched
+'     Applied             the borderless style is fully in effect
+'     Committed           the style write succeeded
+'     RolledBack          the original style was restored after a later failure
+'     RecoveryRequired    the window is in no known good state
+'     FailedStep          the step that failed
+'     LastApiError        the WinAPI error behind it
+'
+' BEHAVIOR
+'   Captures the original style, clears WS_CAPTION, and refreshes the frame
+'
+'   A failure before the style write leaves the window untouched
+'
+'   A failure after the style write restores the original style and refreshes the
+'   frame again, so the form falls back to its native title bar
+'
+'   A rollback that itself fails reports RecoveryRequired, so the caller can
+'   unload and rebuild the form rather than continue against a window in an
+'   unknown state
+'
+' ERROR POLICY
+'   Does not raise. Every outcome is reported through the returned result
+'
+'   Diagnostics are still written to the Immediate Window, naming the failing
+'   step and the WinAPI error. They supplement the result, they do not replace it
+'
+' DEPENDENCIES
+'   M_Platform_ShouldUseWinAPI
+'   M_Window_GetUserFormHwnd
+'   GetWindowLong / SetWindowLong
+'   SetWindowPos
+'   DrawMenuBar
+'
+' NOTES
+'   The original style is kept in its own variable. The masked value goes
+'   somewhere else, because rollback is impossible once the two share storage
+'
+'   There is deliberately no shortcut for a caption bit that is already clear.
+'   The bit being clear proves a previous style write succeeded; it proves
+'   nothing about the frame refresh that should have followed. Skipping the
+'   refresh on that basis would make a half-applied window permanently
+'   unrepairable, because every retry would see the bit clear and report success
+'
+'   Repeating the refresh on an already-borderless window is harmless, which is
+'   what makes a second call a valid recovery
+'
+'   The SetWindowLong zero return is ambiguous: it also means the previous style
+'   was zero. Err.LastDllError disambiguates, and that check is preserved
+'
+'   This is a Function so callers can inspect the outcome, but bare-call syntax
+'   still compiles. Both UF_DatePicker call sites are unchanged
+'
+'   Fault injection is consumed one-shot at entry. See
+'   M_Window_Test_SetFaultInjection
+'
+'   An injected failure skips the native call it is failing. Performing the call
+'   and then overwriting its result would leave the window in the state of a
+'   success while the result described a failure, which is the opposite of what
+'   these paths exist to reproduce
+'
+' UPDATED
+'   2026-08-23
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_Window_RemoveTitleBar"
+
+    Const FAULT_STYLE_READ      As Long = 1     'Fail the style read
+    Const FAULT_STYLE_WRITE     As Long = 2     'Fail the style write
+    Const FAULT_SET_WINDOW_POS  As Long = 3     'Fail the frame refresh after commit
+    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Fail the redraw after commit
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Fail the rollback style restore
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Fail the rollback frame refresh
 
     #If VBA7 Then
         Dim hWndForm            As LongPtr       'UserForm window handle
-        Dim WindowStyle         As LongPtr       'Window style bits
+        Dim OriginalStyle       As LongPtr       'Window style as found
+        Dim WindowStyle         As LongPtr       'Window style being written
         Dim SetStyleResult      As LongPtr       'Previous window style returned by SetWindowLongPtr
     #Else
         Dim hWndForm            As Long          'UserForm window handle
-        Dim WindowStyle         As Long          'Window style bits
+        Dim OriginalStyle       As Long          'Window style as found
+        Dim WindowStyle         As Long          'Window style being written
         Dim SetStyleResult      As Long          'Previous window style returned by SetWindowLong
     #End If
 
+    Dim Result                  As DP_WindowStyleResult  'Structured outcome
+    Dim PrimaryFault            As Long          'Armed primary failure point
+    Dim RollbackFault           As Long          'Armed rollback failure point
     Dim WindowFlags             As Long          'SetWindowPos flags
     Dim ApiResult               As Long          'Generic WinAPI Boolean-style result
     Dim LastApiError            As Long          'WinAPI last-error code
@@ -9536,6 +11875,12 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         On Error GoTo CleanExit
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+    'Consume any armed fault injection immediately, so a test call cannot leave
+    'this routine poisoned for a later real one
+        PrimaryFault = mDP_TestWindowPrimaryFailure
+        RollbackFault = mDP_TestWindowRollbackFailure
+        mDP_TestWindowPrimaryFailure = 0
+        mDP_TestWindowRollbackFailure = 0
 
 '------------------------------------------------------------------------------
 ' VALIDATE INPUT
@@ -9550,38 +11895,45 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Check WinAPI policy"
-    'Exit if WinAPI features should not be used
+    'Leave the native title bar in place when WinAPI use is disabled
         If Not M_Platform_ShouldUseWinAPI Then GoTo CleanExit
-
 
 '------------------------------------------------------------------------------
 ' RESOLVE FORM HANDLE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve form handle"
-    'Resolve the form window handle
+    'Resolve the native window behind the UserForm
         hWndForm = M_Window_GetUserFormHwnd(Frm)
-    'Exit if the form window handle is unavailable
+    'Exit when the window cannot be resolved
         If hWndForm = 0 Then GoTo CleanExit
-
 
 '------------------------------------------------------------------------------
 ' READ WINDOW STYLE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Read window style"
-
-    #If VBA7 Then
-        'Read current window style
-            WindowStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
-    #Else
-        'Read current window style
-            WindowStyle = GetWindowLong(hWndForm, GWL_STYLE)
-    #End If
-
-    'Exit if the style cannot be read
-        If WindowStyle = 0 Then
+    'Clear the WinAPI last-error state before reading
+        SetLastError 0
+    'Skip the read entirely when a regression test has armed this point, so the
+    'injected failure reproduces the native state of a real failure rather than
+    'overwriting the result of a call that already succeeded
+        If PrimaryFault = FAULT_STYLE_READ Then
+            OriginalStyle = 0
+        Else
+            #If VBA7 Then
+                'Read the current window style
+                    OriginalStyle = GetWindowLongPtr(hWndForm, GWL_STYLE)
+            #Else
+                'Read the current window style
+                    OriginalStyle = GetWindowLong(hWndForm, GWL_STYLE)
+            #End If
+        End If
+    'Abort before any change when the style cannot be read
+        If OriginalStyle = 0 Then
             LastApiError = Err.LastDllError
+            Result.FailedStep = HandlerStep
+            Result.LastApiError = LastApiError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=GetWindowLong" & _
@@ -9590,21 +11942,30 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         End If
 
 '------------------------------------------------------------------------------
-' REMOVE TITLE BAR STYLE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Remove title bar style"
-    'Remove the caption style bit
-        WindowStyle = (WindowStyle And Not WS_CAPTION)
-
-'------------------------------------------------------------------------------
 ' WRITE WINDOW STYLE
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Write window style"
-    'Clear the WinAPI last-error state before SetWindowLong
+    'Build the borderless style without losing the original
+        WindowStyle = (OriginalStyle And Not WS_CAPTION)
+    'Record that the native style path was entered. The write below either takes
+    'effect or does not, and Committed is what distinguishes the two
+        Result.Attempted = True
+    'Clear the WinAPI last-error state before writing
         SetLastError 0
-
+    'Skip the write entirely when a regression test has armed this point. Writing
+    'and then reporting failure would leave the window borderless while the result
+    'said nothing had happened, and no rollback would run
+        If PrimaryFault = FAULT_STYLE_WRITE Then
+            SetStyleResult = 0
+            Result.FailedStep = HandlerStep
+            Result.LastApiError = 0
+            Debug.Print PROC_NAME & _
+                " | Step=" & HandlerStep & _
+                " | Api=SetWindowLong" & _
+                " | Injected failure, native write skipped"
+            GoTo CleanExit
+        End If
     #If VBA7 Then
         'Write the updated window style
             SetStyleResult = SetWindowLongPtr(hWndForm, GWL_STYLE, WindowStyle)
@@ -9612,11 +11973,12 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         'Write the updated window style
             SetStyleResult = SetWindowLong(hWndForm, GWL_STYLE, WindowStyle)
     #End If
-
     'Diagnose SetWindowLong failure when return is zero and LastError is non-zero
         If SetStyleResult = 0 Then
             LastApiError = Err.LastDllError
             If LastApiError <> 0 Then
+                Result.FailedStep = HandlerStep
+                Result.LastApiError = LastApiError
                 Debug.Print PROC_NAME & _
                     " | Step=" & HandlerStep & _
                     " | Api=SetWindowLong" & _
@@ -9624,6 +11986,8 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
                 GoTo CleanExit
             End If
         End If
+    'The style is now committed. Everything after this point must recover
+        Result.Committed = True
 
 '------------------------------------------------------------------------------
 ' REFRESH NON-CLIENT FRAME
@@ -9635,15 +11999,24 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
             SWP_NOACTIVATE Or SWP_FRAMECHANGED
     'Clear the WinAPI last-error state before SetWindowPos
         SetLastError 0
-    'Force Windows to recalculate the frame
-        ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
-    'Diagnose SetWindowPos return-code failure
+    'Skip the refresh entirely when a regression test has armed this point, so the
+    'window really is left with a committed style and an unrefreshed frame
+        If PrimaryFault = FAULT_SET_WINDOW_POS Then
+            ApiResult = 0
+        Else
+            'Force Windows to recalculate the frame
+                ApiResult = SetWindowPos(hWndForm, 0, 0, 0, 0, 0, WindowFlags)
+        End If
+    'Recover when the frame could not be refreshed after the style was committed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=SetWindowPos" & _
                 " | LastError=" & VBA.CStr(LastApiError)
+            M_Window_RollbackStyle hWndForm, OriginalStyle, HandlerStep, _
+                LastApiError, RollbackFault, Result
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -9653,16 +12026,30 @@ Public Sub M_Window_RemoveTitleBar(ByVal Frm As Object)
         HandlerStep = "Redraw frame"
     'Clear the WinAPI last-error state before DrawMenuBar
         SetLastError 0
-    'Redraw menu bar and non-client elements
-        ApiResult = DrawMenuBar(hWndForm)
-    'Diagnose DrawMenuBar return-code failure
+    'Skip the redraw entirely when a regression test has armed this point
+        If PrimaryFault = FAULT_DRAW_MENU_BAR Then
+            ApiResult = 0
+        Else
+            'Redraw menu bar and non-client elements
+                ApiResult = DrawMenuBar(hWndForm)
+        End If
+    'Recover when the redraw could not be completed after the style was committed
         If ApiResult = 0 Then
             LastApiError = Err.LastDllError
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Api=DrawMenuBar" & _
                 " | LastError=" & VBA.CStr(LastApiError)
+            M_Window_RollbackStyle hWndForm, OriginalStyle, HandlerStep, _
+                LastApiError, RollbackFault, Result
+            GoTo CleanExit
         End If
+
+'------------------------------------------------------------------------------
+' REPORT SUCCESS
+'------------------------------------------------------------------------------
+    'The borderless style is fully in effect
+        Result.Applied = True
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -9674,19 +12061,24 @@ CleanExit:
         ErrorDescription = Err.Description
     'Write diagnostics only when VBA raised during borderless styling
         If ErrorNumber <> 0 Then
+            If VBA.LenB(Result.FailedStep) = 0 Then Result.FailedStep = HandlerStep
             Debug.Print PROC_NAME & _
                 " | Step=" & HandlerStep & _
                 " | Error=" & VBA.CStr(ErrorNumber) & _
                 " | " & ErrorDescription
         End If
+    'A committed style that was neither applied nor rolled back needs recovery
+        If Result.Committed And Not Result.Applied And Not Result.RolledBack Then
+            Result.RecoveryRequired = True
+        End If
+    'Publish the outcome
+        M_Window_RemoveTitleBar = Result
     'Clear any suppressed styling error
         Err.Clear
     'Restore normal error handling
         On Error GoTo 0
 
-#End If
-
-End Sub
+End Function
 
 Public Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)
 
@@ -11059,8 +13451,10 @@ Public Sub M_KeyboardShortcut_Update()
 '   Registers or removes the DatePicker keyboard shortcut according to settings
 '
 ' WHY THIS EXISTS
-'   The keyboard shortcut is the safe fallback entry point when optional visual
-'   integrations such as the in-grid icon and right-click menu are disabled
+'   The keyboard shortcut is one of three interactive entry points, alongside the
+'   in-grid icon and the right-click menu. Disabling the other two no longer
+'   enables it: Application.OnKey is a session-wide binding, and the component
+'   does not take it on behalf of a user who did not ask for it
 '
 ' INPUTS
 '   None
@@ -11164,6 +13558,14 @@ Private Sub M_KeyboardShortcut_Register()
 '   Registers the DatePicker keyboard shortcut for the current Excel session
 '
 ' WHY THIS EXISTS
+'   Registration happens only when the user enabled the shortcut. Nothing else
+'   turns it on, because taking a session-wide key binding is not a decision the
+'   component makes on the user's behalf
+'
+'   Excel exposes no getter for Application.OnKey, so a binding this displaces
+'   cannot be captured and cannot be restored. That limitation is documented
+'   rather than worked around
+'
 '   Application.OnKey requires an explicit public macro callback and the
 '   assignment is not persisted by Excel across sessions
 '
@@ -11195,7 +13597,7 @@ Private Sub M_KeyboardShortcut_Register()
 '   M_KeyboardShortcut_Remove
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -11287,6 +13689,13 @@ Public Sub M_KeyboardShortcut_Remove()
 '   DP_KEYBOARD_SHORTCUT_KEY
 '
 ' NOTES
+'   This restores Excel's default handling rather than any binding the DatePicker
+'   displaced. Excel exposes no getter for Application.OnKey, so the displaced
+'   assignment cannot be captured and cannot be put back. Of the three possible
+'   teardown behaviors this is the least damaging: binding the key to an empty
+'   macro swallows it, and leaving the DatePicker callback in place points it at
+'   a project that may be unloading
+'
 '   Calling Application.OnKey with only the key argument restores normal Excel
 '   behavior for that key combination
 '
@@ -11294,7 +13703,7 @@ Public Sub M_KeyboardShortcut_Remove()
 '   is a teardown-safe cleanup routine
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-23
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -11611,7 +14020,7 @@ Private Function M_GridIcon_IsSameVisibleTarget( _
     'Exit when the target sheet is missing
         If TargetSheet Is Nothing Then Exit Function
     'Exit when the tracked icon is missing
-        If gDP_GridIconShape Is Nothing Then Exit Function
+        If Not M_GridIcon_TrackedShapeIsLive() Then Exit Function
     'Exit when the cached target key differs
         If VBA.StrComp(mDP_GridIconLastAnchorKey, AnchorKey, vbBinaryCompare) <> 0 Then Exit Function
     'Exit when the cached left position differs
@@ -11989,7 +14398,7 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     'Create the icon only when no reusable shape exists
         M_GridIcon_Create AnchorCell
     'Remember the target when cold creation succeeded
-        If Not gDP_GridIconShape Is Nothing Then
+        If M_GridIcon_TrackedShapeIsLive() Then
             M_GridIcon_RememberTarget AnchorKey, IconLeft, IconTop
         End If
         
@@ -12104,8 +14513,8 @@ Public Sub M_GridIcon_Hide()
 '------------------------------------------------------------------------------
 ' HIDE TRACKED SHAPE
 '------------------------------------------------------------------------------
-    'Hide the tracked icon when available
-        If Not gDP_GridIconShape Is Nothing Then
+    'Hide the tracked icon when it still exists
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Visible = msoFalse
             'Clear stale tracked references only when hiding failed
                 If Err.Number <> 0 Then
@@ -12502,7 +14911,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     'Suppress old-icon cleanup errors
         On Error Resume Next
     'Delete the tracked old icon when available
-        If Not gDP_GridIconShape Is Nothing Then
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
         End If
     'Delete any same-named icon on the target sheet
@@ -12679,7 +15088,7 @@ Public Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)
 ' EXIT IF ICON ALREADY EXISTS
 '------------------------------------------------------------------------------
     'Exit when a tracked icon already exists
-        If Not gDP_GridIconShape Is Nothing Then GoTo HideIcon
+        If M_GridIcon_TrackedShapeIsLive() Then GoTo HideIcon
 
 '------------------------------------------------------------------------------
 ' RESOLVE INITIAL ANCHOR
@@ -12705,7 +15114,7 @@ Public Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
 HideIcon:
     'Hide the icon after creation so startup does not display it prematurely
-        If Not gDP_GridIconShape Is Nothing Then
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Visible = msoFalse
         End If
 
@@ -12721,6 +15130,95 @@ ExitProcedure:
         On Error GoTo 0
 
 End Sub
+Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
+
+'
+'==============================================================================
+'                      TRACKED GRID ICON IS LIVE
+'==============================================================================
+' PURPOSE
+'   Reports whether the tracked grid-icon reference still points at a shape that
+'   exists, and clears it when it does not
+'
+' WHY THIS EXISTS
+'   "Not gDP_GridIconShape Is Nothing" tests the variable, not the object. The
+'   icon is an ordinary worksheet shape and can be destroyed without going
+'   through any routine that maintains the reference:
+'
+'     the worksheet holding it is deleted
+'     M_GridIcon_PurgeAll removes it by name from another workbook
+'     the user deletes it
+'
+'   The variable then still holds a reference to an object that no longer exists,
+'   and the next dereference raises. That produced a routine 424 on every
+'   teardown, suppressed and logged, which is noise that hides real failures
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the tracked shape exists and can be used
+'
+'   False when nothing is tracked, or when the reference is stale. A stale
+'   reference is cleared before returning
+'
+' BEHAVIOR
+'   Probes a cheap property of the tracked shape and reports whether the probe
+'   succeeded
+'
+' ERROR POLICY
+'   Best-effort. Never raises. A stale reference is an ordinary condition here,
+'   not a failure to report
+'
+' DEPENDENCIES
+'   gDP_GridIconShape
+'
+' NOTES
+'   .Name is used as the probe because it is cheap and any surviving shape
+'   answers it. Any property access would do; the point is that the object model
+'   is asked rather than the variable
+'
+'   Callers that need to know a deletion failed should still capture Err after
+'   their own call. This function only removes the stale-reference case from that
+'   signal
+'
+' UPDATED
+'   2026-08-23
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ProbeName       As String       'Probed shape name, discarded
+
+'------------------------------------------------------------------------------
+' PROBE THE TRACKED SHAPE
+'------------------------------------------------------------------------------
+    'Never let a liveness probe raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_GridIcon_TrackedShapeIsLive = False
+    'Exit when nothing is tracked
+        If gDP_GridIconShape Is Nothing Then
+            Err.Clear
+            Exit Function
+        End If
+    'Ask the object model whether the shape still answers
+        Err.Clear
+        ProbeName = gDP_GridIconShape.Name
+    'Drop a reference to a shape that no longer exists
+        If Err.Number <> 0 Then
+            Err.Clear
+            Set gDP_GridIconShape = Nothing
+            Exit Function
+        End If
+    'Report a usable tracked shape
+        M_GridIcon_TrackedShapeIsLive = True
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
 Public Sub M_GridIcon_Remove()
 
 '
@@ -12804,8 +15302,9 @@ Public Sub M_GridIcon_Remove()
 '------------------------------------------------------------------------------
     'Clear any pending error before deleting the tracked shape
         Err.Clear
-    'Delete the tracked grid icon shape when available
-        If Not gDP_GridIconShape Is Nothing Then
+    'Delete the tracked grid icon shape when it still exists. A stale reference is
+    'cleared by the liveness check and is not a deletion failure
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
             TrackedErrNumber = Err.Number
             TrackedErrDescription = Err.Description
@@ -14124,8 +16623,8 @@ Public Sub M_GridIcon_PurgeAll()
 '------------------------------------------------------------------------------
 ' DELETE TRACKED SHAPE
 '------------------------------------------------------------------------------
-    'Delete the tracked grid icon shape when available
-        If Not gDP_GridIconShape Is Nothing Then
+    'Delete the tracked grid icon shape when it still exists
+        If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
         End If
     'Clear the tracked shape reference
@@ -15686,7 +18185,8 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '
 ' DEPENDENCIES
 '   IRibbonControl
-'   ThisWorkbook
+'   DP_DemoSheet_ResolveHostWorkbook
+'   DP_Demo_EnsureDemoSheet
 '   DP_DEMO_SHEET_NAME
 '   DP_DemoSheet_Show
 '   DP_DemoSheet_HideVeryHidden
@@ -15696,11 +18196,16 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   The Control argument is required by the RibbonX callback signature even when
 '   this routine does not use it directly
 '
-'   This routine uses ThisWorkbook rather than ActiveWorkbook so the Ribbon
-'   callback always targets the DatePicker host workbook
+'   The host workbook is resolved through DP_DemoSheet_ResolveHostWorkbook
+'   rather than assumed to be ThisWorkbook. ThisWorkbook is the add-in when the
+'   component is loaded as an .xlam, and an add-in has no worksheets, so the
+'   previous assumption made this button fail on every click in that deployment
+'
+'   The demo sheet is built on first use, so the button works from a session
+'   that has never opened the demo workbook
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -15708,6 +18213,7 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '------------------------------------------------------------------------------
     Const PROC_NAME As String = "Ribbon_Demo"
 
+    Dim HostBook    As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet   As Excel.Worksheet       'DatePicker demo worksheet
 
 '------------------------------------------------------------------------------
@@ -15717,10 +18223,23 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' RESOLVE HOST WORKBOOK
+'------------------------------------------------------------------------------
+    'Resolve the workbook that should hold the demo sheet, creating one when the
+    'component runs as an add-in and no open workbook already holds it
+        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(True)
+
+    'Reject the case where no host workbook could be resolved
+        If HostBook Is Nothing Then
+            Err.Raise vbObjectError + 540, PROC_NAME, _
+                "No workbook is available to hold the demo sheet."
+        End If
+
+'------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Retrieve the demo worksheet from the host workbook
-        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+    'Build the demo sheet on first use, then return it
+        Set DemoSheet = DP_Demo_EnsureDemoSheet(HostBook)
 
 '------------------------------------------------------------------------------
 ' TOGGLE DEMO SHEET
@@ -15932,24 +18451,27 @@ Public Sub DP_DemoSheet_Show()
 '   Nothing
 '
 ' BEHAVIOR
-'   Resolves the demo worksheet from ThisWorkbook, makes it visible, activates
-'   the workbook window when possible, and activates the demo sheet
+'   Resolves the demo worksheet from the resolved host workbook, makes it
+'   visible, activates that workbook's window when possible, and activates the
+'   demo sheet
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the demo worksheet cannot be resolved
 '   or activated
 '
 ' DEPENDENCIES
-'   ThisWorkbook
+'   DP_DemoSheet_ResolveHostWorkbook
 '   Excel.Worksheet
 '   DP_DEMO_SHEET_NAME
 '
 ' NOTES
-'   Uses ThisWorkbook rather than ActiveWorkbook so the callback always targets
-'   the DatePicker host workbook
+'   The host workbook is resolved through DP_DemoSheet_ResolveHostWorkbook, not
+'   assumed to be ThisWorkbook. This routine raises when no open workbook holds
+'   the demo sheet rather than creating one: showing a sheet the caller never
+'   built is not this routine's decision
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -15957,6 +18479,7 @@ Public Sub DP_DemoSheet_Show()
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "DP_DemoSheet_Show"
 
+    Dim HostBook        As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
 
 '------------------------------------------------------------------------------
@@ -15968,8 +18491,17 @@ Public Sub DP_DemoSheet_Show()
 '------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Retrieve the demo worksheet from the host workbook
-        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+    'Resolve the workbook that holds the demo sheet
+        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(False)
+
+    'Reject the case where no open workbook holds a demo sheet
+        If HostBook Is Nothing Then
+            Err.Raise vbObjectError + 541, PROC_NAME, _
+                "No open workbook contains the demo sheet '" & DP_DEMO_SHEET_NAME & "'."
+        End If
+
+    'Retrieve the demo worksheet from the resolved workbook
+        Set DemoSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
 
 '------------------------------------------------------------------------------
 ' SHOW DEMO SHEET
@@ -15982,8 +18514,8 @@ Public Sub DP_DemoSheet_Show()
 '------------------------------------------------------------------------------
     'Suppress window activation errors for hidden or add-in-like contexts
         On Error Resume Next
-    'Activate the first workbook window when available
-        If ThisWorkbook.Windows.Count > 0 Then ThisWorkbook.Windows(1).Activate
+    'Activate the first window of the workbook holding the demo sheet
+        If HostBook.Windows.Count > 0 Then HostBook.Windows(1).Activate
     'Clear any suppressed window activation error
         Err.Clear
     'Restore controlled error handling
@@ -16041,7 +18573,7 @@ Public Sub DP_DemoSheet_HideVeryHidden()
 '   workbook structure, or unavailable workbook window
 '
 ' DEPENDENCIES
-'   ThisWorkbook
+'   DP_DemoSheet_ResolveHostWorkbook
 '   Excel.Worksheet
 '   DP_DEMO_SHEET_NAME
 '   DP_DemoSheet_GetSafeVisibleSheet
@@ -16053,12 +18585,13 @@ Public Sub DP_DemoSheet_HideVeryHidden()
 '   Safe to call repeatedly
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Dim HostBook        As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
     Dim SafeSheet       As Excel.Worksheet       'Visible non-demo worksheet
 
@@ -16071,8 +18604,14 @@ Public Sub DP_DemoSheet_HideVeryHidden()
 '------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Retrieve the demo worksheet from the host workbook
-        Set DemoSheet = ThisWorkbook.Worksheets(DP_DEMO_SHEET_NAME)
+    'Resolve the workbook that holds the demo sheet
+        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(False)
+
+    'Exit if no open workbook holds a demo sheet
+        If HostBook Is Nothing Then GoTo CleanExit
+
+    'Retrieve the demo worksheet from the resolved workbook
+        Set DemoSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
 
     'Exit if the demo worksheet is not available
         If DemoSheet Is Nothing Then GoTo CleanExit
@@ -16125,6 +18664,129 @@ CleanExit:
 
 End Sub
 
+Private Function DP_DemoSheet_ResolveHostWorkbook( _
+    ByVal CreateWhenMissing As Boolean) As Excel.Workbook
+
+'
+'------------------------------------------------------------------------------
+'                       RESOLVE DEMO HOST WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the workbook that holds, or should hold, the DatePicker demo sheet
+'
+' WHY THIS EXISTS
+'   The demo routines previously resolved the sheet from ThisWorkbook. That is
+'   correct when the component is embedded in the demo workbook and wrong when it
+'   is loaded as an add-in, where ThisWorkbook is the add-in and has no
+'   worksheets at all
+'
+'   Centralizing the decision keeps the four demo routines in agreement about
+'   which workbook they are operating on
+'
+' INPUTS
+'   CreateWhenMissing
+'     True to add a new workbook when running as an add-in and no open workbook
+'     already holds the demo sheet
+'
+' RETURNS
+'   Workbook that holds or will hold the demo sheet, or Nothing
+'
+' BEHAVIOR
+'   Returns ThisWorkbook when the component is embedded
+'
+'   When running as an add-in, returns the first open workbook that already holds
+'   the demo sheet. Adds a new workbook when none does and CreateWhenMissing is
+'   True. Otherwise returns Nothing
+'
+' ERROR POLICY
+'   Safe default. Returns Nothing rather than raising when no workbook can be
+'   resolved, so lifecycle cleanup paths can exit quietly
+'
+' DEPENDENCIES
+'   DP_DEMO_SHEET_NAME
+'
+' NOTES
+'   The add-in deliberately does not build the demo into whichever workbook
+'   happens to be active. Adding an unrequested sheet to a user's live workbook
+'   is a worse outcome than opening a new one
+'
+'   An add-in, a workbook with protected structure, and a workbook already
+'   holding the demo are all distinguished here rather than left to fail later
+'
+' UPDATED
+'   2026-08-22
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CandidateBook   As Excel.Workbook       'Workbook scan variable
+    Dim ProbeSheet      As Excel.Worksheet      'Demo sheet probe
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Return the safe default unless a workbook can be resolved
+        Set DP_DemoSheet_ResolveHostWorkbook = Nothing
+    'Suppress resolution errors through the local fail-safe path
+        On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' EMBEDDED DEPLOYMENT
+'------------------------------------------------------------------------------
+    'Use the host workbook when the component is embedded in one
+        If Not ThisWorkbook.IsAddin Then
+            Set DP_DemoSheet_ResolveHostWorkbook = ThisWorkbook
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' REUSE AN OPEN DEMO WORKBOOK
+'------------------------------------------------------------------------------
+    'Return the first open workbook that already holds the demo sheet
+        For Each CandidateBook In Excel.Application.Workbooks
+            'Skip add-ins, which cannot hold a worksheet
+                If Not CandidateBook.IsAddin Then
+                    'Probe for the demo sheet without raising when it is absent
+                        Set ProbeSheet = Nothing
+                        On Error Resume Next
+                        Set ProbeSheet = CandidateBook.Worksheets(DP_DEMO_SHEET_NAME)
+                        Err.Clear
+                        On Error GoTo FailSafe
+                    'Return the workbook that already holds the demo sheet
+                        If Not ProbeSheet Is Nothing Then
+                            Set DP_DemoSheet_ResolveHostWorkbook = CandidateBook
+                            Exit Function
+                        End If
+                End If
+        Next CandidateBook
+
+'------------------------------------------------------------------------------
+' CREATE A DEMO WORKBOOK
+'------------------------------------------------------------------------------
+    'Exit with the safe default when the caller does not want one created
+        If Not CreateWhenMissing Then Exit Function
+
+    'Add a workbook to hold the demo rather than writing into the user's own
+        Set DP_DemoSheet_ResolveHostWorkbook = Excel.Application.Workbooks.Add
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the fail-safe handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAIL-SAFE
+'------------------------------------------------------------------------------
+FailSafe:
+    'Return the safe default
+        Set DP_DemoSheet_ResolveHostWorkbook = Nothing
+    'Clear the suppressed resolution error
+        Err.Clear
+
+End Function
+
 Private Function DP_DemoSheet_GetSafeVisibleSheet( _
     ByVal DemoSheet As Excel.Worksheet) As Excel.Worksheet
 
@@ -16146,25 +18808,26 @@ Private Function DP_DemoSheet_GetSafeVisibleSheet( _
 '     Demo worksheet that should be excluded from the search
 '
 ' RETURNS
-'   First visible non-demo worksheet found in ThisWorkbook
+'   First visible non-demo worksheet in the workbook that owns the demo sheet
 '   Nothing when no suitable worksheet exists
 '
 ' BEHAVIOR
-'   Scans ThisWorkbook.Worksheets and returns the first visible worksheet that
+'   Scans the worksheets of the workbook that owns the supplied demo sheet and
+'   returns the first visible worksheet that
 '   is not the supplied demo worksheet
 '
 ' ERROR POLICY
 '   Best-effort lookup. Returns Nothing on error
 '
 ' DEPENDENCIES
-'   ThisWorkbook
+'   Worksheet.Parent
 '   Excel.Worksheet
 '
 ' NOTES
 '   This helper does not create sheets and does not change visibility
 '
 ' UPDATED
-'   2026-05-15
+'   2026-08-22
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -16181,8 +18844,8 @@ Private Function DP_DemoSheet_GetSafeVisibleSheet( _
 '------------------------------------------------------------------------------
 ' FIND SAFE SHEET
 '------------------------------------------------------------------------------
-    'Loop through worksheets in the host workbook
-        For Each WS In ThisWorkbook.Worksheets
+    'Loop through worksheets in the workbook that owns the demo sheet
+        For Each WS In DemoSheet.Parent.Worksheets
             'Return the first visible worksheet that is not the demo sheet
                 If Not WS Is DemoSheet Then
                     If WS.Visible = xlSheetVisible Then
