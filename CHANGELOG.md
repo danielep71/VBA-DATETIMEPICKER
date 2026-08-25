@@ -1227,6 +1227,30 @@ backward-compatible capability, 💥 **major** may break callers.
   lifecycle procedures named in the document exist as described, and every
   internal link resolves.
 
+- Rebuilt `CONTRIBUTING.md` for the `v1.2.0` contracts. The previous guide
+  described a component whose write scope, ownership model, settings scope and
+  keyboard policy had all since changed, and carried its rules as prose scattered
+  through a workflow document.
+
+  Each contract this release established now has its own section rather than a
+  paragraph: runtime provider ownership, the write-back contract,
+  formula preservation, `DP_WriteResult`, settings persistence and namespaces,
+  the keyboard shortcut contract, grid-icon lifecycle, WinAPI and
+  borderless-window changes, and harness worksheet-creation recovery.
+
+  Two boundaries are stated where contributors will meet them rather than left
+  implicit: the release-certification boundary, and that operational workflows
+  are not software-quality gates — a distinction `daily-traffic.yml` had been
+  asserting only in its own header.
+
+  Also adds the source-first development model, required validation, the
+  clean-start invariant, documentation accuracy rules, and semantic-versioning
+  guidance.
+
+  Verified against source: every `DP_`, `M_` and `TST_DP_` symbol named in the
+  guide exists, none is `Private` while presented as contributor-facing, and all
+  eleven internal links resolve.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
