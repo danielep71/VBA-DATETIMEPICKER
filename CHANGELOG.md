@@ -83,18 +83,30 @@ refactor and no new features. Corrections are published against the released
   the real panel still overrode the user's choice. The save path now resolves
   through a single pure seam that returns the current setting unchanged.
 
-- **Discontiguous write results are complete and order-independent**
+- **A write never reports partial mutation as an exception carrying no result**
   ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21)).
-  `M_WriteBack_PopulateRange` raised whenever an area wrote no cell, and that
-  raise sat before the accumulation block. A zero-write area discarded its own
-  classification counts, and because the raise escaped the area loop it took
-  every area already accumulated with it. A writable area followed by a
-  zero-write area mutated the workbook and then returned no `DP_WriteResult` at
-  all, and the totals depended on the order Excel enumerated `Target.Areas`.
+  `M_WriteBack_PopulateRange` raised on both a zero-write area and an unexpected
+  technical error, and both raises sat before the accumulation block. An area
+  that raised discarded its own classification counts, and because the raise
+  escaped the area loop it took every area already accumulated with it. A
+  writable area followed by a failing one mutated the workbook and then returned
+  no `DP_WriteResult` at all, and the totals depended on the order Excel
+  enumerated `Target.Areas`.
 
-  Every area now contributes its facts before the outcome is decided, once, at
-  the operation level. Partial mutation can no longer be represented as an
-  exception carrying no result.
+  A zero-write area is now an outcome rather than an exception, so totals are
+  complete and order-independent. An unexpected technical error is now decided by
+  one rule: whether any cell, in this area or an earlier one, has produced an
+  outcome. If none has, the original error is raised with its identity preserved,
+  because nothing is destroyed by raising and a programming error reaching the
+  engine must stay loud. If one has, the error is recorded in the result and the
+  facts observed so far are returned.
+
+  Population stops at the first technical failure rather than continuing to
+  mutate the workbook, so the areas it stopped short of are absent from
+  `AttemptedCount`. A technical-failure result is therefore **bounded** —
+  `Written + Locked + Formula + Failed <= Attempted` — rather than balanced, and
+  because the counts alone can then look complete, the failure is reported
+  separately rather than inferred from them.
 
 - **An unrecoverable window-style failure no longer presents the form**
   ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
@@ -131,10 +143,20 @@ refactor and no new features. Corrections are published against the released
   form load. The picker fails rather than presenting a window whose style is
   neither fully applied nor rolled back. A subsequent load is unaffected.
 
+- `DP_WriteResult` gains `TechnicalFailureOccurred`, `TechnicalFailureStep`,
+  `TechnicalFailureNumber` and `TechnicalFailureDescription`. The addition is
+  backward compatible: existing field names, types and meanings are unchanged.
+
+- `M_WriteBack_ReportShortfall` no longer stays silent when `WrittenCount`
+  reaches `AttemptedCount` if a technical failure is flagged, and
+  `M_WriteBack_DescribeShortfall` names the step the operation stopped at. The
+  areas an aborted operation never reached are not counted, so the counts alone
+  could otherwise describe a smaller operation than the user asked for.
+
 ### 🧪 Validation
 
-- Standard regression: `State=PASS; Run=385; Passed=385; Failed=0; CleanupFailures=0`
-- With UI smoke: `State=PASS; Run=388; Passed=388; Failed=0; CleanupFailures=0`
+- Standard regression: `State=PASS; Run=420; Passed=420; Failed=0; CleanupFailures=0`
+- With UI smoke: `State=PASS; Run=423; Passed=423; Failed=0; CleanupFailures=0`
 - New `RuntimeAdmission` suite — 28 assertions driving every public entry path
   under both a foreign and an owned lease.
 - New `SettingsSaveResolution` suite — 12 assertions driving the seam the real
@@ -144,7 +166,12 @@ refactor and no new features. Corrections are published against the released
 - New `WindowRecovery` suite — 8 assertions driving the real form through an
   injected fault at `SetWindowPos` and at the rollback step, covering both the
   initialize and activate paths and confirming that the next load succeeds.
-- Baseline 302 + 28 + 12 + 35 + 8 = 385 standard.
+- New `WriteTechnicalFailure` suite — 35 assertions driving the real public write
+  path with a fault armed after cells were written inside one area, on entering a
+  later area after an earlier one completed, and before anything had been
+  observed at all. One scenario uses an earlier area that only skipped a formula
+  cell, which mutated nothing but still holds an outcome that must survive.
+- Baseline 302 + 28 + 12 + 35 + 8 + 35 = 420 standard.
 - Manual two-provider refusal matrix passed for `.xlam + embedded` and
   `embedded + embedded` in a single Excel process, including a reversal check
   confirming ownership follows start order rather than packaging.
@@ -164,6 +191,14 @@ refactor and no new features. Corrections are published against the released
   seam. It is internal implementation surface, not supported API, and is also to
   be classified `internal` under
   [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+- `M_WriteBack_Test_SetFaultInjection` is internal test infrastructure, not
+  supported API, and is also to be classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). It exists
+  because the path it covers cannot be produced on demand:
+  `M_WriteBack_TryWriteCell` classifies every per-cell failure it can observe and
+  raises nothing, so a genuine technical error inside the area loop is precisely
+  what a test has no way to arrange. Injection is one-shot, disarms itself as it
+  fires, and persists nothing.
 
 ### ⚠️ Known limitations
 

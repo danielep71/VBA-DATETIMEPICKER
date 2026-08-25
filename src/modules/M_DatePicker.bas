@@ -352,6 +352,10 @@ Option Explicit
         ColumnName              As String       'Resolved column when expanded
         AreasCount              As Long         'Discontiguous areas in the target
         EventsDisabledByCaller  As Boolean      'True when events were already off
+        TechnicalFailureOccurred    As Boolean  'True when an unexpected error stopped the operation
+        TechnicalFailureStep        As String   'Handler step the unexpected error occurred in
+        TechnicalFailureNumber      As Long     'Original error number, preserved
+        TechnicalFailureDescription As String   'Original error description, preserved
     End Type
 
 '------------------------------------------------------------------------------
@@ -361,6 +365,12 @@ Option Explicit
     Private mDP_TestWindowPrimaryFailure    As Long
     'Armed rollback failure point for that same call, zero when disarmed
     Private mDP_TestWindowRollbackFailure   As Long
+    'Armed target area ordinal for a forced write-back failure, zero when disarmed
+    Private mDP_TestWriteFailArea           As Long
+    'Cells to write inside that area before the forced failure fires
+    Private mDP_TestWriteFailAfterCells     As Long
+    'Target areas populated so far in the current write operation
+    Private mDP_TestWriteAreaOrdinal        As Long
 
 '------------------------------------------------------------------------------
 ' PUBLIC STATE
@@ -8651,7 +8661,7 @@ Public Function M_WriteBack_Apply( _
     'Track the current handler step
         HandlerStep = "Log partial write"
     'Record a partial write for the developer without interrupting the caller
-        If Result.WrittenCount < Result.AttemptedCount Then
+        If Result.WrittenCount < Result.AttemptedCount Or Result.TechnicalFailureOccurred Then
             Debug.Print PROC_NAME & ": wrote " & VBA.CStr(Result.WrittenCount) & _
                 " of " & VBA.CStr(Result.AttemptedCount) & " cells - " & _
                 M_WriteBack_DescribeShortfall(Result)
@@ -8791,6 +8801,209 @@ Private Sub M_WriteBack_AppendAddress( _
 
 End Sub
 
+Public Sub M_WriteBack_Test_SetFaultInjection( _
+    ByVal FailInAreaOrdinal As Long, _
+    Optional ByVal FailAfterWrittenCellsInArea As Long = 0)
+
+'
+'------------------------------------------------------------------------------
+'                    ARM WRITE-BACK FAULT INJECTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a single forced technical failure inside the next write-back operation
+'
+' WHY THIS EXISTS
+'   #21 promises that partial mutation is never reported as an exception carrying
+'   no result. That promise is only meaningful on the unexpected-technical-error
+'   path, and that path cannot be produced on demand: M_WriteBack_TryWriteCell
+'   classifies every per-cell failure it can observe and raises nothing, so a
+'   genuine technical error inside the area loop is exactly the case a test has
+'   no way to arrange
+'
+'   Classified cell failures such as an array-formula refusal are already covered
+'   by the MultiAreaWriteResult suite. They become FailedCount and are a
+'   different path from this one
+'
+'   The regression module is a separate VBA module and cannot assign private
+'   state in M_DatePicker, so the setter has to be technically Public
+'
+' INPUTS
+'   FailInAreaOrdinal
+'     1-based target area to fail in, counted within one write operation.
+'     Zero disarms
+'
+'   FailAfterWrittenCellsInArea
+'     Cells to write inside that area before failing. Zero fails on entering the
+'     area, before any of its cells are mutated
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the requested failure point for the next write operation only
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API,
+'   is classified internal under #25, and must not appear in the README public
+'   API table
+'
+'   Injection is one-shot. The fault disarms itself as it fires, so an armed
+'   test cannot leak into a later real write. A test that arms a fault it never
+'   reaches must disarm it explicitly in cleanup
+'
+'   The required first argument keeps this out of the Alt+F8 macro list
+'
+'   The forced error is raised through the ordinary Err.Raise path inside
+'   M_WriteBack_PopulateRange, so it exercises the real handler rather than a
+'   test-only branch of it
+'
+'   No state is persisted. Nothing is written to the registry, a workbook, or
+'   any Excel object
+'
+' UPDATED
+'   2026-08-25
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ARM INJECTION
+'------------------------------------------------------------------------------
+    'Arm the requested target area for the next write operation only
+        mDP_TestWriteFailArea = FailInAreaOrdinal
+    'Arm how far into that area the failure fires
+        mDP_TestWriteFailAfterCells = FailAfterWrittenCellsInArea
+    'Reset the per-operation area counter so arming is independent of history
+        mDP_TestWriteAreaOrdinal = 0
+
+End Sub
+
+Private Function M_WriteBack_TestFaultShouldFire( _
+    ByVal AreaOrdinal As Long, _
+    ByVal WrittenInArea As Double) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   RESOLVE ARMED WRITE-BACK FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether an armed write-back fault fires at this point
+'
+' WHY THIS EXISTS
+'   The decision is consulted from two places inside one area, and both have to
+'   agree about one-shot consumption
+'
+' INPUTS
+'   AreaOrdinal
+'     1-based ordinal of the area currently being populated
+'
+'   WrittenInArea
+'     Cells written inside that area so far
+'
+' RETURNS
+'   True when the caller must raise the forced technical failure
+'
+' BEHAVIOR
+'   Fires at most once, and disarms itself as it fires
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Disarmed state is the normal state. Production never arms this
+'
+' UPDATED
+'   2026-08-25
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Set safe default result
+        M_WriteBack_TestFaultShouldFire = False
+    'Exit when no fault is armed
+        If mDP_TestWriteFailArea <= 0 Then Exit Function
+    'Exit when this is not the armed area
+        If AreaOrdinal <> mDP_TestWriteFailArea Then Exit Function
+    'Exit until the armed number of cells has been written inside that area
+        If WrittenInArea < mDP_TestWriteFailAfterCells Then Exit Function
+
+'------------------------------------------------------------------------------
+' CONSUME
+'------------------------------------------------------------------------------
+    'Disarm before reporting, so the fault fires exactly once
+        mDP_TestWriteFailArea = 0
+        mDP_TestWriteFailAfterCells = 0
+    'Report that the caller must raise
+        M_WriteBack_TestFaultShouldFire = True
+
+End Function
+
+Private Function M_WriteBack_HasCellOutcomes( _
+    ByRef Result As DP_WriteResult) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   REPORT WHETHER A RESULT HOLDS CELL OUTCOMES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a write result records anything that actually happened to a
+'   cell
+'
+' WHY THIS EXISTS
+'   Deciding what an unexpected technical failure means turns on one question:
+'   is there anything to lose? That is answered by the per-cell outcomes, not by
+'   AttemptedCount
+'
+'   AttemptedCount is the size of the target. It is recorded before the first cell
+'   is touched, so treating it as evidence would classify a validation failure
+'   that did nothing as a failure worth protecting, and would silently swallow the
+'   programming errors this engine is supposed to raise loudly
+'
+' INPUTS
+'   Result
+'     Write result to inspect. Either an area result or an operation result
+'
+' RETURNS
+'   True when at least one cell was written, skipped or failed
+'
+' BEHAVIOR
+'   Pure. Reads four counters and returns
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   A written cell means the workbook was mutated. A skipped or failed cell means
+'   an observation was made that the caller asked for. Both are facts #21 promises
+'   not to discard
+'
+' UPDATED
+'   2026-08-25
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Report whether any cell produced an outcome
+        M_WriteBack_HasCellOutcomes = _
+            (Result.WrittenCount > 0) Or _
+            (Result.LockedSkippedCount > 0) Or _
+            (Result.FormulaSkippedCount > 0) Or _
+            (Result.FailedCount > 0)
+
+End Function
+
 Public Sub M_WriteBack_ReportShortfall( _
     ByRef Result As DP_WriteResult)
 
@@ -8847,7 +9060,14 @@ Public Sub M_WriteBack_ReportShortfall( _
 ' SKIP A COMPLETE WRITE
 '------------------------------------------------------------------------------
     'Say nothing when every attempted cell was written
-        If Result.WrittenCount >= Result.AttemptedCount Then Exit Sub
+    '
+    'A technical failure is always reported, even when the cells that were
+    'attempted all succeeded. The areas the operation never reached are not in
+    'AttemptedCount, so the counts alone can look complete while the operation
+    'actually stopped early
+        If Result.WrittenCount >= Result.AttemptedCount Then
+            If Not Result.TechnicalFailureOccurred Then Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' REPORT THE SHORTFALL
@@ -8953,6 +9173,22 @@ Public Function M_WriteBack_DescribeShortfall( _
             End If
             Description = Description & VBA.CStr(Result.FailedCount) & " failed: " & _
                 Result.FailedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' DESCRIBE AN UNEXPECTED TECHNICAL FAILURE
+'------------------------------------------------------------------------------
+    'Describe an unexpected error that stopped the operation. This is not a
+    'classified cell outcome: the cells the operation never reached are absent
+    'from every count above, so without this line the message would describe a
+    'smaller operation than the one the user asked for
+        If Result.TechnicalFailureOccurred Then
+            If VBA.LenB(Description) > 0 Then
+                Description = Description & VBA.vbCrLf
+            End If
+            Description = Description & _
+                "The operation stopped early after an unexpected error at step """ & _
+                Result.TechnicalFailureStep & """. Any remaining cells were not attempted."
         End If
 
 '------------------------------------------------------------------------------
@@ -9363,8 +9599,18 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   discontiguous target area, and reports the whole target address
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the write action is unsupported, the
-'   target is missing or empty, or range population fails
+'   Raises a descriptive runtime error if the write action is unsupported or the
+'   target is missing or empty. Both are checked before any area is touched
+'
+'   An unexpected failure during area population is decided by
+'   M_WriteBack_PopulateRange, which raises when no cell has produced an outcome
+'   and returns a result carrying the failure when one has. A technical failure
+'   therefore reaches this routine only when there is something worth returning,
+'   and this routine returns it rather than converting it back into an exception
+'
+'   Population stops at the first technical failure. The remaining areas are
+'   deliberately not attempted, so a technical-failure result is bounded
+'   (Written + Locked + Formula + Failed <= Attempted) rather than balanced
 '
 ' DEPENDENCIES
 '   M_WriteBack_PopulateRange
@@ -9443,6 +9689,9 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Populate target areas"
+    'Reset the per-operation area counter that positions an injected fault. This
+    'is test infrastructure and is inert unless a fault is armed
+        mDP_TestWriteAreaOrdinal = 0
     'Loop through each discontiguous target area. Every area contributes its
     'attempted, written, skipped, failed and address data to Result before the
     'operation outcome is decided, so the totals do not depend on the order
@@ -9450,6 +9699,12 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
         For Each Block In Target.Areas
             'Populate this target area into the accumulating result
                 M_WriteBack_PopulateRange Block, iType, Result, OverwriteFormulas
+            'Stop the operation on an unexpected technical failure. Continuing to
+            'mutate the workbook after an error nobody classified would enlarge the
+            'damage, so the remaining areas are deliberately not attempted. They are
+            'therefore absent from AttemptedCount, which is what makes a
+            'technical-failure result bounded rather than balanced
+                If Result.TechnicalFailureOccurred Then Exit For
         Next Block
 
 '------------------------------------------------------------------------------
@@ -9457,6 +9712,21 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Finalize operation outcome"
+    'Record a technical failure that survived to the operation level
+    '
+    'A failure reaches this point only when at least one cell had already produced
+    'an outcome. M_WriteBack_PopulateRange raises instead when nothing had, so the
+    'result being returned here always carries something worth returning. The
+    'failure is not hidden: it travels in the result, is described by
+    'M_WriteBack_DescribeShortfall, and is reported by M_WriteBack_ReportShortfall
+        If Result.TechnicalFailureOccurred Then
+            Debug.Print PROC_NAME & _
+                " | Technical failure | Step=" & Result.TechnicalFailureStep & _
+                "; Error=" & VBA.CStr(Result.TechnicalFailureNumber) & _
+                "; Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+                "; Written=" & VBA.CStr(Result.WrittenCount) & _
+                "; Areas=" & VBA.CStr(Result.AreasCount)
+        End If
     'The outcome is decided here, once, on complete data. A legitimate zero-write
     'operation returns a complete DP_WriteResult rather than an exception, so a
     'caller can never be handed "exception with no result" after the workbook has
@@ -9638,9 +9908,26 @@ Public Sub M_WriteBack_PopulateRange( _
 '   Formula cells are preserved unless the caller opted into replacing them
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the target range is missing, the write
-'   action is unsupported, the write value cannot be resolved, or no cell in this
-'   range can be written successfully
+'   An area that writes no cell is an outcome, not an exception, and is accumulated
+'   like any other
+'
+'   An unexpected error is decided by one rule: whether any cell, in this area or
+'   in an earlier one, has already produced an outcome
+'
+'   If none has, the original error is raised. Nothing is destroyed by raising, and
+'   an unsupported write action or a missing target reaching this routine is a
+'   programming error that a direct caller of this Public routine must be told
+'   about loudly
+'
+'   If one has, the error is recorded in TechnicalFailureOccurred,
+'   TechnicalFailureStep, TechnicalFailureNumber and TechnicalFailureDescription,
+'   the facts observed so far are accumulated, and the routine returns. A caller
+'   whose workbook has already been mutated is never handed an exception carrying
+'   no result. See #21
+'
+'   AttemptedCount is deliberately not part of that rule. It is recorded before the
+'   first cell is touched, so it describes the size of the target rather than
+'   anything that happened to it
 '
 '   Bulk-write failures are not raised directly because they are expected in
 '   mixed protected, validated, or partially writable ranges. The routine falls
@@ -9702,7 +9989,11 @@ Public Sub M_WriteBack_PopulateRange( _
     Dim ArrayState      As Variant          'Range.HasArray for the target
     Dim FormulaState    As Variant          'Range.HasFormula for the target
     Dim BulkAllowed     As Boolean          'True when the fast path may be used
+    Dim AreaOrdinal     As Long             'Position of this area in the operation
     Dim HandlerStep     As String           'Current handler step for diagnostics
+
+    Dim SavedErrNumber      As Long         'Captured original error number
+    Dim SavedErrDescription As String       'Captured original error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9711,6 +10002,27 @@ Public Sub M_WriteBack_PopulateRange( _
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' RECORD AREA POSITION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Record area position"
+    'Record where this area sits in the operation. The counter is reset by
+    'M_WriteBack_ApplyResolvedTarget before the area loop, so the ordinal is
+    'per-operation rather than per-session
+        mDP_TestWriteAreaOrdinal = mDP_TestWriteAreaOrdinal + 1
+        AreaOrdinal = mDP_TestWriteAreaOrdinal
+    'Raise an armed fault that fires on entering this area, before anything about
+    'it has been recorded and before any of its cells are mutated. This is the one
+    'position from which an operation can still end up carrying no facts at all,
+    'which is the case that must still raise
+    '
+    'Disarmed in production: see M_WriteBack_Test_SetFaultInjection
+        If M_WriteBack_TestFaultShouldFire(AreaOrdinal, 0) Then
+            Err.Raise vbObjectError + 518, PROC_NAME, _
+                "Injected write-back fault on entering area " & VBA.CStr(AreaOrdinal)
+        End If
 
 '------------------------------------------------------------------------------
 ' VALIDATE TARGET RANGE
@@ -9809,6 +10121,15 @@ Public Sub M_WriteBack_PopulateRange( _
                 If M_WriteBack_TryWriteCell(Cell, WriteValue, OverwriteFormulas, AreaResult) Then
                     AreaResult.WrittenCount = AreaResult.WrittenCount + 1
                 End If
+            'Raise an armed fault once the requested number of cells in this area
+            'has been mutated. Disarmed in production: see
+            'M_WriteBack_Test_SetFaultInjection
+                If M_WriteBack_TestFaultShouldFire(AreaOrdinal, AreaResult.WrittenCount) Then
+                    Err.Raise vbObjectError + 518, PROC_NAME, _
+                        "Injected write-back fault after " & _
+                        VBA.CStr(AreaResult.WrittenCount) & _
+                        " written cells in area " & VBA.CStr(AreaOrdinal)
+                End If
         Next Cell
 
 '------------------------------------------------------------------------------
@@ -9876,6 +10197,16 @@ AccumulateResult:
                     AreaResult.FailedAddresses
             End If
         End If
+    'Carry an unexpected technical failure into the operation result. The first
+    'failure wins, so the original error survives any later area
+        If AreaResult.TechnicalFailureOccurred Then
+            If Not Result.TechnicalFailureOccurred Then
+                Result.TechnicalFailureOccurred = True
+                Result.TechnicalFailureStep = AreaResult.TechnicalFailureStep
+                Result.TechnicalFailureNumber = AreaResult.TechnicalFailureNumber
+                Result.TechnicalFailureDescription = AreaResult.TechnicalFailureDescription
+            End If
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -9890,12 +10221,58 @@ CleanExit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error before anything can disturb it. The identity of
+    'this error is preserved all the way to the operation-level decision, so a
+    'caller that is told about a technical failure is told which one
+        SavedErrNumber = Err.Number
+        SavedErrDescription = "DatePicker range population failed: " & Err.Description
     'Release object references
         Set Cell = Nothing
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "DatePicker range population failed: " & Err.Description
+    'Refuse to re-enter. Accumulation below is arithmetic and string joining and
+    'cannot realistically fail, but a handler that resumes into a block able to
+    'raise back into the same handler would spin. A second entry raises instead
+        If AreaResult.TechnicalFailureOccurred Then
+            Err.Raise SavedErrNumber, _
+                PROC_NAME & " | Step=" & HandlerStep, SavedErrDescription
+        End If
+    'Raise when there is nothing to lose
+    '
+    'One rule decides this, and it turns on whether any cell has produced an
+    'outcome. If none has, no work is destroyed by raising, and the caller is
+    'better served by a loud failure: an unsupported write action or a missing
+    'target reaching this routine is a programming error, and this is the only
+    'signal a direct caller of this Public routine would get
+    '
+    'AttemptedCount is deliberately not consulted. It is recorded before the first
+    'cell is touched, so it says how large the target was, not that anything
+    'happened to it
+        If Not M_WriteBack_HasCellOutcomes(Result) Then
+            If Not M_WriteBack_HasCellOutcomes(AreaResult) Then
+                Err.Raise SavedErrNumber, _
+                    PROC_NAME & " | Step=" & HandlerStep, SavedErrDescription
+            End If
+        End If
+    'Record the failure as an observed fact about this area rather than losing it
+    '
+    'Once a cell has produced an outcome this handler does not raise. At v1.2.0 it
+    'always did, and because the accumulation block below sits after it, an
+    'unexpected error discarded every cell this area had already written and every
+    'area accumulated before it. A caller whose workbook had just been mutated
+    'received an exception carrying no DP_WriteResult at all
+    '
+    'Do not reinstate an unconditional raise here: see #21
+        AreaResult.TechnicalFailureOccurred = True
+        AreaResult.TechnicalFailureStep = HandlerStep
+        AreaResult.TechnicalFailureNumber = SavedErrNumber
+        AreaResult.TechnicalFailureDescription = SavedErrDescription
+    'Record the failure for the developer
+        Debug.Print PROC_NAME & _
+            " | Technical failure | Step=" & HandlerStep & _
+            "; Error=" & VBA.CStr(SavedErrNumber) & _
+            "; WrittenInArea=" & VBA.CStr(AreaResult.WrittenCount) & _
+            "; " & SavedErrDescription
+    'Accumulate what this area observed before returning to the caller
+        Resume AccumulateResult
 
 End Sub
 

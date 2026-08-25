@@ -1006,6 +1006,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "WriteBack"
     'Run discontiguous write-result completeness and order-independence checks
         TST_DP_RunSuiteSafe "MultiAreaWriteResult"
+    'Run technical-failure result-preservation checks
+        TST_DP_RunSuiteSafe "WriteTechnicalFailure"
     'Run in-grid icon lifecycle checks
         TST_DP_RunSuiteSafe "GridIcon"
     'Run manager public API and target gating checks
@@ -1307,6 +1309,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "MULTIAREAWRITERESULT"
                 TST_DP_RunSuite_MultiAreaWriteResult
+
+            Case "WRITETECHNICALFAILURE"
+                TST_DP_RunSuite_WriteTechnicalFailure
 
             Case "GRIDICON"
                 TST_DP_RunSuite_GridIcon
@@ -3400,6 +3405,360 @@ Private Function TST_DP_WriteTwoAreasForTest( _
 '------------------------------------------------------------------------------
     'Release the object reference
         Set UnionRange = Nothing
+
+End Function
+
+Private Sub TST_DP_RunSuite_WriteTechnicalFailure()
+
+'
+'==============================================================================
+'                  WRITE TECHNICAL FAILURE SUITE
+'==============================================================================
+' PURPOSE
+'   Proves that an unexpected technical failure during a write never becomes an
+'   exception carrying no result once the workbook has been mutated
+'
+' WHY THIS EXISTS
+'   fee9271 fixed the known ordering defect: a zero-write area no longer raises,
+'   so a writable area followed by a zero-write area keeps its facts. It did not
+'   close the stronger #21 contract. M_WriteBack_PopulateRange still raised on an
+'   unexpected technical error, and an area contributed its facts to the operation
+'   result only after that routine returned successfully, so a technical failure
+'   after mutation still discarded everything observed
+'
+'   That path cannot be produced on demand. M_WriteBack_TryWriteCell classifies
+'   every per-cell failure it can observe and raises nothing, which is exactly why
+'   a controlled fault seam is required. The classified failures this suite does
+'   not use — array-formula refusal, locked cells, formula preservation — are a
+'   different path and are covered by MultiAreaWriteResult
+'
+' BEHAVIOR
+'   Drives the real public write path with a fault armed at three positions: after
+'   cells have been mutated inside one area, on entering a later area after an
+'   earlier one completed, and on entering the first area before anything at all
+'   has been observed. The first two must return a complete result. The third must
+'   still raise, because there are no facts to protect
+'
+'   One scenario deliberately uses an earlier area that only skipped a formula
+'   cell. It mutated nothing, but a skip is still an outcome the caller asked for,
+'   so it must survive. That pins the raise-or-return rule to per-cell outcomes
+'   rather than to mutation, and keeps it clear of AttemptedCount, which is
+'   recorded before any cell is touched and is therefore evidence of nothing
+'
+' NOTES
+'   The suite works in column N, away from the ranges the other write-back suites
+'   use, and restores sheet protection in both exit paths
+'
+'   N7 holds a formula so the first scenario is forced down the per-cell fallback.
+'   The bulk path writes a whole area in one assignment and would leave no
+'   position for a mid-area fault to fire
+'
+'   Injection is one-shot and the helper disarms after every scenario, so a failed
+'   assertion cannot leave a fault armed for a later suite
+'
+'   A technical-failure result is bounded, not balanced. The areas the operation
+'   deliberately stopped short of are absent from AttemptedCount, so
+'   TST_DP_AssertWriteResultBalances does not apply here and the weaker invariant
+'   is asserted instead
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const INJECTED_ERROR    As Long = vbObjectError + 518
+
+    Dim IntraResult     As DP_WriteResult   'Fault fired inside one area
+    Dim CrossResult     As DP_WriteResult   'Fault fired on entering a later area
+    Dim SkipOnlyResult  As DP_WriteResult   'Fault fired after an area that only skipped
+    Dim EmptyFaultResult As DP_WriteResult  'Fault fired before anything was observed
+    Dim CleanResult     As DP_WriteResult   'Write after the fault, with nothing armed
+    Dim DisarmedResult  As DP_WriteResult   'Write after an armed fault was disarmed
+
+    Dim Raised           As Boolean         'True when the write raised
+    Dim RaisedNumber     As Long            'Error number the write raised
+    Dim WriteValue       As Date            'Value the scenarios write
+    Dim UnionRange       As Excel.Range     'Two-area target
+    Dim WasProtected     As Boolean         'Sheet protection state on entry
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "WriteTechnicalFailure"
+
+'------------------------------------------------------------------------------
+' PREPARE THE SCRATCH REGION
+'------------------------------------------------------------------------------
+    'Record protection state so the suite can restore it
+        WasProtected = mTST_DP_ScratchSheet.ProtectContents
+    'Work on an unprotected sheet
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+    'Clear the whole working region
+        mTST_DP_ScratchSheet.Range("N5:N12").ClearContents
+    'N7 holds a formula, which refuses the bulk path and forces the per-cell loop
+        mTST_DP_ScratchSheet.Range("N7").Formula = "=1+1"
+    'Resolve the value every scenario writes
+        WriteValue = VBA.DateSerial(2026, 9, 18)
+    'Assert the fixture took, so a silent setup failure cannot look like a defect
+        TST_DP_AssertTrue "Technical-failure setup creates a formula cell", _
+            mTST_DP_ScratchSheet.Range("N7").HasFormula
+
+'------------------------------------------------------------------------------
+' TECHNICAL FAILURE AFTER EARLIER CELLS INSIDE ONE AREA
+'------------------------------------------------------------------------------
+    'Fail inside the first area once two of its cells have been mutated
+        IntraResult = TST_DP_WriteWithFaultForTest( _
+            mTST_DP_ScratchSheet.Range("N5:N7"), WriteValue, 1, 2, Raised, RaisedNumber)
+    'The caller must receive the facts, not an exception
+        TST_DP_AssertFalse "Intra-area technical failure returns a result", Raised
+        TST_DP_AssertTrue "Intra-area technical failure is flagged in the result", _
+            IntraResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "Intra-area failure preserves the original error", _
+            INJECTED_ERROR, IntraResult.TechnicalFailureNumber
+        TST_DP_AssertEqualsString "Intra-area failure names the step it failed in", _
+            "Populate target cells through safe fallback", _
+            IntraResult.TechnicalFailureStep
+    'The facts observed before the failure must survive it
+        TST_DP_AssertEqualsLong "Intra-area failure reports 3 attempted", _
+            3, VBA.CLng(IntraResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Intra-area failure reports 2 written", _
+            2, VBA.CLng(IntraResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Intra-area failure counts the area it reached", _
+            1, IntraResult.AreasCount
+        TST_DP_AssertTrue "Intra-area failure still names the resolved target", _
+            (VBA.LenB(IntraResult.ResolvedTargetAddress) > 0)
+    'The result describes an operation that stopped short, not a balanced one
+        TST_DP_AssertTrue "Intra-area failure result is bounded by attempted", _
+            (IntraResult.WrittenCount + IntraResult.LockedSkippedCount + _
+             IntraResult.FormulaSkippedCount + IntraResult.FailedCount <= _
+             IntraResult.AttemptedCount)
+    'The mutation the workbook actually received must still be there
+        TST_DP_AssertTrue "Intra-area failure keeps the cells already written", _
+            (VBA.CDbl(mTST_DP_ScratchSheet.Range("N5").Value2) = VBA.CDbl(WriteValue) And _
+             VBA.CDbl(mTST_DP_ScratchSheet.Range("N6").Value2) = VBA.CDbl(WriteValue))
+        TST_DP_AssertTrue "Intra-area failure leaves the cell it never reached", _
+            mTST_DP_ScratchSheet.Range("N7").HasFormula
+    'The user-facing description must say the operation stopped early
+        TST_DP_AssertTrue "Intra-area failure is described to the user", _
+            (VBA.InStr(1, M_WriteBack_DescribeShortfall(IntraResult), _
+                "stopped early", vbTextCompare) > 0)
+
+'------------------------------------------------------------------------------
+' TECHNICAL FAILURE AFTER AN EARLIER AREA
+'------------------------------------------------------------------------------
+    'Reset the region so the second scenario starts from a known state
+        mTST_DP_ScratchSheet.Range("N5:N6").ClearContents
+        mTST_DP_ScratchSheet.Range("N9").ClearContents
+    'Build a two-area target and fail on entering the second area
+        Set UnionRange = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("N5"), mTST_DP_ScratchSheet.Range("N9"))
+        CrossResult = TST_DP_WriteWithFaultForTest( _
+            UnionRange, WriteValue, 2, 0, Raised, RaisedNumber)
+    'The caller must receive the first area's facts, not an exception
+        TST_DP_AssertFalse "Cross-area technical failure returns a result", Raised
+        TST_DP_AssertTrue "Cross-area technical failure is flagged in the result", _
+            CrossResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "Cross-area failure preserves the original error", _
+            INJECTED_ERROR, CrossResult.TechnicalFailureNumber
+        TST_DP_AssertEqualsString "Cross-area failure names the step it failed in", _
+            "Record area position", CrossResult.TechnicalFailureStep
+    'This is the assertion the whole issue turns on: an earlier area mutated the
+    'workbook and its facts reached the caller anyway
+        TST_DP_AssertEqualsLong "Cross-area failure keeps the earlier area's write", _
+            1, VBA.CLng(CrossResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Cross-area failure reports 1 attempted", _
+            1, VBA.CLng(CrossResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Cross-area failure counts only the area it reached", _
+            1, CrossResult.AreasCount
+        TST_DP_AssertTrue "Cross-area failure keeps the earlier area's mutation", _
+            (VBA.CDbl(mTST_DP_ScratchSheet.Range("N5").Value2) = VBA.CDbl(WriteValue))
+        TST_DP_AssertTrue "Cross-area failure leaves the area it never entered", _
+            VBA.IsEmpty(mTST_DP_ScratchSheet.Range("N9").Value2)
+
+'------------------------------------------------------------------------------
+' AN EARLIER AREA THAT ONLY SKIPPED STILL KEEPS ITS FACTS
+'------------------------------------------------------------------------------
+    'Reset the region
+        mTST_DP_ScratchSheet.Range("N9").ClearContents
+    'The first area holds a formula, so it observes a skip and mutates nothing.
+    'That is still an outcome the caller asked for, and it must survive the
+    'failure in the second area. This pins the rule to per-cell outcomes rather
+    'than to whether the workbook happened to be mutated
+        Set UnionRange = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("N7"), mTST_DP_ScratchSheet.Range("N9"))
+        SkipOnlyResult = TST_DP_WriteWithFaultForTest( _
+            UnionRange, WriteValue, 2, 0, Raised, RaisedNumber)
+        TST_DP_AssertFalse "A skip-only earlier area returns a result", Raised
+        TST_DP_AssertTrue "A skip-only earlier area flags the technical failure", _
+            SkipOnlyResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "A skip-only earlier area keeps its formula skip", _
+            1, VBA.CLng(SkipOnlyResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "A skip-only earlier area reports no write", _
+            0, VBA.CLng(SkipOnlyResult.WrittenCount)
+
+'------------------------------------------------------------------------------
+' A FAILURE CARRYING NO FACTS STILL RAISES
+'------------------------------------------------------------------------------
+    'Reset the region
+        mTST_DP_ScratchSheet.Range("N5").ClearContents
+        mTST_DP_ScratchSheet.Range("N9").ClearContents
+    'Fail on entering the first area, before anything has been observed. There is
+    'nothing to protect here, so the original error must reach the caller intact
+        Set UnionRange = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("N5"), mTST_DP_ScratchSheet.Range("N9"))
+        EmptyFaultResult = TST_DP_WriteWithFaultForTest( _
+            UnionRange, WriteValue, 1, 0, Raised, RaisedNumber)
+        TST_DP_AssertTrue "A failure carrying no facts still raises", Raised
+        TST_DP_AssertEqualsLong "A raised failure preserves the original error", _
+            INJECTED_ERROR, RaisedNumber
+        TST_DP_AssertTrue "A raised failure leaves the target unmutated", _
+            (VBA.IsEmpty(mTST_DP_ScratchSheet.Range("N5").Value2) And _
+             VBA.IsEmpty(mTST_DP_ScratchSheet.Range("N9").Value2))
+
+'------------------------------------------------------------------------------
+' AN INJECTED FAULT DOES NOT LEAK INTO THE NEXT WRITE
+'------------------------------------------------------------------------------
+    'Reset the region
+        mTST_DP_ScratchSheet.Range("N5:N6").ClearContents
+    'Write with nothing armed
+        CleanResult = TST_DP_WriteWithFaultForTest( _
+            mTST_DP_ScratchSheet.Range("N5:N6"), WriteValue, 0, 0, Raised, RaisedNumber)
+        TST_DP_AssertFalse "The next write after a fault does not raise", Raised
+        TST_DP_AssertFalse "The next write after a fault reports no failure", _
+            CleanResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "The next write after a fault writes every cell", _
+            2, VBA.CLng(CleanResult.WrittenCount)
+        TST_DP_AssertWriteResultBalances "A write with no fault balances", CleanResult
+
+'------------------------------------------------------------------------------
+' A DISARMED FAULT DOES NOT FIRE
+'------------------------------------------------------------------------------
+    'Reset the region
+        mTST_DP_ScratchSheet.Range("N5:N6").ClearContents
+    'Arm a fault and disarm it before the write
+        M_WriteBack_Test_SetFaultInjection 1, 0
+        M_WriteBack_Test_SetFaultInjection 0
+        DisarmedResult = TST_DP_WriteWithFaultForTest( _
+            mTST_DP_ScratchSheet.Range("N5:N6"), WriteValue, 0, 0, Raised, RaisedNumber)
+        TST_DP_AssertFalse "A disarmed fault does not fire", _
+            DisarmedResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "A disarmed fault leaves the write complete", _
+            2, VBA.CLng(DisarmedResult.WrittenCount)
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm any fault this suite left behind, whatever path it exits by
+        On Error Resume Next
+        M_WriteBack_Test_SetFaultInjection 0
+    'Release the object reference
+        Set UnionRange = Nothing
+    'Restore the sheet to the protection state the suite found
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+        mTST_DP_ScratchSheet.Range("N5:N12").ClearContents
+        mTST_DP_ScratchSheet.Range("N5:N12").Locked = True
+        If WasProtected Then
+            mTST_DP_ScratchSheet.Protect
+        End If
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Write technical failure suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore sheet state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_WriteWithFaultForTest( _
+    ByVal TargetRange As Excel.Range, _
+    ByVal WriteValue As Date, _
+    ByVal FailInAreaOrdinal As Long, _
+    ByVal FailAfterWrittenCellsInArea As Long, _
+    ByRef Raised As Boolean, _
+    ByRef RaisedNumber As Long) As DP_WriteResult
+
+'
+'==============================================================================
+'            WRITE A TARGET WITH A FAULT ARMED (TEST)
+'==============================================================================
+'   Selects the supplied target, optionally arms a forced technical failure, and
+'   drives the real public write path.
+'
+'   Whether the write raised is reported through Raised and RaisedNumber rather
+'   than by letting the error reach the suite, because both outcomes are expected
+'   results here: a technical failure that carries facts must return, and one that
+'   carries nothing must raise. A suite-level handler could not tell them apart.
+'
+'   A UDT assignment from a function that raises does not occur, so the returned
+'   result is zeroed on the raising path. Only Raised and RaisedNumber are
+'   meaningful there.
+'
+'   The fault is disarmed on every path. Injection is one-shot in production code
+'   as well, but a scenario that never reaches its armed position would otherwise
+'   leave it armed for the next suite.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set safe defaults
+        Raised = False
+        RaisedNumber = 0
+    'Stage the value this write applies
+        gDP_WriteValue = WriteValue
+
+'------------------------------------------------------------------------------
+' SELECT THE TARGET
+'------------------------------------------------------------------------------
+    'Activate the sheet so the selection is valid
+        mTST_DP_ScratchSheet.Activate
+    'Select it, because the engine resolves its target from the selection
+        TargetRange.Select
+
+'------------------------------------------------------------------------------
+' ARM THE FAULT
+'------------------------------------------------------------------------------
+    'Arm only when the caller asked for one
+        If FailInAreaOrdinal > 0 Then
+            M_WriteBack_Test_SetFaultInjection FailInAreaOrdinal, _
+                FailAfterWrittenCellsInArea
+        End If
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
+    'Drive the real public path and record whichever outcome it produces
+        On Error Resume Next
+        TST_DP_WriteWithFaultForTest = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        If Err.Number <> 0 Then
+            Raised = True
+            RaisedNumber = Err.Number
+            Err.Clear
+        End If
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' DISARM
+'------------------------------------------------------------------------------
+    'Never leave a fault armed for a later scenario or suite
+        M_WriteBack_Test_SetFaultInjection 0
 
 End Function
 

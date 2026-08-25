@@ -263,7 +263,7 @@ is incomplete without the run state and cleanup result.
 Preferred evidence:
 
 ```text
-State=PASS; Run=385; Passed=385; Failed=0; CleanupFailures=0
+State=PASS; Run=420; Passed=420; Failed=0; CleanupFailures=0
 ```
 
 A non-`PASS` result must not be presented as release-quality evidence merely

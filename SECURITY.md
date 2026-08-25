@@ -999,7 +999,7 @@ For controlled use:
 Latest recorded standard v1.2.1 source regression baseline:
 
 ```text
-State=PASS; Run=385; Passed=385; Failed=0; CleanupFailures=0
+State=PASS; Run=420; Passed=420; Failed=0; CleanupFailures=0
 ```
 
 The assertion count is informative, not a permanent security constant.
