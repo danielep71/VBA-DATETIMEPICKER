@@ -12943,6 +12943,12 @@ Private Function UF_SettingsCheckBoxFont_Create() As Object
     
     Dim NewFont         As Object       'Fresh CheckBox font object
 
+    Dim SavedErrNumber          As Long     'Captured original error number
+    Dim SavedErrDescription     As String   'Captured original error description
+
+    Dim CleanupErrNumber        As Long     'Captured cleanup error number
+    Dim CleanupErrDescription   As String   'Captured cleanup error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -12980,14 +12986,36 @@ Private Function UF_SettingsCheckBoxFont_Create() As Object
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error before any cleanup runs
+    '
+    'Every On Error statement resets the Err object, so the On Error Resume Next
+    'below already destroys the cause on its own, and On Error GoTo 0 destroys it
+    'again. At v1.2.0 the raise that followed read Err.Number and Err.Description
+    'after both, so this handler always reported error 0 with a blank cause rather
+    'than the failure that actually occurred. Nothing may read the live Err object
+    'below this point: see #48
+        SavedErrNumber = Err.Number
+        SavedErrDescription = "Settings CheckBox font creation failed: " & Err.Description
     'Suppress cleanup errors
         On Error Resume Next
     'Release any partially configured font object
         Set NewFont = Nothing
+    'Capture a cleanup failure separately rather than letting it replace the
+    'primary failure
+        If Err.Number <> 0 Then
+            CleanupErrNumber = Err.Number
+            CleanupErrDescription = Err.Description
+        End If
     'Restore normal error handling
         On Error GoTo 0
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, "Settings CheckBox font creation failed: " & Err.Description
+    'Append cleanup diagnostics when cleanup also failed
+        If CleanupErrNumber <> 0 Then
+            SavedErrDescription = SavedErrDescription & _
+                " Cleanup also failed while releasing the font object: " & _
+                CleanupErrDescription
+        End If
+    'Raise the original error after best-effort cleanup
+        Err.Raise SavedErrNumber, PROC_NAME, SavedErrDescription
 
 End Function
 

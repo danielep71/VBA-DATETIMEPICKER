@@ -8340,6 +8340,13 @@ Public Function DP_FillTableColumn( _
     Dim PromptText          As String       'Confirmation prompt text
     Dim HandlerStep         As String       'Current handler step for diagnostics
 
+    Dim SavedErrNumber          As Long     'Captured original error number
+    Dim SavedErrSource          As String   'Captured original error source
+    Dim SavedErrDescription     As String   'Captured original error description
+
+    Dim CleanupErrNumber        As Long     'Captured cleanup error number
+    Dim CleanupErrDescription   As String   'Captured cleanup error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -8460,19 +8467,39 @@ CleanExit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error before any cleanup runs
+    '
+    'Cleanup below restores gDP_WriteValue under On Error Resume Next and clears
+    'Err. At v1.2.0 the raise that followed read Err.Number and Err.Description
+    'after that clear, so whenever ValueApplied was True the caller was handed
+    'error 0 with a blank cause instead of the failure that actually occurred.
+    'Nothing may read the live Err object below this point: see #48
+        SavedErrNumber = Err.Number
+        SavedErrSource = PROC_NAME & " | Step=" & HandlerStep
+        SavedErrDescription = "Table column fill failed: " & Err.Description
     'Restore the previous pending write value when the write failed
         If ValueApplied Then
             On Error Resume Next
             gDP_WriteValue = OldWriteValue
+            'Capture a cleanup failure separately rather than letting it replace
+            'the primary failure
+                If Err.Number <> 0 Then
+                    CleanupErrNumber = Err.Number
+                    CleanupErrDescription = Err.Description
+                End If
             Err.Clear
             On Error GoTo 0
         End If
     'Release object references
         Set TargetColumn = Nothing
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "Table column fill failed: " & Err.Description
+    'Append cleanup diagnostics when cleanup also failed
+        If CleanupErrNumber <> 0 Then
+            SavedErrDescription = SavedErrDescription & _
+                " Cleanup also failed while restoring the pending write value: " & _
+                CleanupErrDescription
+        End If
+    'Raise the original error after best-effort cleanup
+        Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
 
 End Function
 

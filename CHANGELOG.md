@@ -122,6 +122,30 @@ refactor and no new features. Corrections are published against the released
   before anything else so the unload cannot re-enter the path, and unloads the
   form.
 
+- **A handler that cleans up before re-raising now reports the error that
+  actually occurred**
+  ([#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48)).
+  Every `On Error` statement resets the `Err` object, and so does `Err.Clear`.
+  Two handlers cleaned up and then raised from the live `Err` object, so the
+  caller received error `0` with a blank description instead of the cause.
+
+  `DP_FillTableColumn` restored `gDP_WriteValue` under `On Error Resume Next` and
+  cleared `Err` before raising. The loss was conditional on the pending write
+  value having been staged, which is true for every failure inside the fill
+  itself. `UF_SettingsCheckBoxFont_Create` released its temporary font object
+  under `On Error Resume Next` and then restored handling with `On Error GoTo 0`.
+  It never called `Err.Clear` and did not need to, so its loss was unconditional.
+
+  Both now capture number, source and description at handler entry before
+  anything touches `On Error`, run cleanup separately, capture any cleanup
+  failure separately, and re-raise the original with cleanup diagnostics appended
+  when useful.
+
+  All production source was audited mechanically: 243 `Err.Clear` sites, 87
+  `Err.Raise` statements reading the live `Err` object, and exactly two where
+  clearing precedes the raise — the two above. After the fix the same audit
+  reports 85 live-`Err` raises and no defect, so no further occurrence exists.
+
 ### 🔧 Changed
 
 - A refused provider now reports once per user action rather than once per
@@ -155,8 +179,8 @@ refactor and no new features. Corrections are published against the released
 
 ### 🧪 Validation
 
-- Standard regression: `State=PASS; Run=420; Passed=420; Failed=0; CleanupFailures=0`
-- With UI smoke: `State=PASS; Run=423; Passed=423; Failed=0; CleanupFailures=0`
+- Standard regression: `State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0`
+- With UI smoke: `State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0`
 - New `RuntimeAdmission` suite — 28 assertions driving every public entry path
   under both a foreign and an owned lease.
 - New `SettingsSaveResolution` suite — 12 assertions driving the seam the real
@@ -171,7 +195,12 @@ refactor and no new features. Corrections are published against the released
   later area after an earlier one completed, and before anything had been
   observed at all. One scenario uses an earlier area that only skipped a formula
   cell, which mutated nothing but still holds an outcome that must survive.
-- Baseline 302 + 28 + 12 + 35 + 8 + 35 = 420 standard.
+- New `ErrorPreservation` suite — 11 assertions driving the real public
+  `DP_FillTableColumn` against a real Excel Table with a write fault armed,
+  asserting the caller receives the original error rather than error `0`, that
+  the description names both the failing operation and the original cause, and
+  that cleanup still ran.
+- Baseline 302 + 28 + 12 + 35 + 8 + 35 + 11 = 431 standard.
 - Manual two-provider refusal matrix passed for `.xlam + embedded` and
   `embedded + embedded` in a single Excel process, including a reversal check
   confirming ownership follows start order rather than packaging.
@@ -199,6 +228,16 @@ refactor and no new features. Corrections are published against the released
   raises nothing, so a genuine technical error inside the area loop is precisely
   what a test has no way to arrange. Injection is one-shot, disarms itself as it
   fires, and persists nothing.
+
+- `#48` is delivered with two stated limitations rather than silent ticks.
+  Cleanup failure is not injected by regression: the cleanup steps in both
+  handlers are a `Date` assignment and an object release, neither of which can be
+  made to fail without a seam for a failure mode that does not exist. The
+  capture-and-append structure is implemented and uniform with
+  `M_WriteBack_Apply`, but the append branch is defensive.
+  `UF_SettingsCheckBoxFont_Create` has no direct regression because it is
+  `Private` to the form and reached only from the settings-panel build path; its
+  correction rests on review and on the mechanical audit.
 
 ### ⚠️ Known limitations
 

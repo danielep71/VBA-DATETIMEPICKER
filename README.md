@@ -1112,7 +1112,7 @@ It does not blindly retry `Worksheets.Add`.
 ## Latest recorded standard pack
 
 ```text
-State=PASS; Run=420; Passed=420; Failed=0; CleanupFailures=0
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
 This is the latest recorded **standard regression pack** for the `v1.2.1` source cycle. Package-level release testing and UI smoke should still be performed for release preparation.
@@ -1365,7 +1365,7 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 Latest recorded standard regression:
 
 ```text
-State=PASS; Run=420; Passed=420; Failed=0; CleanupFailures=0
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
 ---

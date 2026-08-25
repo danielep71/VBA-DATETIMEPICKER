@@ -1008,6 +1008,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "MultiAreaWriteResult"
     'Run technical-failure result-preservation checks
         TST_DP_RunSuiteSafe "WriteTechnicalFailure"
+    'Run original-error preservation checks across cleanup
+        TST_DP_RunSuiteSafe "ErrorPreservation"
     'Run in-grid icon lifecycle checks
         TST_DP_RunSuiteSafe "GridIcon"
     'Run manager public API and target gating checks
@@ -1312,6 +1314,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "WRITETECHNICALFAILURE"
                 TST_DP_RunSuite_WriteTechnicalFailure
+
+            Case "ERRORPRESERVATION"
+                TST_DP_RunSuite_ErrorPreservation
 
             Case "GRIDICON"
                 TST_DP_RunSuite_GridIcon
@@ -3761,6 +3766,189 @@ Private Function TST_DP_WriteWithFaultForTest( _
         M_WriteBack_Test_SetFaultInjection 0
 
 End Function
+
+Private Sub TST_DP_RunSuite_ErrorPreservation()
+
+'
+'==============================================================================
+'                     ERROR PRESERVATION SUITE
+'==============================================================================
+' PURPOSE
+'   Proves that a handler which cleans up before re-raising still reports the
+'   error that actually occurred
+'
+' WHY THIS EXISTS
+'   Every On Error statement resets the Err object, and so does Err.Clear. A
+'   handler that cleans up under On Error Resume Next and then raises from the
+'   live Err object reports error 0 with a blank description, and the real cause
+'   is gone by the time the caller sees it
+'
+'   DP_FillTableColumn did exactly this whenever it had already staged the pending
+'   write value, which is every failure inside the fill itself
+'
+' BEHAVIOR
+'   Drives the real public DP_FillTableColumn against a real Excel Table with a
+'   write fault armed, and asserts the caller receives the injected error rather
+'   than error 0
+'
+' NOTES
+'   The fault seam is the one added for #21. Reusing it keeps this suite free of
+'   any seam of its own: the failure it needs is an ordinary write failure, and
+'   that is exactly what the seam produces
+'
+'   ConfirmFill is False throughout, so no message box is emitted. The scope
+'   confirmation and the table-cell guidance are both interactive-only
+'
+'   The suite builds its own table in columns P and Q, away from the table the
+'   WriteBack suite creates, and removes it in both exit paths
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const INJECTED_ERROR    As Long = vbObjectError + 518
+
+    Dim TableRange      As Excel.Range      'Source range for the test table
+    Dim TestTable       As Excel.ListObject 'Table the fill targets
+    Dim CleanResult     As DP_WriteResult   'Result of the fill with no fault armed
+    Dim StagedValue     As Date             'Pending write value staged before the fill
+    Dim RaisedNumber    As Long             'Error number the fill raised
+    Dim RaisedText      As String           'Error description the fill raised
+    Dim RaisedSource    As String           'Error source the fill raised
+    Dim Raised          As Boolean          'True when the fill raised
+    Dim WasProtected    As Boolean          'Sheet protection state on entry
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "ErrorPreservation"
+
+'------------------------------------------------------------------------------
+' PREPARE A REAL TABLE
+'------------------------------------------------------------------------------
+    'Record protection state so the suite can restore it
+        WasProtected = mTST_DP_ScratchSheet.ProtectContents
+    'Work on an unprotected sheet
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+    'Clear the working region
+        Set TableRange = mTST_DP_ScratchSheet.Range("P4:Q7")
+        TableRange.Clear
+    'Write the table headers
+        mTST_DP_ScratchSheet.Range("P4").Value = "ID"
+        mTST_DP_ScratchSheet.Range("Q4").Value = "DateValue"
+    'Write the table row identifiers
+        mTST_DP_ScratchSheet.Range("P5:P7").Value = 1
+    'Create the table this suite fills
+        Set TestTable = mTST_DP_ScratchSheet.ListObjects.Add( _
+            SourceType:=xlSrcRange, _
+            Source:=TableRange, _
+            XlListObjectHasHeaders:=xlYes)
+        TestTable.Name = "TST_DP_ErrTable"
+    'Assert the fixture took, so a silent setup failure cannot look like a defect
+        TST_DP_AssertEqualsString "Error-preservation setup creates a table", _
+            "TST_DP_ErrTable", TestTable.Name
+
+'------------------------------------------------------------------------------
+' A FAILED FILL REPORTS THE ERROR THAT ACTUALLY OCCURRED
+'------------------------------------------------------------------------------
+    'Stage a recognizable pending write value, so the restore can be verified
+        StagedValue = VBA.DateSerial(2026, 2, 2)
+        gDP_WriteValue = StagedValue
+    'Activate the sheet and select a data cell in the date column
+        mTST_DP_ScratchSheet.Activate
+        mTST_DP_ScratchSheet.Range("Q5").Select
+    'Arm a write fault that fires before any cell is mutated
+        M_WriteBack_Test_SetFaultInjection 1, 0
+    'Drive the real public entry point and record whatever it raises
+        On Error Resume Next
+        DP_FillTableColumn VBA.DateSerial(2026, 4, 4), ConfirmFill:=False
+        If Err.Number <> 0 Then
+            Raised = True
+            RaisedNumber = Err.Number
+            RaisedText = Err.Description
+            RaisedSource = Err.Source
+            Err.Clear
+        End If
+        On Error GoTo 0
+    'Disarm whatever remains
+        M_WriteBack_Test_SetFaultInjection 0
+    'The failure must reach the caller at all
+        TST_DP_AssertTrue "A failed table fill raises to the caller", Raised
+    'This is the defect: the caller used to receive error 0
+        TST_DP_AssertFalse "A failed table fill does not report error 0", _
+            (RaisedNumber = 0)
+    'The original error number must survive the cleanup that follows it
+        TST_DP_AssertEqualsLong "A failed table fill preserves the original error", _
+            INJECTED_ERROR, RaisedNumber
+    'The description must name the failing operation
+        TST_DP_AssertTrue "A failed table fill names the failing operation", _
+            (VBA.InStr(1, RaisedText, "Table column fill failed", vbTextCompare) > 0)
+    'The description must carry the original cause rather than a blank string
+        TST_DP_AssertTrue "A failed table fill carries the original cause", _
+            (VBA.InStr(1, RaisedText, "Injected write-back fault", vbTextCompare) > 0)
+    'The source must remain usable for diagnosis
+        TST_DP_AssertTrue "A failed table fill names the procedure and step", _
+            (VBA.InStr(1, RaisedSource, "DP_FillTableColumn", vbTextCompare) > 0 And _
+             VBA.InStr(1, RaisedSource, "Step=", vbTextCompare) > 0)
+    'Cleanup must still have run: preserving the error is not an excuse to skip it
+        TST_DP_AssertTrue "A failed table fill still restores the pending value", _
+            (VBA.CDbl(gDP_WriteValue) = VBA.CDbl(StagedValue))
+
+'------------------------------------------------------------------------------
+' THE SUCCESS PATH IS UNAFFECTED
+'------------------------------------------------------------------------------
+    'Select a data cell again and fill with nothing armed
+        mTST_DP_ScratchSheet.Range("Q5").Select
+        CleanResult = DP_FillTableColumn(VBA.DateSerial(2026, 4, 4), ConfirmFill:=False)
+        TST_DP_AssertTrue "A clean table fill reports the expansion", _
+            CleanResult.ExpandedToTableColumn
+        TST_DP_AssertEqualsLong "A clean table fill writes the whole column", _
+            3, VBA.CLng(CleanResult.WrittenCount)
+        TST_DP_AssertWriteResultBalances "A clean table fill balances", CleanResult
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm any fault this suite left behind, whatever path it exits by
+        On Error Resume Next
+        M_WriteBack_Test_SetFaultInjection 0
+    'Remove the table and clear its range
+        If Not TestTable Is Nothing Then
+            TestTable.Unlist
+        End If
+        Set TestTable = Nothing
+        Set TableRange = Nothing
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+        mTST_DP_ScratchSheet.Range("P4:Q7").Clear
+        If WasProtected Then
+            mTST_DP_ScratchSheet.Protect
+        End If
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Error preservation suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore sheet state regardless
+        Resume SuiteExit
+
+End Sub
 
 Private Sub TST_DP_RunSuite_GridIcon()
 
