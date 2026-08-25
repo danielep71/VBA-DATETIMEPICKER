@@ -177,6 +177,50 @@ refactor and no new features. Corrections are published against the released
   areas an aborted operation never reached are not counted, so the counts alone
   could otherwise describe a smaller operation than the user asked for.
 
+### 📖 Documentation
+
+- **The Wiki no longer teaches a shutdown that bypasses ownership**
+  ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)).
+  `Workbook-Lifecycle` recommended an explicit `BeforeClose` teardown that set
+  `gDP_Manager = Nothing` and then called `M_ContextMenu_Remove`,
+  `M_KeyboardShortcut_Remove`, `M_Timer_Stop`, `DP_Close` and
+  `M_GridIcon_PurgeAll` directly. It never called `DP_Stop` and never released the
+  provider lease.
+
+  An owner that ran the recipe stranded ownership for the rest of the Excel
+  process. A refused second copy that ran it removed the true owner's shortcut,
+  menu entry and icons: `DP_Stop` and `DP_RepairRuntime` refuse a caller that
+  cannot prove ownership, but the low-level helpers do not check, because they are
+  the internals those APIs call once admission is already proven. The published
+  recipe therefore bypassed the protection the one-provider lease exists to give.
+
+  `BeforeClose` now calls `DP_Stop`. The old recipe is explained in place rather
+  than deleted, so the record of what was published stands, and the low-level
+  helpers are now identified as internal and diagnostic rather than substitutes
+  for the ownership-aware lifecycle API.
+
+- `Public-API` omitted `FailedCount` and `FailedAddresses` from the
+  `DP_WriteResult` listing while the accounting invariant printed beneath it
+  referred to `FailedCount`. Both fields existed in the source throughout; only
+  the page was incomplete. They are restored, the four `TechnicalFailure` fields
+  are documented, and the invariant is stated as holding for a result that
+  completed, with the bounded technical-failure case described separately.
+
+- `Public-API` address-cap wording now matches the code. The 25-address cap is
+  applied per target area rather than per operation, so a discontiguous write can
+  report more than 25 addresses in a category while the classification totals stay
+  exact. Moving to one cap per operation is tracked for `v1.2.2`.
+
+- `Testing-and-Demo-Guide` moves from 16 suites and `Run=302` to 24 standard
+  suites and `Run=431`, and lists the six suites added by this patch against their
+  issues. The 16 was already stale when published: the runner ran 18 standard
+  suites at `v1.2.0`.
+
+- Wiki claims about lease refusal and the keyboard shortcut needed no rewrite.
+  They were published as `v1.2.0` behavior, were false against `v1.2.0` code, and
+  are true against this patch. They are corrected here rather than on those pages,
+  so released history is not rewritten.
+
 ### 🧪 Validation
 
 - Standard regression: `State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0`
