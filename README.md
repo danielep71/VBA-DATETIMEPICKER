@@ -259,6 +259,10 @@ Result = DP_FillTableColumn( _
 
 # 🛠️ Installation
 
+The three options below are the short form. For step-by-step import instructions,
+upgrade paths from `v1.1.x`, deployment-model comparison and troubleshooting, see
+**[INSTALLATION.md](INSTALLATION.md)**.
+
 ## Option 1 — embed the source in a workbook
 
 Best for:

@@ -1251,6 +1251,30 @@ backward-compatible capability, 💥 **major** may break callers.
   guide exists, none is `Private` while presented as contributor-facing, and all
   eleven internal links resolve.
 
+- Added `INSTALLATION.md`, a standalone installation, upgrade and troubleshooting
+  guide, and linked it from the README installation section. The README covers
+  what the component does; installation detail had nowhere to live and was
+  competing with it.
+
+  Covers both deployment models end to end — embedded source and `.xlam` — with
+  the import order, the `.frx` companion rule, workbook lifecycle wiring, and a
+  consumer smoke test that exercises the three `v1.2.0` behavior changes rather
+  than only confirming the picker opens.
+
+  Upgrade paths are documented separately for `v1.1.x` to `v1.2.0`, between
+  `v1.2.0` development builds, and for the `.xlam`, because the migration
+  concerns differ. The mixed-version warning has its own section: a pre-`v1.2.0`
+  copy does not participate in the provider-lease protocol.
+
+  Troubleshooting covers the failures a user will actually hit — a refused
+  `DP_Start`, an unchanged formula cell, a table column that no longer fills
+  automatically, a `Ctrl + Shift + D` conflict with another add-in, and settings
+  arriving from another workbook — each mapped to the `v1.2.0` behavior that
+  explains it rather than treated as a defect.
+
+  Verified against source: every procedure and repository path named in the guide
+  exists, no internal test seam appears, and all fifteen internal links resolve.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
