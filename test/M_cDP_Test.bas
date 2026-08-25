@@ -1010,6 +1010,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "LifecyclePair"
     'Run the one-provider lease suite
         TST_DP_RunSuiteSafe "ProviderLease"
+    'Run entry-path admission checks under owned and foreign leases
+        TST_DP_RunSuiteSafe "RuntimeAdmission"
     'Run DP_RepairRuntime behavior checks
         TST_DP_RunSuiteSafe "RepairRuntime"
     'Run M_GridIcon_PreCreateHidden startup optimization checks
@@ -1302,6 +1304,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "PROVIDERLEASE"
                 TST_DP_RunSuite_ProviderLease
+
+            Case "RUNTIMEADMISSION"
+                TST_DP_RunSuite_RuntimeAdmission
             Case "LIFECYCLEPAIR"
                 TST_DP_RunSuite_LifecyclePair
 
@@ -3713,6 +3718,286 @@ SuiteFail:
         Resume SuiteExit
 
 End Sub
+
+Private Sub TST_DP_RunSuite_RuntimeAdmission()
+
+'
+'==============================================================================
+'                        RUNTIME ADMISSION SUITE
+'==============================================================================
+' PURPOSE
+'   Proves every supported and callback-driven entry path refuses to act while
+'   another provider holds the lease, and succeeds idempotently while this
+'   project owns it
+'
+' WHY THIS EXISTS
+'   The ProviderLease suite covers the lease primitive. It never drives a real
+'   entry point, which is exactly how v1.2.0 shipped with DP_Show and DP_Preload
+'   reaching M_Picker_EnsureManager without proving ownership
+'
+'   This suite exercises the public paths themselves, so a future change that
+'   removes an admission call fails here rather than in a user's session
+'
+' BEHAVIOR
+'   Plants the state a second provider sees - the lease exists, this project
+'   cannot prove it owns it - then drives each entry path and asserts that no
+'   manager, form or shared registration appeared, and that the path refused
+'
+' NOTES
+'   Refusal reporting is silenced for the duration. Application.DisplayAlerts
+'   does not suppress VBA.MsgBox, so without this the run would block on a modal
+'   dialog at the first refused entry point
+'
+'   Silencing is restored in both exit paths. A run that left it enabled would
+'   hide genuine provider conflicts from the operator
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim EventsBefore        As Boolean      'Application.EnableEvents on entry
+    Dim OwnerToken          As String       'Lease token planted as the foreign owner
+    Dim RefusalsBefore      As Long         'Refusal count before an entry path runs
+    Dim ManagerAfter        As Boolean      'True when a manager exists after a refused path
+    Dim FormAfter           As Boolean      'True when the picker form is loaded after a refused path
+    Dim GuardHeld           As Boolean      'True when the direct-admission backstop raised
+    Dim OwnerSurvived       As Boolean      'True when the owner's lease outlived a refused teardown
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "RuntimeAdmission"
+
+'------------------------------------------------------------------------------
+' START FROM A KNOWN STATE
+'------------------------------------------------------------------------------
+    'Silence the modal refusal report so the real entry paths stay drivable
+        M_Lease_Test_SilenceRefusalReport True
+    'Record the caller's Excel event state so the preservation check is honest
+        EventsBefore = Excel.Application.EnableEvents
+    'Begin from a defined position
+        TST_DP_ForceClearLeaseForTest
+        Set gDP_Manager = Nothing
+
+'------------------------------------------------------------------------------
+' PLANT A FOREIGN LEASE
+'------------------------------------------------------------------------------
+    'Take the lease, then drop the local token. The lease survives, this project
+    'can no longer prove it owns it: exactly what a second copy sees
+        TST_DP_AssertTrue "Admission setup acquires a free lease", _
+            M_Lease_TryAcquire()
+        OwnerToken = TST_DP_ReadLeaseOwnerForTest()
+        TST_DP_AssertTrue "Admission setup planted a lease token", _
+            (VBA.LenB(OwnerToken) > 0)
+        M_Lease_Test_ClearOwnerToken
+        TST_DP_AssertFalse "This project does not own the planted lease", _
+            M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + DP_SHOW
+'------------------------------------------------------------------------------
+    'The shared boundary for every interactive open path
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        Set gDP_Manager = Nothing
+        DP_Show
+        TST_DP_AssertTrue "DP_Show refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        ManagerAfter = Not (gDP_Manager Is Nothing)
+        TST_DP_AssertFalse "DP_Show creates no manager under a foreign lease", _
+            ManagerAfter
+        FormAfter = TST_DP_IsPickerFormLoadedForTest()
+        TST_DP_AssertFalse "DP_Show loads no form under a foreign lease", FormAfter
+        TST_DP_AssertEqualsString "DP_Show does not disturb the owner's lease", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + DP_PRELOAD
+'------------------------------------------------------------------------------
+    'Preload refuses silently, so ownership is what proves it declined
+        Set gDP_Manager = Nothing
+        DP_Preload
+        TST_DP_AssertFalse "DP_Preload creates no manager under a foreign lease", _
+            Not (gDP_Manager Is Nothing)
+        TST_DP_AssertFalse "DP_Preload loads no hidden form under a foreign lease", _
+            TST_DP_IsPickerFormLoadedForTest()
+        TST_DP_AssertEqualsString "DP_Preload does not disturb the owner's lease", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + DP_CLICK
+'------------------------------------------------------------------------------
+    'Delegates through DP_OpenForActiveCell into DP_Show
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        Set gDP_Manager = Nothing
+        DP_Click
+        TST_DP_AssertTrue "DP_Click refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse "DP_Click creates no manager under a foreign lease", _
+            Not (gDP_Manager Is Nothing)
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + DP_OPENFORACTIVECELL
+'------------------------------------------------------------------------------
+    'The keyboard and grid-icon paths both arrive here
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        Set gDP_Manager = Nothing
+        DP_OpenForActiveCell
+        TST_DP_AssertTrue "DP_OpenForActiveCell refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse _
+            "DP_OpenForActiveCell creates no manager under a foreign lease", _
+            Not (gDP_Manager Is Nothing)
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + RIBBON_SHOWPICKER
+'------------------------------------------------------------------------------
+    'The Ribbon callback passes an IRibbonControl it never dereferences, so
+    'Nothing is a valid stand-in for the Excel-supplied argument
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        Set gDP_Manager = Nothing
+        Ribbon_ShowPicker Nothing
+        TST_DP_AssertTrue "Ribbon_ShowPicker refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse _
+            "Ribbon_ShowPicker creates no manager under a foreign lease", _
+            Not (gDP_Manager Is Nothing)
+
+'------------------------------------------------------------------------------
+' DIRECT MANAGER ADMISSION CANNOT BYPASS THE GUARD
+'------------------------------------------------------------------------------
+    'M_Picker_EnsureManager is technically public. Calling it directly under a
+    'foreign lease must fail closed rather than bootstrap a second runtime
+        Set gDP_Manager = Nothing
+        GuardHeld = False
+        On Error Resume Next
+        M_Picker_EnsureManager
+        GuardHeld = (Err.Number <> 0)
+        Err.Clear
+        On Error GoTo SuiteFail
+        TST_DP_AssertTrue _
+            "Direct M_Picker_EnsureManager admission is refused", GuardHeld
+        TST_DP_AssertFalse _
+            "Direct admission creates no manager under a foreign lease", _
+            Not (gDP_Manager Is Nothing)
+
+'------------------------------------------------------------------------------
+' A REFUSED COPY CANNOT TEAR DOWN THE OWNER
+'------------------------------------------------------------------------------
+    'DP_Stop and DP_RepairRuntime already gate on ownership. This proves the
+    'admission work did not weaken that
+        DP_Stop
+        OwnerSurvived = (VBA.StrComp(TST_DP_ReadLeaseOwnerForTest(), OwnerToken, _
+            vbBinaryCompare) = 0)
+        TST_DP_AssertTrue "A refused copy cannot stop the owner's runtime", _
+            OwnerSurvived
+        DP_RepairRuntime
+        TST_DP_AssertEqualsString "A refused copy cannot repair the owner", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' CALLER EXCEL EVENT STATE IS PRESERVED
+'------------------------------------------------------------------------------
+    'No refused path may leave Application.EnableEvents changed
+        TST_DP_AssertTrue "Refused paths preserve Application.EnableEvents", _
+            (Excel.Application.EnableEvents = EventsBefore)
+
+'------------------------------------------------------------------------------
+' OWNER LEASE + SUPPORTED PATHS SUCCEED IDEMPOTENTLY
+'------------------------------------------------------------------------------
+    'Reclaim the lease the only way a project can once its token is gone
+        TST_DP_ForceClearLeaseForTest
+        Set gDP_Manager = Nothing
+        TST_DP_AssertTrue "The owner reacquires a cleared lease", _
+            M_Lease_TryAcquire()
+    'Admission must be idempotent for the owner, not a one-shot
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        DP_Start
+        TST_DP_AssertTrue "DP_Start succeeds for the owner", M_Lease_IsOwner()
+        TST_DP_AssertTrue "DP_Start creates the manager for the owner", _
+            Not (gDP_Manager Is Nothing)
+        DP_Start
+        TST_DP_AssertTrue "Repeated DP_Start remains owned and idempotent", _
+            M_Lease_IsOwner()
+        M_Picker_EnsureManager
+        TST_DP_AssertTrue "Direct admission succeeds for the owner", _
+            Not (gDP_Manager Is Nothing)
+        TST_DP_AssertEqualsString "No owner path reported a refusal", _
+            VBA.CStr(RefusalsBefore), _
+            VBA.CStr(M_Lease_Test_RefusalReportCount())
+
+'------------------------------------------------------------------------------
+' FORCE RELEASE REMAINS EXPLICIT
+'------------------------------------------------------------------------------
+    'Nothing above may have reclaimed a foreign lease automatically. The only
+    'route back is the documented explicit call
+        TST_DP_AssertTrue "Force release remains an explicit operator action", _
+            (VBA.LenB(TST_DP_ReadLeaseOwnerForTest()) > 0)
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Restore reporting so a genuine conflict is never hidden from the operator
+        M_Lease_Test_SilenceRefusalReport False
+    'Leave the run owning the lease, as it did before this suite
+        TST_DP_ForceClearLeaseForTest
+        M_Lease_TryAcquire
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Runtime admission suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore reporting and lease state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_IsPickerFormLoadedForTest() As Boolean
+
+'
+'==============================================================================
+'                   IS THE PICKER FORM LOADED (TEST)
+'==============================================================================
+'   Reports whether the DatePicker UserForm is currently loaded.
+'
+'   M_FormBridge_GetLoadedForm is Private to the production module, so this
+'   suite enumerates the VBA UserForms collection instead. That collection holds
+'   only loaded forms, which is exactly the question being asked.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LoadedForm      As Object       'Iterated loaded form
+
+'------------------------------------------------------------------------------
+' SEARCH
+'------------------------------------------------------------------------------
+    'Never let a lookup raise into an assertion
+        On Error Resume Next
+    'Set safe default result
+        TST_DP_IsPickerFormLoadedForTest = False
+    'Only loaded forms appear in this collection
+        For Each LoadedForm In VBA.UserForms
+            If VBA.StrComp(LoadedForm.Name, "UF_DatePicker", vbTextCompare) = 0 Then
+                TST_DP_IsPickerFormLoadedForTest = True
+                Exit For
+            End If
+        Next LoadedForm
+    'Clear any suppressed enumeration error
+        Err.Clear
+
+End Function
 
 Private Function TST_DP_ReadLeaseOwnerForTest() As String
 

@@ -394,6 +394,8 @@ Option Explicit
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
     Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
     Private mDP_RuntimeOwnerId          As String               'Ephemeral lease token, non-empty only while this project owns the lease
+    Private mDP_LeaseRefusalSilenced    As Boolean              'Test-only: suppress the modal refusal report so entry paths stay drivable
+    Private mDP_LeaseRefusalCount       As Long                 'Test-only: refusal reports raised while silenced
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
     Private mDP_TimerIsRunning          As Boolean              'Timer running flag
     Private mDP_TimerProcedureName      As String               'Qualified OnTime timer procedure name
@@ -5573,6 +5575,19 @@ Public Sub M_Picker_EnsureManager( _
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' VERIFY RUNTIME ADMISSION
+'------------------------------------------------------------------------------
+    'Prove ownership before any side effect. This is the backstop for direct
+    'calls to this technically public bootstrapper: supported entry paths admit
+    'themselves first and exit quietly, so reaching here unadmitted means the
+    'guard was bypassed rather than a user action being refused
+        If Not M_Lease_TryAcquire() Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "DatePicker manager admission refused: another provider owns " & _
+                "this Excel session, or ownership could not be verified"
+        End If
+
+'------------------------------------------------------------------------------
 ' LOAD SETTINGS
 '------------------------------------------------------------------------------
     'Ensure persisted DatePicker settings are available before manager startup
@@ -5712,6 +5727,16 @@ Public Sub DP_Preload()
 '------------------------------------------------------------------------------
     'Suppress preload failures through the fail-safe path
         On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' ADMIT THIS PROVIDER
+'------------------------------------------------------------------------------
+    'Prove ownership before loading a hidden form. Preload is a background
+    'optimization, so a refused copy declines silently rather than interrupting
+    'workbook open with a second message box after DP_Start already reported
+        If Not M_Lease_EnsureAdmitted(PROC_NAME, ReportToUser:=False) Then
+            GoTo CleanExit
+        End If
 
 '------------------------------------------------------------------------------
 ' ENSURE RUNTIME
@@ -5905,6 +5930,65 @@ Public Sub M_Lease_Test_ClearOwnerToken()
 
 End Sub
 
+Public Sub M_Lease_Test_SilenceRefusalReport(ByVal Silence As Boolean)
+
+'
+'==============================================================================
+'                   SILENCE THE REFUSAL REPORT (TEST)
+'==============================================================================
+'   Suppresses the operator-facing refusal message box and counts refusals
+'   instead.
+'
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
+'   must be classified internal under #25.
+'
+'   It exists because #37 requires automated coverage of the real entry points
+'   under a refused lease. Those paths report refusal through a modal MsgBox,
+'   and Application.DisplayAlerts does not suppress VBA.MsgBox, so an unattended
+'   regression run would block forever waiting for a click.
+'
+'   Silencing only affects reporting. Admission itself is unchanged: a refused
+'   provider is still refused, and no shared state is mutated either way.
+'
+'   Enabling resets the counter so each suite measures its own refusals. A run
+'   that leaves this True would hide genuine conflicts from the operator, so the
+'   suite restores it in its exit path.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' SET
+'------------------------------------------------------------------------------
+    'Apply the requested reporting mode
+        mDP_LeaseRefusalSilenced = Silence
+    'Reset the counter so each measurement window starts at zero
+        mDP_LeaseRefusalCount = 0
+
+End Sub
+
+Public Function M_Lease_Test_RefusalReportCount() As Long
+
+'
+'==============================================================================
+'                   READ THE REFUSAL COUNT (TEST)
+'==============================================================================
+'   Reports how many refusals were raised since reporting was silenced.
+'
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
+'   must be classified internal under #25.
+'
+'   A refusal that is silently skipped and a refusal that never happened look
+'   identical from outside. This lets a suite prove the entry path actually
+'   refused, rather than merely proving that nothing visible occurred.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Report refusals observed while silenced
+        M_Lease_Test_RefusalReportCount = mDP_LeaseRefusalCount
+
+End Function
+
 Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
 
 '
@@ -5925,6 +6009,14 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
     'Record the refusal for diagnostics
         Debug.Print EntryPoint & " | Refused | Another DatePicker provider owns " & _
             "this Excel session, or ownership could not be verified"
+    'Count and return without the modal when a regression run has silenced
+    'reporting. An automated suite has to drive the real entry points, and a
+    'modal message box would block the run waiting for a human
+        If mDP_LeaseRefusalSilenced Then
+            mDP_LeaseRefusalCount = mDP_LeaseRefusalCount + 1
+            Err.Clear
+            Exit Sub
+        End If
     'Tell the operator, because nothing else in the session will
         MsgBox _
             "Another copy of the DatePicker is already active in this Excel " & _
@@ -5942,6 +6034,96 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
         Err.Clear
 
 End Sub
+
+Private Function M_Lease_EnsureAdmitted( _
+    ByVal EntryPoint As String, _
+    Optional ByVal ReportToUser As Boolean = True) As Boolean
+
+'
+'==============================================================================
+'                            ENSURE RUNTIME ADMISSION
+'==============================================================================
+' PURPOSE
+'   Single admission gate for every runtime entry path. Proves this project owns
+'   the provider lease before any manager creation, form load or application-wide
+'   registration is attempted
+'
+' WHY THIS EXISTS
+'   The lease primitive already refuses correctly, but at v1.2.0 only DP_Start
+'   consulted it. DP_Show and DP_Preload reached M_Picker_EnsureManager without
+'   proving ownership, so a refused second copy could create a manager, load
+'   settings, register Application.OnKey, hook Application events and later
+'   remove the true owner's registrations during its own teardown
+'
+' INPUTS
+'   EntryPoint
+'       Diagnostic name of the calling entry path
+'
+'   ReportToUser
+'       True to show the operator-facing refusal message. False for best-effort
+'       background paths that must stay silent
+'
+' RETURNS
+'   True when this project owns the lease, including when it already did
+'
+'   False when another provider owns it, or ownership cannot be verified
+'
+' BEHAVIOR
+'   Delegates to M_Lease_TryAcquire, which is idempotent for the current owner
+'   and fails closed for a foreign or unverifiable lease. Reports refusal once
+'   at the refusing entry point
+'
+' ERROR POLICY
+'   Does not raise. Refusal is an ordinary answer the caller acts on
+'
+' DEPENDENCIES
+'   M_Lease_TryAcquire
+'   M_Lease_ReportRefusal
+'
+' NOTES
+'   Refusal performs no shared-state mutation. M_Lease_TryAcquire only creates
+'   the lease bar on the free-lease path, so a refused copy leaves the owner's
+'   registrations and the caller's Application.EnableEvents state untouched
+'
+'   Delegating entry points must not call this a second time. DP_Click and
+'   Ribbon_ShowPicker reach DP_Show, which is the shared boundary, so a single
+'   refusal produces a single report
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Lease_EnsureAdmitted"
+
+'------------------------------------------------------------------------------
+' ADMIT
+'------------------------------------------------------------------------------
+    'Acquire the lease, or confirm this project already holds it
+        If M_Lease_TryAcquire() Then
+            M_Lease_EnsureAdmitted = True
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' REFUSE
+'------------------------------------------------------------------------------
+    'Refusal is fail-closed and leaves no shared state changed
+        M_Lease_EnsureAdmitted = False
+    'Tell the operator unless this is a silent background path
+        If ReportToUser Then
+            M_Lease_ReportRefusal EntryPoint
+        Else
+            'Record the silent refusal so diagnostics still show the cause
+                On Error Resume Next
+                Debug.Print EntryPoint & _
+                    " | Refused | Provider lease not held; entry path declined"
+                Err.Clear
+        End If
+
+End Function
 
 Private Function M_Lease_NewOwnerId() As String
 
@@ -6481,8 +6663,7 @@ Public Sub DP_Start()
     'Claim the one-provider lease before touching anything application-wide. A
     'second copy that registered first and discovered the conflict afterwards
     'would already have displaced the owner's keyboard shortcut
-        If Not M_Lease_TryAcquire() Then
-            M_Lease_ReportRefusal "DP_Start"
+        If Not M_Lease_EnsureAdmitted(PROC_NAME) Then
             Exit Sub
         End If
 
@@ -6628,7 +6809,19 @@ Public Sub DP_Show()
     'Enable controlled error handling
         On Error GoTo ErrorHandler
     'Track the current step
-        StepName = "Ensure manager"
+        StepName = "Admit this provider"
+
+'------------------------------------------------------------------------------
+' ADMIT THIS PROVIDER
+'------------------------------------------------------------------------------
+    'This is the shared admission boundary for every interactive open path.
+    'DP_Click, DP_OpenForActiveCell and Ribbon_ShowPicker all delegate here, so
+    'admitting once refuses once and reports once. Nothing above this point has
+    'touched the manager, the form or any application-wide registration
+        If Not M_Lease_EnsureAdmitted(PROC_NAME) Then
+            Exit Sub
+        End If
+
 '------------------------------------------------------------------------------
 ' ENSURE DATEPICKER INFRASTRUCTURE
 '------------------------------------------------------------------------------
