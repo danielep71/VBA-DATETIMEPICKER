@@ -96,6 +96,20 @@ refactor and no new features. Corrections are published against the released
   the operation level. Partial mutation can no longer be represented as an
   exception carrying no result.
 
+- **An unrecoverable window-style failure no longer presents the form**
+  ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
+  Both call sites of `M_Window_RemoveTitleBar` discarded its return value, so a
+  `DP_WindowStyleResult` reporting `RecoveryRequired` was dropped in silence and
+  the picker went on to show with a window style that had been partly applied
+  and could not be rolled back.
+
+  Both sites now consume the result. `UserForm_Initialize` records the failed
+  step and the last API error and then fails the load, which is the only
+  available action for an instance still under construction.
+  `UserForm_Activate` records the same diagnostics, marks itself activated
+  before anything else so the unload cannot re-enter the path, and unloads the
+  form.
+
 ### 🔧 Changed
 
 - A refused provider now reports once per user action rather than once per
@@ -113,17 +127,24 @@ refactor and no new features. Corrections are published against the released
   never reached those assignments, so this preserves the prior contract now
   that a zero-write returns normally.
 
+- A window-style failure reported as `RecoveryRequired` is now terminal for that
+  form load. The picker fails rather than presenting a window whose style is
+  neither fully applied nor rolled back. A subsequent load is unaffected.
+
 ### 🧪 Validation
 
-- Standard regression: `State=PASS; Run=377; Passed=377; Failed=0; CleanupFailures=0`
-- With UI smoke: `State=PASS; Run=380; Passed=380; Failed=0; CleanupFailures=0`
+- Standard regression: `State=PASS; Run=385; Passed=385; Failed=0; CleanupFailures=0`
+- With UI smoke: `State=PASS; Run=388; Passed=388; Failed=0; CleanupFailures=0`
 - New `RuntimeAdmission` suite — 28 assertions driving every public entry path
   under both a foreign and an owned lease.
 - New `SettingsSaveResolution` suite — 12 assertions driving the seam the real
   save handler executes, sweeping all eight input combinations.
 - New `MultiAreaWriteResult` suite — 35 assertions driving the real public write
   path with a two-area `Union`, repeating every scenario with the areas swapped.
-- Baseline 302 + 28 + 12 + 35 = 377 standard.
+- New `WindowRecovery` suite — 8 assertions driving the real form through an
+  injected fault at `SetWindowPos` and at the rollback step, covering both the
+  initialize and activate paths and confirming that the next load succeeds.
+- Baseline 302 + 28 + 12 + 35 + 8 = 385 standard.
 - Manual two-provider refusal matrix passed for `.xlam + embedded` and
   `embedded + embedded` in a single Excel process, including a reversal check
   confirming ownership follows start order rather than packaging.

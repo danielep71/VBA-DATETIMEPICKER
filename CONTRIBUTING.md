@@ -96,7 +96,7 @@ DP_Stop                          normal owning-provider teardown
 The latest recorded standard regression result, on the `v1.2.1` source cycle, is:
 
 ```text
-State=PASS; Run=377; Passed=377; Failed=0; CleanupFailures=0
+State=PASS; Run=385; Passed=385; Failed=0; CleanupFailures=0
 ```
 
 That number is a useful baseline, **not a hard-coded acceptance criterion**.
@@ -572,7 +572,7 @@ Only `PASS` is a passing run.
 A preferred pull-request evidence line is:
 
 ```text
-State=PASS; Run=377; Passed=377; Failed=0; CleanupFailures=0
+State=PASS; Run=385; Passed=385; Failed=0; CleanupFailures=0
 ```
 
 If the assertion total differs because the suite changed, report the actual
