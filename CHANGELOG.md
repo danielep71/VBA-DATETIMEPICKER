@@ -1407,6 +1407,49 @@ backward-compatible capability, 💥 **major** may break callers.
   `DEMO_Sheet_BuildTemplate` is called by both `TST_DP_RunAll` and
   `TST_DP_RunAll_WithUISmoke`.
 
+- Rebuilt `.github/ISSUE_TEMPLATE/feature_request.md` into a design intake. The
+  previous template asked for a problem, a proposed solution and alternatives,
+  which was adequate while the component had few contracts to violate. A
+  proposal now has to say what it does to write scope, formula preservation,
+  provider ownership, settings persistence and application-state ownership, and
+  none of those had a field.
+
+  The core sections stay short and deliberately do not ask for a design: the
+  opening guidance says not to design the implementation before the use case is
+  clear, and the fifteen subsystem sections are collapsed and optional.
+
+  **Public API / Semantic Versioning** asks whether the proposal is backward
+  compatible and what release it implies, then lists the current supported
+  surface so a proposer can see whether the behavior already has a home. A note
+  records the distinction the project has to keep making — that a procedure may
+  be technically `Public` for RibbonX, `Application.Run` or Office callbacks
+  without being supported consumer API — and asks that a proposal adding such a
+  seam say so. **Compatibility-sensitive behavior** enumerates the twelve things
+  that cannot change quietly, including enum numeric values, structured-result
+  fields, the formula-preservation default and the stable `VBA_DATETIMEPICKER`
+  identifiers.
+
+  **Validation proposal** asks what evidence would prove the feature works
+  before it is built, with an acceptance matrix whose rows are the conditions
+  this cycle found things in: partial failure, recovery, Excel restart, VBA
+  reset, protected sheet, multiple providers, mixed-version provider, and both
+  Office bitnesses.
+
+  The release and provenance section is the intake path for the two `v1.3.0`
+  candidates. It keeps source regression, package validation, workflow success
+  and artifact provenance as four distinct guarantees, restates that a source
+  regression does not prove a later-saved binary came from that source
+  ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)), and asks
+  any proposed workflow change to declare its secrets, environment, permissions,
+  third-party actions and whether contributor-controlled code executes
+  ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)).
+
+  Verified against source: every procedure, enum and type named in the template
+  exists and is `Public`; the supported-surface list matches the README's
+  primary consumer API table member for member; the four public `DP_` procedures
+  it omits are all UI-callback seams, which is the case its own note describes;
+  and no internal test seam or `TST_DP_` symbol appears.
+
 ### 🔗 Compatibility
 
 - No public procedure was added, removed or renamed in `src/`.
