@@ -1110,10 +1110,10 @@ It does not blindly retry `Worksheets.Add`.
 ## Latest recorded standard pack
 
 ```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+State=PASS; Run=330; Passed=330; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the `v1.2.0` source cycle. Package-level release testing and UI smoke should still be performed for release preparation.
+This is the latest recorded **standard regression pack** for the `v1.2.1` source cycle. Package-level release testing and UI smoke should still be performed for release preparation.
 
 > [!IMPORTANT]
 > Tests manipulate real Excel state: worksheets, settings, application flags,
@@ -1363,7 +1363,7 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 Latest recorded standard regression:
 
 ```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+State=PASS; Run=330; Passed=330; Failed=0; CleanupFailures=0
 ```
 
 ---

@@ -41,6 +41,74 @@ settings persistence, runtime ownership, and the stable
 
 ---
 
+## [Unreleased] — `v1.2.1`
+
+> 🩹 **Patch** · integrity hotfix correcting safety-contract gaps shipped in `v1.2.0`
+
+### 🧭 Release intent
+
+`v1.2.1` corrects defects in behavior `v1.2.0` already claimed. It contains no
+refactor and no new features. Corrections are published against the released
+`v1.2.0` notes rather than by rewriting them.
+
+### 🐛 Fixed
+
+- **Provider lease admission is now enforced on every runtime entry path**
+  ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
+  At `v1.2.0` only `DP_Start` consulted the provider lease. `DP_Show` and
+  `DP_Preload` reached `M_Picker_EnsureManager` without proving ownership, and
+  `DP_Click`, `DP_OpenForActiveCell`, the keyboard path and `Ribbon_ShowPicker`
+  all funnelled into that same unguarded path. A refused second copy could
+  therefore create a manager, load settings, hook Application events, register
+  `Application.OnKey`, load a form, and later remove the true owner's
+  registrations during its own teardown.
+
+  Admission is now a single acquire-or-verify gate applied at the lowest shared
+  boundary each path reaches. It is idempotent for the current owner, fails
+  closed for a foreign or unverifiable lease, and mutates no shared state on the
+  refusal path. `M_Picker_EnsureManager` additionally fails closed, so direct
+  calls to that technically public bootstrapper cannot bypass admission.
+
+### 🔧 Changed
+
+- A refused provider now reports once per user action rather than once per
+  delegating layer. `DP_Preload` refuses silently, because a background startup
+  optimization must not raise a second message box after `DP_Start` has already
+  reported.
+
+### 🧪 Validation
+
+- Standard regression: `State=PASS; Run=330; Passed=330; Failed=0; CleanupFailures=0`
+- With UI smoke: `State=PASS; Run=333; Passed=333; Failed=0; CleanupFailures=0`
+- New `RuntimeAdmission` suite — 28 assertions driving every public entry path
+  under both a foreign and an owned lease.
+- Manual two-provider refusal matrix passed for `.xlam + embedded` and
+  `embedded + embedded` in a single Excel process, including a reversal check
+  confirming ownership follows start order rather than packaging.
+
+### 🔗 Compatibility
+
+- No supported API name, signature or default changed.
+- Behavior change is limited to paths that were already specified as refusing.
+  A single participating provider sees no difference.
+- `M_Lease_Test_SilenceRefusalReport` and `M_Lease_Test_RefusalReportCount` are
+  internal test infrastructure, not supported API. They exist because
+  `Application.DisplayAlerts` does not suppress `VBA.MsgBox`, so automated
+  coverage of the real entry paths would otherwise block on a modal dialog.
+  Both are to be classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+
+### ⚠️ Known limitations
+
+- Simultaneous active providers remain unsupported. This release closes
+  admission bypasses under the exclusive-provider model; true coexistence
+  remains [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
+- Automatic reclamation of a stale lease is still deliberately absent. Recovery
+  after a VBA project reset remains the explicit
+  `DP_ForceReleaseProviderLease` call.
+
+---
+
 ## [1.2.0] - 2026-08-25
 
 > ✨ **Minor** · safety, observability and runtime-ownership release
