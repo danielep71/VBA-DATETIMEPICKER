@@ -1004,6 +1004,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "FormBridge"
     'Run worksheet write-back checks
         TST_DP_RunSuiteSafe "WriteBack"
+    'Run discontiguous write-result completeness and order-independence checks
+        TST_DP_RunSuiteSafe "MultiAreaWriteResult"
     'Run in-grid icon lifecycle checks
         TST_DP_RunSuiteSafe "GridIcon"
     'Run manager public API and target gating checks
@@ -1300,6 +1302,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "WRITEBACK"
                 TST_DP_RunSuite_WriteBack
+
+            Case "MULTIAREAWRITERESULT"
+                TST_DP_RunSuite_MultiAreaWriteResult
 
             Case "GRIDICON"
                 TST_DP_RunSuite_GridIcon
@@ -3119,6 +3124,279 @@ SuiteFail:
         Err.Clear
 
 End Sub
+
+Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
+
+'
+'==============================================================================
+'                    MULTI-AREA WRITE RESULT SUITE
+'==============================================================================
+' PURPOSE
+'   Proves a discontiguous write returns one complete DP_WriteResult whose totals
+'   do not depend on the order Excel enumerates Target.Areas
+'
+' WHY THIS EXISTS
+'   At v1.2.0 M_WriteBack_PopulateRange raised before accumulating whenever an
+'   area wrote nothing. M_WriteBack_ApplyResolvedTarget processes Target.Areas in
+'   order, so a writable area followed by a zero-write area mutated the workbook
+'   and then discarded every fact observed so far. The public Function returned
+'   no result at all, and the totals depended on area order
+'
+' BEHAVIOR
+'   Drives the real public path. Each scenario selects a two-area Union and calls
+'   M_WriteBack_Apply, then repeats it with the areas swapped and asserts the
+'   totals are identical
+'
+' NOTES
+'   M_WriteBack_Apply resolves its target from Application.Selection and emits no
+'   message box. Shortfall reporting belongs to its callers, so this suite drives
+'   the engine without modal interruption
+'
+'   The suite works in column M, away from the ranges the other write-back suites
+'   use, and restores sheet protection in both exit paths
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ForwardResult   As DP_WriteResult   'Result with the writable area first
+    Dim ReverseResult   As DP_WriteResult   'Result with the writable area last
+    Dim ZeroResult      As DP_WriteResult   'Result for an all-zero-write target
+    Dim WasProtected    As Boolean          'Sheet protection state on entry
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "MultiAreaWriteResult"
+
+'------------------------------------------------------------------------------
+' PREPARE THE SCRATCH REGION
+'------------------------------------------------------------------------------
+    'Record protection state so the suite can restore it
+        WasProtected = mTST_DP_ScratchSheet.ProtectContents
+    'Work on an unprotected sheet while the fixtures are built
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+    'Clear the whole working region
+        mTST_DP_ScratchSheet.Range("M5:M12").ClearContents
+    'M5 and M9 are the writable cells
+        mTST_DP_ScratchSheet.Range("M5").Locked = False
+        mTST_DP_ScratchSheet.Range("M9").Locked = True
+    'M7 is a formula cell the write must preserve by policy
+        mTST_DP_ScratchSheet.Range("M7").Formula = "=1+1"
+    'M11:M12 is an array formula the write cannot replace
+        mTST_DP_ScratchSheet.Range("M11:M12").FormulaArray = "=ROW()"
+    'Assert the fixtures took, so a silent setup failure cannot look like a defect
+        TST_DP_AssertTrue "Multi-area setup creates a formula cell", _
+            mTST_DP_ScratchSheet.Range("M7").HasFormula
+        TST_DP_AssertTrue "Multi-area setup creates an array formula", _
+            mTST_DP_ScratchSheet.Range("M11").HasArray
+
+'------------------------------------------------------------------------------
+' WRITABLE THEN FORMULA-ONLY, AND THE REVERSE
+'------------------------------------------------------------------------------
+    'Writable area first
+        ForwardResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M5"), mTST_DP_ScratchSheet.Range("M7"))
+        TST_DP_AssertEqualsLong "Writable then formula reports 2 attempted", _
+            2, VBA.CLng(ForwardResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Writable then formula reports 1 written", _
+            1, VBA.CLng(ForwardResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Writable then formula reports 1 formula skip", _
+            1, VBA.CLng(ForwardResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "Writable then formula counts both areas", _
+            2, ForwardResult.AreasCount
+        TST_DP_AssertWriteResultBalances "Writable then formula balances", ForwardResult
+    'Formula area first: this is the ordering that lost the result at v1.2.0
+        ReverseResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M7"), mTST_DP_ScratchSheet.Range("M5"))
+        TST_DP_AssertEqualsLong "Formula then writable reports 2 attempted", _
+            2, VBA.CLng(ReverseResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Formula then writable reports 1 written", _
+            1, VBA.CLng(ReverseResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Formula then writable reports 1 formula skip", _
+            1, VBA.CLng(ReverseResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "Formula then writable counts both areas", _
+            2, ReverseResult.AreasCount
+        TST_DP_AssertWriteResultBalances "Formula then writable balances", ReverseResult
+
+'------------------------------------------------------------------------------
+' WRITABLE THEN FAILED-ONLY, AND THE REVERSE
+'------------------------------------------------------------------------------
+    'Writable area first
+        ForwardResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M5"), mTST_DP_ScratchSheet.Range("M11:M12"))
+        TST_DP_AssertEqualsLong "Writable then failed reports 3 attempted", _
+            3, VBA.CLng(ForwardResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Writable then failed reports 1 written", _
+            1, VBA.CLng(ForwardResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Writable then failed reports 2 failures", _
+            2, VBA.CLng(ForwardResult.FailedCount)
+        TST_DP_AssertWriteResultBalances "Writable then failed balances", ForwardResult
+    'Failed area first
+        ReverseResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M11:M12"), mTST_DP_ScratchSheet.Range("M5"))
+        TST_DP_AssertEqualsLong "Failed then writable reports 3 attempted", _
+            3, VBA.CLng(ReverseResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Failed then writable reports 1 written", _
+            1, VBA.CLng(ReverseResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Failed then writable reports 2 failures", _
+            2, VBA.CLng(ReverseResult.FailedCount)
+        TST_DP_AssertWriteResultBalances "Failed then writable balances", ReverseResult
+    'The two orders must agree on every total
+        TST_DP_AssertEqualsString "Failed-area totals are order-independent", _
+            VBA.CStr(ForwardResult.AttemptedCount) & "/" & _
+            VBA.CStr(ForwardResult.WrittenCount) & "/" & _
+            VBA.CStr(ForwardResult.FailedCount), _
+            VBA.CStr(ReverseResult.AttemptedCount) & "/" & _
+            VBA.CStr(ReverseResult.WrittenCount) & "/" & _
+            VBA.CStr(ReverseResult.FailedCount)
+
+'------------------------------------------------------------------------------
+' AN ALL-ZERO-WRITE TARGET RETURNS A COMPLETE RESULT
+'------------------------------------------------------------------------------
+    'Neither area can accept the value, so the operation writes nothing. This
+    'must produce a complete result rather than an exception
+        ZeroResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M7"), mTST_DP_ScratchSheet.Range("M11:M12"))
+        TST_DP_AssertEqualsLong "Zero-write target reports 3 attempted", _
+            3, VBA.CLng(ZeroResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Zero-write target reports 0 written", _
+            0, VBA.CLng(ZeroResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Zero-write target still counts both areas", _
+            2, ZeroResult.AreasCount
+        TST_DP_AssertTrue "Zero-write target still names the resolved target", _
+            (VBA.LenB(ZeroResult.ResolvedTargetAddress) > 0)
+        TST_DP_AssertWriteResultBalances "Zero-write result balances", ZeroResult
+
+'------------------------------------------------------------------------------
+' WRITABLE THEN LOCKED-ONLY, AND THE REVERSE
+'------------------------------------------------------------------------------
+    'Protect the sheet so the locked cell actually rejects the write
+        mTST_DP_ScratchSheet.Protect
+    'Writable area first
+        ForwardResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M5"), mTST_DP_ScratchSheet.Range("M9"))
+        TST_DP_AssertEqualsLong "Writable then locked reports 2 attempted", _
+            2, VBA.CLng(ForwardResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Writable then locked reports 1 written", _
+            1, VBA.CLng(ForwardResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Writable then locked reports 1 locked skip", _
+            1, VBA.CLng(ForwardResult.LockedSkippedCount)
+        TST_DP_AssertWriteResultBalances "Writable then locked balances", ForwardResult
+    'Locked area first
+        ReverseResult = TST_DP_WriteTwoAreasForTest( _
+            mTST_DP_ScratchSheet.Range("M9"), mTST_DP_ScratchSheet.Range("M5"))
+        TST_DP_AssertEqualsLong "Locked then writable reports 2 attempted", _
+            2, VBA.CLng(ReverseResult.AttemptedCount)
+        TST_DP_AssertEqualsLong "Locked then writable reports 1 written", _
+            1, VBA.CLng(ReverseResult.WrittenCount)
+        TST_DP_AssertEqualsLong "Locked then writable reports 1 locked skip", _
+            1, VBA.CLng(ReverseResult.LockedSkippedCount)
+        TST_DP_AssertWriteResultBalances "Locked then writable balances", ReverseResult
+    'The two orders must agree on every total
+        TST_DP_AssertEqualsString "Locked-area totals are order-independent", _
+            VBA.CStr(ForwardResult.AttemptedCount) & "/" & _
+            VBA.CStr(ForwardResult.WrittenCount) & "/" & _
+            VBA.CStr(ForwardResult.LockedSkippedCount), _
+            VBA.CStr(ReverseResult.AttemptedCount) & "/" & _
+            VBA.CStr(ReverseResult.WrittenCount) & "/" & _
+            VBA.CStr(ReverseResult.LockedSkippedCount)
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Restore the sheet to the protection state the suite found
+        On Error Resume Next
+        If mTST_DP_ScratchSheet.ProtectContents Then
+            mTST_DP_ScratchSheet.Unprotect
+        End If
+        mTST_DP_ScratchSheet.Range("M5:M12").ClearContents
+        mTST_DP_ScratchSheet.Range("M5:M12").Locked = True
+        If WasProtected Then
+            mTST_DP_ScratchSheet.Protect
+        End If
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Multi-area write result suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore sheet state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_WriteTwoAreasForTest( _
+    ByVal FirstArea As Excel.Range, _
+    ByVal SecondArea As Excel.Range) As DP_WriteResult
+
+'
+'==============================================================================
+'               WRITE A TWO-AREA TARGET IN A GIVEN ORDER (TEST)
+'==============================================================================
+'   Selects a discontiguous target built in the supplied order and drives the
+'   real public write path.
+'
+'   M_WriteBack_Apply resolves its target from Application.Selection, so
+'   selecting the Union is how a test controls the order Target.Areas is
+'   enumerated. Building the Union with the arguments swapped is what makes the
+'   order-independence assertions meaningful.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim UnionRange      As Excel.Range      'Discontiguous target in the requested order
+
+'------------------------------------------------------------------------------
+' PREPARE
+'------------------------------------------------------------------------------
+    'Clear only the writable cells so each scenario starts from a known state
+        On Error Resume Next
+        mTST_DP_ScratchSheet.Range("M5").ClearContents
+        Err.Clear
+        On Error GoTo 0
+    'Stage a distinct value for this write
+        gDP_WriteValue = VBA.DateSerial(2026, 9, 17)
+
+'------------------------------------------------------------------------------
+' SELECT THE TARGET IN THE REQUESTED ORDER
+'------------------------------------------------------------------------------
+    'Build the discontiguous target
+        Set UnionRange = Excel.Application.Union(FirstArea, SecondArea)
+    'Activate the sheet so the selection is valid
+        mTST_DP_ScratchSheet.Activate
+    'Select it, because the engine resolves its target from the selection
+        UnionRange.Select
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
+    'Drive the real public path. Apply emits no message box; shortfall reporting
+    'belongs to its callers
+        TST_DP_WriteTwoAreasForTest = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+
+'------------------------------------------------------------------------------
+' RELEASE
+'------------------------------------------------------------------------------
+    'Release the object reference
+        Set UnionRange = Nothing
+
+End Function
 
 Private Sub TST_DP_RunSuite_GridIcon()
 

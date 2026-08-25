@@ -1314,7 +1314,7 @@ is a valid passing run.
 The latest recorded standard `v1.2.1` source pack is:
 
 ```text
-State=PASS; Run=330; Passed=330; Failed=0; CleanupFailures=0
+State=PASS; Run=377; Passed=377; Failed=0; CleanupFailures=0
 ```
 
 The assertion count is not a permanent magic number.

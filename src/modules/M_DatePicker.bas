@@ -7875,10 +7875,16 @@ Public Sub M_Picker_SelectDate( _
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
 '------------------------------------------------------------------------------
-    'Store the selected date only after write-back succeeds
-        gDP_SelectedDate = SelectedDateOnly
-    'Mark the selected date as available
-        gDP_HasSelectedDate = True
+    'Store the selected date only when at least one cell actually received it.
+    'Before #21 a zero-write raised out of the engine and never reached here, so
+    'the guard preserves that contract now that a zero-write returns a complete
+    'result instead of an exception
+        If WriteResult.WrittenCount > 0 Then
+            'Store the selected date
+                gDP_SelectedDate = SelectedDateOnly
+            'Mark the selected date as available
+                gDP_HasSelectedDate = True
+        End If
 
 '------------------------------------------------------------------------------
 ' CLOSE OR REFRESH FORM
@@ -8148,10 +8154,15 @@ Public Sub DP_Now()
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
 '------------------------------------------------------------------------------
-    'Store the date-only part as the active selected date
-        gDP_SelectedDate = NowDate
-    'Mark selected-date state as available
-        gDP_HasSelectedDate = True
+    'Store the date only when at least one cell actually received it. Before #21
+    'a zero-write raised out of the engine and never reached here, so the guard
+    'preserves that contract now that a zero-write returns a complete result
+        If WriteResult.WrittenCount > 0 Then
+            'Store the date-only part as the active selected date
+                gDP_SelectedDate = NowDate
+            'Mark selected-date state as available
+                gDP_HasSelectedDate = True
+        End If
 
 '------------------------------------------------------------------------------
 ' CLOSE OR REFRESH FORM
@@ -9432,11 +9443,34 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Populate target areas"
-    'Loop through each discontiguous target area
+    'Loop through each discontiguous target area. Every area contributes its
+    'attempted, written, skipped, failed and address data to Result before the
+    'operation outcome is decided, so the totals do not depend on the order
+    'Excel enumerates Target.Areas
         For Each Block In Target.Areas
             'Populate this target area into the accumulating result
                 M_WriteBack_PopulateRange Block, iType, Result, OverwriteFormulas
         Next Block
+
+'------------------------------------------------------------------------------
+' FINALIZE OPERATION OUTCOME
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Finalize operation outcome"
+    'The outcome is decided here, once, on complete data. A legitimate zero-write
+    'operation returns a complete DP_WriteResult rather than an exception, so a
+    'caller can never be handed "exception with no result" after the workbook has
+    'already been mutated by an earlier area. Callers report the shortfall through
+    'M_WriteBack_ReportShortfall, which emits at most one operation-level message
+        If Result.WrittenCount <= 0 Then
+            'Record the zero-write operation for diagnostics
+                Debug.Print PROC_NAME & _
+                    " | Zero-write operation | Areas=" & VBA.CStr(Result.AreasCount) & _
+                    "; Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+                    "; LockedSkipped=" & VBA.CStr(Result.LockedSkippedCount) & _
+                    "; FormulaSkipped=" & VBA.CStr(Result.FormulaSkippedCount) & _
+                    "; Failed=" & VBA.CStr(Result.FailedCount)
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -9782,14 +9816,24 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve write result"
-    'Reject write-back attempts that did not write any cell
+    'A zero-write area is an outcome, not an exception, and is accumulated like
+    'any other. At v1.2.0 this raised before the accumulation below, so an area
+    'that wrote nothing discarded its own classification counts and every area
+    'already accumulated ahead of it. A caller that had just mutated an earlier
+    'area received an exception carrying no DP_WriteResult at all, and the totals
+    'depended on the order Excel happened to enumerate Target.Areas
+    '
+    'The operation-level outcome is decided by M_WriteBack_ApplyResolvedTarget
+    'once every area has been accounted for. Do not reinstate a per-area raise
+    'here: see #21
         If AreaResult.WrittenCount <= 0 Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "DatePicker write-back did not write any cell. Target cells: " & _
-                VBA.CStr(AreaResult.AttemptedCount) & "; protected locked cells skipped: " & _
-                VBA.CStr(AreaResult.LockedSkippedCount) & "; formula cells preserved: " & _
-                VBA.CStr(AreaResult.FormulaSkippedCount) & "; other failures: " & _
-                VBA.CStr(AreaResult.FailedCount)
+            'Record the zero-write area for diagnostics without interrupting the
+            'operation or discarding what the other areas observed
+                Debug.Print PROC_NAME & _
+                    " | Zero-write area | Attempted=" & VBA.CStr(AreaResult.AttemptedCount) & _
+                    "; LockedSkipped=" & VBA.CStr(AreaResult.LockedSkippedCount) & _
+                    "; FormulaSkipped=" & VBA.CStr(AreaResult.FormulaSkippedCount) & _
+                    "; Failed=" & VBA.CStr(AreaResult.FailedCount)
         End If
 
 '------------------------------------------------------------------------------

@@ -69,6 +69,33 @@ refactor and no new features. Corrections are published against the released
   refusal path. `M_Picker_EnsureManager` additionally fails closed, so direct
   calls to that technically public bootstrapper cannot bypass admission.
 
+- **A disabled keyboard shortcut is honored by the settings-panel save path**
+  ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42)).
+  `UF_SettingsPanel_Save` forced the shortcut back on whenever right-click and
+  the grid icon were both disabled, then persisted that value and registered it
+  through `Application.OnKey`. A user who had deliberately disabled all three
+  built-in entry paths could not keep that configuration.
+
+  The equivalent block had already been removed from
+  `M_Settings_SetShowRightClick` and `M_Settings_SetShowGridIcon`, which is why
+  all three module setters still carried an empty `PROTECT MANUAL ACCESS PATH`
+  banner. The UserForm copy was missed, so setter-level coverage passed while
+  the real panel still overrode the user's choice. The save path now resolves
+  through a single pure seam that returns the current setting unchanged.
+
+- **Discontiguous write results are complete and order-independent**
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21)).
+  `M_WriteBack_PopulateRange` raised whenever an area wrote no cell, and that
+  raise sat before the accumulation block. A zero-write area discarded its own
+  classification counts, and because the raise escaped the area loop it took
+  every area already accumulated with it. A writable area followed by a
+  zero-write area mutated the workbook and then returned no `DP_WriteResult` at
+  all, and the totals depended on the order Excel enumerated `Target.Areas`.
+
+  Every area now contributes its facts before the outcome is decided, once, at
+  the operation level. Partial mutation can no longer be represented as an
+  exception carrying no result.
+
 ### 🔧 Changed
 
 - A refused provider now reports once per user action rather than once per
@@ -76,12 +103,27 @@ refactor and no new features. Corrections are published against the released
   optimization must not raise a second message box after `DP_Start` has already
   reported.
 
+- A write operation that writes no cell now returns a complete `DP_WriteResult`
+  with `WrittenCount = 0` instead of raising. Callers report it through
+  `M_WriteBack_ReportShortfall` as a normal shortfall message. Single-area
+  writes are unaffected.
+
+- `M_Picker_SelectDate` and `DP_Now` store the selected date only when at least
+  one cell received it. A zero-write previously raised out of the engine and
+  never reached those assignments, so this preserves the prior contract now
+  that a zero-write returns normally.
+
 ### 🧪 Validation
 
-- Standard regression: `State=PASS; Run=330; Passed=330; Failed=0; CleanupFailures=0`
-- With UI smoke: `State=PASS; Run=333; Passed=333; Failed=0; CleanupFailures=0`
+- Standard regression: `State=PASS; Run=377; Passed=377; Failed=0; CleanupFailures=0`
+- With UI smoke: `State=PASS; Run=380; Passed=380; Failed=0; CleanupFailures=0`
 - New `RuntimeAdmission` suite — 28 assertions driving every public entry path
   under both a foreign and an owned lease.
+- New `SettingsSaveResolution` suite — 12 assertions driving the seam the real
+  save handler executes, sweeping all eight input combinations.
+- New `MultiAreaWriteResult` suite — 35 assertions driving the real public write
+  path with a two-area `Union`, repeating every scenario with the areas swapped.
+- Baseline 302 + 28 + 12 + 35 = 377 standard.
 - Manual two-provider refusal matrix passed for `.xlam + embedded` and
   `embedded + embedded` in a single Excel process, including a reversal check
   confirming ownership follows start order rather than packaging.
@@ -96,6 +138,10 @@ refactor and no new features. Corrections are published against the released
   `Application.DisplayAlerts` does not suppress `VBA.MsgBox`, so automated
   coverage of the real entry paths would otherwise block on a modal dialog.
   Both are to be classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+- `M_Settings_ResolveKeyboardShortcutOnSave` is the settings-save resolution
+  seam. It is internal implementation surface, not supported API, and is also to
+  be classified `internal` under
   [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
 
 ### ⚠️ Known limitations
