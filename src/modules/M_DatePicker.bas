@@ -352,6 +352,10 @@ Option Explicit
         ColumnName              As String       'Resolved column when expanded
         AreasCount              As Long         'Discontiguous areas in the target
         EventsDisabledByCaller  As Boolean      'True when events were already off
+        TechnicalFailureOccurred    As Boolean  'True when an unexpected error stopped the operation
+        TechnicalFailureStep        As String   'Handler step the unexpected error occurred in
+        TechnicalFailureNumber      As Long     'Original error number, preserved
+        TechnicalFailureDescription As String   'Original error description, preserved
     End Type
 
 '------------------------------------------------------------------------------
@@ -361,6 +365,12 @@ Option Explicit
     Private mDP_TestWindowPrimaryFailure    As Long
     'Armed rollback failure point for that same call, zero when disarmed
     Private mDP_TestWindowRollbackFailure   As Long
+    'Armed target area ordinal for a forced write-back failure, zero when disarmed
+    Private mDP_TestWriteFailArea           As Long
+    'Cells to write inside that area before the forced failure fires
+    Private mDP_TestWriteFailAfterCells     As Long
+    'Target areas populated so far in the current write operation
+    Private mDP_TestWriteAreaOrdinal        As Long
 
 '------------------------------------------------------------------------------
 ' PUBLIC STATE
@@ -394,6 +404,8 @@ Option Explicit
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
     Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
     Private mDP_RuntimeOwnerId          As String               'Ephemeral lease token, non-empty only while this project owns the lease
+    Private mDP_LeaseRefusalSilenced    As Boolean              'Test-only: suppress the modal refusal report so entry paths stay drivable
+    Private mDP_LeaseRefusalCount       As Long                 'Test-only: refusal reports raised while silenced
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
     Private mDP_TimerIsRunning          As Boolean              'Timer running flag
     Private mDP_TimerProcedureName      As String               'Qualified OnTime timer procedure name
@@ -1938,6 +1950,75 @@ ErrorHandler:
 
 End Sub
 
+Public Function M_Settings_ResolveKeyboardShortcutOnSave( _
+    ByVal CurrentEnableKeyboard As Boolean, _
+    ByVal ResolvedShowRightClick As Boolean, _
+    ByVal ResolvedShowGridIcon As Boolean) As Boolean
+
+'
+'==============================================================================
+'                 RESOLVE KEYBOARD SHORTCUT ON SETTINGS SAVE
+'==============================================================================
+' PURPOSE
+'   Resolves the keyboard shortcut setting a settings save should persist
+'
+' WHY THIS EXISTS
+'   The settings panel has no keyboard checkbox. The shortcut is set through
+'   M_Settings_SetEnableKeyboardShortcut, and a panel save must carry the
+'   current value forward untouched
+'
+'   At v1.2.0 the UserForm save path instead forced the value back to True
+'   whenever right-click and the grid icon were both disabled, then persisted it
+'   and registered Application.OnKey. A user who had deliberately disabled all
+'   three built-in entry points could not keep that configuration
+'
+'   The equivalent block was already removed from M_Settings_SetShowRightClick
+'   and M_Settings_SetShowGridIcon, which is why those setters still carry an
+'   empty PROTECT MANUAL ACCESS PATH banner. The UserForm copy was missed
+'
+' INPUTS
+'   CurrentEnableKeyboard
+'       The keyboard shortcut setting as currently resolved
+'
+'   ResolvedShowRightClick
+'       The right-click setting the save is about to persist
+'
+'   ResolvedShowGridIcon
+'       The grid-icon setting the save is about to persist
+'
+' RETURNS
+'   CurrentEnableKeyboard, unchanged, for every combination of the other two
+'
+' BEHAVIOR
+'   Zero built-in entry paths is a valid configuration. The DatePicker remains
+'   reachable through DP_Show, DP_Click and the Ribbon, so no combination of
+'   integration settings justifies overriding an explicit user choice
+'
+' ERROR POLICY
+'   Pure. Does not raise, read global state or mutate anything
+'
+' NOTES
+'   The two integration arguments are accepted deliberately even though they do
+'   not affect the result. They are the exact inputs the removed fallback
+'   consulted, so this signature states the contract that they must never affect
+'   it, and lets a regression sweep every combination
+'
+'   This is the seam the settings-save regression drives. It is the same code
+'   the real UserForm save handler executes, not a module-level setter standing
+'   in for it. Classify internal under #25
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Preserve the explicitly resolved setting exactly as the user chose it
+        M_Settings_ResolveKeyboardShortcutOnSave = CurrentEnableKeyboard
+
+End Function
+
 Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As Boolean)
 
 '
@@ -2050,6 +2131,10 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
+    'Deliberately empty. An earlier design forced the keyboard shortcut back on
+    'when right-click and the grid icon were both disabled. Zero built-in entry
+    'paths is a valid configuration, so the resolved value above is carried
+    'forward unchanged. Do not reintroduce a fallback here: see #42
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAG
 '------------------------------------------------------------------------------
@@ -3340,6 +3425,10 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
+    'Deliberately empty. An earlier design forced the keyboard shortcut back on
+    'when right-click and the grid icon were both disabled. Zero built-in entry
+    'paths is a valid configuration, so the resolved value above is carried
+    'forward unchanged. Do not reintroduce a fallback here: see #42
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -3553,6 +3642,10 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '------------------------------------------------------------------------------
 ' PROTECT MANUAL ACCESS PATH
 '------------------------------------------------------------------------------
+    'Deliberately empty. An earlier design forced the keyboard shortcut back on
+    'when right-click and the grid icon were both disabled. Zero built-in entry
+    'paths is a valid configuration, so the resolved value above is carried
+    'forward unchanged. Do not reintroduce a fallback here: see #42
 '------------------------------------------------------------------------------
 ' RESOLVE CHANGE FLAGS
 '------------------------------------------------------------------------------
@@ -5573,6 +5666,19 @@ Public Sub M_Picker_EnsureManager( _
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' VERIFY RUNTIME ADMISSION
+'------------------------------------------------------------------------------
+    'Prove ownership before any side effect. This is the backstop for direct
+    'calls to this technically public bootstrapper: supported entry paths admit
+    'themselves first and exit quietly, so reaching here unadmitted means the
+    'guard was bypassed rather than a user action being refused
+        If Not M_Lease_TryAcquire() Then
+            Err.Raise vbObjectError + 515, PROC_NAME, _
+                "DatePicker manager admission refused: another provider owns " & _
+                "this Excel session, or ownership could not be verified"
+        End If
+
+'------------------------------------------------------------------------------
 ' LOAD SETTINGS
 '------------------------------------------------------------------------------
     'Ensure persisted DatePicker settings are available before manager startup
@@ -5712,6 +5818,16 @@ Public Sub DP_Preload()
 '------------------------------------------------------------------------------
     'Suppress preload failures through the fail-safe path
         On Error GoTo FailSafe
+
+'------------------------------------------------------------------------------
+' ADMIT THIS PROVIDER
+'------------------------------------------------------------------------------
+    'Prove ownership before loading a hidden form. Preload is a background
+    'optimization, so a refused copy declines silently rather than interrupting
+    'workbook open with a second message box after DP_Start already reported
+        If Not M_Lease_EnsureAdmitted(PROC_NAME, ReportToUser:=False) Then
+            GoTo CleanExit
+        End If
 
 '------------------------------------------------------------------------------
 ' ENSURE RUNTIME
@@ -5905,6 +6021,65 @@ Public Sub M_Lease_Test_ClearOwnerToken()
 
 End Sub
 
+Public Sub M_Lease_Test_SilenceRefusalReport(ByVal Silence As Boolean)
+
+'
+'==============================================================================
+'                   SILENCE THE REFUSAL REPORT (TEST)
+'==============================================================================
+'   Suppresses the operator-facing refusal message box and counts refusals
+'   instead.
+'
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
+'   must be classified internal under #25.
+'
+'   It exists because #37 requires automated coverage of the real entry points
+'   under a refused lease. Those paths report refusal through a modal MsgBox,
+'   and Application.DisplayAlerts does not suppress VBA.MsgBox, so an unattended
+'   regression run would block forever waiting for a click.
+'
+'   Silencing only affects reporting. Admission itself is unchanged: a refused
+'   provider is still refused, and no shared state is mutated either way.
+'
+'   Enabling resets the counter so each suite measures its own refusals. A run
+'   that leaves this True would hide genuine conflicts from the operator, so the
+'   suite restores it in its exit path.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' SET
+'------------------------------------------------------------------------------
+    'Apply the requested reporting mode
+        mDP_LeaseRefusalSilenced = Silence
+    'Reset the counter so each measurement window starts at zero
+        mDP_LeaseRefusalCount = 0
+
+End Sub
+
+Public Function M_Lease_Test_RefusalReportCount() As Long
+
+'
+'==============================================================================
+'                   READ THE REFUSAL COUNT (TEST)
+'==============================================================================
+'   Reports how many refusals were raised since reporting was silenced.
+'
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
+'   must be classified internal under #25.
+'
+'   A refusal that is silently skipped and a refusal that never happened look
+'   identical from outside. This lets a suite prove the entry path actually
+'   refused, rather than merely proving that nothing visible occurred.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Report refusals observed while silenced
+        M_Lease_Test_RefusalReportCount = mDP_LeaseRefusalCount
+
+End Function
+
 Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
 
 '
@@ -5925,6 +6100,14 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
     'Record the refusal for diagnostics
         Debug.Print EntryPoint & " | Refused | Another DatePicker provider owns " & _
             "this Excel session, or ownership could not be verified"
+    'Count and return without the modal when a regression run has silenced
+    'reporting. An automated suite has to drive the real entry points, and a
+    'modal message box would block the run waiting for a human
+        If mDP_LeaseRefusalSilenced Then
+            mDP_LeaseRefusalCount = mDP_LeaseRefusalCount + 1
+            Err.Clear
+            Exit Sub
+        End If
     'Tell the operator, because nothing else in the session will
         MsgBox _
             "Another copy of the DatePicker is already active in this Excel " & _
@@ -5942,6 +6125,96 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
         Err.Clear
 
 End Sub
+
+Private Function M_Lease_EnsureAdmitted( _
+    ByVal EntryPoint As String, _
+    Optional ByVal ReportToUser As Boolean = True) As Boolean
+
+'
+'==============================================================================
+'                            ENSURE RUNTIME ADMISSION
+'==============================================================================
+' PURPOSE
+'   Single admission gate for every runtime entry path. Proves this project owns
+'   the provider lease before any manager creation, form load or application-wide
+'   registration is attempted
+'
+' WHY THIS EXISTS
+'   The lease primitive already refuses correctly, but at v1.2.0 only DP_Start
+'   consulted it. DP_Show and DP_Preload reached M_Picker_EnsureManager without
+'   proving ownership, so a refused second copy could create a manager, load
+'   settings, register Application.OnKey, hook Application events and later
+'   remove the true owner's registrations during its own teardown
+'
+' INPUTS
+'   EntryPoint
+'       Diagnostic name of the calling entry path
+'
+'   ReportToUser
+'       True to show the operator-facing refusal message. False for best-effort
+'       background paths that must stay silent
+'
+' RETURNS
+'   True when this project owns the lease, including when it already did
+'
+'   False when another provider owns it, or ownership cannot be verified
+'
+' BEHAVIOR
+'   Delegates to M_Lease_TryAcquire, which is idempotent for the current owner
+'   and fails closed for a foreign or unverifiable lease. Reports refusal once
+'   at the refusing entry point
+'
+' ERROR POLICY
+'   Does not raise. Refusal is an ordinary answer the caller acts on
+'
+' DEPENDENCIES
+'   M_Lease_TryAcquire
+'   M_Lease_ReportRefusal
+'
+' NOTES
+'   Refusal performs no shared-state mutation. M_Lease_TryAcquire only creates
+'   the lease bar on the free-lease path, so a refused copy leaves the owner's
+'   registrations and the caller's Application.EnableEvents state untouched
+'
+'   Delegating entry points must not call this a second time. DP_Click and
+'   Ribbon_ShowPicker reach DP_Show, which is the shared boundary, so a single
+'   refusal produces a single report
+'
+' UPDATED
+'   2026-08-25
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "M_Lease_EnsureAdmitted"
+
+'------------------------------------------------------------------------------
+' ADMIT
+'------------------------------------------------------------------------------
+    'Acquire the lease, or confirm this project already holds it
+        If M_Lease_TryAcquire() Then
+            M_Lease_EnsureAdmitted = True
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' REFUSE
+'------------------------------------------------------------------------------
+    'Refusal is fail-closed and leaves no shared state changed
+        M_Lease_EnsureAdmitted = False
+    'Tell the operator unless this is a silent background path
+        If ReportToUser Then
+            M_Lease_ReportRefusal EntryPoint
+        Else
+            'Record the silent refusal so diagnostics still show the cause
+                On Error Resume Next
+                Debug.Print EntryPoint & _
+                    " | Refused | Provider lease not held; entry path declined"
+                Err.Clear
+        End If
+
+End Function
 
 Private Function M_Lease_NewOwnerId() As String
 
@@ -6481,8 +6754,7 @@ Public Sub DP_Start()
     'Claim the one-provider lease before touching anything application-wide. A
     'second copy that registered first and discovered the conflict afterwards
     'would already have displaced the owner's keyboard shortcut
-        If Not M_Lease_TryAcquire() Then
-            M_Lease_ReportRefusal "DP_Start"
+        If Not M_Lease_EnsureAdmitted(PROC_NAME) Then
             Exit Sub
         End If
 
@@ -6628,7 +6900,19 @@ Public Sub DP_Show()
     'Enable controlled error handling
         On Error GoTo ErrorHandler
     'Track the current step
-        StepName = "Ensure manager"
+        StepName = "Admit this provider"
+
+'------------------------------------------------------------------------------
+' ADMIT THIS PROVIDER
+'------------------------------------------------------------------------------
+    'This is the shared admission boundary for every interactive open path.
+    'DP_Click, DP_OpenForActiveCell and Ribbon_ShowPicker all delegate here, so
+    'admitting once refuses once and reports once. Nothing above this point has
+    'touched the manager, the form or any application-wide registration
+        If Not M_Lease_EnsureAdmitted(PROC_NAME) Then
+            Exit Sub
+        End If
+
 '------------------------------------------------------------------------------
 ' ENSURE DATEPICKER INFRASTRUCTURE
 '------------------------------------------------------------------------------
@@ -7601,10 +7885,16 @@ Public Sub M_Picker_SelectDate( _
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
 '------------------------------------------------------------------------------
-    'Store the selected date only after write-back succeeds
-        gDP_SelectedDate = SelectedDateOnly
-    'Mark the selected date as available
-        gDP_HasSelectedDate = True
+    'Store the selected date only when at least one cell actually received it.
+    'Before #21 a zero-write raised out of the engine and never reached here, so
+    'the guard preserves that contract now that a zero-write returns a complete
+    'result instead of an exception
+        If WriteResult.WrittenCount > 0 Then
+            'Store the selected date
+                gDP_SelectedDate = SelectedDateOnly
+            'Mark the selected date as available
+                gDP_HasSelectedDate = True
+        End If
 
 '------------------------------------------------------------------------------
 ' CLOSE OR REFRESH FORM
@@ -7874,10 +8164,15 @@ Public Sub DP_Now()
 '------------------------------------------------------------------------------
 ' STORE SELECTED DATE AFTER SUCCESSFUL WRITE-BACK
 '------------------------------------------------------------------------------
-    'Store the date-only part as the active selected date
-        gDP_SelectedDate = NowDate
-    'Mark selected-date state as available
-        gDP_HasSelectedDate = True
+    'Store the date only when at least one cell actually received it. Before #21
+    'a zero-write raised out of the engine and never reached here, so the guard
+    'preserves that contract now that a zero-write returns a complete result
+        If WriteResult.WrittenCount > 0 Then
+            'Store the date-only part as the active selected date
+                gDP_SelectedDate = NowDate
+            'Mark selected-date state as available
+                gDP_HasSelectedDate = True
+        End If
 
 '------------------------------------------------------------------------------
 ' CLOSE OR REFRESH FORM
@@ -8045,6 +8340,13 @@ Public Function DP_FillTableColumn( _
     Dim PromptText          As String       'Confirmation prompt text
     Dim HandlerStep         As String       'Current handler step for diagnostics
 
+    Dim SavedErrNumber          As Long     'Captured original error number
+    Dim SavedErrSource          As String   'Captured original error source
+    Dim SavedErrDescription     As String   'Captured original error description
+
+    Dim CleanupErrNumber        As Long     'Captured cleanup error number
+    Dim CleanupErrDescription   As String   'Captured cleanup error description
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -8165,19 +8467,39 @@ CleanExit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error before any cleanup runs
+    '
+    'Cleanup below restores gDP_WriteValue under On Error Resume Next and clears
+    'Err. At v1.2.0 the raise that followed read Err.Number and Err.Description
+    'after that clear, so whenever ValueApplied was True the caller was handed
+    'error 0 with a blank cause instead of the failure that actually occurred.
+    'Nothing may read the live Err object below this point: see #48
+        SavedErrNumber = Err.Number
+        SavedErrSource = PROC_NAME & " | Step=" & HandlerStep
+        SavedErrDescription = "Table column fill failed: " & Err.Description
     'Restore the previous pending write value when the write failed
         If ValueApplied Then
             On Error Resume Next
             gDP_WriteValue = OldWriteValue
+            'Capture a cleanup failure separately rather than letting it replace
+            'the primary failure
+                If Err.Number <> 0 Then
+                    CleanupErrNumber = Err.Number
+                    CleanupErrDescription = Err.Description
+                End If
             Err.Clear
             On Error GoTo 0
         End If
     'Release object references
         Set TargetColumn = Nothing
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "Table column fill failed: " & Err.Description
+    'Append cleanup diagnostics when cleanup also failed
+        If CleanupErrNumber <> 0 Then
+            SavedErrDescription = SavedErrDescription & _
+                " Cleanup also failed while restoring the pending write value: " & _
+                CleanupErrDescription
+        End If
+    'Raise the original error after best-effort cleanup
+        Err.Raise SavedErrNumber, SavedErrSource, SavedErrDescription
 
 End Function
 
@@ -8366,7 +8688,7 @@ Public Function M_WriteBack_Apply( _
     'Track the current handler step
         HandlerStep = "Log partial write"
     'Record a partial write for the developer without interrupting the caller
-        If Result.WrittenCount < Result.AttemptedCount Then
+        If Result.WrittenCount < Result.AttemptedCount Or Result.TechnicalFailureOccurred Then
             Debug.Print PROC_NAME & ": wrote " & VBA.CStr(Result.WrittenCount) & _
                 " of " & VBA.CStr(Result.AttemptedCount) & " cells - " & _
                 M_WriteBack_DescribeShortfall(Result)
@@ -8506,6 +8828,209 @@ Private Sub M_WriteBack_AppendAddress( _
 
 End Sub
 
+Public Sub M_WriteBack_Test_SetFaultInjection( _
+    ByVal FailInAreaOrdinal As Long, _
+    Optional ByVal FailAfterWrittenCellsInArea As Long = 0)
+
+'
+'------------------------------------------------------------------------------
+'                    ARM WRITE-BACK FAULT INJECTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a single forced technical failure inside the next write-back operation
+'
+' WHY THIS EXISTS
+'   #21 promises that partial mutation is never reported as an exception carrying
+'   no result. That promise is only meaningful on the unexpected-technical-error
+'   path, and that path cannot be produced on demand: M_WriteBack_TryWriteCell
+'   classifies every per-cell failure it can observe and raises nothing, so a
+'   genuine technical error inside the area loop is exactly the case a test has
+'   no way to arrange
+'
+'   Classified cell failures such as an array-formula refusal are already covered
+'   by the MultiAreaWriteResult suite. They become FailedCount and are a
+'   different path from this one
+'
+'   The regression module is a separate VBA module and cannot assign private
+'   state in M_DatePicker, so the setter has to be technically Public
+'
+' INPUTS
+'   FailInAreaOrdinal
+'     1-based target area to fail in, counted within one write operation.
+'     Zero disarms
+'
+'   FailAfterWrittenCellsInArea
+'     Cells to write inside that area before failing. Zero fails on entering the
+'     area, before any of its cells are mutated
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the requested failure point for the next write operation only
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API,
+'   is classified internal under #25, and must not appear in the README public
+'   API table
+'
+'   Injection is one-shot. The fault disarms itself as it fires, so an armed
+'   test cannot leak into a later real write. A test that arms a fault it never
+'   reaches must disarm it explicitly in cleanup
+'
+'   The required first argument keeps this out of the Alt+F8 macro list
+'
+'   The forced error is raised through the ordinary Err.Raise path inside
+'   M_WriteBack_PopulateRange, so it exercises the real handler rather than a
+'   test-only branch of it
+'
+'   No state is persisted. Nothing is written to the registry, a workbook, or
+'   any Excel object
+'
+' UPDATED
+'   2026-08-25
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ARM INJECTION
+'------------------------------------------------------------------------------
+    'Arm the requested target area for the next write operation only
+        mDP_TestWriteFailArea = FailInAreaOrdinal
+    'Arm how far into that area the failure fires
+        mDP_TestWriteFailAfterCells = FailAfterWrittenCellsInArea
+    'Reset the per-operation area counter so arming is independent of history
+        mDP_TestWriteAreaOrdinal = 0
+
+End Sub
+
+Private Function M_WriteBack_TestFaultShouldFire( _
+    ByVal AreaOrdinal As Long, _
+    ByVal WrittenInArea As Double) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   RESOLVE ARMED WRITE-BACK FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether an armed write-back fault fires at this point
+'
+' WHY THIS EXISTS
+'   The decision is consulted from two places inside one area, and both have to
+'   agree about one-shot consumption
+'
+' INPUTS
+'   AreaOrdinal
+'     1-based ordinal of the area currently being populated
+'
+'   WrittenInArea
+'     Cells written inside that area so far
+'
+' RETURNS
+'   True when the caller must raise the forced technical failure
+'
+' BEHAVIOR
+'   Fires at most once, and disarms itself as it fires
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Disarmed state is the normal state. Production never arms this
+'
+' UPDATED
+'   2026-08-25
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Set safe default result
+        M_WriteBack_TestFaultShouldFire = False
+    'Exit when no fault is armed
+        If mDP_TestWriteFailArea <= 0 Then Exit Function
+    'Exit when this is not the armed area
+        If AreaOrdinal <> mDP_TestWriteFailArea Then Exit Function
+    'Exit until the armed number of cells has been written inside that area
+        If WrittenInArea < mDP_TestWriteFailAfterCells Then Exit Function
+
+'------------------------------------------------------------------------------
+' CONSUME
+'------------------------------------------------------------------------------
+    'Disarm before reporting, so the fault fires exactly once
+        mDP_TestWriteFailArea = 0
+        mDP_TestWriteFailAfterCells = 0
+    'Report that the caller must raise
+        M_WriteBack_TestFaultShouldFire = True
+
+End Function
+
+Private Function M_WriteBack_HasCellOutcomes( _
+    ByRef Result As DP_WriteResult) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   REPORT WHETHER A RESULT HOLDS CELL OUTCOMES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a write result records anything that actually happened to a
+'   cell
+'
+' WHY THIS EXISTS
+'   Deciding what an unexpected technical failure means turns on one question:
+'   is there anything to lose? That is answered by the per-cell outcomes, not by
+'   AttemptedCount
+'
+'   AttemptedCount is the size of the target. It is recorded before the first cell
+'   is touched, so treating it as evidence would classify a validation failure
+'   that did nothing as a failure worth protecting, and would silently swallow the
+'   programming errors this engine is supposed to raise loudly
+'
+' INPUTS
+'   Result
+'     Write result to inspect. Either an area result or an operation result
+'
+' RETURNS
+'   True when at least one cell was written, skipped or failed
+'
+' BEHAVIOR
+'   Pure. Reads four counters and returns
+'
+' ERROR POLICY
+'   Does not raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   A written cell means the workbook was mutated. A skipped or failed cell means
+'   an observation was made that the caller asked for. Both are facts #21 promises
+'   not to discard
+'
+' UPDATED
+'   2026-08-25
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE
+'------------------------------------------------------------------------------
+    'Report whether any cell produced an outcome
+        M_WriteBack_HasCellOutcomes = _
+            (Result.WrittenCount > 0) Or _
+            (Result.LockedSkippedCount > 0) Or _
+            (Result.FormulaSkippedCount > 0) Or _
+            (Result.FailedCount > 0)
+
+End Function
+
 Public Sub M_WriteBack_ReportShortfall( _
     ByRef Result As DP_WriteResult)
 
@@ -8562,7 +9087,14 @@ Public Sub M_WriteBack_ReportShortfall( _
 ' SKIP A COMPLETE WRITE
 '------------------------------------------------------------------------------
     'Say nothing when every attempted cell was written
-        If Result.WrittenCount >= Result.AttemptedCount Then Exit Sub
+    '
+    'A technical failure is always reported, even when the cells that were
+    'attempted all succeeded. The areas the operation never reached are not in
+    'AttemptedCount, so the counts alone can look complete while the operation
+    'actually stopped early
+        If Result.WrittenCount >= Result.AttemptedCount Then
+            If Not Result.TechnicalFailureOccurred Then Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' REPORT THE SHORTFALL
@@ -8668,6 +9200,22 @@ Public Function M_WriteBack_DescribeShortfall( _
             End If
             Description = Description & VBA.CStr(Result.FailedCount) & " failed: " & _
                 Result.FailedAddresses
+        End If
+
+'------------------------------------------------------------------------------
+' DESCRIBE AN UNEXPECTED TECHNICAL FAILURE
+'------------------------------------------------------------------------------
+    'Describe an unexpected error that stopped the operation. This is not a
+    'classified cell outcome: the cells the operation never reached are absent
+    'from every count above, so without this line the message would describe a
+    'smaller operation than the one the user asked for
+        If Result.TechnicalFailureOccurred Then
+            If VBA.LenB(Description) > 0 Then
+                Description = Description & VBA.vbCrLf
+            End If
+            Description = Description & _
+                "The operation stopped early after an unexpected error at step """ & _
+                Result.TechnicalFailureStep & """. Any remaining cells were not attempted."
         End If
 
 '------------------------------------------------------------------------------
@@ -9078,8 +9626,18 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   discontiguous target area, and reports the whole target address
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the write action is unsupported, the
-'   target is missing or empty, or range population fails
+'   Raises a descriptive runtime error if the write action is unsupported or the
+'   target is missing or empty. Both are checked before any area is touched
+'
+'   An unexpected failure during area population is decided by
+'   M_WriteBack_PopulateRange, which raises when no cell has produced an outcome
+'   and returns a result carrying the failure when one has. A technical failure
+'   therefore reaches this routine only when there is something worth returning,
+'   and this routine returns it rather than converting it back into an exception
+'
+'   Population stops at the first technical failure. The remaining areas are
+'   deliberately not attempted, so a technical-failure result is bounded
+'   (Written + Locked + Formula + Failed <= Attempted) rather than balanced
 '
 ' DEPENDENCIES
 '   M_WriteBack_PopulateRange
@@ -9158,11 +9716,58 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Populate target areas"
-    'Loop through each discontiguous target area
+    'Reset the per-operation area counter that positions an injected fault. This
+    'is test infrastructure and is inert unless a fault is armed
+        mDP_TestWriteAreaOrdinal = 0
+    'Loop through each discontiguous target area. Every area contributes its
+    'attempted, written, skipped, failed and address data to Result before the
+    'operation outcome is decided, so the totals do not depend on the order
+    'Excel enumerates Target.Areas
         For Each Block In Target.Areas
             'Populate this target area into the accumulating result
                 M_WriteBack_PopulateRange Block, iType, Result, OverwriteFormulas
+            'Stop the operation on an unexpected technical failure. Continuing to
+            'mutate the workbook after an error nobody classified would enlarge the
+            'damage, so the remaining areas are deliberately not attempted. They are
+            'therefore absent from AttemptedCount, which is what makes a
+            'technical-failure result bounded rather than balanced
+                If Result.TechnicalFailureOccurred Then Exit For
         Next Block
+
+'------------------------------------------------------------------------------
+' FINALIZE OPERATION OUTCOME
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Finalize operation outcome"
+    'Record a technical failure that survived to the operation level
+    '
+    'A failure reaches this point only when at least one cell had already produced
+    'an outcome. M_WriteBack_PopulateRange raises instead when nothing had, so the
+    'result being returned here always carries something worth returning. The
+    'failure is not hidden: it travels in the result, is described by
+    'M_WriteBack_DescribeShortfall, and is reported by M_WriteBack_ReportShortfall
+        If Result.TechnicalFailureOccurred Then
+            Debug.Print PROC_NAME & _
+                " | Technical failure | Step=" & Result.TechnicalFailureStep & _
+                "; Error=" & VBA.CStr(Result.TechnicalFailureNumber) & _
+                "; Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+                "; Written=" & VBA.CStr(Result.WrittenCount) & _
+                "; Areas=" & VBA.CStr(Result.AreasCount)
+        End If
+    'The outcome is decided here, once, on complete data. A legitimate zero-write
+    'operation returns a complete DP_WriteResult rather than an exception, so a
+    'caller can never be handed "exception with no result" after the workbook has
+    'already been mutated by an earlier area. Callers report the shortfall through
+    'M_WriteBack_ReportShortfall, which emits at most one operation-level message
+        If Result.WrittenCount <= 0 Then
+            'Record the zero-write operation for diagnostics
+                Debug.Print PROC_NAME & _
+                    " | Zero-write operation | Areas=" & VBA.CStr(Result.AreasCount) & _
+                    "; Attempted=" & VBA.CStr(Result.AttemptedCount) & _
+                    "; LockedSkipped=" & VBA.CStr(Result.LockedSkippedCount) & _
+                    "; FormulaSkipped=" & VBA.CStr(Result.FormulaSkippedCount) & _
+                    "; Failed=" & VBA.CStr(Result.FailedCount)
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -9330,9 +9935,26 @@ Public Sub M_WriteBack_PopulateRange( _
 '   Formula cells are preserved unless the caller opted into replacing them
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the target range is missing, the write
-'   action is unsupported, the write value cannot be resolved, or no cell in this
-'   range can be written successfully
+'   An area that writes no cell is an outcome, not an exception, and is accumulated
+'   like any other
+'
+'   An unexpected error is decided by one rule: whether any cell, in this area or
+'   in an earlier one, has already produced an outcome
+'
+'   If none has, the original error is raised. Nothing is destroyed by raising, and
+'   an unsupported write action or a missing target reaching this routine is a
+'   programming error that a direct caller of this Public routine must be told
+'   about loudly
+'
+'   If one has, the error is recorded in TechnicalFailureOccurred,
+'   TechnicalFailureStep, TechnicalFailureNumber and TechnicalFailureDescription,
+'   the facts observed so far are accumulated, and the routine returns. A caller
+'   whose workbook has already been mutated is never handed an exception carrying
+'   no result. See #21
+'
+'   AttemptedCount is deliberately not part of that rule. It is recorded before the
+'   first cell is touched, so it describes the size of the target rather than
+'   anything that happened to it
 '
 '   Bulk-write failures are not raised directly because they are expected in
 '   mixed protected, validated, or partially writable ranges. The routine falls
@@ -9394,7 +10016,11 @@ Public Sub M_WriteBack_PopulateRange( _
     Dim ArrayState      As Variant          'Range.HasArray for the target
     Dim FormulaState    As Variant          'Range.HasFormula for the target
     Dim BulkAllowed     As Boolean          'True when the fast path may be used
+    Dim AreaOrdinal     As Long             'Position of this area in the operation
     Dim HandlerStep     As String           'Current handler step for diagnostics
+
+    Dim SavedErrNumber      As Long         'Captured original error number
+    Dim SavedErrDescription As String       'Captured original error description
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9403,6 +10029,27 @@ Public Sub M_WriteBack_PopulateRange( _
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+
+'------------------------------------------------------------------------------
+' RECORD AREA POSITION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Record area position"
+    'Record where this area sits in the operation. The counter is reset by
+    'M_WriteBack_ApplyResolvedTarget before the area loop, so the ordinal is
+    'per-operation rather than per-session
+        mDP_TestWriteAreaOrdinal = mDP_TestWriteAreaOrdinal + 1
+        AreaOrdinal = mDP_TestWriteAreaOrdinal
+    'Raise an armed fault that fires on entering this area, before anything about
+    'it has been recorded and before any of its cells are mutated. This is the one
+    'position from which an operation can still end up carrying no facts at all,
+    'which is the case that must still raise
+    '
+    'Disarmed in production: see M_WriteBack_Test_SetFaultInjection
+        If M_WriteBack_TestFaultShouldFire(AreaOrdinal, 0) Then
+            Err.Raise vbObjectError + 518, PROC_NAME, _
+                "Injected write-back fault on entering area " & VBA.CStr(AreaOrdinal)
+        End If
 
 '------------------------------------------------------------------------------
 ' VALIDATE TARGET RANGE
@@ -9501,6 +10148,15 @@ Public Sub M_WriteBack_PopulateRange( _
                 If M_WriteBack_TryWriteCell(Cell, WriteValue, OverwriteFormulas, AreaResult) Then
                     AreaResult.WrittenCount = AreaResult.WrittenCount + 1
                 End If
+            'Raise an armed fault once the requested number of cells in this area
+            'has been mutated. Disarmed in production: see
+            'M_WriteBack_Test_SetFaultInjection
+                If M_WriteBack_TestFaultShouldFire(AreaOrdinal, AreaResult.WrittenCount) Then
+                    Err.Raise vbObjectError + 518, PROC_NAME, _
+                        "Injected write-back fault after " & _
+                        VBA.CStr(AreaResult.WrittenCount) & _
+                        " written cells in area " & VBA.CStr(AreaOrdinal)
+                End If
         Next Cell
 
 '------------------------------------------------------------------------------
@@ -9508,14 +10164,24 @@ Public Sub M_WriteBack_PopulateRange( _
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve write result"
-    'Reject write-back attempts that did not write any cell
+    'A zero-write area is an outcome, not an exception, and is accumulated like
+    'any other. At v1.2.0 this raised before the accumulation below, so an area
+    'that wrote nothing discarded its own classification counts and every area
+    'already accumulated ahead of it. A caller that had just mutated an earlier
+    'area received an exception carrying no DP_WriteResult at all, and the totals
+    'depended on the order Excel happened to enumerate Target.Areas
+    '
+    'The operation-level outcome is decided by M_WriteBack_ApplyResolvedTarget
+    'once every area has been accounted for. Do not reinstate a per-area raise
+    'here: see #21
         If AreaResult.WrittenCount <= 0 Then
-            Err.Raise vbObjectError + 516, PROC_NAME, _
-                "DatePicker write-back did not write any cell. Target cells: " & _
-                VBA.CStr(AreaResult.AttemptedCount) & "; protected locked cells skipped: " & _
-                VBA.CStr(AreaResult.LockedSkippedCount) & "; formula cells preserved: " & _
-                VBA.CStr(AreaResult.FormulaSkippedCount) & "; other failures: " & _
-                VBA.CStr(AreaResult.FailedCount)
+            'Record the zero-write area for diagnostics without interrupting the
+            'operation or discarding what the other areas observed
+                Debug.Print PROC_NAME & _
+                    " | Zero-write area | Attempted=" & VBA.CStr(AreaResult.AttemptedCount) & _
+                    "; LockedSkipped=" & VBA.CStr(AreaResult.LockedSkippedCount) & _
+                    "; FormulaSkipped=" & VBA.CStr(AreaResult.FormulaSkippedCount) & _
+                    "; Failed=" & VBA.CStr(AreaResult.FailedCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -9558,6 +10224,16 @@ AccumulateResult:
                     AreaResult.FailedAddresses
             End If
         End If
+    'Carry an unexpected technical failure into the operation result. The first
+    'failure wins, so the original error survives any later area
+        If AreaResult.TechnicalFailureOccurred Then
+            If Not Result.TechnicalFailureOccurred Then
+                Result.TechnicalFailureOccurred = True
+                Result.TechnicalFailureStep = AreaResult.TechnicalFailureStep
+                Result.TechnicalFailureNumber = AreaResult.TechnicalFailureNumber
+                Result.TechnicalFailureDescription = AreaResult.TechnicalFailureDescription
+            End If
+        End If
 
 '------------------------------------------------------------------------------
 ' CLEAN EXIT
@@ -9572,12 +10248,58 @@ CleanExit:
 ' ERROR HANDLER
 '------------------------------------------------------------------------------
 ErrorHandler:
+    'Capture the original error before anything can disturb it. The identity of
+    'this error is preserved all the way to the operation-level decision, so a
+    'caller that is told about a technical failure is told which one
+        SavedErrNumber = Err.Number
+        SavedErrDescription = "DatePicker range population failed: " & Err.Description
     'Release object references
         Set Cell = Nothing
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "DatePicker range population failed: " & Err.Description
+    'Refuse to re-enter. Accumulation below is arithmetic and string joining and
+    'cannot realistically fail, but a handler that resumes into a block able to
+    'raise back into the same handler would spin. A second entry raises instead
+        If AreaResult.TechnicalFailureOccurred Then
+            Err.Raise SavedErrNumber, _
+                PROC_NAME & " | Step=" & HandlerStep, SavedErrDescription
+        End If
+    'Raise when there is nothing to lose
+    '
+    'One rule decides this, and it turns on whether any cell has produced an
+    'outcome. If none has, no work is destroyed by raising, and the caller is
+    'better served by a loud failure: an unsupported write action or a missing
+    'target reaching this routine is a programming error, and this is the only
+    'signal a direct caller of this Public routine would get
+    '
+    'AttemptedCount is deliberately not consulted. It is recorded before the first
+    'cell is touched, so it says how large the target was, not that anything
+    'happened to it
+        If Not M_WriteBack_HasCellOutcomes(Result) Then
+            If Not M_WriteBack_HasCellOutcomes(AreaResult) Then
+                Err.Raise SavedErrNumber, _
+                    PROC_NAME & " | Step=" & HandlerStep, SavedErrDescription
+            End If
+        End If
+    'Record the failure as an observed fact about this area rather than losing it
+    '
+    'Once a cell has produced an outcome this handler does not raise. At v1.2.0 it
+    'always did, and because the accumulation block below sits after it, an
+    'unexpected error discarded every cell this area had already written and every
+    'area accumulated before it. A caller whose workbook had just been mutated
+    'received an exception carrying no DP_WriteResult at all
+    '
+    'Do not reinstate an unconditional raise here: see #21
+        AreaResult.TechnicalFailureOccurred = True
+        AreaResult.TechnicalFailureStep = HandlerStep
+        AreaResult.TechnicalFailureNumber = SavedErrNumber
+        AreaResult.TechnicalFailureDescription = SavedErrDescription
+    'Record the failure for the developer
+        Debug.Print PROC_NAME & _
+            " | Technical failure | Step=" & HandlerStep & _
+            "; Error=" & VBA.CStr(SavedErrNumber) & _
+            "; WrittenInArea=" & VBA.CStr(AreaResult.WrittenCount) & _
+            "; " & SavedErrDescription
+    'Accumulate what this area observed before returning to the caller
+        Resume AccumulateResult
 
 End Sub
 

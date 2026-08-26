@@ -41,6 +41,265 @@ settings persistence, runtime ownership, and the stable
 
 ---
 
+## [Unreleased] — `v1.2.1`
+
+> 🩹 **Patch** · integrity hotfix correcting safety-contract gaps shipped in `v1.2.0`
+
+### 🧭 Release intent
+
+`v1.2.1` corrects defects in behavior `v1.2.0` already claimed. It contains no
+refactor and no new features. Corrections are published against the released
+`v1.2.0` notes rather than by rewriting them.
+
+### 🐛 Fixed
+
+- **Provider lease admission is now enforced on every runtime entry path**
+  ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
+  At `v1.2.0` only `DP_Start` consulted the provider lease. `DP_Show` and
+  `DP_Preload` reached `M_Picker_EnsureManager` without proving ownership, and
+  `DP_Click`, `DP_OpenForActiveCell`, the keyboard path and `Ribbon_ShowPicker`
+  all funnelled into that same unguarded path. A refused second copy could
+  therefore create a manager, load settings, hook Application events, register
+  `Application.OnKey`, load a form, and later remove the true owner's
+  registrations during its own teardown.
+
+  Admission is now a single acquire-or-verify gate applied at the lowest shared
+  boundary each path reaches. It is idempotent for the current owner, fails
+  closed for a foreign or unverifiable lease, and mutates no shared state on the
+  refusal path. `M_Picker_EnsureManager` additionally fails closed, so direct
+  calls to that technically public bootstrapper cannot bypass admission.
+
+- **A disabled keyboard shortcut is honored by the settings-panel save path**
+  ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42)).
+  `UF_SettingsPanel_Save` forced the shortcut back on whenever right-click and
+  the grid icon were both disabled, then persisted that value and registered it
+  through `Application.OnKey`. A user who had deliberately disabled all three
+  built-in entry paths could not keep that configuration.
+
+  The equivalent block had already been removed from
+  `M_Settings_SetShowRightClick` and `M_Settings_SetShowGridIcon`, which is why
+  all three module setters still carried an empty `PROTECT MANUAL ACCESS PATH`
+  banner. The UserForm copy was missed, so setter-level coverage passed while
+  the real panel still overrode the user's choice. The save path now resolves
+  through a single pure seam that returns the current setting unchanged.
+
+- **A write never reports partial mutation as an exception carrying no result**
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21)).
+  `M_WriteBack_PopulateRange` raised on both a zero-write area and an unexpected
+  technical error, and both raises sat before the accumulation block. An area
+  that raised discarded its own classification counts, and because the raise
+  escaped the area loop it took every area already accumulated with it. A
+  writable area followed by a failing one mutated the workbook and then returned
+  no `DP_WriteResult` at all, and the totals depended on the order Excel
+  enumerated `Target.Areas`.
+
+  A zero-write area is now an outcome rather than an exception, so totals are
+  complete and order-independent. An unexpected technical error is now decided by
+  one rule: whether any cell, in this area or an earlier one, has produced an
+  outcome. If none has, the original error is raised with its identity preserved,
+  because nothing is destroyed by raising and a programming error reaching the
+  engine must stay loud. If one has, the error is recorded in the result and the
+  facts observed so far are returned.
+
+  Population stops at the first technical failure rather than continuing to
+  mutate the workbook, so the areas it stopped short of are absent from
+  `AttemptedCount`. A technical-failure result is therefore **bounded** —
+  `Written + Locked + Formula + Failed <= Attempted` — rather than balanced, and
+  because the counts alone can then look complete, the failure is reported
+  separately rather than inferred from them.
+
+- **An unrecoverable window-style failure no longer presents the form**
+  ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
+  Both call sites of `M_Window_RemoveTitleBar` discarded its return value, so a
+  `DP_WindowStyleResult` reporting `RecoveryRequired` was dropped in silence and
+  the picker went on to show with a window style that had been partly applied
+  and could not be rolled back.
+
+  Both sites now consume the result. `UserForm_Initialize` records the failed
+  step and the last API error and then fails the load, which is the only
+  available action for an instance still under construction.
+  `UserForm_Activate` records the same diagnostics, marks itself activated
+  before anything else so the unload cannot re-enter the path, and unloads the
+  form.
+
+- **A handler that cleans up before re-raising now reports the error that
+  actually occurred**
+  ([#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48)).
+  Every `On Error` statement resets the `Err` object, and so does `Err.Clear`.
+  Two handlers cleaned up and then raised from the live `Err` object, so the
+  caller received error `0` with a blank description instead of the cause.
+
+  `DP_FillTableColumn` restored `gDP_WriteValue` under `On Error Resume Next` and
+  cleared `Err` before raising. The loss was conditional on the pending write
+  value having been staged, which is true for every failure inside the fill
+  itself. `UF_SettingsCheckBoxFont_Create` released its temporary font object
+  under `On Error Resume Next` and then restored handling with `On Error GoTo 0`.
+  It never called `Err.Clear` and did not need to, so its loss was unconditional.
+
+  Both now capture number, source and description at handler entry before
+  anything touches `On Error`, run cleanup separately, capture any cleanup
+  failure separately, and re-raise the original with cleanup diagnostics appended
+  when useful.
+
+  All production source was audited mechanically: 243 `Err.Clear` sites, 87
+  `Err.Raise` statements reading the live `Err` object, and exactly two where
+  clearing precedes the raise — the two above. After the fix the same audit
+  reports 85 live-`Err` raises and no defect, so no further occurrence exists.
+
+### 🔧 Changed
+
+- A refused provider now reports once per user action rather than once per
+  delegating layer. `DP_Preload` refuses silently, because a background startup
+  optimization must not raise a second message box after `DP_Start` has already
+  reported.
+
+- A write operation that writes no cell now returns a complete `DP_WriteResult`
+  with `WrittenCount = 0` instead of raising. Callers report it through
+  `M_WriteBack_ReportShortfall` as a normal shortfall message. Single-area
+  writes are unaffected.
+
+- `M_Picker_SelectDate` and `DP_Now` store the selected date only when at least
+  one cell received it. A zero-write previously raised out of the engine and
+  never reached those assignments, so this preserves the prior contract now
+  that a zero-write returns normally.
+
+- A window-style failure reported as `RecoveryRequired` is now terminal for that
+  form load. The picker fails rather than presenting a window whose style is
+  neither fully applied nor rolled back. A subsequent load is unaffected.
+
+- `DP_WriteResult` gains `TechnicalFailureOccurred`, `TechnicalFailureStep`,
+  `TechnicalFailureNumber` and `TechnicalFailureDescription`. The addition is
+  backward compatible: existing field names, types and meanings are unchanged.
+
+- `M_WriteBack_ReportShortfall` no longer stays silent when `WrittenCount`
+  reaches `AttemptedCount` if a technical failure is flagged, and
+  `M_WriteBack_DescribeShortfall` names the step the operation stopped at. The
+  areas an aborted operation never reached are not counted, so the counts alone
+  could otherwise describe a smaller operation than the user asked for.
+
+### 📖 Documentation
+
+- **The Wiki no longer teaches a shutdown that bypasses ownership**
+  ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)).
+  `Workbook-Lifecycle` recommended an explicit `BeforeClose` teardown that set
+  `gDP_Manager = Nothing` and then called `M_ContextMenu_Remove`,
+  `M_KeyboardShortcut_Remove`, `M_Timer_Stop`, `DP_Close` and
+  `M_GridIcon_PurgeAll` directly. It never called `DP_Stop` and never released the
+  provider lease.
+
+  An owner that ran the recipe stranded ownership for the rest of the Excel
+  process. A refused second copy that ran it removed the true owner's shortcut,
+  menu entry and icons: `DP_Stop` and `DP_RepairRuntime` refuse a caller that
+  cannot prove ownership, but the low-level helpers do not check, because they are
+  the internals those APIs call once admission is already proven. The published
+  recipe therefore bypassed the protection the one-provider lease exists to give.
+
+  `BeforeClose` now calls `DP_Stop`. The old recipe is explained in place rather
+  than deleted, so the record of what was published stands, and the low-level
+  helpers are now identified as internal and diagnostic rather than substitutes
+  for the ownership-aware lifecycle API.
+
+- `Public-API` omitted `FailedCount` and `FailedAddresses` from the
+  `DP_WriteResult` listing while the accounting invariant printed beneath it
+  referred to `FailedCount`. Both fields existed in the source throughout; only
+  the page was incomplete. They are restored, the four `TechnicalFailure` fields
+  are documented, and the invariant is stated as holding for a result that
+  completed, with the bounded technical-failure case described separately.
+
+- `Public-API` address-cap wording now matches the code. The 25-address cap is
+  applied per target area rather than per operation, so a discontiguous write can
+  report more than 25 addresses in a category while the classification totals stay
+  exact. Moving to one cap per operation is tracked for `v1.2.2`.
+
+- `Installation-and-Import` showed a repository tree containing a tracked
+  `demo/DatePicker Demo.xlsm`. No demo workbook is tracked: `demo/` holds the VBA
+  source that builds it and the built file is a Release asset, as the root
+  `README` already states. The tree now matches the repository, including `test/`,
+  `dist/` and `images/`, and no longer implies the Wiki is a folder inside it.
+
+- `Testing-and-Demo-Guide` moves from 16 suites and `Run=302` to 24 standard
+  suites and `Run=431`, and lists the six suites added by this patch against their
+  issues. The 16 was already stale when published: the runner ran 18 standard
+  suites at `v1.2.0`.
+
+- Wiki claims about lease refusal and the keyboard shortcut needed no rewrite.
+  They were published as `v1.2.0` behavior, were false against `v1.2.0` code, and
+  are true against this patch. They are corrected here rather than on those pages,
+  so released history is not rewritten.
+
+### 🧪 Validation
+
+- Standard regression: `State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0`
+- With UI smoke: `State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0`
+- New `RuntimeAdmission` suite — 28 assertions driving every public entry path
+  under both a foreign and an owned lease.
+- New `SettingsSaveResolution` suite — 12 assertions driving the seam the real
+  save handler executes, sweeping all eight input combinations.
+- New `MultiAreaWriteResult` suite — 35 assertions driving the real public write
+  path with a two-area `Union`, repeating every scenario with the areas swapped.
+- New `WindowRecovery` suite — 8 assertions driving the real form through an
+  injected fault at `SetWindowPos` and at the rollback step, covering both the
+  initialize and activate paths and confirming that the next load succeeds.
+- New `WriteTechnicalFailure` suite — 35 assertions driving the real public write
+  path with a fault armed after cells were written inside one area, on entering a
+  later area after an earlier one completed, and before anything had been
+  observed at all. One scenario uses an earlier area that only skipped a formula
+  cell, which mutated nothing but still holds an outcome that must survive.
+- New `ErrorPreservation` suite — 11 assertions driving the real public
+  `DP_FillTableColumn` against a real Excel Table with a write fault armed,
+  asserting the caller receives the original error rather than error `0`, that
+  the description names both the failing operation and the original cause, and
+  that cleanup still ran.
+- Baseline 302 + 28 + 12 + 35 + 8 + 35 + 11 = 431 standard.
+- Manual two-provider refusal matrix passed for `.xlam + embedded` and
+  `embedded + embedded` in a single Excel process, including a reversal check
+  confirming ownership follows start order rather than packaging.
+
+### 🔗 Compatibility
+
+- No supported API name, signature or default changed.
+- Behavior change is limited to paths that were already specified as refusing.
+  A single participating provider sees no difference.
+- `M_Lease_Test_SilenceRefusalReport` and `M_Lease_Test_RefusalReportCount` are
+  internal test infrastructure, not supported API. They exist because
+  `Application.DisplayAlerts` does not suppress `VBA.MsgBox`, so automated
+  coverage of the real entry paths would otherwise block on a modal dialog.
+  Both are to be classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+- `M_Settings_ResolveKeyboardShortcutOnSave` is the settings-save resolution
+  seam. It is internal implementation surface, not supported API, and is also to
+  be classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+- `M_WriteBack_Test_SetFaultInjection` is internal test infrastructure, not
+  supported API, and is also to be classified `internal` under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). It exists
+  because the path it covers cannot be produced on demand:
+  `M_WriteBack_TryWriteCell` classifies every per-cell failure it can observe and
+  raises nothing, so a genuine technical error inside the area loop is precisely
+  what a test has no way to arrange. Injection is one-shot, disarms itself as it
+  fires, and persists nothing.
+
+- `#48` is delivered with two stated limitations rather than silent ticks.
+  Cleanup failure is not injected by regression: the cleanup steps in both
+  handlers are a `Date` assignment and an object release, neither of which can be
+  made to fail without a seam for a failure mode that does not exist. The
+  capture-and-append structure is implemented and uniform with
+  `M_WriteBack_Apply`, but the append branch is defensive.
+  `UF_SettingsCheckBoxFont_Create` has no direct regression because it is
+  `Private` to the form and reached only from the settings-panel build path; its
+  correction rests on review and on the mechanical audit.
+
+### ⚠️ Known limitations
+
+- Simultaneous active providers remain unsupported. This release closes
+  admission bypasses under the exclusive-provider model; true coexistence
+  remains [#14](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/14).
+- Automatic reclamation of a stale lease is still deliberately absent. Recovery
+  after a VBA project reset remains the explicit
+  `DP_ForceReleaseProviderLease` call.
+
+---
+
 ## [1.2.0] - 2026-08-25
 
 > ✨ **Minor** · safety, observability and runtime-ownership release

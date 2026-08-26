@@ -1311,10 +1311,10 @@ PASS
 
 is a valid passing run.
 
-The latest recorded standard `v1.2.0` source pack is:
+The latest recorded standard `v1.2.1` source pack is:
 
 ```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
 The assertion count is not a permanent magic number.

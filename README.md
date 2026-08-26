@@ -969,6 +969,8 @@ RecoveryRequired=True
 
 The component no longer silently treats a partially committed native style as a successful borderless window.
 
+`RecoveryRequired=True` is terminal for that form load. The failed step and the last API error are recorded, and the picker fails rather than presenting a window whose style is neither fully applied nor rolled back. A subsequent load is unaffected.
+
 WinAPI styling is optional. The runtime-provider lease is not: it uses the Office CommandBars model and therefore remains available even when WinAPI styling is disabled.
 
 ---
@@ -1110,10 +1112,10 @@ It does not blindly retry `Worksheets.Add`.
 ## Latest recorded standard pack
 
 ```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the `v1.2.0` source cycle. Package-level release testing and UI smoke should still be performed for release preparation.
+This is the latest recorded **standard regression pack** for the `v1.2.1` source cycle. Package-level release testing and UI smoke should still be performed for release preparation.
 
 > [!IMPORTANT]
 > Tests manipulate real Excel state: worksheets, settings, application flags,
@@ -1363,7 +1365,7 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 Latest recorded standard regression:
 
 ```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
 ---

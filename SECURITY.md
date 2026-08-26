@@ -996,10 +996,10 @@ For controlled use:
 12. perform package-level smoke testing on the actual release binary where that
     binary is the deployed artifact.
 
-Latest recorded standard v1.2.0 source regression baseline:
+Latest recorded standard v1.2.1 source regression baseline:
 
 ```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
 The assertion count is informative, not a permanent security constant.
