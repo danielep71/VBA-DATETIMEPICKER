@@ -588,8 +588,13 @@ Public Sub TST_DP_RunAll()
             Exit Sub
         End If
     'Build the result sheet template before the run
+    'Name the target workbook explicitly. DEMO_Sheet_BuildTemplate defaults
+    'TargetWorkbook to ThisWorkbook, which is the host only when the component
+    'runs embedded. Loaded as an .xlam, ThisWorkbook is the add-in, so the result
+    'sheet was built somewhere other than the workbook the run then reads it from,
+    'and TST_DP_PrepareResultSheet failed with error 9 before the first suite
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
-            "Test Sheet", , TST_DP_RESULT_FIRST_ROW
+            "Test Sheet", , TST_DP_RESULT_FIRST_ROW, mTST_DP_HostWorkbook
 
 '------------------------------------------------------------------------------
 ' RUN TESTS
@@ -679,8 +684,13 @@ Public Sub TST_DP_RunAll_WithUISmoke()
 ' BUILD RESULT SHEET TEMPLATE
 '------------------------------------------------------------------------------
     'Build the result sheet template before the run
+    'Name the target workbook explicitly. DEMO_Sheet_BuildTemplate defaults
+    'TargetWorkbook to ThisWorkbook, which is the host only when the component
+    'runs embedded. Loaded as an .xlam, ThisWorkbook is the add-in, so the result
+    'sheet was built somewhere other than the workbook the run then reads it from,
+    'and TST_DP_PrepareResultSheet failed with error 9 before the first suite
         DEMO_Sheet_BuildTemplate TST_DP_RESULT_SHEET_NAME, "DATE PICKER", _
-            "Test Sheet", , TST_DP_RESULT_FIRST_ROW
+            "Test Sheet", , TST_DP_RESULT_FIRST_ROW, mTST_DP_HostWorkbook
 
 '------------------------------------------------------------------------------
 ' RUN TESTS
