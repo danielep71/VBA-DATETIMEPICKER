@@ -4001,6 +4001,10 @@ Private Sub TST_DP_RunSuite_GridIcon()
     Dim ShapeTopBefore      As Double   'Icon top position before the move
     Dim StaleSheet          As Excel.Worksheet  'Temporary sheet used to strand the icon
 
+    Dim SavedErrNumber      As Long     'Captured original error number
+    Dim SavedErrDescription As String   'Captured original error description
+    Dim SavedErrSource      As String   'Captured original error source
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -4138,9 +4142,8 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'destroyed without going through a routine that maintains it. Deleting the
     'worksheet holding the icon is the simplest way to produce that state
         gDP_ShowGridIcon = True
-        Set StaleSheet = mTST_DP_HostWorkbook.Worksheets.Add( _
-            After:=mTST_DP_HostWorkbook.Worksheets(mTST_DP_HostWorkbook.Worksheets.Count))
-        StaleSheet.Name = TST_DP_STALE_SHEET_NAME
+        Set StaleSheet = TST_DP_AddStaleSheetForTest( _
+            mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME)
         TST_DP_ActivateWorksheetForTest StaleSheet
 
     'Create the icon on the temporary worksheet
@@ -4155,8 +4158,9 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'through the shared helper, which suppresses its own errors, and nothing here
     'touches DisplayAlerts: the run already disabled alerts and forcing them back
     'on would re-enable the delete prompt for everything that follows
-        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        On Error GoTo SuiteFail
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
     'A stale reference must not stop a new icon being created. Before the
@@ -4170,15 +4174,15 @@ Private Sub TST_DP_RunSuite_GridIcon()
 
     'Recreate the stale condition and prove teardown clears it rather than
     'raising on it
-        Set StaleSheet = mTST_DP_HostWorkbook.Worksheets.Add( _
-            After:=mTST_DP_HostWorkbook.Worksheets(mTST_DP_HostWorkbook.Worksheets.Count))
-        StaleSheet.Name = TST_DP_STALE_SHEET_NAME
+        Set StaleSheet = TST_DP_AddStaleSheetForTest( _
+            mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME)
         TST_DP_ActivateWorksheetForTest StaleSheet
         M_GridIcon_ShowOrMove StaleSheet.Range("B2")
         On Error GoTo SuiteFail
         DoEvents
-        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
+        On Error GoTo SuiteFail
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
     'Remove must leave nothing tracked and must not raise
@@ -4205,15 +4209,162 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' SUITE FAIL
 '------------------------------------------------------------------------------
 SuiteFail:
+    'Capture the original error before any cleanup runs
+    '
+    'Every On Error statement resets the Err object, and so does Err.Clear. This
+    'handler used to clean up first and then format its message from the live Err,
+    'so it reported "Error 0 - " and destroyed the evidence of its own failure.
+    'That is the #48 defect shape, in the harness. Nothing may read the live Err
+    'object below this point
+        SavedErrNumber = Err.Number
+        SavedErrDescription = Err.Description
+        SavedErrSource = Err.Source
     'Release the temporary worksheet the stale-reference cases may have left. The
     'run owns DisplayAlerts and this must not change it
         On Error Resume Next
-        Set StaleSheet = Nothing
+        TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
         Err.Clear
-    'Record the suite-level failure and clear the error
+    'Record the suite-level failure from the captured values
         TST_DP_RecordFail "GridIcon suite failed", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+            "Error " & VBA.CStr(SavedErrNumber) & " - " & SavedErrDescription & _
+            " | Source=" & SavedErrSource
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_AddStaleSheetForTest( _
+    ByVal HostWorkbook As Excel.Workbook, _
+    ByVal DesiredName As String) As Excel.Worksheet
+
+'
+'==============================================================================
+'          ADD THE STALE-REFERENCE WORKSHEET, TOLERATING THE ADD ANOMALY
+'==============================================================================
+'   Worksheets.Add has been observed to report 1004 while nevertheless leaving a
+'   new worksheet in the workbook. TST_DP_PrepareScratchSheet already treats that
+'   as a partial success, because every occurrence leaked a sheet that preflight
+'   could not see: it looks for a sheet by name and the leftover is called
+'   SheetNN.
+'
+'   The GridIcon stale-reference cases called Worksheets.Add raw. When the anomaly
+'   struck there, the Add raised before the rename, so the suite failed, the
+'   handler tried to delete by a name nothing had been given yet, and an unnamed
+'   worksheet was left in the host workbook.
+'
+'   This routine applies the same discipline as the scratch path: snapshot, add,
+'   and on a raised Add adopt the worksheet if and only if exactly one new one
+'   appeared. Anything else re-raises the original failure.
+'
+'   The worksheet is returned before it is renamed as well as after, so a caller
+'   whose rename fails still holds the reference needed to delete it by identity.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TST_DP_AddStaleSheetForTest"
+
+    Dim WorksheetsBefore    As Collection       'Identity snapshot taken before the Add
+    Dim NewWorksheets       As Collection       'Worksheets that appeared during the Add
+    Dim CreatedSheet        As Excel.Worksheet  'Worksheet this call established
+    Dim WS                  As Excel.Worksheet  'Snapshot loop cursor
+    Dim AddErrNumber        As Long             'Error the Add reported, if any
+    Dim AddErrDescription   As String           'Description the Add reported
+
+'------------------------------------------------------------------------------
+' SNAPSHOT
+'------------------------------------------------------------------------------
+    'Identity, not names: a rename would make a pre-existing sheet look new
+        Set WorksheetsBefore = New Collection
+        For Each WS In HostWorkbook.Worksheets
+            WorksheetsBefore.Add WS
+        Next WS
+        Set WS = Nothing
+
+'------------------------------------------------------------------------------
+' ADD
+'------------------------------------------------------------------------------
+    'Anchor on Sheets so a trailing chart sheet is handled
+        On Error Resume Next
+        Set CreatedSheet = HostWorkbook.Worksheets.Add( _
+            After:=HostWorkbook.Sheets(HostWorkbook.Sheets.Count))
+        AddErrNumber = Err.Number
+        AddErrDescription = Err.Description
+        Err.Clear
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' ADOPT A PARTIAL COMMIT
+'------------------------------------------------------------------------------
+    'The Add reported a failure. Adopt its worksheet only when exactly one
+    'appeared, which is the signature of the documented anomaly
+        If CreatedSheet Is Nothing Then
+            Set NewWorksheets = TST_DP_FindNewWorksheets(HostWorkbook, WorksheetsBefore)
+            If NewWorksheets.Count = 1 Then
+                Set CreatedSheet = NewWorksheets(1)
+                TST_DP_RecordInfo mTST_DP_CurrentSuite, "Worksheets.Add anomaly", _
+                    "Add reported " & VBA.CStr(AddErrNumber) & _
+                    " but created one worksheet; adopted it | " & AddErrDescription
+            Else
+                Err.Raise vbObjectError + 2406, PROC_NAME, _
+                    "Worksheets.Add failed and left " & _
+                    VBA.CStr(NewWorksheets.Count) & _
+                    " candidate worksheets; none adopted. Original error " & _
+                    VBA.CStr(AddErrNumber) & " - " & AddErrDescription
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' PUBLISH BEFORE RENAMING
+'------------------------------------------------------------------------------
+    'Hand the reference back before the rename, so a caller whose rename fails can
+    'still delete this worksheet by identity rather than by a name it never got
+        Set TST_DP_AddStaleSheetForTest = CreatedSheet
+
+'------------------------------------------------------------------------------
+' NAME
+'------------------------------------------------------------------------------
+    'Remove any previous sheet holding the name before claiming it
+        TST_DP_DeleteWorksheetIfExists HostWorkbook, DesiredName
+        CreatedSheet.Name = DesiredName
+
+'------------------------------------------------------------------------------
+' RELEASE
+'------------------------------------------------------------------------------
+    'Release local references
+        Set CreatedSheet = Nothing
+        Set NewWorksheets = Nothing
+        Set WorksheetsBefore = Nothing
+
+End Function
+
+Private Sub TST_DP_DeleteWorksheetByReference( _
+    ByRef Candidate As Excel.Worksheet)
+
+'
+'==============================================================================
+'                 DELETE A WORKSHEET BY IDENTITY (TEST)
+'==============================================================================
+'   Deletes a worksheet through the reference held for it, which is the only way
+'   to remove one whose rename never completed. A name-based delete cannot see a
+'   leftover called SheetNN.
+'
+'   Best-effort by design: this runs on failure paths where nothing may raise.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DELETE
+'------------------------------------------------------------------------------
+    'Never let cleanup raise
+        On Error Resume Next
+    'Only touch a reference that still points at a live worksheet
+        If TST_DP_WorksheetReferenceIsLive(Candidate) Then
+            Candidate.Delete
+        End If
+    'Release the reference whatever happened
+        Set Candidate = Nothing
+    'Clear any suppressed cleanup error
         Err.Clear
 
 End Sub
@@ -7332,6 +7483,10 @@ Private Sub TST_DP_ExpectFormulaProtection()
     Dim WriteResult     As DP_WriteResult   'Structured write-back result
     Dim EmptyResult     As DP_WriteResult   'Zeroed result used to reset WriteResult
     Dim TargetRange     As Excel.Range      'Mixed blank/literal/formula target
+
+    Dim FPSavedErrNumber      As Long   'Captured original error number
+    Dim FPSavedErrDescription As String 'Captured original error description
+    Dim FPSavedErrSource      As String 'Captured original error source
     Dim ExpectedList    As String           'Expected preserved address list
 
 '------------------------------------------------------------------------------
@@ -7442,14 +7597,21 @@ Private Sub TST_DP_ExpectFormulaProtection()
 ' FORMULA PROTECTION FAIL
 '------------------------------------------------------------------------------
 FormulaProtectionFail:
+    'Capture the original error before any cleanup runs. Every On Error statement
+    'resets the Err object, and so does Err.Clear, so formatting the message after
+    'cleanup reported "Error 0 - " and lost the cause. See #48
+        FPSavedErrNumber = Err.Number
+        FPSavedErrDescription = Err.Description
+        FPSavedErrSource = Err.Source
     'Clear the target even when the expectation failed
         On Error Resume Next
         mTST_DP_ScratchSheet.Range("K5:K8").ClearContents
         Set TargetRange = Nothing
         Err.Clear
-    'Record the failure and clear the error
+    'Record the failure from the captured values
         TST_DP_RecordFail "Formula protection", _
-            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+            "Error " & VBA.CStr(FPSavedErrNumber) & " - " & FPSavedErrDescription & _
+            " | Source=" & FPSavedErrSource
     Err.Clear
 
 End Sub
