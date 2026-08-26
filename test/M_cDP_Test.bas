@@ -1101,6 +1101,29 @@ CleanExit:
         TST_DP_RestoreSettings SettingsSnapshot
         TST_DP_CheckCleanupStep "RestoreSettings"
 
+    'Reconcile the context menu to the state the run found.
+    '
+    'RestoreSettings puts the persisted right-click policy back and then calls
+    'M_ContextMenu_Update, which re-registers the entries whenever that policy is
+    'enabled. That happens after the teardown above removed them, so a run which
+    'began with no entries ends holding two.
+    '
+    'It is invisible in an embedded workbook, where Workbook_Open has already
+    'started the runtime and the pre-run count is the same two. It shows up in an
+    '.xlam that was loaded without starting the runtime: the pre-run count is
+    'zero, and restoring a setting the session never applied registers a menu the
+    'user did not have.
+    '
+    'The settings restore is correct and stays where it is. This step exists
+    'because the harness contract is to leave the session as it was found, and
+    'only the pre-run count knows what that was
+        If mTST_DP_MenuAtStart = 0 Then
+            If TST_DP_ContextMenuControlCount() > 0 Then
+                M_ContextMenu_Remove
+            End If
+        End If
+        TST_DP_CheckCleanupStep "ReconcileContextMenu"
+
     'Restore the manager state to its pre-run condition
         TST_DP_RestoreManagerState
         TST_DP_CheckCleanupStep "RestoreManagerState"
