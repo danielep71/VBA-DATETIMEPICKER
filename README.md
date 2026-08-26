@@ -10,8 +10,8 @@
 
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
-[![Source](https://img.shields.io/badge/Source-v1.2.0_Safety_Release-6f42c1?style=for-the-badge)](#release-status)
-[![Tests](https://img.shields.io/badge/Regression-302%2F302-2ea44f?style=for-the-badge)](#regression-testing)
+[![Source](https://img.shields.io/badge/Source-v1.2.1_Integrity_Hotfix-6f42c1?style=for-the-badge)](#release-status)
+[![Tests](https://img.shields.io/badge/Regression-431%2F431-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge)](LICENSE)
 
 <br>
@@ -1326,6 +1326,41 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 
 # 🧭 Release status
 
+## v1.2.1 — integrity hotfix
+
+`v1.2.1` corrects defects in behavior `v1.2.0` already claimed. It contains no
+refactor and no new features, and no supported API name, signature or default
+changed.
+
+- provider-lease admission is enforced on **every** runtime entry path, not only
+  `DP_Start` ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37));
+- the settings panel no longer re-enables a keyboard shortcut the user disabled
+  ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42));
+- a write that stops partway returns the `DP_WriteResult` for the work already
+  observed, instead of escaping as an exception carrying nothing
+  ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21));
+- an unrecoverable window-style failure no longer presents the form
+  ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47));
+- cleanup no longer destroys the primary error and reports `0` in its place
+  ([#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48));
+- the Wiki `Workbook_BeforeClose` recipe calls `DP_Stop` rather than the
+  low-level helpers ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)).
+
+Certified at [`7d55cc7`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/7d55cc76f0b32a393663ab605b3d2c3d5852a71f).
+Both hosts, standard and with UI smoke:
+
+```text
+State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+```
+
+Certification voided three candidate commits. Every defect it found was in the
+regression apparatus, not the component — `git diff ab15c92 7d55cc7 -- src/` is
+empty. One of them was that the regression pack had never been runnable inside a
+packaged `.xlam`, so these are the first regression figures this project has
+gathered from the artifact it actually ships rather than from source alone.
+
+---
+
 ## v1.2.0 — safety release
 
 `v1.2.0` is centered on **safe defaults, observable outcomes and runtime containment**.
@@ -1406,7 +1441,7 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Source status:** `v1.2.0` safety-release scope complete.
+**Source status:** `v1.2.1` integrity-hotfix scope complete, on the `v1.2.0` safety-release baseline.
 
 The project is suitable for controlled Excel/VBA environments when the documented ownership, settings and application-wide shortcut boundaries are respected.
 

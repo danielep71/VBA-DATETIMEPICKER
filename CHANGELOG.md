@@ -41,7 +41,7 @@ settings persistence, runtime ownership, and the stable
 
 ---
 
-## [Unreleased] — `v1.2.1`
+## [1.2.1] - 2026-08-26
 
 > 🩹 **Patch** · integrity hotfix correcting safety-contract gaps shipped in `v1.2.0`
 
@@ -964,7 +964,8 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.0.0...v1.1.0

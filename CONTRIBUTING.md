@@ -397,7 +397,7 @@ Before pushing a release branch:
 
 ```bash
 git fetch origin
-git rev-list --left-right --count origin/release/v1.2.0...HEAD
+git rev-list --left-right --count origin/release/<version>...HEAD
 ```
 
 Interpretation:

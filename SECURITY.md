@@ -133,7 +133,7 @@ Security fixes are normally applied to the **latest tagged release**.
 | Source state | Security support |
 |---|---|
 | **Latest tagged release** | ✅ Supported |
-| `release/v1.2.0` before publication | ⚠️ Release-candidate testing / best effort |
+| `release/*` before publication | ⚠️ Release-candidate testing / best effort |
 | `main` | ⚠️ Development branch / best effort |
 | Older tagged releases | ❌ Normally unsupported; upgrade first |
 | Modified third-party forks/copies | ❌ Unsupported unless the issue reproduces in official source |
@@ -1103,7 +1103,7 @@ Sanitize:
 
 ## 🔑 Repository automation credentials
 
-The current `release/v1.2.0` repository contains one GitHub Actions workflow:
+The repository contains one GitHub Actions workflow:
 
 ```text
 .github/workflows/daily-traffic.yml
