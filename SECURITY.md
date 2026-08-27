@@ -606,6 +606,12 @@ EnableKeyboardShortcut = False
 
 The component does not force the key on as a fallback.
 
+> [!NOTE]
+> Through `v1.2.0` the settings-panel save path did not honor this: it forced the
+> shortcut back on whenever right-click and the grid icon were both disabled, and
+> the panel exposes no keyboard control, so the change was invisible to the user
+> ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42)). The statement above holds from `v1.2.1`.
+
 ---
 
 ### 4. `Application.OnTime`
@@ -856,6 +862,11 @@ LastApiError
 
 A half-applied style must not silently report clean success.
 
+From `v1.2.1`, `RecoveryRequired` is also terminal for that form load: the picker
+fails rather than presenting a window whose style is neither fully applied nor
+rolled back. Through `v1.2.0` the result was produced and then discarded at both
+call sites, so the form was presented anyway ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
+
 ### Native APIs are not an elevation mechanism
 
 The APIs operate inside the user's existing Excel process and Windows session.
@@ -1031,13 +1042,21 @@ For controlled use:
 13. perform package-level smoke testing on the actual release binary where that
     binary is the deployed artifact.
 
-Latest recorded standard v1.2.1 source regression baseline:
+Latest recorded `v1.2.1` regression baseline, on both the embedded `.xlsm` and
+the packaged `.xlam`:
 
 ```text
-State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+standard:       State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+with UI smoke:  State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0
 ```
 
 The assertion count is informative, not a permanent security constant.
+
+Certification ran on a developer workstation with other add-ins loaded in the
+same Excel process, not on a clean VM. Host-isolation effects are therefore not
+part of the recorded evidence — which matters here, because the provider lease
+and the `OnKey`/`OnTime` boundaries above are all about behavior in a shared
+process.
 
 Only a clean `PASS` is a passing harness run.
 
@@ -1120,6 +1139,18 @@ Excel restart     safest process-level reset
 DP_ForceReleaseProviderLease
                   operator-only lease recovery
 ```
+
+Workbook teardown must go through `DP_Stop`. The low-level helpers —
+`M_ContextMenu_Remove`, `M_KeyboardShortcut_Remove`, `M_Timer_Stop`,
+`M_GridIcon_PurgeAll` — are internal and diagnostic. They perform no ownership
+check, because they are the internals the ownership-aware APIs call once
+admission has already been proven.
+
+Calling them directly from `Workbook_BeforeClose` strands the lease for an owner,
+and lets a **refused** non-owner strip the true owner's shortcut, menu entry and
+icons — exactly the damage the lease exists to prevent. A teardown recipe of that
+shape was published through `v1.2.0` and is corrected in `v1.2.1`
+([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)).
 
 ### 8. Protect sensitive material in bug reports
 

@@ -432,7 +432,9 @@ AttemptedCount =
     FailedCount
 ```
 
-Skipped/failed address lists are worksheet-qualified and bounded for diagnostics while the counts remain exact.
+A result with `TechnicalFailureOccurred = True` does **not** obey that identity. An unexpected error stops population rather than continuing to mutate the workbook, so the result reports only the outcomes observed before the fault, and `TechnicalFailureStep`, `TechnicalFailureNumber` and `TechnicalFailureDescription` carry the original cause. Test for `TechnicalFailureOccurred` before reconciling counts.
+
+Skipped/failed address lists are worksheet-qualified and bounded for diagnostics while the counts remain exact. The bound is applied **per target area**, not per operation, so a discontiguous write can report more addresses in a category than a single-area write. Moving to one cap per operation is deferred to `v1.2.2`.
 
 Example:
 
@@ -629,7 +631,7 @@ Those choices keep persistence stable across rename, move, Save As and upgrades.
 |---|---|
 | Display | First day of week, local names, live clock, compact mode, weekend highlighting |
 | Behavior | Close after selection, allow outside-month selection |
-| Integration | Right-click, in-grid icon, keyboard shortcut, WinAPI styling |
+| Integration | Right-click, in-grid icon, keyboard shortcut (programmatic only — the panel has no control for it), WinAPI styling |
 | Advanced | Holiday callback |
 
 The persisted namespace is a **configuration scope**. It is not the runtime-provider identity described below.
@@ -871,6 +873,19 @@ M_GridIcon_PurgeAll
 ```
 
 `M_Picker_EnsureManager` reports caller event state without changing it.
+
+### Internal test seams — not supported API
+
+Some procedures are `Public` solely so the regression harness can reach them:
+
+```text
+M_Lease_Test_SilenceRefusalReport
+M_Lease_Test_RefusalReportCount
+M_Settings_ResolveKeyboardShortcutOnSave
+M_WriteBack_Test_SetFaultInjection
+```
+
+They are internal infrastructure, may change or disappear without notice, and are to be classified `internal` under [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). Do not call them from host code.
 
 ---
 
@@ -1294,7 +1309,23 @@ The project is designed and documented for Excel desktop on Windows. Optional bo
 
 ### Accessibility / DPI
 
-High-DPI, high-contrast and accessibility behavior should be validated in the target deployment environment; they are not yet treated as fully certified across all Office/display configurations.
+High-DPI, high-contrast and accessibility behavior should be validated in the target deployment environment; they are not yet treated as fully certified across all Office/display configurations. Tracked as [#29](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/29).
+
+### Known defect — `Ribbon_Demo` sheet toggle
+
+`Ribbon_Demo` builds the demo sheet visible, then reads it as already visible and hides it again. The defect predates `v1.2.0` and was out of scope for the `v1.2.1` integrity hotfix. Deferred to `v1.2.2`; not yet filed as an issue.
+
+### Diagnostic address caps are per area
+
+Classification totals are always exact, but the bounded address lists are capped per target area rather than per operation. Deferred to `v1.2.2`.
+
+### Release evidence is procedural, not automated
+
+No CI runs the regression pack — the only workflow in the repository is repository traffic analytics ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
+
+### Certification environment
+
+`v1.2.1` certification ran on a developer workstation with other add-ins loaded in the same Excel process, not in a clean VM. Recorded rather than implied.
 
 ---
 

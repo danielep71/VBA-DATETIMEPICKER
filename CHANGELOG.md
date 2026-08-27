@@ -170,6 +170,12 @@ refactor and no new features. Corrections are published against the released
 - `DP_WriteResult` gains `TechnicalFailureOccurred`, `TechnicalFailureStep`,
   `TechnicalFailureNumber` and `TechnicalFailureDescription`. The addition is
   backward compatible: existing field names, types and meanings are unchanged.
+  Adding members to a public result type would ordinarily require a minor bump
+  under the versioning policy stated at the top of this file. It is carried in a
+  patch because the fields are the reporting mechanism for the #21 correction —
+  a bounded result cannot be described without them — and because no supported
+  member is added, removed, renamed or redefined. Recorded as a deliberate
+  deviation rather than left to inference.
 
 - `M_WriteBack_ReportShortfall` no longer stays silent when `WrittenCount`
   reaches `AttemptedCount` if a technical failure is flagged, and
@@ -230,7 +236,8 @@ refactor and no new features. Corrections are published against the released
 
 ### 🧪 Validation
 
-- Standard regression: `State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0`
+- Standard regression, run on both the embedded `.xlsm` and the packaged
+  `.xlam`: `State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0`
 - With UI smoke: `State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0`
 - New `RuntimeAdmission` suite — 28 assertions driving every public entry path
   under both a foreign and an owned lease.
@@ -251,7 +258,19 @@ refactor and no new features. Corrections are published against the released
   asserting the caller receives the original error rather than error `0`, that
   the description names both the failing operation and the original cause, and
   that cleanup still ran.
-- Baseline 302 + 28 + 12 + 35 + 8 + 35 + 11 = 431 standard.
+- Baseline 302 + 28 + 12 + 35 + 8 + 35 + 11 = 431 standard; 24 standard suites,
+  25 registered including UI smoke.
+- Certified at `7d55cc7`, tag `v1.2.1`. Three earlier candidates — `ab15c92`,
+  `359d2ca`, `128a84f` — were voided during certification. All four defects found
+  were in the regression apparatus, not the component: `git diff ab15c92 7d55cc7
+  -- src/` is empty, so the certified source is byte-identical to the first
+  candidate. One of those defects meant the regression pack had never been
+  runnable inside a packaged `.xlam` at all, so the packaged figures above are
+  the first this project has gathered from the artifact it ships. That narrows,
+  but does not close, the packaging boundary recorded for `v1.2.0`
+  ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)).
+- Certification ran on a developer workstation with other add-ins loaded in the
+  same Excel process, not on a clean VM.
 - Manual two-provider refusal matrix passed for `.xlam + embedded` and
   `embedded + embedded` in a single Excel process, including a reversal check
   confirming ownership follows start order rather than packaging.

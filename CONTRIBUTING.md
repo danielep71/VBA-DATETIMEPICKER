@@ -552,8 +552,8 @@ window-style tests.
 | Grid icon | Compile + regression + worksheet lifecycle/manual selection check |
 | Keyboard/context menu | Compile + regression + registration/removal check |
 | Provider lease | Compile + regression + multi-provider manual matrix |
-| WinAPI styling | Compile + WindowStyle suite + UI smoke on Windows |
-| Release artifact | Source validation + package-specific manual certification and provenance checks |
+| WinAPI styling | Compile + WindowStyle and WindowRecovery suites + UI smoke on Windows |
+| Release artifact | Source validation + regression pack executed inside the packaged artifact + manual certification and provenance checks |
 
 ### Regression verdict
 
@@ -568,6 +568,12 @@ INCOMPLETE_SKIPPED
 ```
 
 Only `PASS` is a passing run.
+
+A run that ends early prints **no summary line at all**. An absent summary is
+itself a failure result, not missing output — do not read it as a tooling glitch.
+
+There are 24 standard suites, 25 registered including UI smoke. A run that
+reports fewer has skipped something.
 
 A preferred pull-request evidence line is:
 
@@ -708,6 +714,14 @@ registrations second
 ```
 
 Checking after registration is too late.
+
+**Admission is per entry path, not per startup.**
+
+Every path that can reach the manager — `DP_Start`, `DP_Show`, `DP_Preload`,
+`DP_Click`, `DP_OpenForActiveCell`, the keyboard handler and `Ribbon_ShowPicker`
+— must prove ownership before it acts. Guarding only the startup path leaves the
+lease decorative: the ordering rule above was satisfied at `DP_Start` and the
+defect shipped anyway ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
 
 **Guard teardown as well as startup.**
 
@@ -856,9 +870,33 @@ Do not create a parallel second result mechanism.
 - a failed write is not inferred from subtraction when Excel can silently decline
   an assignment;
 - the write engine collects facts;
-- interactive entry points decide whether to show a user-facing summary.
+- interactive entry points decide whether to show a user-facing summary;
+- a technical failure part-way through a multi-area write must still surface a
+  populated `DP_WriteResult`. An exception must never be the only outcome once
+  user data has been mutated; raise only when no cell produced any outcome,
+  because only then is nothing lost by raising;
+- multi-area totals must not depend on the order Excel enumerates
+  `Target.Areas`.
 
 Do not show one modal dialog per area/cell from the low-level write loop.
+
+### Internal test seams
+
+These are `Public` only so the harness can reach them. They are not supported
+API, and are to be classified `internal` under [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25):
+
+```text
+M_Lease_Test_SilenceRefusalReport
+M_Lease_Test_RefusalReportCount
+M_Settings_ResolveKeyboardShortcutOnSave
+M_WriteBack_Test_SetFaultInjection
+```
+
+Add a seam only when the path cannot be produced otherwise, and say so in the
+PR. `M_WriteBack_Test_SetFaultInjection` exists because
+`M_WriteBack_TryWriteCell` classifies every per-cell failure it can observe and
+raises nothing, so a genuine technical error inside the area loop is precisely
+what a test has no way to arrange.
 
 ---
 
@@ -1199,6 +1237,9 @@ Never commit Office lock files, editor backups, logs/dumps, local secrets,
 signing keys, client data, generated `.xlam` / `.xlsm` build output, the workbook
 used as your VBE editing host, or unrelated formatting churn.
 
+Published release evidence — certification worksheets, hash manifests — belongs
+in the GitHub Release process rather than being committed from a workstation.
+
 ### One-time normalization
 
 If `.gitattributes` rules are intentionally changed:
@@ -1484,13 +1525,24 @@ A release candidate should separately establish, as applicable:
 source compiles
 standard regression PASS
 UI smoke PASS
+regression pack executed inside the packaged .xlam, not only in the source host
 manual lifecycle checks PASS
 provider-lease scenario checks where affected
 release assets rebuilt from intended source
-asset version/naming correct
+asset version/naming correct — check the exact published filename, it has varied
+artifact SHA-256 computed after the artifact was built AND tested
+tag points at the tested commit, not at a later merge commit
 release notes/changelog correct
 provenance/evidence recorded to the extent supported by the current release process
 ```
+
+Two of those lines exist because `v1.2.1` certification found the gaps the hard
+way. The packaged-artifact run had never been possible — a result sheet was built
+into `ThisWorkbook`, so the pack could not run inside an add-in at all — which
+means every earlier release's regression figure was source-level evidence only.
+And a defect found in the harness is a release blocker, not test-only noise:
+three candidate commits were voided during `v1.2.1` certification, all four
+defects were in `test/`, and `git diff` across them over `src/` is empty.
 
 The repository is continuing to improve automated workflow health and exact-SHA
 release evidence.

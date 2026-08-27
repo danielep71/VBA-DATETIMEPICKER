@@ -888,11 +888,22 @@ Use the add-in when you want one DatePicker provider available across workbooks.
 
 ## 1. Obtain the release asset
 
-Download the DatePicker `.xlam` from:
+Download the DatePicker `.xlam` from the GitHub Releases page. At `v1.2.1` the
+assets are:
 
 ```text
-GitHub Releases
+DATETIMEPICKER v1.2.1.xlam
+DATETIMEPICKER-demo-v1.2.1.xlsm
 ```
+
+> [!IMPORTANT]
+> The `.xlam` filename separator has varied between releases — `v1.2.0` published
+> `DATETIMEPICKER.v1.2.0.xlam`. Take the exact name from the Release page rather
+> than assuming it, and verify the published SHA-256:
+>
+> ```text
+> certutil -hashfile "DATETIMEPICKER v1.2.1.xlam" SHA256
+> ```
 
 Use the release asset rather than a binary copied from an unknown source.
 
@@ -1323,10 +1334,12 @@ PASS
 
 is a valid passing run.
 
-The latest recorded standard `v1.2.1` source pack is:
+The latest recorded `v1.2.1` figures, on both the embedded `.xlsm` and the
+packaged `.xlam`, are:
 
 ```text
-State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+standard:       State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+with UI smoke:  State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0
 ```
 
 The assertion count is not a permanent magic number.
@@ -1445,6 +1458,12 @@ is a recovery operation and may deliberately re-enable events.
 `DP_WriteResult.EventsDisabledByCaller` records the caller event state observed
 by write-back.
 
+`DP_WriteResult` also carries `TechnicalFailureOccurred`, `TechnicalFailureStep`,
+`TechnicalFailureNumber` and `TechnicalFailureDescription`. On a discontiguous
+(multi-area) write the result reports the outcomes actually observed; the
+original error is raised only when no cell produced any outcome. Test
+`TechnicalFailureOccurred` before reconciling the counts.
+
 ---
 
 # 🆘 Runtime recovery
@@ -1513,6 +1532,7 @@ DP_ForceReleaseProviderLease
 | Grid icon missing | Disabled setting, ineligible cell, protection/drawing restriction | Check target/protection/settings |
 | Grid icon reference fails after sheet deletion | Stale Shape lifecycle | Current code should re-resolve; report if reproducible |
 | Borderless UI not applied | WinAPI disabled/policy/host difference | Check Windows host and DatePicker WinAPI setting |
+| Picker refuses to open after a window-style failure | Style was neither fully applied nor rolled back; presentation refused by design | Check the WinAPI setting and host; a later load is unaffected |
 | Test reports `FAIL_DIRTY_START` | Previous run left observable state | Clean test host / restart Excel and rerun |
 | Test setup reports worksheet ambiguity | Partial-success setup state | Inspect; do not blindly retry |
 | Settings seem shared across workbooks | Both deployments use legacy default namespace | Configure stable namespace before `DP_Start` |
@@ -1718,7 +1738,7 @@ For maintainers/release preparation:
 5. build the demo using the committed demo source;
 6. run the applicable source regression and UI validation;
 7. save the generated workbook **outside the Git-tracked source tree**;
-8. name it for the intended release;
+8. name it to match the published release asset — `DATETIMEPICKER-demo-v1.2.1.xlsm` at `v1.2.1`;
 9. attach it to the GitHub Release;
 10. record release provenance/evidence to the extent supported by the current
     release process.
@@ -1763,6 +1783,12 @@ Key policy:
 Markdown/config          LF
 Office binaries          binary
 ```
+
+> [!NOTE]
+> The GitHub source ZIP honors `export-ignore`, so `.gitattributes`, `.gitignore`,
+> `.github/` and `.editorconfig` are **not present in it**. This line-ending
+> policy applies to clones; files extracted from the ZIP arrive with whatever the
+> archive stored and carry no attributes to re-apply.
 
 Do not manually normalize exported VBA source to LF.
 

@@ -253,6 +253,9 @@ FAIL_DIRTY_START
 INCOMPLETE_SKIPPED
 ```
 
+A run that ends early prints no summary line at all. An absent summary is itself
+a failure result, not missing output.
+
 A statement such as:
 
 ```text
