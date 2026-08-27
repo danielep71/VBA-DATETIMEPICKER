@@ -689,8 +689,8 @@ Two providers that both believe they own them can replace each other's shortcut,
 duplicate/remove context-menu entries, interfere with Application events, cancel
 timers, or dismantle resources the other still needs.
 
-`v1.2.0` therefore uses one process-visible lease for participating
-current-version providers.
+`v1.2.1` therefore enforces one process-visible lease, on every entry path, for
+participating current-version providers.
 
 Lease name:
 
@@ -1229,7 +1229,7 @@ Documentation belongs in the **same change** as the behavior it describes.
 
 ### Wiki status
 
-The Wiki rewrite for `v1.2.0` is complete.
+The Wiki rewrite for `v1.2.1` is complete.
 
 Pages corrected in `v1.2.1` are stamped with the certified commit:
 

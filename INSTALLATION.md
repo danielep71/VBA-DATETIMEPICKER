@@ -44,10 +44,10 @@
 > A prebuilt `.xlam` is a convenience deployment, not a different implementation.
 
 > [!WARNING]
-> `v1.2.0` supports **one participating current-version DatePicker provider per
+> `v1.2.1` supports **one participating current-version DatePicker provider per
 > Excel process**.
 >
-> Do not install the `.xlam` and also start an embedded `v1.2.0` copy in the same
+> Do not install the `.xlam` and also start an embedded `v1.2.1` copy in the same
 > Excel session expecting both to operate independently. The second current-
 > version provider is deliberately refused.
 >
@@ -943,7 +943,7 @@ clears process-level runtime state and temporary leases.
 
 ## 6. Do not start a second provider
 
-If a workbook also embeds `v1.2.0` source and calls `DP_Start`, the second
+If a workbook also embeds `v1.2.1` source and calls any DatePicker entry point, the second
 participating provider will be refused.
 
 Choose one ownership model for a given Excel session.
@@ -994,7 +994,7 @@ DP_Stop
 
 ---
 
-## ⬆️ Upgrade an embedded `v1.1.x` installation to `v1.2.0`
+## ⬆️ Upgrade an embedded `v1.1.x` installation to `v1.2.1`
 
 Replace the complete DatePicker source set together.
 
@@ -1064,7 +1064,7 @@ Debug → Compile VBAProject
 
 ### 7. Review behavioral changes
 
-`v1.2.0` intentionally hardens several defaults.
+`v1.2.1` intentionally hardens several defaults.
 
 #### Excel Table cells
 
@@ -1085,7 +1085,7 @@ Do not assume that selecting a new date destroys a formula.
 
 #### Runtime ownership
 
-A second participating `v1.2.0` provider is refused.
+A second participating `v1.2.1` provider is refused on every entry path.
 
 Check for an old `.xlam` or another embedded copy before concluding that startup
 is broken.
@@ -1100,7 +1100,7 @@ There is no automatic migration into a new namespace.
 
 ---
 
-## ⬆️ Upgrade between `v1.2.0` development builds
+## ⬆️ Upgrade between `v1.2.1` development builds
 
 Replace the complete production source set together:
 
@@ -1167,7 +1167,7 @@ second provider refused
 This is **not guaranteed safe**:
 
 ```text
-v1.2.0 provider
+v1.2.1 provider
 +
 v1.1.x provider
 ```
@@ -1504,7 +1504,7 @@ DP_ForceReleaseProviderLease
 | `Ambiguous name detected` | Old/duplicate component still present | Remove duplicate module/class/form |
 | UserForm imports incorrectly | `.frx` missing/mismatched | Put matching `.frm` + `.frx` together and re-import |
 | Picker does not start automatically | Macros or workbook events did not run | Check macro policy; test `DP_Start` manually |
-| `DP_Start` reports another provider | Another `v1.2.0` copy owns the session or lease is stale | Identify provider; restart Excel if ownership is uncertain |
+| `DP_Start` reports another provider | Another current-version copy owns the session or lease is stale | Identify provider; restart Excel if ownership is uncertain |
 | `DP_Stop` / `DP_RepairRuntime` refused | Current project cannot prove ownership | Do not force teardown of another provider |
 | Formula did not change | Formula-preservation policy | Expected default behavior |
 | Only one Table cell changed | Safe single-cell default | Use `DP_FillTableColumn` for explicit whole-column fill |

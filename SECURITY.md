@@ -110,7 +110,7 @@ every VBA project reset leaves runtime ownership reconstructable
 every release binary can be proven from source without explicit provenance data
 ```
 
-That distinction explains several v1.2.0 design decisions:
+That distinction explains several v1.2.1 design decisions:
 
 - normal write-back defaults to the selected cell rather than inferred broad
   Table scope;
@@ -647,7 +647,8 @@ reuse because deleting a worksheet/shape can stale the reference.
 ## 🪪 Runtime provider lease
 
 `v1.2.0` introduces a process-visible provider lease because two DatePicker
-copies share Excel surfaces.
+copies share Excel surfaces. `v1.2.1` completes it: admission is enforced on
+every runtime entry path, not only at `DP_Start`.
 
 Lease name:
 
@@ -1064,7 +1065,7 @@ The workbook still contains executable VBA and must be trusted as such.
 
 ### 3. Use one provider per Excel process
 
-For v1.2.0, choose:
+For v1.2.1, choose:
 
 ```text
 embedded provider

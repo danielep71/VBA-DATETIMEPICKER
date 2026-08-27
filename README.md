@@ -116,7 +116,7 @@ It is especially useful when:
 
 ## 🎯 Core capabilities
 
-| Area | Capability | v1.2.0 behavior |
+| Area | Capability | v1.2.1 behavior |
 |---|---|---|
 | Picker UX | Modeless Date / Time Picker | Excel remains interactive while the form is open |
 | Calendar | Fixed 6 × 7 grid | Month/year navigation, outside-month dates and keyboard focus |
@@ -636,7 +636,7 @@ The persisted namespace is a **configuration scope**. It is not the runtime-prov
 
 ---
 
-## 🔒 One provider per Excel process in v1.2.0
+## 🔒 One provider per Excel process
 
 Many DatePicker surfaces are application-wide or use fixed shared identifiers:
 
@@ -652,7 +652,7 @@ Two current-version copies must therefore not silently register over one another
 
 ### Provider lease
 
-`v1.2.0` uses a hidden, temporary, application-scoped CommandBar lease:
+The component uses a hidden, temporary, application-scoped CommandBar lease, introduced in `v1.2.0`:
 
 ```text
 __VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__
@@ -924,7 +924,7 @@ flowchart TD
     HOOKS[cDatePickerLabelHook<br/>runtime label events]
     SETTINGS[Registry-backed settings<br/>optional namespace]
     SURFACES[Excel shared surfaces<br/>OnKey · CommandBars · Shapes · OnTime]
-    LEASE[Temporary provider lease<br/>one v1.2.0 owner]
+    LEASE[Temporary provider lease<br/>one current-version owner]
     WINAPI[Optional Windows UI layer]
 
     EXCEL --> MANAGER
@@ -1132,7 +1132,7 @@ multiple new worksheets
 
 It does not blindly retry `Worksheets.Add`.
 
-## Latest recorded standard pack
+## Latest recorded regression figures
 
 ```text
 State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
@@ -1168,7 +1168,7 @@ The demo is generated from source and includes practical scenarios for:
 - protected-sheet guidance;
 - right-click, keyboard, Ribbon and in-grid access.
 
-The key `v1.2.0` table demonstration is deliberate:
+The key table demonstration is deliberate:
 
 ```text
 pick a date in one Expiry Date cell

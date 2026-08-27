@@ -366,8 +366,8 @@ Technical discussion should preserve those distinctions.
 
 Some Excel integration surfaces are application-wide.
 
-The `v1.2.0` contract allows one current-version DatePicker provider to own the
-session and refuses a second one.
+The `v1.2.1` contract allows one current-version DatePicker provider to own the
+session and refuses a second one on every entry path.
 
 When reporting ownership problems, identify:
 
