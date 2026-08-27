@@ -60,23 +60,23 @@ Option Explicit
 '   TST_DP_HolidayCallbackError must remain Public so Application.Run can
 '   resolve them as holiday policy callbacks
 '
-'   Production routines that end with On Error GoTo 0 (M_GridIcon_ShowOrMove,
-'   M_GridIcon_Remove, M_GridIcon_PurgeAll, M_GridIcon_EnsureEmbeddedIconFile,
-'   M_GridIcon_PreCreateHidden, DP_Close, DP_Stop, Handle_SelectionChange, and
-'   the access-path setters SetShowRightClick and SetShowGridIcon) kill the
-'   suite SuiteFail handler on return. Every call to those routines is
-'   immediately followed by On Error GoTo SuiteFail to re-arm the handler.
+'   On Error state belongs to the procedure in which the statement executes. A
+'   called routine cannot arm, disarm or replace the handler of the procedure
+'   that called it, whatever it does to its own
 '
-'   DP_RepairRuntime and M_Picker_SelectDate use On Error GoTo ErrorHandler and
-'   raise outward on failure; they do not reset the caller SuiteFail handler and
-'   therefore do not need re-arming.
+'   A suite therefore re-arms On Error GoTo SuiteFail only where the suite
+'   procedure itself changed its own error mode, never because of what a
+'   production routine does internally
+'
+'   TST_DP_RunSuite_HarnessSelfCheck proves both halves of that rule, so a
+'   regression restores the correct model instead of the assumption
 '
 '   The write-back routines are Functions returning DP_WriteResult. Bare calls
 '   still compile and are kept where the outcome is not asserted, so the suite
 '   covers both call forms.
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -102,6 +102,7 @@ Option Explicit
     Private Const TST_DP_RESULT_FIRST_ROW   As Long = 5                         'First result data row on the result sheet
     Private Const TST_DP_STATUS_BAR_TEXT    As String = "Running DatePicker regression tests..."  'Status bar text the run displays
     Private Const TST_DP_STALE_SHEET_NAME   As String = "TST_DP_STALE"          'Temporary sheet used to strand a grid icon
+    Private Const TST_DP_ERRSCOPE_NUMBER    As Long = vbObjectError + 3232      'Error number raised by the error-scope probes
     Private Const TST_DP_COL_SEQ            As Long = 3                         'Result sequence number column index
     Private Const TST_DP_COL_TIMESTAMP      As Long = 4                         'Result timestamp column index
     Private Const TST_DP_COL_RESULT         As Long = 5                         'Result marker column index
@@ -2121,7 +2122,7 @@ Private Sub TST_DP_RunSuite_SettingsNamespace()
 '   for the next run to find
 '
 ' UPDATED
-'   2026-08-23
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2193,6 +2194,8 @@ Private Sub TST_DP_RunSuite_SettingsNamespace()
         M_Settings_SetNamespace "TooLate"
         RefusedLate = (Err.Number <> 0)
         Err.Clear
+    'This procedure changed its own error mode above, so it must restore its
+    'own handler before relying on it again
         On Error GoTo SuiteFail
         TST_DP_AssertTrue "Namespace change after settings load is refused", _
             RefusedLate
@@ -2211,6 +2214,7 @@ Private Sub TST_DP_RunSuite_SettingsNamespace()
         M_Settings_SetNamespace "bad\namespace"
         RefusedInvalid = (Err.Number <> 0)
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
         TST_DP_AssertTrue "Invalid namespace is refused", RefusedInvalid
 
@@ -3467,7 +3471,7 @@ Private Sub TST_DP_RunSuite_WriteTechnicalFailure()
 '   That path cannot be produced on demand. M_WriteBack_TryWriteCell classifies
 '   every per-cell failure it can observe and raises nothing, which is exactly why
 '   a controlled fault seam is required. The classified failures this suite does
-'   not use — array-formula refusal, locked cells, formula preservation — are a
+'   not use - array-formula refusal, locked cells, formula preservation - are a
 '   different path and are covered by MultiAreaWriteResult
 '
 ' BEHAVIOR
@@ -3500,7 +3504,7 @@ Private Sub TST_DP_RunSuite_WriteTechnicalFailure()
 '   is asserted instead
 '
 ' UPDATED
-'   2026-08-25
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4023,7 +4027,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '   triggering the settings setter side effects during the test
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4050,17 +4054,13 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Enable the grid icon feature for this suite
         gDP_ShowGridIcon = True
     'Purge any stale grid icons before the suite
-    'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' EMBEDDED ICON FILE
 '------------------------------------------------------------------------------
     'Resolve the embedded icon file path
-    'M_GridIcon_EnsureEmbeddedIconFile resets On Error GoTo 0 on exit; re-arm
         IconPath = M_GridIcon_EnsureEmbeddedIconFile()
-        On Error GoTo SuiteFail
     'Assert the embedded icon path is not blank
         TST_DP_AssertTrue "Embedded grid icon path is not blank", _
             VBA.LenB(IconPath) > 0
@@ -4075,9 +4075,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'and restores it on exit, allowing the drawing layer to settle
         Excel.Application.ScreenUpdating = True
     'Create the grid icon beside the target cell
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Allow the drawing layer to process the shape creation
         DoEvents
     'Assert the grid icon exists on the scratch sheet
@@ -4104,9 +4102,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' MOVE ICON
 '------------------------------------------------------------------------------
     'Move the grid icon beside a different target cell
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("F8")
-        On Error GoTo SuiteFail
     'Allow the drawing layer to process the move
         DoEvents
     'Assert the grid icon still exists after the move
@@ -4132,9 +4128,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' REMOVE ICON
 '------------------------------------------------------------------------------
     'Remove the active grid icon
-    'M_GridIcon_Remove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_Remove
-        On Error GoTo SuiteFail
     'Assert the grid icon no longer exists on the scratch sheet
         TST_DP_AssertFalse "Grid icon is removed from the scratch sheet", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4143,13 +4137,9 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' PURGE ALL ICONS
 '------------------------------------------------------------------------------
     'Create the icon again for the purge test
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Purge all named grid icons from the host workbook
-    'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
     'Assert no named grid icon remains anywhere in the host workbook
         TST_DP_AssertEqualsLong "PurgeAll removes all grid icons from the workbook", _
             0, _
@@ -4161,9 +4151,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Disable the grid icon feature directly
         gDP_ShowGridIcon = False
     'Attempt to show the icon while the feature is disabled
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Assert no icon was created while the feature is disabled
         TST_DP_AssertFalse "Grid icon is not shown when the feature is disabled", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4180,9 +4168,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
         TST_DP_ActivateWorksheetForTest StaleSheet
 
     'Create the icon on the temporary worksheet
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove StaleSheet.Range("B2")
-        On Error GoTo SuiteFail
         DoEvents
         TST_DP_AssertTrue "Stale-reference setup creates a tracked icon", _
             Not (gDP_GridIconShape Is Nothing)
@@ -4193,14 +4179,12 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'on would re-enable the delete prompt for everything that follows
         TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
-        On Error GoTo SuiteFail
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
     'A stale reference must not stop a new icon being created. Before the
     'liveness check, PreCreateHidden saw a non-Nothing variable and skipped
     'straight to hiding a shape that no longer existed
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
         DoEvents
         TST_DP_AssertTrue "Stale reference does not block icon creation", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4211,24 +4195,19 @@ Private Sub TST_DP_RunSuite_GridIcon()
             mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME)
         TST_DP_ActivateWorksheetForTest StaleSheet
         M_GridIcon_ShowOrMove StaleSheet.Range("B2")
-        On Error GoTo SuiteFail
         DoEvents
         TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
-        On Error GoTo SuiteFail
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
     'Remove must leave nothing tracked and must not raise
         M_GridIcon_Remove
-        On Error GoTo SuiteFail
         TST_DP_AssertTrue "Remove clears a stale tracked reference", _
             gDP_GridIconShape Is Nothing
 
     'Purge must tolerate the same condition
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
         TST_DP_AssertTrue "Purge clears the tracked reference", _
             gDP_GridIconShape Is Nothing
 
@@ -4440,7 +4419,7 @@ Private Sub TST_DP_RunSuite_Manager()
 '   which allows either the remove or the hide implementation path
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4463,9 +4442,7 @@ Private Sub TST_DP_RunSuite_Manager()
     'Activate the scratch sheet
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
     'Purge stale grid icons before the manager tests
-    'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
     'Enable grid icon gating for this suite
         gDP_ShowGridIcon = True
 
@@ -4476,9 +4453,7 @@ Private Sub TST_DP_RunSuite_Manager()
         TST_DP_AssertFalse "New manager is not busy", Manager.Is_Busy
 
     'Close any loaded picker before the visible / loaded checks
-    'DP_Close resets On Error GoTo 0 on exit; re-arm immediately
         DP_Close
-        On Error GoTo SuiteFail
 
     'Assert the picker is not visible after close
         TST_DP_AssertFalse "PickerVisible is False after DP_Close", _
@@ -4537,9 +4512,7 @@ Private Sub TST_DP_RunSuite_Manager()
     'Prepare a date value cell for the selection-change test
         mTST_DP_ScratchSheet.Range("E10").Value = VBA.DateSerial(2026, 9, 9)
     'Handle a selection change to an eligible target cell
-    'Handle_SelectionChange resets On Error GoTo 0 on exit; re-arm immediately
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E10")
-        On Error GoTo SuiteFail
     'Assert the manager created or showed the grid icon for the eligible target
         TST_DP_AssertTrue "Handle_SelectionChange shows a visible icon for an eligible target", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4548,9 +4521,7 @@ Private Sub TST_DP_RunSuite_Manager()
         mTST_DP_ScratchSheet.Range("E11").ClearContents
         mTST_DP_ScratchSheet.Range("E11").NumberFormat = "General"
     'Handle a selection change to the ineligible target cell
-    'Handle_SelectionChange resets On Error GoTo 0 on exit; re-arm immediately
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E11")
-        On Error GoTo SuiteFail
     'Assert no visible grid icon remains for the ineligible target
         TST_DP_AssertFalse "Handle_SelectionChange leaves no visible icon for an ineligible target", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4559,9 +4530,7 @@ Private Sub TST_DP_RunSuite_Manager()
 ' RESET BEHAVIOR
 '------------------------------------------------------------------------------
     'Show the icon again for the reset test
-    'Handle_SelectionChange resets On Error GoTo 0 on exit; re-arm immediately
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E10")
-        On Error GoTo SuiteFail
     'Reset all DatePicker UI through the manager
         Manager.Reset_DatePickerUI
     'Assert the reset removed all grid icons from the host workbook
@@ -4640,18 +4609,13 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 '   TST_DP_CountNamedShapes
 '
 ' NOTES
-'   DP_Stop uses On Error Resume Next throughout and ends with On Error GoTo 0,
-'   which kills the SuiteFail handler on return. It is re-armed immediately
-'   after each DP_Stop call.
-'
-'   DP_Start uses On Error GoTo ErrorHandler and raises outward on failure.
-'   It does not reset the caller SuiteFail handler when it succeeds.
-'
-'   M_Picker_EnsureManager uses On Error GoTo ErrorHandler (raises outward)
-'   and does not reset the caller SuiteFail handler.
+'   DP_Stop suppresses its own errors and DP_Start raises outward. Neither
+'   changes the error handler of this suite, so neither is followed by a
+'   re-arm. What DP_Start reports on failure is asserted; what it does to its
+'   own error state is its own business
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4671,9 +4635,7 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 ' FIRST STOP - TEARDOWN STATE
 '------------------------------------------------------------------------------
     'Call DP_Stop to tear down the DatePicker runtime
-    'DP_Stop uses OERN and ends with On Error GoTo 0; re-arm immediately
         DP_Stop
-        On Error GoTo SuiteFail
 
     'Assert the global manager reference is released after DP_Stop
         TST_DP_AssertTrue "Manager is Nothing after DP_Stop", _
@@ -4690,10 +4652,7 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
     'Capture the caller event state before the recovery start
         EventsBeforeStart = Excel.Application.EnableEvents
     'Call DP_Start to recreate the DatePicker runtime
-    'DP_Start internally calls Handle_SelectionChange which ends with
-    'On Error GoTo 0, killing the SuiteFail handler. Re-arm immediately.
         DP_Start
-        On Error GoTo SuiteFail
 
     'Assert the manager is recreated after DP_Start
         TST_DP_AssertFalse "Manager is instantiated after DP_Start", _
@@ -4713,9 +4672,7 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 ' SECOND STOP - IDEMPOTENT TEARDOWN
 '------------------------------------------------------------------------------
     'Call DP_Stop a second time to verify idempotent behavior
-    'DP_Stop uses OERN and ends with On Error GoTo 0; re-arm immediately
         DP_Stop
-        On Error GoTo SuiteFail
 
     'Assert the manager is released again after the second DP_Stop
         TST_DP_AssertTrue "Manager is Nothing after second DP_Stop", _
@@ -4938,7 +4895,7 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '   hide genuine provider conflicts from the operator
 '
 ' UPDATED
-'   2026-08-25
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5063,6 +5020,7 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
         M_Picker_EnsureManager
         GuardHeld = (Err.Number <> 0)
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
         TST_DP_AssertTrue _
             "Direct M_Picker_EnsureManager admission is refused", GuardHeld
@@ -5390,17 +5348,16 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 '   gDP_Manager
 '
 ' NOTES
-'   DP_RepairRuntime uses On Error GoTo ErrorHandler and raises outward on
-'   its own failure path. However, it calls Handle_SelectionChange internally,
-'   and Handle_SelectionChange ends with On Error GoTo 0 in its CleanExit.
-'   This kills the SuiteFail handler inside DP_RepairRuntime's call stack.
-'   Re-arm On Error GoTo SuiteFail after every DP_RepairRuntime call.
+'   DP_RepairRuntime raises outward on its own failure path and is not
+'   followed by a re-arm. Handle_SelectionChange runs inside its call stack
+'   and ends with On Error GoTo 0, but that statement belongs to
+'   Handle_SelectionChange and cannot reach this suite's handler
 '
-'   The RepairRuntime suite re-enables Application.EnableEvents = True.
-'   Subsequent suites that call mTST_DP_ScratchSheet.Activate must
-'   temporarily disable events before the Activate call to prevent the
-'   live manager from firing SheetActivate or SelectionChange during the
-'   sheet switch, which would reset the SuiteFail handler unexpectedly.
+'   This suite leaves Application.EnableEvents = True. A later suite that
+'   activates mTST_DP_ScratchSheet must suppress events across the Activate
+'   call, so the live manager does not react to the sheet switch and mutate
+'   grid-icon, selection or transient state a test is about to assert. The
+'   reason is test isolation, not error handling
 '
 '   The suite deliberately disables EnableEvents before calling DP_RepairRuntime.
 '   The harness has already set EnableEvents = False for its own operation.
@@ -5409,7 +5366,7 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 '   cleanup path at the end of the run.
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5435,12 +5392,7 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 ' CALL DP_REPAIRRUNTIME
 '------------------------------------------------------------------------------
     'Call DP_RepairRuntime to repair the DatePicker runtime
-    'DP_RepairRuntime raises outward on its own failure path.
-    'However it calls Handle_SelectionChange internally, which ends with
-    'On Error GoTo 0 in its CleanExit, killing the SuiteFail handler.
-    'Re-arm the handler after DP_RepairRuntime returns.
         DP_RepairRuntime
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' ASSERT REPAIRED STATE
@@ -5463,10 +5415,7 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 ' IDEMPOTENT CALL - HEALTHY RUNTIME
 '------------------------------------------------------------------------------
     'Call DP_RepairRuntime again against an already healthy runtime
-    'Handle_SelectionChange inside DP_RepairRuntime ends with On Error GoTo 0;
-    're-arm the handler after the call.
         DP_RepairRuntime
-        On Error GoTo SuiteFail
 
     'Assert EnableEvents is still True after the second repair call
         TST_DP_AssertTrue "EnableEvents is True after second DP_RepairRuntime", _
@@ -5550,16 +5499,6 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 '   TST_DP_CountNamedShapes
 '
 ' NOTES
-'   M_GridIcon_PreCreateHidden uses On Error Resume Next throughout and ends
-'   with On Error GoTo 0, which kills the SuiteFail handler on return.
-'   It is re-armed immediately after every call.
-'
-'   M_GridIcon_PurgeAll also ends with On Error GoTo 0; re-armed after each call.
-'
-'   The setter M_Settings_SetShowGridIcon internally calls M_GridIcon_Remove
-'   and M_KeyboardShortcut_Update, both of which end with On Error GoTo 0.
-'   It is re-armed after each setter call.
-'
 '   ScreenUpdating is set True before pre-creation because M_GridIcon_Create
 '   captures PreviousScreenUpdating. With ScreenUpdating = False the final
 '   shape show step may silently fail on some Excel builds. The tracked
@@ -5567,7 +5506,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 '   a rendering detail that this suite does not assert.
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5595,15 +5534,10 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' PREPARE FEATURE STATE
 '------------------------------------------------------------------------------
     'Enable the grid icon feature via setter
-    'M_Settings_SetShowGridIcon calls M_GridIcon_Remove and
-    'M_KeyboardShortcut_Update which both end with On Error GoTo 0; re-arm
         M_Settings_SetShowGridIcon True
-        On Error GoTo SuiteFail
 
     'Purge any stale grid icons before the suite
-    'M_GridIcon_PurgeAll ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' PRE-CREATE ON ELIGIBLE CELL
@@ -5612,9 +5546,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
     'PreviousScreenUpdating and restores it on exit
         Excel.Application.ScreenUpdating = True
     'Pre-create the grid icon using the scratch-sheet anchor cell
-    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Suppress ScreenUpdating for remaining cleanup steps
         Excel.Application.ScreenUpdating = False
     'Allow the drawing layer to settle after pre-creation
@@ -5642,9 +5574,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' IDEMPOTENT SECOND CALL
 '------------------------------------------------------------------------------
     'Call M_GridIcon_PreCreateHidden again when a shape already exists
-    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
 
     'Assert only one shape exists after the second pre-create call
         TST_DP_AssertEqualsLong "PreCreateHidden is idempotent when shape already exists", _
@@ -5658,19 +5588,13 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' DISABLED FEATURE BEHAVIOR
 '------------------------------------------------------------------------------
     'Purge before the disabled test to ensure a clean state
-    'M_GridIcon_PurgeAll ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
 
     'Disable the grid icon feature via setter
-    'M_Settings_SetShowGridIcon calls removal routines ending with GoTo 0; re-arm
         M_Settings_SetShowGridIcon False
-        On Error GoTo SuiteFail
 
     'Call M_GridIcon_PreCreateHidden while the feature is disabled
-    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
 
     'Assert no shape was created while the feature is disabled
         TST_DP_AssertFalse "PreCreateHidden creates no shape when feature is disabled", _
@@ -5680,9 +5604,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' RESTORE FEATURE STATE FOR SUBSEQUENT SUITES
 '------------------------------------------------------------------------------
     'Re-enable the grid icon feature via setter
-    'M_Settings_SetShowGridIcon calls removal routines ending with GoTo 0; re-arm
         M_Settings_SetShowGridIcon True
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -5749,14 +5671,6 @@ Private Sub TST_DP_RunSuite_SelectDate()
 '   mTST_DP_ScratchSheet
 '
 ' NOTES
-'   M_Picker_SelectDate uses On Error GoTo ErrorHandler and raises outward on
-'   failure. It does not reset the caller SuiteFail handler when it succeeds.
-'   No re-arm is needed after M_Picker_SelectDate calls.
-'
-'   M_Settings_SetCloseAfterSelection only calls M_Settings_Save internally.
-'   M_Settings_Save uses GoTo ErrorHandler and raises outward; it does not
-'   reset the SuiteFail handler. No re-arm is needed after setter calls.
-'
 '   gDP_WriteValue, gDP_HasSelectedDate, and gDP_SelectedDate are read directly
 '   after calls to verify transient state. No public getters exist for these
 '   transient fields. Direct reads are the correct approach for these.
@@ -5765,7 +5679,7 @@ Private Sub TST_DP_RunSuite_SelectDate()
 '   M_WriteBack_Apply uses the correct Excel selection as its write target.
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5987,7 +5901,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '   after the call, and against EventsDisabledByCaller on the returned result
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6033,9 +5947,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 ' DP_START PRESERVES CALLER STATE
 '------------------------------------------------------------------------------
     'Start the runtime while the caller has events suppressed
-    'DP_Start resets On Error GoTo 0 on exit; re-arm immediately
         DP_Start
-        On Error GoTo SuiteFail
     'Assert DP_Start did not re-enable events
         TST_DP_AssertFalse "DP_Start preserves disabled events", _
             Excel.Application.EnableEvents
@@ -6046,9 +5958,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Restore the suppressed condition before the preload check
         Excel.Application.EnableEvents = False
     'Preload the form while the caller has events suppressed
-    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
         DP_Preload
-        On Error GoTo SuiteFail
     'Assert DP_Preload did not re-enable events
         TST_DP_AssertFalse "DP_Preload preserves disabled events", _
             Excel.Application.EnableEvents
@@ -6059,16 +5969,12 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Restore the suppressed condition before the show check
         Excel.Application.EnableEvents = False
     'Show the picker while the caller has events suppressed
-    'DP_Show resets On Error GoTo 0 on exit; re-arm immediately
         DP_Show
-        On Error GoTo SuiteFail
     'Assert DP_Show did not re-enable events
         TST_DP_AssertFalse "DP_Show preserves disabled events", _
             Excel.Application.EnableEvents
     'Close the picker before the write-back checks
-    'DP_Close resets On Error GoTo 0 on exit; re-arm immediately
         DP_Close
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' WRITE-BACK RESTORES THE DISABLED CASE
@@ -6083,9 +5989,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Establish the suppressed condition before the transaction
         Excel.Application.EnableEvents = False
     'Apply the write-back transaction
-    'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
         WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
-        On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the disabled caller state
@@ -6111,9 +6015,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Establish the enabled condition before the transaction
         Excel.Application.EnableEvents = True
     'Apply the write-back transaction
-    'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
         WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
-        On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the enabled caller state
@@ -6128,9 +6030,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Establish the suppressed condition before the repair check
         Excel.Application.EnableEvents = False
     'Repair the runtime, which is the only sanctioned force-enable path
-    'DP_RepairRuntime resets On Error GoTo 0 on exit; re-arm immediately
         DP_RepairRuntime
-        On Error GoTo SuiteFail
     'Assert DP_RepairRuntime re-enabled events
         TST_DP_AssertTrue "DP_RepairRuntime force-enables events", _
             Excel.Application.EnableEvents
@@ -6234,7 +6134,7 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
 '   state worth creating inside an unattended run
 '
 ' UPDATED
-'   2026-08-25
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6263,6 +6163,7 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
         On Error Resume Next
         Unload UF_DatePicker
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
@@ -6298,6 +6199,7 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
         Load UF_DatePicker
         LoadRaised = (Err.Number <> 0)
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
         TST_DP_AssertTrue "Recovery-required styling fails the form load", _
             LoadRaised
@@ -6414,7 +6316,7 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '   left with its native title bar for whatever runs next
 '
 ' UPDATED
-'   2026-08-23
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6455,9 +6357,7 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 ' RESOLVE A REAL WINDOW HANDLE
 '------------------------------------------------------------------------------
     'Load the picker form without showing it
-    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
         DP_Preload
-        On Error GoTo SuiteFail
     'Resolve the native window the transaction will operate on
         FormHandle = M_Window_GetUserFormHwnd(UF_DatePicker)
     'Assert the precondition. A missing handle is a setup failure, never a pass
@@ -6691,8 +6591,14 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
 '   detector fires on the evidence an abort leaves; that an abort leaves it is a
 '   manual validation step
 '
+'   The error-scope checks prove that On Error state is procedure-local in both
+'   directions: a callee cannot disarm this procedure's handler, and a procedure
+'   that disarms its own handler really does lose it. The harness relied on the
+'   opposite belief until #32, so the rule is regression-locked rather than
+'   documented
+'
 ' UPDATED
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6717,6 +6623,12 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
     Dim MenuProbeCount      As Long         'Context-menu controls seen by the probe
     Dim ProbeDirty          As Boolean      'Preflight verdict during the probe
     Dim ProbeDetail         As String       'Preflight detail during the probe
+
+    Dim CalleeZeroCaught    As Boolean      'Caller handler survived a callee's On Error GoTo 0
+    Dim CalleeOernCaught    As Boolean      'Caller handler survived a callee's On Error Resume Next
+    Dim SelfRearmCaught     As Boolean      'Local handler caught again after an explicit re-arm
+    Dim EscapedNumber       As Long         'Error number escaping a self-disarmed procedure
+    Dim EscapedDescription  As String       'Description escaping a self-disarmed procedure
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6801,6 +6713,28 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
         MenuProbeCount = TST_DP_ContextMenuControlCount()
 
 '------------------------------------------------------------------------------
+' PROBE PROCEDURE-LOCAL ERROR SCOPE
+'------------------------------------------------------------------------------
+    'A callee cannot disarm the handler of the procedure that called it, whatever
+    'it does to its own error state
+        CalleeZeroCaught = TST_DP_ErrorScope_CallerAfterCalleeDisarms()
+        CalleeOernCaught = TST_DP_ErrorScope_CallerAfterCalleeResumes()
+    'A procedure that disarms its own handler and then raises has no handler
+    'left, so the error escapes to whoever called it
+        EscapedNumber = 0
+        EscapedDescription = VBA.vbNullString
+        On Error Resume Next
+        Err.Clear
+        TST_DP_ErrorScope_SelfDisarmAndRaise
+        EscapedNumber = Err.Number
+        EscapedDescription = Err.Description
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+    'Explicit re-arming inside one procedure restores that procedure's handler
+        SelfRearmCaught = TST_DP_ErrorScope_SelfRearmAndRaise()
+
+'------------------------------------------------------------------------------
 ' RESTORE LIVE RUN STATE
 '------------------------------------------------------------------------------
     'Restore before the first assertion, so this suite's own result is honest
@@ -6867,6 +6801,25 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
             MenuProbeCount >= 0
 
 '------------------------------------------------------------------------------
+' ASSERT PROCEDURE-LOCAL ERROR SCOPE
+'------------------------------------------------------------------------------
+    'Assert a callee ending with On Error GoTo 0 leaves the caller armed
+        TST_DP_AssertTrue "Callee On Error GoTo 0 leaves the caller handler armed", _
+            CalleeZeroCaught
+    'Assert a callee running under On Error Resume Next leaves the caller armed
+        TST_DP_AssertTrue "Callee On Error Resume Next leaves the caller handler armed", _
+            CalleeOernCaught
+    'Assert a procedure that disarmed its own handler lets the error escape
+        TST_DP_AssertEqualsLong "Self-disarmed procedure lets its error escape", _
+            TST_DP_ERRSCOPE_NUMBER, EscapedNumber
+    'Assert the escaping error still carries usable evidence
+        TST_DP_AssertTrue "Escaping error keeps a meaningful description", _
+            VBA.LenB(EscapedDescription) > 0
+    'Assert an explicit same-procedure re-arm restores the local handler
+        TST_DP_AssertTrue "Same-procedure re-arm restores the local handler", _
+            SelfRearmCaught
+
+'------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
     'Exit after the suite completes
@@ -6892,6 +6845,397 @@ SuiteFail:
     Err.Clear
 
 End Sub
+
+Private Sub TST_DP_ErrorScope_CalleeDisarms()
+
+'
+'==============================================================================
+'                     ERROR SCOPE CALLEE - DISARMS ITSELF
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stands in for a production routine that suppresses its own errors and ends
+'   with On Error GoTo 0
+'
+' WHY THIS EXISTS
+'   The harness assumed a callee shaped like this disabled its caller's handler.
+'   Proving otherwise needs a callee whose error statements are the only thing
+'   under test
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Suppresses errors, swallows one raised error, restores its own default error
+'   handling and returns normally
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   The On Error GoTo 0 below is the statement the old harness comments claimed
+'   would reach the caller
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' SUPPRESS AND RESTORE LOCAL ERROR STATE
+'------------------------------------------------------------------------------
+    'Suppress errors inside this procedure only
+        On Error Resume Next
+    'Swallow one error so the suppression is not merely declared
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_CalleeDisarms", _
+            "Swallowed by the callee"
+        Err.Clear
+    'Restore default error handling for this procedure only
+        On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_ErrorScope_CalleeResumes()
+
+'
+'==============================================================================
+'                    ERROR SCOPE CALLEE - LEAVES OERN ACTIVE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stands in for a routine that returns while On Error Resume Next is still the
+'   active mode in its own scope
+'
+' WHY THIS EXISTS
+'   Suppression is the other shape a callee can return in. It must be shown not
+'   to follow the return either
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Suppresses errors, swallows one raised error and returns without restoring
+'   its own error mode
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   Err is cleared before returning so a stale error cannot be mistaken for one
+'   the caller observed
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' SUPPRESS AND RETURN
+'------------------------------------------------------------------------------
+    'Suppress errors inside this procedure only
+        On Error Resume Next
+    'Swallow one error so the suppression is not merely declared
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_CalleeResumes", _
+            "Swallowed by the callee"
+    'Leave no error behind for the caller to read
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ErrorScope_SelfDisarmAndRaise()
+
+'
+'==============================================================================
+'                  ERROR SCOPE PROBE - SELF DISARM THEN RAISE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a local handler, disarms it in the same procedure and then raises
+'
+' WHY THIS EXISTS
+'   This is the case that genuinely requires a re-arm. Without one the error has
+'   no local handler and must escape to the caller
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Arms LocalHandler, disarms it with On Error GoTo 0, then raises
+'   TST_DP_ERRSCOPE_NUMBER, which therefore escapes this procedure
+'
+' ERROR POLICY
+'   Deliberately raises outward. The caller must suppress or handle the error
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   LocalHandler is unreachable while the disarm above stands. It exists so the
+'   probe fails visibly, rather than silently changing meaning, if the disarm is
+'   ever removed
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ARM, DISARM, RAISE
+'------------------------------------------------------------------------------
+    'Arm a local handler
+        On Error GoTo LocalHandler
+    'Disarm it again in this same procedure
+        On Error GoTo 0
+    'Raise with no active local handler, so the error escapes
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_SelfDisarmAndRaise", _
+            "Escapes a procedure that disarmed its own handler"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the unreachable handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Reached only if the disarm above is removed
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_ErrorScope_SelfRearmAndRaise() As Boolean
+
+'
+'==============================================================================
+'                  ERROR SCOPE PROBE - SELF REARM THEN RAISE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that a procedure which changed its own error mode gets its handler
+'   back by re-arming it explicitly
+'
+' WHY THIS EXISTS
+'   Removing the redundant re-arms is only safe if the necessary ones are
+'   understood. This is the pattern the five retained re-arms use
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the re-armed local handler caught the raised error
+'
+' BEHAVIOR
+'   Arms a local handler, suppresses errors, restores default handling, re-arms
+'   the local handler and raises TST_DP_ERRSCOPE_NUMBER
+'
+' ERROR POLICY
+'   Never raises outward while the re-arm stands
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   Returns False rather than raising if the raise is somehow not reached, so a
+'   silent no-op cannot be read as a pass
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Assume the handler did not catch until it does
+        TST_DP_ErrorScope_SelfRearmAndRaise = False
+    'Arm a local handler
+        On Error GoTo LocalHandler
+
+'------------------------------------------------------------------------------
+' CHANGE AND RESTORE THIS PROCEDURE'S OWN ERROR MODE
+'------------------------------------------------------------------------------
+    'Suppress errors for one probe
+        On Error Resume Next
+        Err.Clear
+    'Restore default handling, which leaves this procedure with no handler
+        On Error GoTo 0
+    'Re-arm the local handler, which is what the retained suite re-arms do
+        On Error GoTo LocalHandler
+
+'------------------------------------------------------------------------------
+' RAISE INTO THE RE-ARMED HANDLER
+'------------------------------------------------------------------------------
+    'Raise so the re-armed handler is the thing under test
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_SelfRearmAndRaise", _
+            "Caught by a re-armed local handler"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Report that the re-armed handler caught the expected error
+        TST_DP_ErrorScope_SelfRearmAndRaise = (Err.Number = TST_DP_ERRSCOPE_NUMBER)
+    'Leave no error behind for the caller
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_ErrorScope_CallerAfterCalleeDisarms() As Boolean
+
+'
+'==============================================================================
+'              ERROR SCOPE PROBE - CALLER AFTER A CALLEE DISARMS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that a callee ending with On Error GoTo 0 leaves this procedure's
+'   handler armed
+'
+' WHY THIS EXISTS
+'   Forty-two harness re-arms existed only because the opposite was assumed. The
+'   assumption is now a test rather than a comment
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the local handler caught the error raised after the callee returned
+'
+' BEHAVIOR
+'   Arms a local handler, calls TST_DP_ErrorScope_CalleeDisarms, then raises
+'   TST_DP_ERRSCOPE_NUMBER without re-arming anything
+'
+' ERROR POLICY
+'   Never raises outward while the rule holds. If the local handler were lost the
+'   error would escape to the caller, which the suite records as a failure
+'
+' DEPENDENCIES
+'   TST_DP_ErrorScope_CalleeDisarms
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   The absence of a re-arm between the call and the raise is the point of the
+'   probe and must not be tidied away
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ARM, CALL, RAISE
+'------------------------------------------------------------------------------
+    'Assume the handler did not catch until it does
+        TST_DP_ErrorScope_CallerAfterCalleeDisarms = False
+    'Arm a local handler
+        On Error GoTo LocalHandler
+    'Call a routine that ends with On Error GoTo 0
+        TST_DP_ErrorScope_CalleeDisarms
+    'Raise with no re-arm, so only the original handler can catch it
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, _
+            "TST_DP_ErrorScope_CallerAfterCalleeDisarms", _
+            "Caught by a handler a callee could not disarm"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Report that the original handler was still armed
+        TST_DP_ErrorScope_CallerAfterCalleeDisarms = (Err.Number = TST_DP_ERRSCOPE_NUMBER)
+    'Leave no error behind for the caller
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_ErrorScope_CallerAfterCalleeResumes() As Boolean
+
+'
+'==============================================================================
+'              ERROR SCOPE PROBE - CALLER AFTER A CALLEE SUPPRESSES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that a callee returning under On Error Resume Next leaves this
+'   procedure's handler armed
+'
+' WHY THIS EXISTS
+'   Suppression is the other shape a production routine can return in, and the
+'   harness treated it the same way it treated On Error GoTo 0
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the local handler caught the error raised after the callee returned
+'
+' BEHAVIOR
+'   Arms a local handler, calls TST_DP_ErrorScope_CalleeResumes, then raises
+'   TST_DP_ERRSCOPE_NUMBER without re-arming anything
+'
+' ERROR POLICY
+'   Never raises outward while the rule holds
+'
+' DEPENDENCIES
+'   TST_DP_ErrorScope_CalleeResumes
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   If suppression did follow the return, the raise below would be ignored, the
+'   handler would never run and this function would return False rather than
+'   failing silently
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ARM, CALL, RAISE
+'------------------------------------------------------------------------------
+    'Assume the handler did not catch until it does
+        TST_DP_ErrorScope_CallerAfterCalleeResumes = False
+    'Arm a local handler
+        On Error GoTo LocalHandler
+    'Call a routine that returns while suppression is active in its own scope
+        TST_DP_ErrorScope_CalleeResumes
+    'Raise with no re-arm, so only the original handler can catch it
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, _
+            "TST_DP_ErrorScope_CallerAfterCalleeResumes", _
+            "Caught by a handler a callee could not suppress"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Report that the original handler was still armed
+        TST_DP_ErrorScope_CallerAfterCalleeResumes = (Err.Number = TST_DP_ERRSCOPE_NUMBER)
+    'Leave no error behind for the caller
+        Err.Clear
+
+End Function
 
 Private Sub TST_DP_RunSuite_UISmoke()
 
