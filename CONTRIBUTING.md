@@ -199,8 +199,8 @@ the component rather than opaque workbook/add-in binaries.
 | `customUI14.xml` | ✅ | RibbonX source |
 | Demo builder/source modules | ✅ | Source of the release demo |
 | Regression module | ✅ | Executable test source |
-| `DATETIMEPICKER-demo-vx.y.z.xlsm` | ❌ | Generated release asset |
-| `DATETIMEPICKER-vx.y.z.xlam` | ❌ | Generated release asset |
+| `DATETIMEPICKER-demo-v<version>.xlsm` | ❌ | Generated release asset |
+| The packaged `.xlam` | ❌ | Generated release asset |
 
 The `.frx` is the intentional exception to the “reviewable text” preference:
 it is source, not a distributable build artifact.
@@ -734,18 +734,21 @@ provider is alive. It must never become an automatic recovery step.
 Current protection is:
 
 ```text
-v1.2.0 + v1.2.0
-    → second participating provider refused
+v1.2.1 + v1.2.1
+    → second participating provider refused on every entry path
 ```
 
 It is **not**:
 
 ```text
-v1.2.0 + pre-v1.2.0
+v1.2.1 + pre-v1.2.1
     → guaranteed safe
 ```
 
-Older code has no lease protocol.
+Pre-`v1.2.0` code has no lease protocol at all. `v1.2.0` has the protocol but
+admits it only at `DP_Start`, so on every other entry path it behaves as a
+non-participant while appearing to be one — treat a `v1.2.0` peer as
+pre-`v1.2.1`, not as a participating provider.
 
 Any provider-ownership test or documentation must state the versions involved.
 
@@ -1051,6 +1054,13 @@ ErrLine = Erl
 
 Then perform cleanup/logging.
 
+Every `On Error` statement resets the `Err` object, and so does `Err.Clear`. Any
+cleanup that arms or disarms an error handler therefore destroys the original
+failure before you can report it. Raise from the captured locals, never from the
+live `Err`. This is not a corner case: production source carries 243 `Err.Clear`
+sites and 87 raises that read the live `Err`, and two of them shipped as defects
+in `v1.2.0` ([#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48)).
+
 **Anything called from an error handler must not replace the original failure.**
 
 **Keep `On Error Resume Next` narrow.**
@@ -1221,18 +1231,23 @@ Documentation belongs in the **same change** as the behavior it describes.
 
 The Wiki rewrite for `v1.2.0` is complete.
 
-Recorded source review baseline:
+Pages corrected in `v1.2.1` are stamped with the certified commit:
 
 ```text
-6435c9170f1707a6269f2e307d158a0faf0cae21
+Applies to:      v1.2.1
+Reviewed commit: 7d55cc7
 ```
 
-Substantive pages were stamped with:
+Pages untouched since the `v1.2.0` review keep that baseline, which remains
+accurate for them:
 
 ```text
 Applies to:      v1.2.0
 Reviewed commit: 6435c91
 ```
+
+Stamp a page you edit with the commit you verified it against — never carry a
+previous page's stamp forward.
 
 When a later source change makes a Wiki statement stale:
 
@@ -1306,6 +1321,7 @@ What remains unverified?
 [ ] Provider-ownership impact assessed
 [ ] Settings-persistence impact assessed
 [ ] Error/partial-success behavior assessed
+[ ] Error handlers capture Err.Number/Source/Description before any cleanup, On Error statement or Err.Clear
 [ ] 32/64-bit impact assessed where relevant
 [ ] Debug → Compile VBAProject passed
 [ ] TST_DP_RunAll result recorded for production changes

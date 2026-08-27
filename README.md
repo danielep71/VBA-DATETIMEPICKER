@@ -79,7 +79,7 @@ It is designed for real workbook workflows rather than an isolated UserForm demo
 - optional compact layout, live clock and weekend highlighting;
 - optional Windows title-bar styling and mouse-positioning support;
 - registry-backed settings with **optional deployment namespaces**;
-- a `v1.2.0` **single-provider lease** that refuses a second current-version provider before it can overwrite shared Excel registrations;
+- a **single-provider lease** — introduced in `v1.2.0`, enforced on every entry path since `v1.2.1` — that refuses a second current-version provider before it can overwrite shared Excel registrations;
 - structured write-back and native-window outcomes for operations that can partially succeed;
 - a regression harness that distinguishes assertion failure, cleanup failure, dirty start and incomplete execution.
 
@@ -123,13 +123,13 @@ It is especially useful when:
 | Write-back | Calendar, Today, Now | Safe selected-cell default |
 | Excel Tables | Explicit whole-column fill | `DP_FillTableColumn` with scope confirmation |
 | Formula safety | Preserve formulas by default | Formula skips are reported, not silently overwritten |
-| Partial writes | Structured result | `DP_WriteResult` reports attempted, written, skipped and failed cells |
+| Partial writes | Structured result | `DP_WriteResult` reports attempted, written, skipped, failed and technical-failure detail for every cell that produced an outcome |
 | Right-click | Cell context-menu entry | Independently configurable |
 | In-grid icon | Contextual worksheet Shape | Independently configurable |
 | Keyboard | `Ctrl + Shift + D` | Registered only when explicitly enabled |
 | Ribbon | RibbonX callbacks | Optional `customUI14.xml` integration |
 | Settings | Registry-backed | Legacy global scope or explicit deployment namespace |
-| Runtime ownership | One current-version provider | Second `v1.2.0` provider is refused before shared registration |
+| Runtime ownership | One current-version provider | Second current-version provider is refused on every entry path, before shared registration |
 | WinAPI | Optional styling and positioning | 32-/64-bit aware; styling transaction is observable and recoverable |
 | Testing | Regression harness | Clean-start, completion and cleanup-aware run states |
 
@@ -313,13 +313,17 @@ DP_Demo_CreateDemoSheet
 
 ## Option 3 — install the `.xlam`
 
-Download:
+Download the add-in asset from
+[GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases). At
+`v1.2.1` it is:
 
 ```text
-DATETIMEPICKER-vx.y.z.xlam
+DATETIMEPICKER v1.2.1.xlam
 ```
 
-from [GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases).
+The `.xlam` filename separator has varied between releases — `v1.2.0` published
+`DATETIMEPICKER.v1.2.0.xlam` — so take the exact name from the Release page, and
+check its SHA-256 against the one published there.
 
 Use this when you want the DatePicker available across workbooks and your Excel policy allows add-in installation.
 
@@ -408,6 +412,11 @@ Public Type DP_WriteResult
     TableName               As String
     ColumnName              As String
     AreasCount              As Long
+
+    TechnicalFailureOccurred    As Boolean
+    TechnicalFailureStep        As String
+    TechnicalFailureNumber      As Long
+    TechnicalFailureDescription As String
 
     EventsDisabledByCaller  As Boolean
 End Type
@@ -664,15 +673,22 @@ temporary for the Excel process
 
 ```text
 lease free
-    → first v1.2.0 provider acquires
+    → first current-version provider acquires
     → shared registrations may start
 
 lease already owned
-    → second v1.2.0 provider refused
+    → second current-version provider refused
     → owner remains untouched
+
+any later entry path
+    → DP_Show, DP_Preload, DP_Click, DP_OpenForActiveCell,
+      keyboard, Ribbon_ShowPicker
+    → ownership re-proved before the manager is reached
 ```
 
 Acquisition occurs **before** shared registration. A provider that registered first and checked ownership afterwards would already have caused the collision the lease is meant to prevent.
+
+Since `v1.2.1` this admission check runs on **every** runtime entry path. Through `v1.2.0` only `DP_Start` consulted the lease, so a refused copy could still reach the manager by another route and register shared state it later removed ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
 
 ### Teardown and repair are guarded too
 
@@ -686,6 +702,8 @@ DP_RepairRuntime
 and dismantle the current owner's runtime.
 
 Ownership is checked before destructive lifecycle operations.
+
+Through `v1.2.0` this guard was reachable around: a refused copy could not call `DP_Stop` or `DP_RepairRuntime`, but it could register shared state through an unguarded entry path and remove the owner's during its own teardown.
 
 ### Stale lease
 
@@ -714,11 +732,15 @@ DP_ForceReleaseProviderLease
 ### Mixed-version boundary
 
 ```text
-v1.2.0 + v1.2.0
-    → second current-version provider refused
+v1.2.1 + v1.2.1
+    → second current-version provider refused on every entry path
 
-v1.2.0 + pre-v1.2.0
-    → older copy has no lease protocol
+v1.2.1 + v1.2.0
+    → v1.2.0 admits the lease only at DP_Start
+    → not protected on any other entry path
+
+v1.2.x + pre-v1.2.0
+    → older copy has no lease protocol at all
     → ownership protection cannot be guaranteed
 ```
 
@@ -782,6 +804,7 @@ failures
 resolved target
 table expansion metadata
 area count
+technical-failure detail (occurred, step, number, description)
 caller event state
 ```
 
@@ -967,9 +990,9 @@ or
 RecoveryRequired=True
 ```
 
-The component no longer silently treats a partially committed native style as a successful borderless window.
+Since `v1.2.1` the component no longer treats a partially committed native style as a successful borderless window. Through `v1.2.0` the `RecoveryRequired` outcome was produced and then discarded at both call sites ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
 
-`RecoveryRequired=True` is terminal for that form load. The failed step and the last API error are recorded, and the picker fails rather than presenting a window whose style is neither fully applied nor rolled back. A subsequent load is unaffected.
+From `v1.2.1`, `RecoveryRequired=True` is terminal for that form load. The failed step and the last API error are recorded, and the picker fails rather than presenting a window whose style is neither fully applied nor rolled back. A subsequent load is unaffected.
 
 WinAPI styling is optional. The runtime-provider lease is not: it uses the Office CommandBars model and therefore remains available even when WinAPI styling is disabled.
 
@@ -1115,7 +1138,7 @@ It does not blindly retry `Worksheets.Add`.
 State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the `v1.2.1` source cycle. Package-level release testing and UI smoke should still be performed for release preparation.
+This is the latest recorded **standard regression pack** for the `v1.2.1` cycle. With the UI smoke suite the figure is `434`. Both the embedded `.xlsm` and the packaged `.xlam` pass; `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
 
 > [!IMPORTANT]
 > Tests manipulate real Excel state: worksheets, settings, application flags,
@@ -1175,6 +1198,7 @@ VBA-DATETIMEPICKER/
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_DP_DEMO.bas
 ├─ dist/
+│  └─ README.md
 ├─ images/
 ├─ src/
 │  ├─ classes/
@@ -1192,6 +1216,7 @@ VBA-DATETIMEPICKER/
 ├─ CHANGELOG.md
 ├─ CODE_OF_CONDUCT.md
 ├─ CONTRIBUTING.md
+├─ INSTALLATION.md
 ├─ LICENSE
 ├─ README.md
 └─ SECURITY.md
@@ -1221,13 +1246,13 @@ No third-party DLL, package manager, COM component or external runtime is requir
 
 ### One current-version provider at a time
 
-`v1.2.0` deliberately supports:
+`v1.2.1` deliberately supports:
 
 ```text
 one active DatePicker provider per Excel process
 ```
 
-and refuses a second current-version provider.
+and refuses a second current-version provider on every runtime entry path.
 
 True multi-provider coexistence and arbitration remain a separate architectural problem.
 
@@ -1291,19 +1316,19 @@ High-DPI, high-contrast and accessibility behavior should be validated in the ta
 
 ## 📚 Documentation
 
-The project Wiki has been rewritten and reviewed for `v1.2.0`.
+The project Wiki was rewritten and reviewed for `v1.2.0`, and amended in `v1.2.1` for the corrections under [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17).
 
-The recorded Wiki review baseline is:
+The pages corrected in `v1.2.1` are stamped:
+
+```text
+Applies to:      v1.2.1
+Reviewed commit: 7d55cc7
+```
+
+The remaining pages keep the `v1.2.0` review baseline, which is still accurate for them:
 
 ```text
 6435c9170f1707a6269f2e307d158a0faf0cae21
-```
-
-All substantive Wiki pages were stamped with:
-
-```text
-Applies to:      v1.2.0
-Reviewed commit: 6435c91
 ```
 
 The Wiki covers installation, API, manager/events, settings, testing/demo guidance, WinAPI behavior, Ribbon integration and deployment details.
@@ -1347,10 +1372,11 @@ changed.
   low-level helpers ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)).
 
 Certified at [`7d55cc7`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/7d55cc76f0b32a393663ab605b3d2c3d5852a71f).
-Both hosts, standard and with UI smoke:
+Both hosts — the embedded demo `.xlsm` and the packaged `.xlam`:
 
 ```text
-State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+standard:       State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+with UI smoke:  State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0
 ```
 
 Certification voided three candidate commits. Every defect it found was in the
@@ -1371,12 +1397,12 @@ gathered from the artifact it actually ships rather than from source alone.
 - explicit `DP_FillTableColumn`;
 - `DP_WriteResult`;
 - formula preservation with explicit override;
-- deterministic partial-write reporting.
+- partial-write reporting (made deterministic in `v1.2.1` — see [#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21)).
 
 ### Runtime safety
 
 - one-provider process lease;
-- refused-provider teardown/repair guards;
+- refused-provider teardown/repair guards (completed in `v1.2.1` — see [#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37));
 - explicit stale-lease recovery;
 - settings namespace isolation;
 - explicit application-wide keyboard limitation.
@@ -1385,8 +1411,7 @@ gathered from the artifact it actually ships rather than from source alone.
 
 - transactional borderless styling;
 - rollback;
-- `RecoveryRequired` state;
-- independent native regression verification.
+- `RecoveryRequired` state (consumed from `v1.2.1` — see [#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
 
 ### Test-evidence quality
 
@@ -1397,10 +1422,10 @@ gathered from the artifact it actually ships rather than from source alone.
 - observable final-state verification;
 - safe recovery from the observed partial-commit `Worksheets.Add` anomaly.
 
-Latest recorded standard regression:
+Regression recorded for the `v1.2.0` cycle — source host only:
 
 ```text
-State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
 ```
 
 ---

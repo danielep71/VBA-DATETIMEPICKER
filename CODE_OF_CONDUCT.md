@@ -183,7 +183,8 @@ Where relevant, include:
   - embedded in a workbook;
   - running from the `.xlam`;
   - running alongside another DatePicker copy;
-- whether any pre-`v1.2.0` DatePicker provider is also loaded;
+- whether any pre-`v1.2.1` DatePicker provider is also loaded (a `v1.2.0` peer
+  admits the lease only at `DP_Start`, so it counts);
 - `Application.EnableEvents` state when relevant;
 - worksheet protection state;
 - whether WinAPI styling is enabled;
@@ -383,7 +384,8 @@ whether Excel was restarted
 Do not assume a mixed-version session is protected by the current provider
 lease.
 
-A pre-`v1.2.0` copy does not participate in that protocol.
+A pre-`v1.2.0` copy does not participate in that protocol at all, and a `v1.2.0`
+copy participates only at `DP_Start`.
 
 ---
 

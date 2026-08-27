@@ -309,7 +309,7 @@ Examples:
 - a partial write is reported as complete success in a way that can cause a
   caller to rely on false state;
 - a non-owner DatePicker instance can tear down another provider's shared Excel
-  registrations despite the documented v1.2.0 ownership guard;
+  registrations despite the documented `v1.2.1` ownership guard;
 - a settings namespace defect causes one deployment to overwrite another
   deployment's persistent configuration unexpectedly;
 - a native-window failure leaves the UserForm in an unsafe/unknown state while
@@ -415,8 +415,9 @@ If unsure, report privately first.
 
 ### In scope — official release artifacts
 
-- official `DATETIMEPICKER-vx.y.z.xlam` assets;
-- official `DATETIMEPICKER-demo-vx.y.z.xlsm` assets;
+- official add-in assets published on the Releases page (the exact filename has
+  varied between releases — `DATETIMEPICKER v1.2.1.xlam` at `v1.2.1`);
+- official `DATETIMEPICKER-demo-v<version>.xlsm` assets;
 - release archives;
 - release notes and provenance claims.
 
@@ -527,12 +528,18 @@ written
 locked skips
 formula skips
 other failures
+technical-failure flag, step, number and description
 resolved target
 Table expansion metadata
 caller event state
 ```
 
 A partial write must not be represented as complete success.
+
+A technical failure stops population rather than continuing to mutate the
+workbook, so the result is bounded rather than balanced: it reports the outcomes
+actually observed, and the failure is reported in its own fields rather than
+inferred from the counts.
 
 ---
 
@@ -732,25 +739,32 @@ A malicious macro can use Excel/VBA/Office APIs directly.
 The provider lease protects:
 
 ```text
-v1.2.0 + v1.2.0
+v1.2.1 + v1.2.1
 ```
 
-when both copies participate in the protocol.
+when both copies participate in the protocol on every entry path.
 
 It cannot retrofit lease awareness into a previously released provider.
 
 Therefore:
 
 ```text
-v1.2.0 + pre-v1.2.0
+v1.2.1 + pre-v1.2.1
 ```
 
 is not guaranteed safe in either direction.
 
+`v1.2.0` is a pre-`v1.2.1` provider for this purpose, not a participating peer.
+It carries the lease protocol but admits it only at `DP_Start`, so on every other
+entry path it behaves as a non-participant while appearing to be one
+([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)). That is the more dangerous of the two failure modes,
+because it looks protected.
+
 This is a compatibility boundary, not an authentication failure.
 
 For controlled deployments, remove/disable the older provider before relying on
-v1.2.0 ownership behavior.
+`v1.2.1` ownership behavior. Do not rely on `v1.2.0` ownership behavior: it
+admits the lease only at `DP_Start` ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
 
 ---
 
@@ -890,11 +904,17 @@ The repository is source-first.
 Generated:
 
 ```text
-DATETIMEPICKER-vx.y.z.xlam
-DATETIMEPICKER-demo-vx.y.z.xlsm
+DATETIMEPICKER v1.2.1.xlam
+DATETIMEPICKER-demo-v1.2.1.xlsm
 ```
 
 are executable Office artifacts and must be treated accordingly.
+
+> [!WARNING]
+> The `.xlam` asset separator has changed between releases — `v1.2.0` published
+> `DATETIMEPICKER.v1.2.0.xlam` and `v1.2.1` publishes `DATETIMEPICKER v1.2.1.xlam`.
+> Do not treat a filename as proof of authenticity. Confirm the exact name and
+> the SHA-256 on the Release page.
 
 Users should assume:
 
@@ -941,11 +961,15 @@ its matching `.frm`.
 
 ### Exact artifact provenance
 
-The repository is continuing to strengthen exact-SHA release manifests and
-machine-readable evidence.
+`v1.2.1` publishes a SHA-256 for each release asset, recorded after the asset
+was built **and tested**. That establishes **file identity**: it lets you confirm
+the file you hold is the file that was certified. It does not establish that the
+file was built from a given source commit.
 
-Until a release explicitly publishes that binding, do not overstate what a source
-regression proves about a later saved `.xlam` or `.xlsm`.
+The repository is continuing to strengthen exact-SHA release manifests and
+machine-readable evidence. Provenance today is procedural, not cryptographic. Do
+not overstate what a source regression proves about a later saved `.xlam` or
+`.xlsm`.
 
 This distinction matters:
 
@@ -959,7 +983,8 @@ is not automatically identical to:
 binary asset Y is cryptographically proven to have been built from SHA X
 ```
 
-Release-provenance work is tracked separately from source behavior.
+Release-provenance work is tracked separately from source behavior, as
+[#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16).
 
 ---
 
@@ -973,27 +998,36 @@ For controlled use:
 4. inspect release notes and `CHANGELOG.md`;
 5. review the source relevant to the deployment;
 6. treat `.xlam` / `.xlsm` as executable Office content;
-7. scan binaries under organizational policy where required;
-8. compile the imported source:
+7. compute the artifact's SHA-256 and compare it with the value published on
+   the Release page:
+
+   ```text
+   certutil -hashfile "DATETIMEPICKER v1.2.1.xlam" SHA256
+   ```
+
+   A mismatch means the file is not the certified artifact. Treat it as a
+   supply-chain report, not a download error.
+8. scan binaries under organizational policy where required;
+9. compile the imported source:
 
    ```text
    VBA Editor → Debug → Compile VBAProject
    ```
 
-9. for developer validation, import the regression dependencies and run:
+10. for developer validation, import the regression dependencies and run:
 
    ```vb
    TST_DP_RunAll
    ```
 
-10. for form/UI changes, also run:
+11. for form/UI changes, also run:
 
    ```vb
    TST_DP_RunAll_WithUISmoke
    ```
 
-11. record the actual Excel version/build, Office bitness and Windows version;
-12. perform package-level smoke testing on the actual release binary where that
+12. record the actual Excel version/build, Office bitness and Windows version;
+13. perform package-level smoke testing on the actual release binary where that
     binary is the deployed artifact.
 
 Latest recorded standard v1.2.1 source regression baseline:
@@ -1233,7 +1267,8 @@ artifact signing
 
 while the analytics credential is available to the job.
 
-The repository's software-quality workflow work is tracked separately.
+The repository's software-quality workflow work is tracked separately, as
+[#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15). No automated CI runs the VBA regression pack today.
 
 ---
 

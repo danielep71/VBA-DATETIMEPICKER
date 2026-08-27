@@ -693,21 +693,30 @@ DP_Start acquires lease
 shared Excel registrations are installed
 ```
 
-## Second `v1.2.0` provider
+## Second current-version provider
 
 ```text
 owner already present
     ↓
-second DP_Start refused
+second provider refused on any entry path
     ↓
 existing owner left untouched
 ```
 
-The ownership check happens **before** shared registrations.
+The ownership check happens **before** shared registrations, on **every** entry
+path — `DP_Start`, `DP_Show`, `DP_Preload`, `DP_Click`, `DP_OpenForActiveCell`,
+the keyboard shortcut and `Ribbon_ShowPicker`.
+
+> [!NOTE]
+> Through `v1.2.0` only `DP_Start` consulted the lease. A refused copy could
+> still reach the manager by another route, register shared state, and remove
+> the owner's registrations during its own teardown. Corrected in `v1.2.1`
+> ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
 
 ## Teardown protection
 
-A refused provider is not allowed to dismantle the owner's runtime through:
+A refused provider is not admitted on any entry path, and is not allowed to
+register shared state or to dismantle the owner's runtime through:
 
 ```text
 DP_Stop
@@ -761,7 +770,10 @@ Ctrl + Shift + D
 
 All three may be disabled.
 
-That is valid configuration.
+That is valid configuration, and it is honored from `v1.2.1`. Through `v1.2.0`
+the settings panel forced `Ctrl + Shift + D` back on whenever right-click and the
+grid icon were both disabled — a setting the panel does not expose, so the change
+was invisible ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42)).
 
 The picker can still be opened through:
 
@@ -1145,9 +1157,9 @@ Closing Excel also clears the temporary provider lease.
 This is protected:
 
 ```text
-v1.2.0 provider
+v1.2.1 provider
 +
-v1.2.0 provider
+v1.2.1 provider
 =
 second provider refused
 ```

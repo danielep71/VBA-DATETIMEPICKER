@@ -209,7 +209,8 @@ refactor and no new features. Corrections are published against the released
 - `Public-API` address-cap wording now matches the code. The 25-address cap is
   applied per target area rather than per operation, so a discontiguous write can
   report more than 25 addresses in a category while the classification totals stay
-  exact. Moving to one cap per operation is tracked for `v1.2.2`.
+  exact. Moving to one cap per operation is deferred to `v1.2.2` and is not yet filed as
+  an issue.
 
 - `Installation-and-Import` showed a repository tree containing a tracked
   `demo/DatePicker Demo.xlsm`. No demo workbook is tracked: `demo/` holds the VBA
@@ -258,8 +259,14 @@ refactor and no new features. Corrections are published against the released
 ### 🔗 Compatibility
 
 - No supported API name, signature or default changed.
-- Behavior change is limited to paths that were already specified as refusing.
-  A single participating provider sees no difference.
+- Provider-admission behavior change is limited to paths that were already
+  specified as refusing; a single participating provider sees no difference
+  there. The #21, #42 and #47 corrections do change what a single provider
+  observes: a zero-write returns a complete `DP_WriteResult` instead of raising,
+  a `RecoveryRequired` window-style failure fails the form load instead of
+  presenting it, and saving the settings panel no longer re-enables
+  `Ctrl + Shift + D`. In each case the new behavior is what `v1.2.0` already
+  specified.
 - `M_Lease_Test_SilenceRefusalReport` and `M_Lease_Test_RefusalReportCount` are
   internal test infrastructure, not supported API. They exist because
   `Application.DisplayAlerts` does not suppress `VBA.MsgBox`, so automated
@@ -297,12 +304,27 @@ refactor and no new features. Corrections are published against the released
 - Automatic reclamation of a stale lease is still deliberately absent. Recovery
   after a VBA project reset remains the explicit
   `DP_ForceReleaseProviderLease` call.
+- A pre-existing `Ribbon_Demo` demo-sheet toggle defect is not fixed here: the
+  callback builds the demo sheet visible, then reads it as already visible and
+  hides it. It predates `v1.2.0`, is out of scope for an integrity hotfix, and is
+  deferred to `v1.2.2`. It is not yet filed as an issue.
 
 ---
 
 ## [1.2.0] - 2026-08-25
 
 > ✨ **Minor** · safety, observability and runtime-ownership release
+
+> 📌 **Corrected by [1.2.1](#121---2026-08-26).** This entry is preserved as
+> published. Five contracts recorded below were specified but not fully
+> delivered in `v1.2.0`, and were corrected in the `v1.2.1` integrity hotfix:
+> provider refusal was enforced only at `DP_Start` ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)); the
+> settings-panel save path still forced the keyboard shortcut back on
+> ([#42](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/42)); the accounting invariant holds only for a result that
+> completed ([#21](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/21)); `DP_WindowStyleResult` was produced but
+> discarded at both call sites ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)); and four Wiki pages from
+> the rewrite were wrong or stale ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17)). Read this entry
+> together with `v1.2.1`.
 
 ### 🧭 Release intent
 
