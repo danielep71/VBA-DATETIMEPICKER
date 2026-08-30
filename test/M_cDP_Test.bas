@@ -76,7 +76,7 @@ Option Explicit
 '   covers both call forms.
 '
 ' UPDATED
-'   2026-08-27
+'   2026-08-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4028,7 +4028,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '   triggering the settings setter side effects during the test
 '
 ' UPDATED
-'   2026-08-27
+'   2026-08-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4048,6 +4048,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     Dim ForeignLeftBefore   As Double           'Foreign left position before the DatePicker ran
     Dim ForeignTopBefore    As Double           'Foreign top position before the DatePicker ran
     Dim ForeignWidthBefore  As Double           'Foreign width before the DatePicker ran
+    Dim PurgeErrNumber      As Long             'Error escaping purge when deletion is unavailable
 
     Dim SavedErrNumber      As Long     'Captured original error number
     Dim SavedErrDescription As String   'Captured original error description
@@ -4323,6 +4324,47 @@ Private Sub TST_DP_RunSuite_GridIcon()
             0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
         Set ForeignShape = Nothing
 
+
+'------------------------------------------------------------------------------
+' STALE PENDING SHAPE
+'------------------------------------------------------------------------------
+    'M_GridIcon_Create clears a stale DP_GridIcon_Pending shape left by an
+    'interrupted run. That shape is retrieved from Excel rather than created by
+    'the current transaction, so the internal name selects it but never proves it
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, _
+            DP_GRID_ICON_NAME & "_Pending", _
+            "User shape that happens to use the pending name")
+        ForeignAltBefore = ForeignShape.AlternativeText
+
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "A foreign pending shape survives icon creation", _
+            1, TST_DP_CountNamedShapes( _
+                mTST_DP_HostWorkbook, DP_GRID_ICON_NAME & "_Pending")
+        TST_DP_AssertEqualsString "A foreign pending shape keeps its alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+    'Clear both shapes before the owned case
+        M_GridIcon_PurgeAll
+        ForeignShape.Delete
+        Set ForeignShape = Nothing
+
+    'A pending shape carrying a valid marker is this component's own debris from
+    'an interrupted create and must still be reclaimed
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, _
+            DP_GRID_ICON_NAME & "_Pending", _
+            "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF")
+        Set ForeignShape = Nothing
+
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "An owned pending orphan is reclaimed by creation", _
+            0, TST_DP_CountNamedShapes( _
+                mTST_DP_HostWorkbook, DP_GRID_ICON_NAME & "_Pending")
+        M_GridIcon_PurgeAll
+
 '------------------------------------------------------------------------------
 ' CROSS-WORKBOOK PURGE
 '------------------------------------------------------------------------------
@@ -4351,6 +4393,47 @@ Private Sub TST_DP_RunSuite_GridIcon()
             1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
         TST_DP_AssertEqualsString "Second-workbook shape keeps its alternative text", _
             ForeignAltBefore, ForeignShape.AlternativeText
+
+
+'------------------------------------------------------------------------------
+' DELETION UNAVAILABLE ON A PROTECTED SHEET
+'------------------------------------------------------------------------------
+    'Ownership can be proven and deletion can still be impossible. Purge must
+    'leave the shape in place and must not raise into its caller. Reporting that
+    'outcome as a structured cleanup result belongs to #50, not here
+        ForeignShape.Delete
+        Set ForeignShape = Nothing
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            ProbeSheet, _
+            DP_GRID_ICON_NAME, _
+            "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF")
+        TST_DP_AssertEqualsLong "Owned icon exists on the protected sheet before purge", _
+            1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+
+    'Protect the worksheet so Excel refuses the deletion
+        ProbeSheet.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True
+
+    'Suppress errors across the purge so an escaping error is asserted here
+    'rather than failing the suite from inside the call
+        On Error Resume Next
+        Err.Clear
+        M_GridIcon_PurgeAll
+        PurgeErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "Purge raises nothing when deletion is unavailable", _
+            0, PurgeErrNumber
+        TST_DP_AssertEqualsLong "Protection leaves the owned icon in place", _
+            1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+
+    'Removing the protection restores the ability to reclaim the icon
+        ProbeSheet.Unprotect
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "The owned icon is reclaimed once protection is removed", _
+            0, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+        Set ForeignShape = Nothing
 
 '------------------------------------------------------------------------------
 ' RELEASE THE SECOND WORKBOOK

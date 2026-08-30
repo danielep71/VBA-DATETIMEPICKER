@@ -15982,7 +15982,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '   This routine is the cold creation / recreation path
 '
 ' UPDATED
-'   2026-08-27
+'   2026-08-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -15996,6 +15996,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     Dim TargetSheet             As Excel.Worksheet  'Worksheet receiving the icon
     Dim NewIconShape            As Excel.Shape      'New temporary icon shape
     Dim ExistingIconShape       As Excel.Shape      'Owned icon already holding the canonical name
+    Dim PendingShape            As Excel.Shape      'Stale pending icon left by an interrupted run
     Dim ForeignIconPresent      As Boolean          'True when a same-named shape is not DatePicker-owned
     Dim OwnerMarker             As String           'Ownership marker written into DatePicker icons
     Dim IconLeft                As Double           'Icon left position
@@ -16156,8 +16157,20 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Remove stale temporary shape"
     'Suppress stale temporary-shape cleanup errors
         On Error Resume Next
-    'Delete a stale temporary icon from a previous interrupted run
-        TargetSheet.Shapes(TempShapeName).Delete
+    'Resolve a stale temporary icon left by a previous interrupted run without
+    'touching it. The pending name is internal, but this shape comes back from
+    'Excel rather than from this transaction, so it is proven like any other
+        Set PendingShape = Nothing
+        Set PendingShape = TargetSheet.Shapes(TempShapeName)
+        Err.Clear
+    'Delete it only when DatePicker ownership is proven
+        If Not PendingShape Is Nothing Then
+            If M_GridIcon_IsOwnedShape(PendingShape) Then
+                PendingShape.Delete
+            End If
+        End If
+    'Release the resolved reference
+        Set PendingShape = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
     'Restore fail-safe error handling
@@ -17997,7 +18010,8 @@ Public Sub M_GridIcon_PurgeAll()
 '   Deletes the tracked grid icon shape when available
 '   Clears the tracked grid icon shape reference
 '   Scans all open workbooks
-'   Deletes shapes named DP_GRID_ICON_NAME from each open workbook
+'   Deletes proven DatePicker-owned icons named DP_GRID_ICON_NAME from each
+'   open workbook, leaving same-named shapes it does not own untouched
 '   Restores normal error handling before exit
 '
 ' ERROR POLICY
@@ -18017,7 +18031,7 @@ Public Sub M_GridIcon_PurgeAll()
 '   Do not call this routine from high-frequency selection-change paths
 '
 ' UPDATED
-'   2026-08-27
+'   2026-08-30
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -18071,7 +18085,7 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '                    DELETE NAMED SHAPE ACROSS WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Deletes same-named DatePicker in-grid icon shapes from every worksheet in a
+'   Deletes proven DatePicker-owned in-grid icon shapes from every worksheet in a
 '   target workbook
 '
 ' WHY THIS EXISTS
@@ -18099,7 +18113,8 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '   Exits when no workbook is supplied
 '   Exits when the target shape name is blank
 '   Loops through every worksheet in the workbook
-'   Attempts to delete the same-named shape from each worksheet
+'   Resolves the same-named shape without modifying it
+'   Deletes it only when DatePicker ownership is proven
 '   Restores normal error handling before exit
 '
 ' ERROR POLICY
@@ -18111,14 +18126,18 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '   Excel Workbook / Worksheet / Shape object model
 '
 ' NOTES
-'   This routine intentionally deletes by shape name only
-'   This routine intentionally does not validate whether the named shape belongs
-'   to the DatePicker beyond the supplied shape name
+'   The shape name selects candidates; it never proves ownership. Every
+'   candidate is routed through M_GridIcon_IsOwnedShape before deletion, and a
+'   shape whose ownership cannot be proven is left completely untouched
+'
+'   Before #53 this routine deleted by name alone, so an unrelated shape in an
+'   unrelated workbook was destroyed silently under the suppression below
+'
 '   This routine intentionally does not trim TargetShapeName
 '   Keep this helper aligned with M_GridIcon_PurgeAll
 '
 ' UPDATED
-'   2026-08-27
+'   2026-08-30
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
