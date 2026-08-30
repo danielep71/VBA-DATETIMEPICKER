@@ -3994,7 +3994,8 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '                           GRID ICON SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Validates in-grid DatePicker icon creation, movement, removal, and purge
+'   Validates in-grid DatePicker icon creation, movement, removal, purge and
+'   shape ownership
 '
 ' WHY THIS EXISTS
 '   The grid icon is a high-frequency worksheet shape that is sensitive to stale
@@ -4037,6 +4038,16 @@ Private Sub TST_DP_RunSuite_GridIcon()
     Dim ShapeLeftBefore     As Double   'Icon left position before the move
     Dim ShapeTopBefore      As Double   'Icon top position before the move
     Dim StaleSheet          As Excel.Worksheet  'Temporary sheet used to strand the icon
+
+    Dim ProbeWorkbook       As Excel.Workbook   'Second workbook used by the ownership cases
+    Dim ProbeWorkbookName   As String           'Name of the second workbook, for the closed check
+    Dim ProbeSheet          As Excel.Worksheet  'Worksheet in the second workbook
+    Dim ForeignShape        As Excel.Shape      'Unrelated same-named shape under test
+    Dim ForeignAltBefore    As String           'Foreign alternative text before the DatePicker ran
+    Dim ForeignActionBefore As String           'Foreign OnAction before the DatePicker ran
+    Dim ForeignLeftBefore   As Double           'Foreign left position before the DatePicker ran
+    Dim ForeignTopBefore    As Double           'Foreign top position before the DatePicker ran
+    Dim ForeignWidthBefore  As Double           'Foreign width before the DatePicker ran
 
     Dim SavedErrNumber      As Long     'Captured original error number
     Dim SavedErrDescription As String   'Captured original error description
@@ -4211,6 +4222,149 @@ Private Sub TST_DP_RunSuite_GridIcon()
         TST_DP_AssertTrue "Purge clears the tracked reference", _
             gDP_GridIconShape Is Nothing
 
+
+'------------------------------------------------------------------------------
+' FOREIGN SHAPE SURVIVES THE CREATE PATH
+'------------------------------------------------------------------------------
+    'Before #53 a shape merely sharing the DP_GridIcon name was adopted by the
+    'show path: moved, resized, rebound to DP_Click and re-marked with DatePicker
+    'alternative text, which manufactured the ownership evidence a later purge
+    'relied on. Ownership must be proven, never granted by the component itself
+        M_GridIcon_PurgeAll
+        gDP_ShowGridIcon = True
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, DP_GRID_ICON_NAME, "User shape, not a DatePicker icon")
+
+    'Capture every property the adopt path used to overwrite
+        ForeignAltBefore = ForeignShape.AlternativeText
+        ForeignActionBefore = ForeignShape.OnAction
+        ForeignLeftBefore = ForeignShape.Left
+        ForeignTopBefore = ForeignShape.Top
+        ForeignWidthBefore = ForeignShape.Width
+
+    'Drive the normal show path against a cell on the same worksheet
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+
+    'The DatePicker must neither adopt the shape nor create a second one
+        TST_DP_AssertEqualsLong "Foreign collision creates no second grid icon", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "Foreign shape keeps its alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+        TST_DP_AssertEqualsString "Foreign shape keeps its OnAction", _
+            ForeignActionBefore, ForeignShape.OnAction
+        TST_DP_AssertTrue "Foreign shape keeps its position", _
+            (ForeignShape.Left = ForeignLeftBefore) And _
+            (ForeignShape.Top = ForeignTopBefore)
+        TST_DP_AssertTrue "Foreign shape keeps its size", _
+            ForeignShape.Width = ForeignWidthBefore
+        TST_DP_AssertTrue "Foreign collision leaves nothing tracked", _
+            gDP_GridIconShape Is Nothing
+
+    'The hidden pre-creation path reaches the same creation routine
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "PreCreateHidden refuses a foreign collision", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "PreCreateHidden leaves the foreign alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+'------------------------------------------------------------------------------
+' FOREIGN SHAPE SURVIVES THE DELETE PATHS
+'------------------------------------------------------------------------------
+    'Removal and purge both deleted by name alone. Neither may touch a shape
+    'whose ownership is not proven
+        M_GridIcon_Remove
+        TST_DP_AssertTrue "Remove leaves a foreign shape in place", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "PurgeAll leaves a foreign shape in place", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "Foreign shape survives purge unmutated", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+'------------------------------------------------------------------------------
+' MALFORMED MARKERS FAIL CLOSED
+'------------------------------------------------------------------------------
+    'A bare prefix must not confer ownership, and an unknown schema must not be
+    'interpreted as v1. Both cases stay foreign
+        ForeignShape.AlternativeText = "DatePicker Grid Entry Point | dp-owner-v1="
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "An empty owner token fails closed", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+        ForeignShape.AlternativeText = _
+            "DatePicker Grid Entry Point | dp-owner-v9=20200101010101-00000000-DEADBEEF"
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "An unknown marker schema fails closed", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+'------------------------------------------------------------------------------
+' MARKED SHAPES ARE RECLAIMABLE
+'------------------------------------------------------------------------------
+    'A valid v1 marker carrying another provider's token is reclaimable under the
+    'exclusive-provider model, which is what allows a crashed provider's icon to
+    'be cleaned up. #14 narrows this to token equality
+        ForeignShape.AlternativeText = _
+            "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF"
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "A stale provider-token icon is reclaimable", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        Set ForeignShape = Nothing
+
+    'Icons created before the marker existed carry the bare legacy string. They
+    'were written by released DatePicker code, so abandoning them across the
+    'upgrade would strand a shape in every saved workbook
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, DP_GRID_ICON_NAME, "DatePicker Grid Entry Point")
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "A legacy v0 icon is reclaimable", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        Set ForeignShape = Nothing
+
+'------------------------------------------------------------------------------
+' CROSS-WORKBOOK PURGE
+'------------------------------------------------------------------------------
+    'PurgeAll walks every open workbook and deleted by name there too, so an
+    'unrelated shape in an unrelated workbook was destroyed silently. This is the
+    'case the issue was filed for
+        Set ProbeWorkbook = Excel.Application.Workbooks.Add
+        ProbeWorkbookName = ProbeWorkbook.Name
+        Set ProbeSheet = ProbeWorkbook.Worksheets(1)
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            ProbeSheet, DP_GRID_ICON_NAME, "Unrelated shape in another workbook")
+        ForeignAltBefore = ForeignShape.AlternativeText
+
+    'Create a genuine DatePicker icon in the host workbook
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "Owned icon exists in the host workbook before purge", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+    'Purge must remove what it owns and leave what it does not
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "Purge removes the owned icon from the host workbook", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsLong "Purge leaves the unrelated shape in the second workbook", _
+            1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "Second-workbook shape keeps its alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+'------------------------------------------------------------------------------
+' RELEASE THE SECOND WORKBOOK
+'------------------------------------------------------------------------------
+    'Release the shape reference before the workbook that owns it
+        Set ForeignShape = Nothing
+        Set ProbeSheet = Nothing
+    'Close the second workbook without saving, then prove it is gone. A leaked
+    'workbook is a dirty environment for everything that follows, so it is
+    'asserted rather than merely attempted
+        TST_DP_CloseProbeWorkbook ProbeWorkbook
+        TST_DP_AssertTrue "The ownership probe workbook is closed", _
+            Not TST_DP_WorkbookIsOpen(ProbeWorkbookName)
+
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -4237,6 +4391,13 @@ SuiteFail:
         TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
         Err.Clear
+    'Release the second workbook on the failure path too. This runs after the
+    'original error was captured above, so a cleanup failure here can never
+    'overwrite the assertion failure that brought the suite here
+        Set ForeignShape = Nothing
+        Set ProbeSheet = Nothing
+        TST_DP_CloseProbeWorkbook ProbeWorkbook
+        Err.Clear
     'Record the suite-level failure from the captured values
         TST_DP_RecordFail "GridIcon suite failed", _
             "Error " & VBA.CStr(SavedErrNumber) & " - " & SavedErrDescription & _
@@ -4244,6 +4405,208 @@ SuiteFail:
         Err.Clear
 
 End Sub
+
+Private Function TST_DP_AddNamedShapeForTest( _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByVal ShapeName As String, _
+    ByVal AlternativeTextValue As String) As Excel.Shape
+
+'
+'==============================================================================
+'                       ADD A NAMED SHAPE FOR OWNERSHIP TESTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Creates a plain worksheet shape with a chosen name and alternative text
+'
+' WHY THIS EXISTS
+'   The ownership cases need shapes the DatePicker did not create: an unrelated
+'   user shape that merely shares the canonical name, a shape carrying a legacy
+'   marker, and shapes carrying malformed markers. All of them are ordinary
+'   shapes distinguished only by their alternative text
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet receiving the shape
+'
+'   ShapeName
+'     Name to assign
+'
+'   AlternativeTextValue
+'     Alternative text to assign, which is the ownership marker under test
+'
+' RETURNS
+'   The created shape
+'
+' BEHAVIOR
+'   Adds a small rectangle well away from the icon anchor, names it and stamps
+'   the requested alternative text
+'
+' ERROR POLICY
+'   Raises outward. A setup failure must fail the suite rather than produce a
+'   case that silently tests nothing
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The shape is deliberately positioned and sized unlike a real grid icon, so a
+'   test that asserts position or size cannot pass by coincidence
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NewShape        As Excel.Shape  'Shape being created
+
+'------------------------------------------------------------------------------
+' CREATE THE SHAPE
+'------------------------------------------------------------------------------
+    'Add a shape that looks nothing like a grid icon
+        Set NewShape = TargetSheet.Shapes.AddShape(msoShapeRectangle, 300#, 300#, 40#, 18#)
+    'Apply the name and the marker under test
+        NewShape.Name = ShapeName
+        NewShape.AlternativeText = AlternativeTextValue
+    'Return the created shape
+        Set TST_DP_AddNamedShapeForTest = NewShape
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release the local reference without releasing the returned shape
+        Set NewShape = Nothing
+
+End Function
+
+Private Sub TST_DP_CloseProbeWorkbook(ByRef ProbeWorkbook As Excel.Workbook)
+
+'
+'==============================================================================
+'                          CLOSE THE PROBE WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Closes the second workbook used by the ownership cases without saving
+'
+' WHY THIS EXISTS
+'   The cross-workbook case has to open a real second workbook. Leaking it would
+'   leave the Excel session dirty for every following suite and for the next run
+'
+' INPUTS
+'   ProbeWorkbook
+'     Workbook to close; set to Nothing on return
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Closes with SaveChanges:=False and releases the reference
+'
+' ERROR POLICY
+'   Best effort. Must not raise, because it runs on both the success and the
+'   failure path, and on the failure path the original error has already been
+'   captured and must not be replaced
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The workbook is held by object reference rather than by name, so a workbook
+'   the run did not create can never be closed by this routine
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLOSE THE WORKBOOK
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into a caller
+        On Error Resume Next
+    'Exit when nothing is held
+        If ProbeWorkbook Is Nothing Then
+            Err.Clear
+            Exit Sub
+        End If
+    'Close the workbook without saving
+        ProbeWorkbook.Close SaveChanges:=False
+    'Release the reference whatever the close reported
+        Set ProbeWorkbook = Nothing
+    'Clear any suppressed close error
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_WorkbookIsOpen(ByVal WorkbookName As String) As Boolean
+
+'
+'==============================================================================
+'                            WORKBOOK IS OPEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a workbook with the given name is still open
+'
+' WHY THIS EXISTS
+'   Closing the probe workbook must be asserted, not assumed. A leaked workbook
+'   is exactly the kind of residue that makes a later run fail for reasons that
+'   look unrelated
+'
+' INPUTS
+'   WorkbookName
+'     Workbook name captured while it was open
+'
+' RETURNS
+'   True when a workbook of that name is still in the Workbooks collection
+'
+' BEHAVIOR
+'   Scans the open workbooks by name
+'
+' ERROR POLICY
+'   Never raises outward. Any failure reports False
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Names are compared case-insensitively, as Excel treats them
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CurWorkbook     As Excel.Workbook   'Workbook being scanned
+
+'------------------------------------------------------------------------------
+' SCAN THE OPEN WORKBOOKS
+'------------------------------------------------------------------------------
+    'Never let the scan raise into a caller
+        On Error Resume Next
+    'Assume the workbook is closed
+        TST_DP_WorkbookIsOpen = False
+    'Exit when no name was supplied
+        If VBA.LenB(WorkbookName) = 0 Then GoTo ExitProcedure
+    'Report a match from the open workbooks
+        For Each CurWorkbook In Excel.Application.Workbooks
+            If VBA.StrComp(CurWorkbook.Name, WorkbookName, vbTextCompare) = 0 Then
+                TST_DP_WorkbookIsOpen = True
+                GoTo ExitProcedure
+            End If
+        Next CurWorkbook
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release the local reference
+        Set CurWorkbook = Nothing
+    'Clear any suppressed scan error
+        Err.Clear
+
+End Function
 
 Private Function TST_DP_AddStaleSheetForTest( _
     ByVal HostWorkbook As Excel.Workbook, _

@@ -275,6 +275,9 @@ Option Explicit
     Private Const DP_LEASE_MARKER_TAG              As String = "VBA_DATETIMEPICKER_RUNTIME_LEASE_OWNER"         'Identifies the lease marker control
     Private Const DP_LEASE_AMBIGUOUS               As String = "?"                       'Sentinel for a lease that cannot be read
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
+    Private Const DP_GRID_ICON_ALT_BASE            As String = "DatePicker Grid Entry Point"   'Human-readable grid icon alternative text
+    Private Const DP_GRID_ICON_OWNER_TAG           As String = " | dp-owner-v1="               'Versioned ownership marker schema tag
+    Private Const DP_GRID_ICON_PENDING_SUFFIX      As String = "_Pending"                      'Temporary name held during icon creation
     Public Const DP_MSGBOX_TITLE                   As String = "Date / Time Picker"      'Message-box title
 
     Public Const DP_DEFAULT_FIRST_DAY_OF_WEEK      As Long = vbMonday                    'Default first day of week
@@ -404,6 +407,8 @@ Option Explicit
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
     Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
     Private mDP_RuntimeOwnerId          As String               'Ephemeral lease token, non-empty only while this project owns the lease
+    Private mDP_GridIconOwnerToken      As String               'Durable token stamped into created grid icons, never used for admission
+    Private mDP_GridIconRefusalKey      As String               'Diagnostic-only key of the last sheet where a foreign icon refused creation
     Private mDP_LeaseRefusalSilenced    As Boolean              'Test-only: suppress the modal refusal report so entry paths stay drivable
     Private mDP_LeaseRefusalCount       As Long                 'Test-only: refusal reports raised while silenced
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
@@ -14795,6 +14800,625 @@ SafeExit:
 
 End Function
 
+Private Function M_GridIcon_SessionOwnerToken() As String
+
+'
+'==============================================================================
+'                        GRID ICON SESSION OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the token stamped into grid icons created by this session
+'
+' WHY THIS EXISTS
+'   mDP_RuntimeOwnerId is ephemeral and is empty whenever this project does not
+'   hold the provider lease. An icon stamped with an empty token would be born
+'   unowned, and fail-closed cleanup would then protect it from its own creator
+'   permanently. This token is therefore never empty
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   A token valid under the v1 owner-token grammar
+'
+' BEHAVIOR
+'   Seeds once from the live lease token when one is held, otherwise mints one
+'   through the same generator the lease uses, and reuses it for the session
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_RuntimeOwnerId
+'   mDP_GridIconOwnerToken
+'   M_Lease_NewOwnerId
+'
+' NOTES
+'   This is a stamping identity only. It is never consulted for admission and
+'   never compared against the lease. #14 will compare stored tokens against the
+'   live provider; nothing here should be read as ownership arbitration
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE THE SESSION TOKEN
+'------------------------------------------------------------------------------
+    'Never let token resolution raise into a caller
+        On Error Resume Next
+    'Reuse the token already minted for this session
+        If VBA.LenB(mDP_GridIconOwnerToken) > 0 Then
+            M_GridIcon_SessionOwnerToken = mDP_GridIconOwnerToken
+            Err.Clear
+            Exit Function
+        End If
+    'Prefer the live lease token when this project holds the lease
+        If VBA.LenB(mDP_RuntimeOwnerId) > 0 Then
+            mDP_GridIconOwnerToken = mDP_RuntimeOwnerId
+        Else
+    'Mint a token through the same generator the lease uses
+            mDP_GridIconOwnerToken = M_Lease_NewOwnerId()
+        End If
+    'Return the resolved token
+        M_GridIcon_SessionOwnerToken = mDP_GridIconOwnerToken
+    'Clear any suppressed resolution error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_BuildOwnerMarker() As String
+
+'
+'==============================================================================
+'                        GRID ICON BUILD OWNER MARKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds the AlternativeText value written into every DatePicker grid icon
+'
+' WHY THIS EXISTS
+'   The marker is the only durable, shape-scoped ownership evidence. Building it
+'   in one place keeps the written form and the parsed form from drifting
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The complete marker string
+'
+' BEHAVIOR
+'   Concatenates the human-readable base, the versioned schema tag and the
+'   session owner token
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_ALT_BASE
+'   DP_GRID_ICON_OWNER_TAG
+'   M_GridIcon_SessionOwnerToken
+'
+' NOTES
+'   The human phrase stays at the front so assistive technology announces
+'   something meaningful before the machine token. Formalizing or relocating the
+'   accessible representation belongs to #29
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' BUILD THE MARKER
+'------------------------------------------------------------------------------
+    'Never let marker construction raise into a caller
+        On Error Resume Next
+    'Compose the versioned marker
+        M_GridIcon_BuildOwnerMarker = DP_GRID_ICON_ALT_BASE & _
+            DP_GRID_ICON_OWNER_TAG & _
+            M_GridIcon_SessionOwnerToken()
+    'Clear any suppressed construction error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_IsValidOwnerToken(ByVal TokenText As String) As Boolean
+
+'
+'==============================================================================
+'                      GRID ICON IS VALID OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a token satisfies the v1 owner-token grammar
+'
+' WHY THIS EXISTS
+'   A bare prefix must not confer ownership. Requiring the token to parse stops
+'   hand-typed or truncated alternative text from manufacturing ownership
+'
+' INPUTS
+'   TokenText
+'     Candidate token extracted from a marker
+'
+' RETURNS
+'   True only when the token matches the v1 grammar exactly
+'
+' BEHAVIOR
+'   Validates yyyymmddhhnnss-nnnnnnnn-HEX, which is the form produced by
+'   M_Lease_NewOwnerId
+'
+' ERROR POLICY
+'   Never raises outward. Any failure reports False
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The grammar is bound to schema v1. A future schema adds its own validator
+'   rather than loosening this one, so shapes already marked keep their meaning
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CharIndex       As Long         'Character position being validated
+    Dim CurrentChar     As String       'Character being validated
+    Dim HexPart         As String       'Trailing hexadecimal component
+
+'------------------------------------------------------------------------------
+' VALIDATE THE TOKEN
+'------------------------------------------------------------------------------
+    'Never let validation raise into a caller
+        On Error Resume Next
+    'Assume the token is invalid until every rule passes
+        M_GridIcon_IsValidOwnerToken = False
+    'Reject a token shorter than the minimum v1 form
+        If VBA.Len(TokenText) < 25 Then GoTo ExitProcedure
+    'Reject a token longer than the maximum v1 form
+        If VBA.Len(TokenText) > 32 Then GoTo ExitProcedure
+    'Require the separators in their fixed positions
+        If VBA.Mid$(TokenText, 15, 1) <> "-" Then GoTo ExitProcedure
+        If VBA.Mid$(TokenText, 24, 1) <> "-" Then GoTo ExitProcedure
+    'Require 14 leading timestamp digits
+        For CharIndex = 1 To 14
+            CurrentChar = VBA.Mid$(TokenText, CharIndex, 1)
+            If CurrentChar < "0" Or CurrentChar > "9" Then GoTo ExitProcedure
+        Next CharIndex
+    'Require 8 fractional-second digits
+        For CharIndex = 16 To 23
+            CurrentChar = VBA.Mid$(TokenText, CharIndex, 1)
+            If CurrentChar < "0" Or CurrentChar > "9" Then GoTo ExitProcedure
+        Next CharIndex
+    'Isolate the trailing hexadecimal component
+        HexPart = VBA.Mid$(TokenText, 25)
+    'Require a non-empty hexadecimal component
+        If VBA.LenB(HexPart) = 0 Then GoTo ExitProcedure
+    'Require every hexadecimal character to be an uppercase hex digit
+        For CharIndex = 1 To VBA.Len(HexPart)
+            CurrentChar = VBA.Mid$(HexPart, CharIndex, 1)
+            If Not ((CurrentChar >= "0" And CurrentChar <= "9") Or _
+                    (CurrentChar >= "A" And CurrentChar <= "F")) Then
+                GoTo ExitProcedure
+            End If
+        Next CharIndex
+    'Report a token that satisfies every rule
+        M_GridIcon_IsValidOwnerToken = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed validation error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_ReadOwnerToken(ByVal TargetShape As Excel.Shape) As String
+
+'
+'==============================================================================
+'                        GRID ICON READ OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Extracts the owner token from a shape carrying a v1 ownership marker
+'
+' WHY THIS EXISTS
+'   #14 must compare stored tokens against the live provider. Extraction is kept
+'   beside the predicate so no other routine parses AlternativeText
+'
+' INPUTS
+'   TargetShape
+'     Shape to inspect
+'
+' RETURNS
+'   The token when the shape carries a valid v1 marker, otherwise an empty string
+'
+' BEHAVIOR
+'   Reads AlternativeText, verifies the base and schema tag, and returns the
+'   remainder only when it parses under the v1 grammar
+'
+' ERROR POLICY
+'   Never raises outward. Any failure returns an empty string
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_ALT_BASE
+'   DP_GRID_ICON_OWNER_TAG
+'   M_GridIcon_IsValidOwnerToken
+'
+' NOTES
+'   A legacy v0 icon carries the base string with no tag. It is owned but has no
+'   token, so this function returns an empty string for it. An empty result
+'   therefore means "no token", never "not owned"
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim MarkerText      As String       'Alternative text read from the shape
+    Dim MarkerPrefix    As String       'Expected base and schema tag
+    Dim TokenText       As String       'Extracted candidate token
+
+'------------------------------------------------------------------------------
+' READ THE TOKEN
+'------------------------------------------------------------------------------
+    'Never let a marker read raise into a caller
+        On Error Resume Next
+    'Start with no token
+        M_GridIcon_ReadOwnerToken = VBA.vbNullString
+    'Exit when no shape was supplied
+        If TargetShape Is Nothing Then GoTo ExitProcedure
+    'Read the marker, treating an unreadable shape as unmarked
+        Err.Clear
+        MarkerText = TargetShape.AlternativeText
+        If Err.Number <> 0 Then GoTo ExitProcedure
+    'Build the expected marker prefix
+        MarkerPrefix = DP_GRID_ICON_ALT_BASE & DP_GRID_ICON_OWNER_TAG
+    'Exit when the marker does not open with the expected prefix
+        If VBA.Len(MarkerText) <= VBA.Len(MarkerPrefix) Then GoTo ExitProcedure
+        If VBA.StrComp(VBA.Left$(MarkerText, VBA.Len(MarkerPrefix)), _
+            MarkerPrefix, vbBinaryCompare) <> 0 Then GoTo ExitProcedure
+    'Isolate the candidate token
+        TokenText = VBA.Mid$(MarkerText, VBA.Len(MarkerPrefix) + 1)
+    'Return the token only when it parses
+        If M_GridIcon_IsValidOwnerToken(TokenText) Then
+            M_GridIcon_ReadOwnerToken = TokenText
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_IsOwnedShape(ByVal TargetShape As Excel.Shape) As Boolean
+
+'
+'==============================================================================
+'                          GRID ICON IS OWNED SHAPE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The single authority on whether a shape is a DatePicker-owned grid icon
+'
+' WHY THIS EXISTS
+'   Before this predicate the component treated the shape name alone as proof of
+'   ownership. It would adopt any same-named shape, move it, resize it, bind it
+'   to DP_Click, overwrite its alternative text and later delete it. Overwriting
+'   the alternative text manufactured the very evidence the deletion relied on,
+'   so ownership could be self-granted. Interpretation must live in exactly one
+'   place or that drift returns
+'
+' INPUTS
+'   TargetShape
+'     Shape to inspect
+'
+' RETURNS
+'   True only when ownership is proven
+'
+' BEHAVIOR
+'   Requires the canonical or pending grid-icon name, then a marker that is
+'   either a valid v1 marker or the legacy v0 alternative text
+'
+' ERROR POLICY
+'   Never raises outward. Any failure to read reports False, so an unreadable
+'   shape is treated as foreign and is never modified or deleted
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_NAME
+'   DP_GRID_ICON_PENDING_SUFFIX
+'   DP_GRID_ICON_ALT_BASE
+'   M_GridIcon_ReadOwnerToken
+'
+' NOTES
+'   Legacy v0 icons carry the bare base string with no schema tag. They predate
+'   #53 and are recognized as product-owned so the component does not abandon
+'   icons it created before the marker existed
+'
+'   Ownership here is product-level by design for v1.2.2, which is what allows a
+'   stale icon left by a crashed provider to be reclaimed. #14 narrows the
+'   predicate to token equality without changing the carrier
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ShapeName       As String       'Name read from the shape
+    Dim MarkerText      As String       'Alternative text read from the shape
+
+'------------------------------------------------------------------------------
+' VERIFY OWNERSHIP
+'------------------------------------------------------------------------------
+    'Never let an ownership probe raise into a caller
+        On Error Resume Next
+    'Fail closed until ownership is proven
+        M_GridIcon_IsOwnedShape = False
+    'Exit when no shape was supplied
+        If TargetShape Is Nothing Then GoTo ExitProcedure
+    'Read the shape name, treating an unreadable shape as foreign
+        Err.Clear
+        ShapeName = TargetShape.Name
+        If Err.Number <> 0 Then GoTo ExitProcedure
+    'Require the canonical or pending grid-icon name
+        If VBA.StrComp(ShapeName, DP_GRID_ICON_NAME, vbBinaryCompare) <> 0 Then
+            If VBA.StrComp(ShapeName, _
+                DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX, _
+                vbBinaryCompare) <> 0 Then
+                GoTo ExitProcedure
+            End If
+        End If
+    'Accept a shape carrying a valid v1 owner token
+        If VBA.LenB(M_GridIcon_ReadOwnerToken(TargetShape)) > 0 Then
+            M_GridIcon_IsOwnedShape = True
+            GoTo ExitProcedure
+        End If
+    'Read the marker again to test the legacy v0 form
+        Err.Clear
+        MarkerText = TargetShape.AlternativeText
+        If Err.Number <> 0 Then GoTo ExitProcedure
+    'Accept the legacy v0 marker, which carries no token
+        If VBA.StrComp(MarkerText, DP_GRID_ICON_ALT_BASE, vbBinaryCompare) = 0 Then
+            M_GridIcon_IsOwnedShape = True
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_ResolveOwnedShape( _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByRef ForeignShapePresent As Boolean) As Excel.Shape
+
+'
+'==============================================================================
+'                        GRID ICON RESOLVE OWNED SHAPE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the canonical grid icon on a worksheet, reporting separately when a
+'   same-named shape exists but is not owned
+'
+' WHY THIS EXISTS
+'   Callers need three answers, not two: an owned icon to reuse, no shape at all,
+'   or a foreign shape that must be left completely alone. Collapsing the last
+'   two would let creation overwrite a user shape
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet to inspect
+'
+'   ForeignShapePresent
+'     Set True when a same-named shape exists and ownership is not proven
+'
+' RETURNS
+'   The owned shape, or Nothing
+'
+' BEHAVIOR
+'   Looks the shape up by canonical name and routes it through the ownership
+'   predicate without touching it
+'
+' ERROR POLICY
+'   Never raises outward. A lookup failure reports no shape and no collision
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_NAME
+'   M_GridIcon_IsOwnedShape
+'
+' NOTES
+'   This routine reads only. It must never modify the shape it inspects, because
+'   the foreign case is decided by what it finds
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CandidateShape  As Excel.Shape  'Same-named shape found on the worksheet
+
+'------------------------------------------------------------------------------
+' RESOLVE THE SHAPE
+'------------------------------------------------------------------------------
+    'Never let resolution raise into a caller
+        On Error Resume Next
+    'Report no collision until one is found
+        ForeignShapePresent = False
+    'Exit when no worksheet was supplied
+        If TargetSheet Is Nothing Then GoTo ExitProcedure
+    'Look the canonical shape up without touching it
+        Err.Clear
+        Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+    'Exit when no same-named shape exists
+        If Err.Number <> 0 Or CandidateShape Is Nothing Then
+            Err.Clear
+            Set CandidateShape = Nothing
+            GoTo ExitProcedure
+        End If
+    'Return an owned icon, or report a foreign collision
+        If M_GridIcon_IsOwnedShape(CandidateShape) Then
+            Set M_GridIcon_ResolveOwnedShape = CandidateShape
+        Else
+            ForeignShapePresent = True
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release the local reference without releasing the returned shape
+        Set CandidateShape = Nothing
+    'Clear any suppressed resolution error
+        Err.Clear
+
+End Function
+
+Private Sub M_GridIcon_ReportForeignShape( _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByVal EntryPoint As String)
+
+'
+'==============================================================================
+'                       GRID ICON REPORT FOREIGN SHAPE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes a diagnostic once per worksheet when a foreign same-named shape
+'   refuses grid-icon creation
+'
+' WHY THIS EXISTS
+'   Should_ShowGridIcon fires on every eligible selection, so an unsuppressed
+'   refusal would print on every cell move. Silence would be worse: the user
+'   would see no icon and no reason
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet carrying the foreign shape
+'
+'   EntryPoint
+'     Name of the refusing routine
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Builds a workbook-plus-worksheet identity key and prints only when that key
+'   differs from the last reported one
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_GridIconRefusalKey
+'
+' NOTES
+'   This state is diagnostic only. It never affects the ownership decision and
+'   never suppresses re-evaluation: every eligible selection still consults the
+'   predicate against current reality. Only repeated printing is suppressed
+'
+'   The key uses the worksheet CodeName as well as its visible name, because a
+'   visible name can be renamed and can collide across workbooks
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RefusalKey      As String       'Workbook and worksheet identity key
+
+'------------------------------------------------------------------------------
+' REPORT THE REFUSAL
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise into a caller
+        On Error Resume Next
+    'Exit when no worksheet was supplied
+        If TargetSheet Is Nothing Then GoTo ExitProcedure
+    'Build the worksheet identity key
+        RefusalKey = TargetSheet.Parent.Name & "||" & _
+            TargetSheet.CodeName & "||" & TargetSheet.Name
+    'Exit when this worksheet was already reported
+        If VBA.StrComp(RefusalKey, mDP_GridIconRefusalKey, vbBinaryCompare) = 0 Then
+            GoTo ExitProcedure
+        End If
+    'Remember the reported worksheet
+        mDP_GridIconRefusalKey = RefusalKey
+    'Write the refusal diagnostic
+        Debug.Print EntryPoint & _
+            " | Refused | A shape named " & DP_GRID_ICON_NAME & _
+            " exists on " & TargetSheet.Name & _
+            " without DatePicker ownership; it was left untouched"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Sub
+
+Private Sub M_GridIcon_ClearRefusalKey()
+
+'
+'==============================================================================
+'                        GRID ICON CLEAR REFUSAL KEY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears the diagnostic refusal key so a later collision reports again
+'
+' WHY THIS EXISTS
+'   A refusal that has been resolved should not stay silent forever. Clearing on
+'   success and on teardown keeps the diagnostic useful without making it stateful
+'   in any way that matters
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Empties the stored key
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_GridIconRefusalKey
+'
+' NOTES
+'   Called when an owned icon is created or adopted, and during teardown. It is
+'   never consulted for ownership
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLEAR THE KEY
+'------------------------------------------------------------------------------
+    'Never let a diagnostic reset raise into a caller
+        On Error Resume Next
+    'Forget the last reported worksheet
+        mDP_GridIconRefusalKey = VBA.vbNullString
+    'Clear any suppressed reset error
+        Err.Clear
+
+End Sub
+
 Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 
 '
@@ -14871,7 +15495,7 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '   shapes may have changed z-order since the last selection event
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -14880,13 +15504,14 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     Const PROC_NAME             As String = "M_GridIcon_ShowOrMove"
     Const ICON_SIZE             As Double = 24#                     'Grid icon size in points
     Const ICON_GAP              As Double = 5#                      'Gap between target cell and icon
-    Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point" 'Grid icon alternative text
 
     Dim TargetSheet             As Excel.Worksheet   'Worksheet receiving the icon
     Dim AnchorCell              As Excel.Range       'Resolved anchor cell
     Dim AnchorKey               As String            'Stable same-target cache key
     
     Dim CandidateShape          As Excel.Shape       'Existing reusable icon candidate
+    Dim ForeignIconPresent      As Boolean           'True when a same-named shape is not DatePicker-owned
+    Dim OwnerMarker             As String            'Ownership marker written into DatePicker icons
     Dim IconLeft                As Double            'Icon left position
     Dim IconTop                 As Double            'Icon top position
     Dim HasReusableIcon         As Boolean           'True when an existing shape can be moved
@@ -14913,6 +15538,16 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Ensure settings loaded"
     'Load settings before reading the grid-icon feature flag
         M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' BUILD OWNERSHIP MARKER
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Build ownership marker"
+    'Build the marker before any shape is inspected or normalized. Normalizing
+    'an adopted icon writes this value, so an empty marker here would strip the
+    'ownership evidence off an icon this component legitimately owns
+        OwnerMarker = M_GridIcon_BuildOwnerMarker()
 
 '------------------------------------------------------------------------------
 ' FEATURE GATE
@@ -15068,12 +15703,15 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve same-sheet icon"
-    'Try to reuse a same-named shape on the target worksheet
+    'Try to reuse a same-named shape on the target worksheet, but only when it
+    'is proven DatePicker-owned. A same-named foreign shape must not be moved,
+    'resized, rebound, re-marked or deleted
         If CandidateShape Is Nothing Then
             'Suppress missing-shape lookup errors
                 On Error Resume Next
-            'Resolve a same-named shape from the target worksheet
-                Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+            'Resolve an owned same-sheet icon, reporting a foreign collision
+                Set CandidateShape = M_GridIcon_ResolveOwnedShape( _
+                    TargetSheet, ForeignIconPresent)
             'Resolve whether a reusable same-sheet icon was found
                 HasReusableIcon = Not (CandidateShape Is Nothing)
             'Clear lookup failures
@@ -15084,6 +15722,17 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
                 End If
             'Restore fail-safe error handling
                 On Error GoTo FailSafe
+        End If
+
+'------------------------------------------------------------------------------
+' REFUSE A FOREIGN SAME-NAME COLLISION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refuse foreign icon collision"
+    'Leave a foreign same-named shape completely untouched and show no icon
+        If ForeignIconPresent Then
+            M_GridIcon_ReportForeignShape TargetSheet, PROC_NAME
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -15099,13 +15748,15 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
                 If .Width <> ICON_SIZE Then .Width = ICON_SIZE
                 If .Height <> ICON_SIZE Then .Height = ICON_SIZE
                 If .Placement <> xlMove Then .Placement = xlMove
-                If .AlternativeText <> ICON_ALT_TEXT Then .AlternativeText = ICON_ALT_TEXT
+                If .AlternativeText <> OwnerMarker Then .AlternativeText = OwnerMarker
                 If .OnAction <> CallbackMacroName Then .OnAction = CallbackMacroName
                 If .Visible <> msoTrue Then .Visible = msoTrue
                 .ZOrder msoBringToFront
             End With
             'Store the reusable icon reference
                 Set gDP_GridIconShape = CandidateShape
+            'Forget any earlier refusal now that an owned icon is in place
+                M_GridIcon_ClearRefusalKey
             'Remember the successfully positioned target
                 M_GridIcon_RememberTarget AnchorKey, IconLeft, IconTop
             'Exit after moving the icon
@@ -15331,7 +15982,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '   This routine is the cold creation / recreation path
 '
 ' UPDATED
-'   2026-05-08
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -15340,11 +15991,13 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     Const PROC_NAME             As String = "M_GridIcon_Create"
     Const ICON_SIZE             As Double = 24#
     Const ICON_GAP              As Double = 5#
-    Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point"
 
     Dim AnchorCell              As Excel.Range      'Resolved anchor cell
     Dim TargetSheet             As Excel.Worksheet  'Worksheet receiving the icon
     Dim NewIconShape            As Excel.Shape      'New temporary icon shape
+    Dim ExistingIconShape       As Excel.Shape      'Owned icon already holding the canonical name
+    Dim ForeignIconPresent      As Boolean          'True when a same-named shape is not DatePicker-owned
+    Dim OwnerMarker             As String           'Ownership marker written into DatePicker icons
     Dim IconLeft                As Double           'Icon left position
     Dim IconTop                 As Double           'Icon top position
     Dim IconFilePath            As String           'Resolved embedded icon file path
@@ -15457,7 +16110,10 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     'Vertically center the icon against the anchor cell
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
     'Build the temporary shape name
-        TempShapeName = DP_GRID_ICON_NAME & "_Pending"
+        TempShapeName = DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX
+    'Build the ownership marker before any shape is created, so an icon that
+    'survives an interrupted create path is already recognizable to cleanup
+        OwnerMarker = M_GridIcon_BuildOwnerMarker()
 
 '------------------------------------------------------------------------------
 ' RESOLVE EMBEDDED ICON FILE
@@ -15529,7 +16185,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         With NewIconShape
             .Name = TempShapeName
             .Placement = xlMove
-            .AlternativeText = ICON_ALT_TEXT
+            .AlternativeText = OwnerMarker
             .OnAction = M_GetQualifiedMacroName("DP_Click")
             .LockAspectRatio = msoTrue
             .Fill.Visible = msoTrue
@@ -15628,6 +16284,22 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Replace old icon"
+    'Resolve whether the canonical name is already taken, and by whom, before
+    'anything is deleted or promoted
+        Set ExistingIconShape = M_GridIcon_ResolveOwnedShape( _
+            TargetSheet, ForeignIconPresent)
+    'Abandon this creation when a foreign shape holds the canonical name. The
+    'pending shape is discarded rather than promoted over the user's shape
+        If ForeignIconPresent Then
+            M_GridIcon_ReportForeignShape TargetSheet, PROC_NAME
+            On Error Resume Next
+            NewIconShape.Delete
+            Err.Clear
+            Set NewIconShape = Nothing
+            Set ExistingIconShape = Nothing
+            On Error GoTo FailSafe
+            GoTo CleanExit
+        End If
     'Mark that stable icon replacement has started
         StableReplaceStarted = True
     'Suppress old-icon cleanup errors
@@ -15636,8 +16308,12 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
         End If
-    'Delete any same-named icon on the target sheet
-        TargetSheet.Shapes(DP_GRID_ICON_NAME).Delete
+    'Delete the same-named icon only when it is proven DatePicker-owned
+        If Not ExistingIconShape Is Nothing Then
+            ExistingIconShape.Delete
+        End If
+    'Release the resolved reference
+        Set ExistingIconShape = Nothing
     'Clear any suppressed old-icon cleanup error
         Err.Clear
     'Restore fail-safe error handling
@@ -15648,6 +16324,8 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         Set gDP_GridIconShape = NewIconShape
     'Mark the new icon as safely promoted
         StableIconPromoted = True
+    'Forget any earlier refusal now that an owned icon is in place
+        M_GridIcon_ClearRefusalKey
     'Remember the successfully promoted icon target
         M_GridIcon_RememberTarget _
             M_GridIcon_BuildAnchorKey(AnchorCell), _
@@ -15905,7 +16583,7 @@ Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
 '   signal
 '
 ' UPDATED
-'   2026-08-23
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -15930,6 +16608,14 @@ Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
         ProbeName = gDP_GridIconShape.Name
     'Drop a reference to a shape that no longer exists
         If Err.Number <> 0 Then
+            Err.Clear
+            Set gDP_GridIconShape = Nothing
+            Exit Function
+        End If
+    'Drop a reference to a shape this component cannot prove it owns. A live
+    'reference with a matching name is not ownership, and downstream callers
+    'delete through this result
+        If Not M_GridIcon_IsOwnedShape(gDP_GridIconShape) Then
             Err.Clear
             Set gDP_GridIconShape = Nothing
             Exit Function
@@ -15994,7 +16680,7 @@ Public Sub M_GridIcon_Remove()
 '   print, teardown, or regression reset
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -16005,6 +16691,7 @@ Public Sub M_GridIcon_Remove()
     Dim ActiveSheetObject           As Object       'Current active sheet object
     Dim ActiveWorksheet             As Worksheet    'Current active worksheet
     Dim FallbackShape               As Shape        'Same-named active-sheet fallback shape
+    Dim FallbackShapeIsForeign      As Boolean      'True when the same-named shape is not DatePicker-owned
 
     Dim TrackedErrNumber            As Long         'Tracked-shape deletion error number
     Dim TrackedErrDescription       As String       'Tracked-shape deletion error description
@@ -16060,9 +16747,11 @@ Public Sub M_GridIcon_Remove()
 '------------------------------------------------------------------------------
 ' RESOLVE ACTIVE-SHEET FALLBACK SHAPE
 '------------------------------------------------------------------------------
-    'Resolve a same-named icon from the active worksheet when available
+    'Resolve a same-named icon from the active worksheet, but only when it is
+    'proven DatePicker-owned. A foreign same-named shape is left untouched
         If Not ActiveWorksheet Is Nothing Then
-            Set FallbackShape = ActiveWorksheet.Shapes(DP_GRID_ICON_NAME)
+            Set FallbackShape = M_GridIcon_ResolveOwnedShape( _
+                ActiveWorksheet, FallbackShapeIsForeign)
             Err.Clear
         End If
 
@@ -17328,7 +18017,7 @@ Public Sub M_GridIcon_PurgeAll()
 '   Do not call this routine from high-frequency selection-change paths
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -17351,6 +18040,8 @@ Public Sub M_GridIcon_PurgeAll()
         End If
     'Clear the tracked shape reference
         Set gDP_GridIconShape = Nothing
+    'Forget any refusal diagnostic so a later collision reports again
+        M_GridIcon_ClearRefusalKey
     'Clear the cached last target
         M_GridIcon_ClearLastTarget
 
@@ -17427,13 +18118,14 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '   Keep this helper aligned with M_GridIcon_PurgeAll
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-27
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim CurWorksheet           As Worksheet    'Worksheet being scanned
+    Dim CurShape               As Excel.Shape  'Same-named shape found on the worksheet
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -17455,8 +18147,18 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '------------------------------------------------------------------------------
     'Loop through all worksheets in the target workbook
         For Each CurWorksheet In TargetWorkbook.Worksheets
-            'Delete the named shape when found
-                CurWorksheet.Shapes(TargetShapeName).Delete
+            'Resolve the same-named shape without touching it
+                Set CurShape = Nothing
+                Set CurShape = CurWorksheet.Shapes(TargetShapeName)
+                Err.Clear
+            'Delete it only when DatePicker ownership is proven. An unrelated
+            'shape that merely shares the name is never deleted
+                If Not CurShape Is Nothing Then
+                    If M_GridIcon_IsOwnedShape(CurShape) Then
+                        CurShape.Delete
+                        Err.Clear
+                    End If
+                End If
         Next CurWorksheet
 
 '------------------------------------------------------------------------------
@@ -17464,6 +18166,7 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '------------------------------------------------------------------------------
 ExitProcedure:
     'Release local object references
+        Set CurShape = Nothing
         Set CurWorksheet = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
