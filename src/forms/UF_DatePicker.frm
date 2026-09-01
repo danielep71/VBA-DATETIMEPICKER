@@ -712,6 +712,10 @@ Private Sub UserForm_Activate()
 '   mHasActivated guard prevents repeated positioning, timer initialization, and
 '   post-show work
 '
+'   The timer health check runs before that guard on purpose. Repeat activations
+'   are exactly when a dropped clock registration needs repairing, and the guard
+'   would otherwise make the check unreachable after the first activation
+'
 '   Borderless styling is controlled by M_Platform_ShouldUseWinAPI
 '
 '   Mouse positioning is intentionally attempted separately. Disabling WinAPI
@@ -719,7 +723,7 @@ Private Sub UserForm_Activate()
 '   are otherwise available
 '
 ' UPDATED
-'   2026-05-02
+'   2026-08-30
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -734,6 +738,14 @@ Private Sub UserForm_Activate()
 '------------------------------------------------------------------------------
     'Enable controlled error handling
         On Error GoTo ErrorHandler
+    'Reapply the clock mode before the one-time guard below. Every tick is now
+    'scheduled with a bounded delivery window, so a tick that misses its window is
+    'dropped rather than delayed and the chain ends. Nothing independent can
+    'observe that absence, so the next activation is the repair opportunity. This
+    'reaches the timer health check through M_Timer_Start and is a no-op for a
+    'registration still inside its window. Placing it after the guard would make
+    'it unreachable on every activation after the first
+        M_Timer_ApplyClockMode
     'Exit if one-time post-show initialization has already run
         If mHasActivated Then Exit Sub
 

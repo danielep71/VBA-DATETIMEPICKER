@@ -1033,6 +1033,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "RuntimeAdmission"
     'Run DP_RepairRuntime behavior checks
         TST_DP_RunSuiteSafe "RepairRuntime"
+    'Run deterministic live-clock timer registration and drain checks
+        TST_DP_RunSuiteSafe "Timer"
     'Run M_GridIcon_PreCreateHidden startup optimization checks
         TST_DP_RunSuiteSafe "PreCreateHidden"
     'Run M_Picker_SelectDate write-back and state-management checks
@@ -1368,6 +1370,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "REPAIRRUNTIME"
                 TST_DP_RunSuite_RepairRuntime
+
+            Case "TIMER"
+                TST_DP_RunSuite_Timer
 
             Case "PRECREATEHIDDEN"
                 TST_DP_RunSuite_PreCreateHidden
@@ -5894,6 +5899,440 @@ SuiteFail:
         Excel.Application.EnableEvents = True
         Err.Clear
         On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_RunSuite_Timer()
+
+'
+'==============================================================================
+'                              TIMER SUITE
+'==============================================================================
+' PURPOSE
+'   Validates live-clock registration identity, cancellation, the unresolved
+'   registration barrier and its drains, scheduling failure, and dropped-tick
+'   recovery
+'
+' WHY THIS EXISTS
+'   Before #27 the timer had no coverage at all. Cancellation failure reached
+'   only Debug.Print while the state claimed clean teardown, nothing could
+'   observe what had actually been scheduled, and a stale callback arriving after
+'   a restart could not be distinguished from a current one
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives M_Timer_Start, M_Timer_Stop and M_Timer_Tick directly and asserts
+'   against the recorded registration exposed by the timer test seams
+'
+' ERROR POLICY
+'   Suite-level handler records a failure and continues the run
+'
+' DEPENDENCIES
+'   M_Timer_Start
+'   M_Timer_Stop
+'   M_Timer_Tick
+'   M_Timer_Test_Reset
+'   M_Timer_Test_LastRegistration
+'   M_Timer_Test_ArmScheduleFault
+'   M_Timer_Test_IsRunning
+'   M_Timer_Test_IsUnresolved
+'   M_Timer_Test_ExpireRegistration
+'   TST_DP_CancelRegistrationForTest
+'
+' NOTES
+'   This suite must contain no DoEvents, and each section must perform all of its
+'   actions and capture every observation before it asserts anything
+'
+'   An Application.OnTime callback runs when Excel goes idle, and recording an
+'   assertion writes a row to the result worksheet, which yields to the message
+'   pump. A tick scheduled one second out therefore fires part-way through an
+'   assertion block, finds no loaded form and calls M_Timer_Stop, which both
+'   clears the running flag and adds a cancellation to the recorded call count
+'
+'   Capturing into locals first keeps the observed values contiguous with the
+'   actions that produced them. Asserting inline instead is what made this suite
+'   fail six cases on behavior that was correct
+'
+'   Cases that deliberately fail a cancellation leave a real registration armed
+'   in Excel. Draining the barrier clears this component's bookkeeping, not
+'   Excel's schedule, so each such case cancels the real registration through
+'   TST_DP_CancelRegistrationForTest. Otherwise a callback would fire after the
+'   suite and start a second clock chain
+'
+'   The workbook-rename criterion is deliberately absent. Renaming the host that
+'   carries the executing project and the results sheet is not something a run
+'   may do to itself; that case is manual integration evidence on a disposable
+'   copy, alongside the real Application.OnTime smoke
+'
+' UPDATED
+'   2026-09-01
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SavedErrNumber      As Long             'Original error number captured on failure
+    Dim SavedErrDescription As String           'Original error description captured on failure
+    Dim SavedErrSource      As String           'Original error source captured on failure
+
+    Dim RegEarliest         As Date             'Recorded EarliestTime of the last call
+    Dim RegLatest           As Date             'Recorded LatestTime of the last call
+    Dim RegProcedure        As String           'Recorded Procedure of the last call
+    Dim RegSchedule         As Boolean          'Recorded Schedule flag of the last call
+    Dim RegErrNumber        As Long             'Recorded error from the last call
+    Dim RegCallCount        As Long             'Recorded number of scheduling calls
+
+    Dim ArmedEarliest       As Date             'EarliestTime of a registration left armed in Excel
+    Dim ArmedProcedure      As String           'Procedure of a registration left armed in Excel
+    Dim BaselineCount       As Long             'Call count captured before an action
+    Dim StartErrNumber      As Long             'Error escaping a refused M_Timer_Start
+
+    Dim RunAfterStart       As Boolean          'Timer state captured immediately after the first start
+    Dim CountAfterStart     As Long             'Call count captured immediately after the first start
+    Dim CountAfterRepeat    As Long             'Call count captured immediately after the repeated start
+    Dim RunAfterRetry       As Boolean          'Timer state captured immediately after the retry drain
+    Dim UnresAfterRetry     As Boolean          'Barrier state captured immediately after the retry drain
+    Dim RunAfterExpiry      As Boolean          'Timer state captured immediately after the expiry drain
+    Dim UnresAfterExpiry    As Boolean          'Barrier state captured immediately after the expiry drain
+    Dim RunAfterRecovery    As Boolean          'Timer state captured immediately after recovery
+    Dim CountAfterRecovery  As Long             'Call count captured immediately after recovery
+    Dim SchedAfterRecovery  As Boolean          'Schedule flag captured immediately after recovery
+    Dim CountAfterHealthy   As Long             'Call count captured immediately after the healthy start
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "Timer"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Start from a known timer state
+        M_Timer_Stop
+        M_Timer_Test_Reset
+
+'------------------------------------------------------------------------------
+' REGISTRATION IDENTITY
+'------------------------------------------------------------------------------
+    'Start must record exactly what it asked Excel for, because cancellation has
+    'to match the same EarliestTime and Procedure
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountAfterStart
+        RunAfterStart = M_Timer_Test_IsRunning()
+    'A second start must not schedule a competing registration. It runs here,
+    'before any assertion, because recording one would let a tick fire between
+    'the two starts and stop the timer
+        M_Timer_Start
+        M_Timer_Test_LastRegistration ArmedEarliest, RegLatest, ArmedProcedure, _
+            RegSchedule, RegErrNumber, CountAfterRepeat
+
+        TST_DP_AssertEqualsLong "Start makes exactly one scheduling call", _
+            1, CountAfterStart
+        TST_DP_AssertTrue "Start schedules rather than cancels", RegSchedule
+        TST_DP_AssertEqualsLong "Start reports no scheduling error", 0, RegErrNumber
+        TST_DP_AssertTrue "Start records a workbook-qualified callback name", _
+            VBA.InStr(1, RegProcedure, "M_Timer_Tick", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Start bounds delivery to thirty seconds", _
+            RegLatest = RegEarliest + VBA.TimeSerial(0, 0, 30)
+        TST_DP_AssertTrue "Start leaves the timer running", RunAfterStart
+        TST_DP_AssertEqualsLong "A repeated start adds no scheduling call", _
+            1, CountAfterRepeat
+
+'------------------------------------------------------------------------------
+' CANCELLATION MATCHES THE SCHEDULED IDENTITY
+'------------------------------------------------------------------------------
+    'The identity captured after the repeated start is what Stop must match
+        M_Timer_Stop
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+
+        TST_DP_AssertFalse "Stop cancels rather than schedules", RegSchedule
+        TST_DP_AssertTrue "Stop cancels the exact scheduled time", _
+            RegEarliest = ArmedEarliest
+        TST_DP_AssertEqualsString "Stop cancels the exact scheduled procedure", _
+            ArmedProcedure, RegProcedure
+        TST_DP_AssertFalse "A stopped timer is not running", M_Timer_Test_IsRunning()
+        TST_DP_AssertFalse "A successful cancellation leaves nothing unresolved", _
+            M_Timer_Test_IsUnresolved()
+
+'------------------------------------------------------------------------------
+' A FAILED CANCELLATION RETAINS THE REGISTRATION
+'------------------------------------------------------------------------------
+    'A cancellation that fails leaves a registration that may still fire. The
+    'timer must be logically inactive without claiming clean teardown
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+
+        TST_DP_AssertTrue "A failed cancellation retains the registration", _
+            M_Timer_Test_IsUnresolved()
+        TST_DP_AssertFalse "A failed cancellation leaves the timer inactive", _
+            M_Timer_Test_IsRunning()
+
+'------------------------------------------------------------------------------
+' A RESTART IS REFUSED WHILE THE REGISTRATION IS OUTSTANDING
+'------------------------------------------------------------------------------
+    'The retry runs on every attempt, so failing it too is what proves refusal
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+
+        TST_DP_AssertFalse "A refused restart leaves the timer inactive", _
+            M_Timer_Test_IsRunning()
+        TST_DP_AssertFalse "A refused restart scheduled nothing", RegSchedule
+        TST_DP_AssertTrue "A refused restart keeps the registration outstanding", _
+            M_Timer_Test_IsUnresolved()
+
+'------------------------------------------------------------------------------
+' A SUCCESSFUL RETRY DRAINS THE REGISTRATION
+'------------------------------------------------------------------------------
+    'With no fault armed the retry cancels the retained identity and the barrier
+    'lifts immediately rather than waiting for expiry
+        M_Timer_Start
+        UnresAfterRetry = M_Timer_Test_IsUnresolved()
+        RunAfterRetry = M_Timer_Test_IsRunning()
+
+        TST_DP_AssertFalse "A successful retry drains the registration", _
+            UnresAfterRetry
+        TST_DP_AssertTrue "A drained barrier allows a fresh registration", _
+            RunAfterRetry
+
+    'Leave the timer stopped and Excel holding nothing
+        M_Timer_Stop
+
+'------------------------------------------------------------------------------
+' EXPIRY DRAINS THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Expiry is sound only because every tick carries an explicit LatestTime.
+    'Arming a second fault keeps the retry from draining it first
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+        M_Timer_Test_ExpireRegistration
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Start
+        UnresAfterExpiry = M_Timer_Test_IsUnresolved()
+        RunAfterExpiry = M_Timer_Test_IsRunning()
+
+        TST_DP_AssertFalse "An expired registration drains despite a failed retry", _
+            UnresAfterExpiry
+        TST_DP_AssertTrue "An expired registration allows a fresh schedule", _
+            RunAfterExpiry
+
+    'The original registration is still armed in Excel; cancel it directly
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+'------------------------------------------------------------------------------
+' A STALE CALLBACK DRAINS WITHOUT WORKING
+'------------------------------------------------------------------------------
+    'A callback arriving while the timer is inactive can only be the stale one.
+    'It must do no work, reschedule nothing, and drain the barrier
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+
+        M_Timer_Tick
+
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        TST_DP_AssertFalse "A stale callback drains the registration", _
+            M_Timer_Test_IsUnresolved()
+        TST_DP_AssertEqualsLong "A stale callback schedules nothing", _
+            BaselineCount, RegCallCount
+        TST_DP_AssertFalse "A stale callback does not restart the timer", _
+            M_Timer_Test_IsRunning()
+
+    'Cancel the registration the failed cancellation left armed
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+'------------------------------------------------------------------------------
+' A REFUSED SCHEDULE LEAVES THE TIMER INACTIVE
+'------------------------------------------------------------------------------
+    'The armed state must be established only after Excel accepts the schedule,
+    'never before it with an error handler expected to unwind it
+        M_Timer_Test_Reset
+        M_Timer_Test_ArmScheduleFault 1004
+
+        On Error Resume Next
+        Err.Clear
+        M_Timer_Start
+        StartErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertTrue "A refused schedule raises to the caller", _
+            StartErrNumber <> 0
+        TST_DP_AssertFalse "A refused schedule leaves the timer inactive", _
+            M_Timer_Test_IsRunning()
+
+'------------------------------------------------------------------------------
+' A DROPPED REGISTRATION IS REPAIRED
+'------------------------------------------------------------------------------
+    'A tick that misses its bounded window is dropped rather than delayed, which
+    'ends the chain while the running flag is still True. The next start repairs
+    'it, and must schedule exactly one replacement
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ExpireRegistration
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            SchedAfterRecovery, RegErrNumber, CountAfterRecovery
+        RunAfterRecovery = M_Timer_Test_IsRunning()
+    'A registration still inside its window needs no replacement. This start runs
+    'before any assertion so no tick can fire between the two
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountAfterHealthy
+
+        TST_DP_AssertEqualsLong "Recovery schedules exactly one replacement", _
+            BaselineCount + 1, CountAfterRecovery
+        TST_DP_AssertTrue "Recovery leaves the timer running", RunAfterRecovery
+        TST_DP_AssertTrue "The replacement registration is a schedule", _
+            SchedAfterRecovery
+        TST_DP_AssertEqualsLong "A healthy registration schedules nothing extra", _
+            CountAfterRecovery, CountAfterHealthy
+
+    'Stop the replacement, then cancel the registration recovery abandoned
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+'------------------------------------------------------------------------------
+' RESTORE TIMER STATE
+'------------------------------------------------------------------------------
+    'Leave the timer stopped and the recorder clean for the suites that follow
+        M_Timer_Stop
+        M_Timer_Test_Reset
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Capture the original error before any cleanup runs
+        SavedErrNumber = Err.Number
+        SavedErrDescription = Err.Description
+        SavedErrSource = Err.Source
+    'Release timer state on the failure path. This runs after the original error
+    'was captured, so a cleanup failure cannot overwrite the assertion failure
+        On Error Resume Next
+        M_Timer_Test_ArmScheduleFault 0
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+        M_Timer_Test_Reset
+        Err.Clear
+    'Record the suite-level failure from the captured values
+        TST_DP_RecordFail "Timer suite failed", _
+            "Error " & VBA.CStr(SavedErrNumber) & " - " & SavedErrDescription & _
+            " | Source=" & SavedErrSource
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_CancelRegistrationForTest( _
+    ByVal EarliestTime As Date, _
+    ByVal ProcedureName As String)
+
+'
+'==============================================================================
+'                  CANCEL A REGISTRATION LEFT ARMED BY A TEST
+'==============================================================================
+' PURPOSE
+'   Cancels an Application.OnTime registration directly, bypassing the production
+'   scheduling path
+'
+' WHY THIS EXISTS
+'   Cases that deliberately fail a cancellation leave a real registration armed
+'   in Excel. Draining the barrier clears this component's bookkeeping, not
+'   Excel's schedule. Without a direct cancellation those callbacks fire after the
+'   suite, find a later timer running, and start a second clock chain
+'
+' INPUTS
+'   EarliestTime
+'     Exact time the registration was scheduled for
+'
+'   ProcedureName
+'     Exact workbook-qualified callback name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Calls Application.OnTime with Schedule:=False using the supplied identity
+'
+' ERROR POLICY
+'   Best effort. Never raises, because it runs on both the success and the
+'   failure path and must not replace a captured error
+'
+' DEPENDENCIES
+'   Application.OnTime
+'
+' NOTES
+'   This deliberately does not go through M_Timer_ApplySchedule. Routing it there
+'   would expose it to the injected fault the test just armed, which is the very
+'   thing that left the registration armed
+'
+'   Excel matches a cancellation on EarliestTime and Procedure, so both must be
+'   the exact recorded values
+'
+' UPDATED
+'   2026-08-30
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CANCEL THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Never let test cleanup raise into a caller
+        On Error Resume Next
+    'Exit when there is nothing identifiable to cancel
+        If VBA.LenB(ProcedureName) = 0 Or EarliestTime = 0 Then
+            Err.Clear
+            Exit Sub
+        End If
+    'Cancel the exact registration directly
+        Excel.Application.OnTime _
+            EarliestTime:=EarliestTime, _
+            Procedure:=ProcedureName, _
+            Schedule:=False
+    'Clear any suppressed cancellation error
+        Err.Clear
 
 End Sub
 

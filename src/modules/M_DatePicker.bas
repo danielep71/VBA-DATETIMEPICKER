@@ -239,6 +239,7 @@ Option Explicit
     Private Const DP_CONTEXT_MENU_BEFORE           As Long = 1                           'Context-menu insertion position
 
     Private Const DP_TIMER_SECONDS                 As Long = 1                           'Live clock interval in seconds
+    Private Const DP_TIMER_LATEST_SECONDS          As Long = 30                          'Bounded OnTime delivery window in seconds
 
     Private Const GWL_STYLE                        As Long = -16                         'Window style index
     Private Const MONITOR_DEFAULTTONEAREST         As Long = 2                           'Monitor nearest flag
@@ -422,6 +423,22 @@ Option Explicit
     Private mDP_GridIconLastLeft            As Double           'Last grid-icon left position
     Private mDP_GridIconLastTop             As Double           'Last grid-icon top position
     Private mDP_TimerProcedureWorkbookName  As String           'Workbook name used for cached timer callback
+
+    Private mDP_TimerLatestTime         As Date                 'LatestTime of the current registration
+    Private mDP_TimerLastEarliest       As Date                 'EarliestTime of the last scheduling call
+    Private mDP_TimerLastLatest         As Date                 'LatestTime of the last scheduling call
+    Private mDP_TimerLastProcedure      As String               'Procedure of the last scheduling call
+    Private mDP_TimerLastSchedule       As Boolean              'Schedule flag of the last scheduling call
+    Private mDP_TimerLastErrNumber      As Long                 'Error number from the last scheduling call
+    Private mDP_TimerLastErrDescription As String               'Error description from the last scheduling call
+    Private mDP_TimerCallCount          As Long                 'Number of scheduling calls made
+    Private mDP_TimerFaultNumber        As Long                 'One-shot injected scheduling failure, 0 when disarmed
+
+    Private mDP_TimerUnresolved         As Boolean              'True while a failed cancellation leaves a registration outstanding
+    Private mDP_TimerUnresolvedEarliest As Date                 'EarliestTime of the unresolved registration
+    Private mDP_TimerUnresolvedLatest   As Date                 'LatestTime of the unresolved registration
+    Private mDP_TimerUnresolvedProcedure As String              'Procedure of the unresolved registration
+    Private mDP_TimerRefusalReported    As Boolean              'Diagnostic-only: restart refusal already reported
 
 '------------------------------------------------------------------------------
 ' EMBEDDED GRID ICON
@@ -11534,6 +11551,800 @@ ErrorHandler:
 End Function
 
 
+Private Function M_Timer_ApplySchedule( _
+    ByVal EarliestTime As Date, _
+    ByVal LatestTime As Date, _
+    ByVal ProcedureName As String, _
+    ByVal ScheduleFlag As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                        APPLY A TIMER SCHEDULING CALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The single point through which every Application.OnTime call is made, and the
+'   recorder of what was asked for
+'
+' WHY THIS EXISTS
+'   Cancellation needs the exact EarliestTime and Procedure that were scheduled,
+'   and nothing could previously observe either. Routing all three call sites
+'   through one routine records the identity of every registration and gives the
+'   regression a deterministic way to make scheduling or cancellation fail
+'   without waiting for wall-clock time
+'
+' INPUTS
+'   EarliestTime
+'     Registration time, and for a cancellation the time to match
+'
+'   LatestTime
+'     Bounded delivery deadline; ignored for a cancellation
+'
+'   ProcedureName
+'     Workbook-qualified callback name
+'
+'   ScheduleFlag
+'     True to schedule, False to cancel
+'
+' RETURNS
+'   True when the call was accepted
+'
+' BEHAVIOR
+'   Records the requested registration, consumes a one-shot injected fault when
+'   armed, otherwise calls Application.OnTime and records the outcome
+'
+' ERROR POLICY
+'   Never raises outward. Callers read the recorded error and decide
+'
+' DEPENDENCIES
+'   Application.OnTime
+'
+' NOTES
+'   LatestTime is passed only when scheduling. Application.OnTime matches a
+'   cancellation on EarliestTime and Procedure alone
+'
+'   The injected fault is one-shot and is consumed whether or not it is observed,
+'   so an armed fault can never leak into a later test
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FaultNumber     As Long         'One-shot injected failure being consumed
+
+'------------------------------------------------------------------------------
+' RECORD THE REQUEST
+'------------------------------------------------------------------------------
+    'Never let a scheduling call raise into its caller
+        On Error Resume Next
+    'Record what this call asked for, before it is attempted
+        mDP_TimerLastEarliest = EarliestTime
+        mDP_TimerLastLatest = LatestTime
+        mDP_TimerLastProcedure = ProcedureName
+        mDP_TimerLastSchedule = ScheduleFlag
+        mDP_TimerLastErrNumber = 0
+        mDP_TimerLastErrDescription = VBA.vbNullString
+        mDP_TimerCallCount = mDP_TimerCallCount + 1
+    'Assume the call fails until it is accepted
+        M_Timer_ApplySchedule = False
+
+'------------------------------------------------------------------------------
+' CONSUME AN INJECTED FAULT
+'------------------------------------------------------------------------------
+    'Consume a one-shot injected failure instead of calling Excel
+        If mDP_TimerFaultNumber <> 0 Then
+            FaultNumber = mDP_TimerFaultNumber
+            mDP_TimerFaultNumber = 0
+            mDP_TimerLastErrNumber = FaultNumber
+            mDP_TimerLastErrDescription = "Injected timer scheduling failure"
+            Err.Clear
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' CALL EXCEL
+'------------------------------------------------------------------------------
+    'Schedule with a bounded delivery window, or cancel by matching identity
+        Err.Clear
+        If ScheduleFlag Then
+            Excel.Application.OnTime _
+                EarliestTime:=EarliestTime, _
+                Procedure:=ProcedureName, _
+                LatestTime:=LatestTime, _
+                Schedule:=True
+        Else
+            Excel.Application.OnTime _
+                EarliestTime:=EarliestTime, _
+                Procedure:=ProcedureName, _
+                Schedule:=False
+        End If
+    'Record the outcome
+        If Err.Number = 0 Then
+            M_Timer_ApplySchedule = True
+        Else
+            mDP_TimerLastErrNumber = Err.Number
+            mDP_TimerLastErrDescription = Err.Description
+        End If
+    'Clear any suppressed scheduling error
+        Err.Clear
+
+End Function
+
+Private Sub M_Timer_RetainUnresolved( _
+    ByVal EarliestTime As Date, _
+    ByVal LatestTime As Date, _
+    ByVal ProcedureName As String)
+
+'
+'------------------------------------------------------------------------------
+'                      RETAIN AN UNRESOLVED REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records the exact registration a failed cancellation left outstanding
+'
+' WHY THIS EXISTS
+'   A Boolean running flag cannot distinguish generations. If an old callback
+'   arrives after a restart, the flag is True again and the callback cannot know
+'   which generation invoked it. Retaining the exact registration lets a restart
+'   be refused until the old one is provably gone
+'
+' INPUTS
+'   EarliestTime, LatestTime, ProcedureName
+'     Identity of the registration that could not be cancelled
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the registration and marks it unresolved
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   This is deliberately distinct from a healthy current registration. An
+'   unresolved registration must never be treated as a running timer
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETAIN THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Never let bookkeeping raise into a caller
+        On Error Resume Next
+    'Store the exact identity the cancellation failed on
+        mDP_TimerUnresolvedEarliest = EarliestTime
+        mDP_TimerUnresolvedLatest = LatestTime
+        mDP_TimerUnresolvedProcedure = ProcedureName
+        mDP_TimerUnresolved = True
+    'Clear any suppressed bookkeeping error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Timer_ResolveUnresolved()
+
+'
+'------------------------------------------------------------------------------
+'                     RESOLVE AN UNRESOLVED REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Drains the outstanding registration once it can no longer fire
+'
+' WHY THIS EXISTS
+'   The restart barrier has to lift. Draining is centralized so the three valid
+'   drains cannot diverge
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Clears the retained registration and the refusal diagnostic flag
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Called by all three drains: a stale callback arriving, a successful retry
+'   cancellation, and expiry of the retained LatestTime
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DRAIN THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Never let bookkeeping raise into a caller
+        On Error Resume Next
+    'Forget the retained registration
+        mDP_TimerUnresolved = False
+        mDP_TimerUnresolvedEarliest = 0
+        mDP_TimerUnresolvedLatest = 0
+        mDP_TimerUnresolvedProcedure = VBA.vbNullString
+    'Allow a later refusal to report again
+        mDP_TimerRefusalReported = False
+    'Clear any suppressed bookkeeping error
+        Err.Clear
+
+End Sub
+
+Private Function M_Timer_TryDrainUnresolved() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       TRY TO DRAIN THE REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a fresh registration may be scheduled
+'
+' WHY THIS EXISTS
+'   Two of the three drains can be attempted on demand: retrying the cancellation
+'   with the retained identity, and observing that the retained LatestTime has
+'   passed. The third, a stale callback arriving, drains itself
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when nothing is outstanding and scheduling may proceed
+'
+' BEHAVIOR
+'   Returns True when no registration is outstanding. Otherwise retries the
+'   cancellation using the exact retained identity, and failing that checks
+'   whether the retained LatestTime has passed
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_ApplySchedule
+'   M_Timer_ResolveUnresolved
+'
+' NOTES
+'   Expiry is sound only because every tick is scheduled with an explicit
+'   LatestTime. With LatestTime omitted, Excel may run a callback well after its
+'   EarliestTime, so elapsed time alone would prove nothing
+'
+'   The retry runs on every attempt. Only the refusal diagnostic is
+'   de-duplicated; suppressing the retry would strand the barrier
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ATTEMPT THE DRAINS
+'------------------------------------------------------------------------------
+    'Never let a drain attempt raise into a caller
+        On Error Resume Next
+    'Nothing outstanding means scheduling may proceed
+        If Not mDP_TimerUnresolved Then
+            M_Timer_TryDrainUnresolved = True
+            Err.Clear
+            Exit Function
+        End If
+    'Retry the cancellation against the exact retained identity
+        If VBA.LenB(mDP_TimerUnresolvedProcedure) > 0 Then
+            If M_Timer_ApplySchedule(mDP_TimerUnresolvedEarliest, 0, _
+                mDP_TimerUnresolvedProcedure, False) Then
+                M_Timer_ResolveUnresolved
+                M_Timer_TryDrainUnresolved = True
+                Err.Clear
+                Exit Function
+            End If
+        End If
+    'Treat the registration as expired once its bounded window has passed
+        If mDP_TimerUnresolvedLatest <> 0 Then
+            If VBA.Now > mDP_TimerUnresolvedLatest Then
+                M_Timer_ResolveUnresolved
+                M_Timer_TryDrainUnresolved = True
+                Err.Clear
+                Exit Function
+            End If
+        End If
+    'Refuse a fresh registration while the old one may still fire
+        M_Timer_TryDrainUnresolved = False
+    'Clear any suppressed drain error
+        Err.Clear
+
+End Function
+
+Private Sub M_Timer_ReportRestartRefusal(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                        REPORT A RESTART REFUSAL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes a diagnostic once while restarts are refused
+'
+' WHY THIS EXISTS
+'   A refusal can repeat on every clock-mode change and every form activation.
+'   Silence would leave a static clock with no explanation
+'
+' INPUTS
+'   EntryPoint
+'     Name of the refusing routine
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Prints only when a refusal has not already been reported since the last drain
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerRefusalReported
+'
+' NOTES
+'   Diagnostic only. It never suppresses the cancellation retry and never affects
+'   whether a registration is outstanding
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT THE REFUSAL
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise into a caller
+        On Error Resume Next
+    'Report only once per outstanding registration
+        If mDP_TimerRefusalReported Then
+            Err.Clear
+            Exit Sub
+        End If
+    'Remember that this refusal was reported
+        mDP_TimerRefusalReported = True
+    'Write the refusal diagnostic
+        Debug.Print EntryPoint & _
+            " | Refused | A previous timer registration could not be cancelled" & _
+            " and may still fire; the live clock stays inactive until it drains"
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Timer_CheckHealth()
+
+'
+'------------------------------------------------------------------------------
+'                          CHECK TIMER HEALTH
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Repairs a live clock whose registration was dropped by Excel
+'
+' WHY THIS EXISTS
+'   Every tick is scheduled with an explicit LatestTime, so a tick that cannot
+'   run inside its window is dropped rather than delayed. Because each tick
+'   schedules the next one, one dropped tick ends the chain: M_Timer_Tick never
+'   runs, nothing reschedules, and the running flag stays True while no
+'   registration exists
+'
+'   Nothing independent can observe that absence. This is opportunistic
+'   self-healing driven by the next DatePicker interaction, not a watchdog
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   When the timer is logically active, holds a current registration that is not
+'   an unresolved one, and the retained LatestTime has passed, clears the stale
+'   state and schedules exactly one fresh registration
+'
+' ERROR POLICY
+'   Never raises outward. A failed recovery leaves the timer honestly inactive
+'
+' DEPENDENCIES
+'   M_Timer_ApplySchedule
+'   M_Timer_GetProcedureName
+'
+' NOTES
+'   A healthy registration still inside its delivery window produces no
+'   scheduling call at all
+'
+'   An unresolved registration left by a failed cancellation is explicitly not
+'   healed here. That case is a barrier, not a dropped tick, and is drained by
+'   M_Timer_TryDrainUnresolved
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NextEarliest    As Date         'Registration time of the replacement tick
+    Dim NextLatest      As Date         'Bounded delivery deadline of the replacement tick
+
+'------------------------------------------------------------------------------
+' DECIDE WHETHER RECOVERY IS DUE
+'------------------------------------------------------------------------------
+    'Never let a health check raise into a caller
+        On Error Resume Next
+    'A logically inactive timer has nothing to repair
+        If Not mDP_TimerIsRunning Then GoTo ExitProcedure
+    'An unresolved registration is a barrier, not a dropped tick
+        If mDP_TimerUnresolved Then GoTo ExitProcedure
+    'A registration with no bounded window cannot be proven expired
+        If mDP_TimerLatestTime = 0 Then GoTo ExitProcedure
+    'A registration still inside its delivery window is healthy
+        If VBA.Now <= mDP_TimerLatestTime Then GoTo ExitProcedure
+
+'------------------------------------------------------------------------------
+' REPLACE THE EXPIRED REGISTRATION
+'------------------------------------------------------------------------------
+    'Clear the stale active-registration state before rescheduling
+        mDP_TimerIsRunning = False
+        mDP_NextTickTime = 0
+        mDP_TimerLatestTime = 0
+    'Rebuild the qualified callback name
+        mDP_TimerProcedureName = M_Timer_GetProcedureName
+        Err.Clear
+    'Calculate exactly one replacement registration
+        NextEarliest = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+        NextLatest = NextEarliest + VBA.TimeSerial(0, 0, DP_TIMER_LATEST_SECONDS)
+    'Arm the replacement only when the schedule call is accepted
+        If M_Timer_ApplySchedule(NextEarliest, NextLatest, mDP_TimerProcedureName, True) Then
+            mDP_TimerIsRunning = True
+            mDP_NextTickTime = NextEarliest
+            mDP_TimerLatestTime = NextLatest
+        Else
+            Debug.Print "M_Timer_CheckHealth" & _
+                " | Step=RescheduleDroppedTick" & _
+                " | Error=" & VBA.CStr(mDP_TimerLastErrNumber) & _
+                " | " & mDP_TimerLastErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed health-check error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_Test_ArmScheduleFault(ByVal ErrorNumber As Long)
+
+'
+'------------------------------------------------------------------------------
+'                      ARM A TIMER SCHEDULING FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Makes the next scheduling or cancellation call fail deterministically
+'
+' WHY THIS EXISTS
+'   Cancellation failure, restart refusal and dropped-tick recovery cannot be
+'   exercised by waiting. The regression must be able to make one call fail
+'
+' INPUTS
+'   ErrorNumber
+'     Error number the next call reports; zero disarms
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Arms a one-shot fault consumed by the next M_Timer_ApplySchedule call
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerFaultNumber
+'
+' NOTES
+'   Public only because the regression harness is a separate module. It takes an
+'   argument, so it does not appear in the macro dialog. Classifying and hiding
+'   production test seams belongs to #25
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ARM THE FAULT
+'------------------------------------------------------------------------------
+    'Never let arming raise into a caller
+        On Error Resume Next
+    'Store the one-shot fault
+        mDP_TimerFaultNumber = ErrorNumber
+    'Clear any suppressed arming error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_Test_LastRegistration( _
+    ByRef EarliestTime As Date, _
+    ByRef LatestTime As Date, _
+    ByRef ProcedureName As String, _
+    ByRef ScheduleFlag As Boolean, _
+    ByRef ErrorNumber As Long, _
+    ByRef CallCount As Long)
+
+'
+'------------------------------------------------------------------------------
+'                      READ THE LAST TIMER REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports exactly what the last scheduling call asked Excel for
+'
+' WHY THIS EXISTS
+'   The issue requires proof that start records one exact scheduled time and
+'   qualified callback, and that stop cancels using the same values. Nothing
+'   could observe either before
+'
+' INPUTS
+'   EarliestTime, LatestTime, ProcedureName, ScheduleFlag, ErrorNumber, CallCount
+'     Receive the recorded registration and the running call count
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Copies the recorded values out
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Reading is free of side effects. It never drains, arms or reschedules
+'   anything
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' COPY THE RECORDED VALUES
+'------------------------------------------------------------------------------
+    'Never let a read raise into a caller
+        On Error Resume Next
+    'Copy the recorded registration
+        EarliestTime = mDP_TimerLastEarliest
+        LatestTime = mDP_TimerLastLatest
+        ProcedureName = mDP_TimerLastProcedure
+        ScheduleFlag = mDP_TimerLastSchedule
+        ErrorNumber = mDP_TimerLastErrNumber
+        CallCount = mDP_TimerCallCount
+    'Clear any suppressed read error
+        Err.Clear
+
+End Sub
+
+Public Function M_Timer_Test_IsUnresolved() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   REPORT AN UNRESOLVED TIMER REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a failed cancellation left a registration outstanding
+'
+' WHY THIS EXISTS
+'   A cancellation failure previously reached only Debug.Print, so the state that
+'   refuses a restart was unobservable. Whether that state should also make
+'   shutdown incomplete and retain the lease is #50's contract, not this one
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True while a registration is outstanding
+'
+' BEHAVIOR
+'   Reports the retained state without attempting any drain
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerUnresolved
+'
+' NOTES
+'   Deliberately does not retry the cancellation, so a test can observe the
+'   barrier before deciding to drain it
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT THE STATE
+'------------------------------------------------------------------------------
+    'Never let a read raise into a caller
+        On Error Resume Next
+    'Report whether a registration is outstanding
+        M_Timer_Test_IsUnresolved = mDP_TimerUnresolved
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Public Function M_Timer_Test_IsRunning() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       REPORT THE LOGICAL TIMER STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the timer is logically active
+'
+' WHY THIS EXISTS
+'   Several cases turn on the timer being honestly inactive after a failure, and
+'   the running flag is private
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True while the timer is logically active
+'
+' BEHAVIOR
+'   Reports the flag without running the health check
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerIsRunning
+'
+' NOTES
+'   Deliberately does not call M_Timer_CheckHealth, so a test can observe a
+'   dropped registration before recovery is triggered
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT THE STATE
+'------------------------------------------------------------------------------
+    'Never let a read raise into a caller
+        On Error Resume Next
+    'Report the logical timer state
+        M_Timer_Test_IsRunning = mDP_TimerIsRunning
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Public Sub M_Timer_Test_ExpireRegistration()
+
+'
+'------------------------------------------------------------------------------
+'                    EXPIRE THE RETAINED REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Backdates the retained delivery deadlines so expiry can be tested
+'
+' WHY THIS EXISTS
+'   The bounded window is thirty seconds. Both the expiry drain and dropped-tick
+'   recovery depend on it having passed, and a regression cannot wait
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Moves the current and unresolved LatestTime values into the past
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerLatestTime
+'   mDP_TimerUnresolvedLatest
+'
+' NOTES
+'   Backdates only the deadlines. It never cancels, schedules or drains anything,
+'   so what the production code then does is the thing under test
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' BACKDATE THE DEADLINES
+'------------------------------------------------------------------------------
+    'Never let a test seam raise into a caller
+        On Error Resume Next
+    'Backdate the current registration deadline when one exists
+        If mDP_TimerLatestTime <> 0 Then
+            mDP_TimerLatestTime = VBA.Now - VBA.TimeSerial(0, 1, 0)
+        End If
+    'Backdate the unresolved registration deadline when one exists
+        If mDP_TimerUnresolvedLatest <> 0 Then
+            mDP_TimerUnresolvedLatest = VBA.Now - VBA.TimeSerial(0, 1, 0)
+        End If
+    'Clear any suppressed test-seam error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_Test_Reset()
+
+'
+'------------------------------------------------------------------------------
+'                        RESET TIMER TEST STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the recorder, the injected fault and the barrier to a known state
+'
+' WHY THIS EXISTS
+'   Timer cases must not leak an armed fault, a recorded registration or an
+'   outstanding barrier into the suites that follow
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Disarms the fault, clears the recorder and drains any retained registration
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_ResolveUnresolved
+'
+' NOTES
+'   This clears bookkeeping only. It does not cancel a live registration, so a
+'   suite must still stop the timer through the supported path
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESET THE STATE
+'------------------------------------------------------------------------------
+    'Never let a reset raise into a caller
+        On Error Resume Next
+    'Disarm any injected fault
+        mDP_TimerFaultNumber = 0
+    'Clear the recorded registration
+        mDP_TimerLastEarliest = 0
+        mDP_TimerLastLatest = 0
+        mDP_TimerLastProcedure = VBA.vbNullString
+        mDP_TimerLastSchedule = False
+        mDP_TimerLastErrNumber = 0
+        mDP_TimerLastErrDescription = VBA.vbNullString
+        mDP_TimerCallCount = 0
+    'Drain any retained registration
+        M_Timer_ResolveUnresolved
+    'Clear any suppressed reset error
+        Err.Clear
+
+End Sub
+
 Public Sub M_Timer_ApplyClockMode()
 
 '
@@ -11748,6 +12559,8 @@ Public Sub M_Timer_Start()
 
     Dim ErrorNumber             As Long          'Captured error number
     Dim ErrorDescription        As String        'Captured error description
+    Dim NextEarliest            As Date          'Registration time of the next tick
+    Dim NextLatest              As Date          'Bounded delivery deadline of the next tick
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -11756,37 +12569,60 @@ Public Sub M_Timer_Start()
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' HEAL A DROPPED REGISTRATION
+'------------------------------------------------------------------------------
+    'Repair a chain Excel dropped before deciding the timer is already running.
+    'This runs before the guard below because a dropped registration leaves the
+    'running flag True with nothing scheduled
+        M_Timer_CheckHealth
+
+'------------------------------------------------------------------------------
 ' EXIT IF ALREADY RUNNING
 '------------------------------------------------------------------------------
     'Exit if the timer is already running
         If mDP_TimerIsRunning Then Exit Sub
 
 '------------------------------------------------------------------------------
+' DRAIN AN UNRESOLVED REGISTRATION
+'------------------------------------------------------------------------------
+    'Refuse a fresh registration while an uncancelled one may still fire. The
+    'retry runs on every attempt; only the diagnostic is de-duplicated
+        If Not M_Timer_TryDrainUnresolved() Then
+            M_Timer_ReportRestartRefusal PROC_NAME
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
 ' RESOLVE TIMER PROCEDURE
 '------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
         mDP_TimerProcedureName = M_Timer_GetProcedureName
-        
-'------------------------------------------------------------------------------
-' MARK TIMER RUNNING
-'------------------------------------------------------------------------------
-    'Mark the timer as running before scheduling the OnTime callback
-        mDP_TimerIsRunning = True
 
 '------------------------------------------------------------------------------
 ' CALCULATE NEXT TICK
 '------------------------------------------------------------------------------
-    'Calculate the next timer tick
-        mDP_NextTickTime = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+    'Calculate the next tick and its bounded delivery deadline
+        NextEarliest = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+        NextLatest = NextEarliest + VBA.TimeSerial(0, 0, DP_TIMER_LATEST_SECONDS)
 
 '------------------------------------------------------------------------------
 ' SCHEDULE NEXT TICK
 '------------------------------------------------------------------------------
-    'Schedule the next timer tick
-        Application.OnTime _
-            EarliestTime:=mDP_NextTickTime, _
-            Procedure:=mDP_TimerProcedureName, _
-            Schedule:=True
+    'Schedule the next timer tick and raise when Excel refuses it
+        If Not M_Timer_ApplySchedule(NextEarliest, NextLatest, _
+            mDP_TimerProcedureName, True) Then
+            Err.Raise mDP_TimerLastErrNumber, PROC_NAME, mDP_TimerLastErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' ARM THE TIMER
+'------------------------------------------------------------------------------
+    'Establish the armed state only after the schedule call was accepted, so a
+    'refused schedule can never leave a false running state behind
+        mDP_TimerIsRunning = True
+        mDP_NextTickTime = NextEarliest
+        mDP_TimerLatestTime = NextLatest
+        mDP_TimerRefusalReported = False
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -11806,6 +12642,8 @@ ErrorHandler:
         mDP_TimerIsRunning = False
     'Clear next tick time after scheduling failure
         mDP_NextTickTime = 0
+    'Clear the delivery deadline after scheduling failure
+        mDP_TimerLatestTime = 0
     'Re-raise the original error to the caller
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
@@ -11894,12 +12732,15 @@ Public Sub M_Timer_Stop()
         If mDP_TimerIsRunning Then
             If mDP_NextTickTime <> 0 Then
                 If VBA.Len(mDP_TimerProcedureName) > 0 Then
-                    Application.OnTime _
-                        EarliestTime:=mDP_NextTickTime, _
-                        Procedure:=mDP_TimerProcedureName, _
-                        Schedule:=False
-                    CancelErrNumber = Err.Number
-                    CancelErrDescription = Err.Description
+                    If M_Timer_ApplySchedule(mDP_NextTickTime, 0, _
+                        mDP_TimerProcedureName, False) Then
+                        M_Timer_ResolveUnresolved
+                    Else
+                        CancelErrNumber = mDP_TimerLastErrNumber
+                        CancelErrDescription = mDP_TimerLastErrDescription
+                        M_Timer_RetainUnresolved mDP_NextTickTime, _
+                            mDP_TimerLatestTime, mDP_TimerProcedureName
+                    End If
                     Err.Clear
                 End If
             End If
@@ -11912,6 +12753,9 @@ Public Sub M_Timer_Stop()
         mDP_TimerIsRunning = False
     'Clear next tick time
         mDP_NextTickTime = 0
+    'Clear the delivery deadline. A registration that could not be cancelled is
+    'retained separately as unresolved, never as a running timer
+        mDP_TimerLatestTime = 0
     'Keep the cached timer procedure name for the next timer start
 
 '------------------------------------------------------------------------------
@@ -12008,6 +12852,8 @@ Public Sub M_Timer_Tick()
     Const PROC_NAME            As String = "M_Timer_Tick" 'Current procedure name
 
     Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim NextEarliest           As Date         'Registration time of the next tick
+    Dim NextLatest             As Date         'Bounded delivery deadline of the next tick
     Dim ErrorNumber            As Long         'Captured error number
     Dim ErrorDescription       As String       'Captured error description
     Dim StopErrNumber          As Long         'Captured timer-stop error number
@@ -12022,8 +12868,12 @@ Public Sub M_Timer_Tick()
 '------------------------------------------------------------------------------
 ' EXIT IF TIMER IS NOT RUNNING
 '------------------------------------------------------------------------------
-    'Exit if the timer is no longer running
-        If Not mDP_TimerIsRunning Then Exit Sub
+    'A callback arriving while the timer is inactive is the stale one a failed
+    'cancellation left outstanding. Drain it, do no work and do not reschedule
+        If Not mDP_TimerIsRunning Then
+            M_Timer_ResolveUnresolved
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' RESOLVE LOADED FORM
@@ -12051,21 +12901,27 @@ Public Sub M_Timer_Tick()
 '------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
         mDP_TimerProcedureName = M_Timer_GetProcedureName
-        
+
 '------------------------------------------------------------------------------
 ' CALCULATE NEXT TICK
 '------------------------------------------------------------------------------
-    'Calculate the next timer tick
-        mDP_NextTickTime = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+    'Calculate the next tick and its bounded delivery deadline
+        NextEarliest = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+        NextLatest = NextEarliest + VBA.TimeSerial(0, 0, DP_TIMER_LATEST_SECONDS)
 
 '------------------------------------------------------------------------------
 ' SCHEDULE NEXT TICK
 '------------------------------------------------------------------------------
-    'Schedule the next timer tick
-        Excel.Application.OnTime _
-            EarliestTime:=mDP_NextTickTime, _
-            Procedure:=mDP_TimerProcedureName, _
-            Schedule:=True
+    'Keep the chain alive only while Excel accepts the next registration
+        If M_Timer_ApplySchedule(NextEarliest, NextLatest, _
+            mDP_TimerProcedureName, True) Then
+            mDP_NextTickTime = NextEarliest
+            mDP_TimerLatestTime = NextLatest
+        Else
+            mDP_TimerIsRunning = False
+            mDP_NextTickTime = 0
+            mDP_TimerLatestTime = 0
+        End If
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
