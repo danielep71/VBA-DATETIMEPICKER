@@ -5942,6 +5942,7 @@ Private Sub TST_DP_RunSuite_Timer()
 '   M_Timer_Test_IsRunning
 '   M_Timer_Test_IsUnresolved
 '   M_Timer_Test_ExpireRegistration
+'   M_Timer_EnsureHealthy
 '   TST_DP_CancelRegistrationForTest
 '
 ' NOTES
@@ -6003,6 +6004,14 @@ Private Sub TST_DP_RunSuite_Timer()
     Dim CountAfterRecovery  As Long             'Call count captured immediately after recovery
     Dim SchedAfterRecovery  As Boolean          'Schedule flag captured immediately after recovery
     Dim CountAfterHealthy   As Long             'Call count captured immediately after the healthy start
+    Dim RunAfterTick        As Boolean          'Timer state captured immediately after a formless tick
+    Dim CountAfterTick      As Long             'Call count captured immediately after a formless tick
+    Dim TickEarliest        As Date             'EarliestTime the formless tick cancelled
+    Dim TickSchedule        As Boolean          'Schedule flag recorded by the formless tick
+    Dim CountBridgeHealthy  As Long             'Call count captured after a bridge call on a healthy timer
+    Dim RunBridgeHealthy    As Boolean          'Timer state captured after a bridge call on a healthy timer
+    Dim CountBridgeRepair   As Long             'Call count captured after a bridge call on an expired timer
+    Dim RunBridgeRepair     As Boolean          'Timer state captured after a bridge call on an expired timer
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6224,6 +6233,78 @@ Private Sub TST_DP_RunSuite_Timer()
             SchedAfterRecovery
         TST_DP_AssertEqualsLong "A healthy registration schedules nothing extra", _
             CountAfterRecovery, CountAfterHealthy
+
+    'Stop the replacement, then cancel the registration recovery abandoned
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+
+'------------------------------------------------------------------------------
+' AN ACTIVE TICK WITH NO LOADED FORM STOPS THE TIMER
+'------------------------------------------------------------------------------
+    'The live clock exists to refresh a loaded form. A tick that arrives while
+    'the timer is active but no form is loaded must stop the clock rather than
+    'reschedule, or the chain runs forever against nothing
+    '
+    'No form is loaded at this point in the run, and this path is what stopped
+    'the timer mid-suite while the cases above asserted inline. It is asserted
+    'here rather than left as an accident
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Tick
+        RunAfterTick = M_Timer_Test_IsRunning()
+        M_Timer_Test_LastRegistration TickEarliest, RegLatest, RegProcedure, _
+            TickSchedule, RegErrNumber, CountAfterTick
+
+        TST_DP_AssertFalse "An active tick with no loaded form stops the timer", _
+            RunAfterTick
+        TST_DP_AssertFalse "The stopping tick cancels rather than reschedules", _
+            TickSchedule
+        TST_DP_AssertTrue "The stopping tick cancels the scheduled registration", _
+            TickEarliest = ArmedEarliest
+        TST_DP_AssertEqualsLong "The stopping tick makes exactly one scheduling call", _
+            BaselineCount + 1, CountAfterTick
+
+'------------------------------------------------------------------------------
+' THE HEALTH BRIDGE THE FORM USES
+'------------------------------------------------------------------------------
+    'UF_DatePicker reaches the health check through M_Timer_EnsureHealthy. It
+    'previously went through M_Timer_ApplyClockMode, which stops the timer
+    'unconditionally first, so the check was unreachable and a dropped
+    'registration became a refused restart. Both bridge outcomes are asserted
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+    'A healthy registration must cost nothing at all
+        M_Timer_EnsureHealthy "TST_DP_RunSuite_Timer"
+        RunBridgeHealthy = M_Timer_Test_IsRunning()
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountBridgeHealthy
+
+    'An expired registration must be replaced exactly once
+        M_Timer_Test_ExpireRegistration
+        M_Timer_EnsureHealthy "TST_DP_RunSuite_Timer"
+        RunBridgeRepair = M_Timer_Test_IsRunning()
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountBridgeRepair
+
+        TST_DP_AssertEqualsLong "The bridge schedules nothing for a healthy timer", _
+            BaselineCount, CountBridgeHealthy
+        TST_DP_AssertTrue "The bridge leaves a healthy timer running", _
+            RunBridgeHealthy
+        TST_DP_AssertEqualsLong "The bridge replaces an expired registration once", _
+            BaselineCount + 1, CountBridgeRepair
+        TST_DP_AssertTrue "The bridge leaves the repaired timer running", _
+            RunBridgeRepair
 
     'Stop the replacement, then cancel the registration recovery abandoned
         M_Timer_Stop

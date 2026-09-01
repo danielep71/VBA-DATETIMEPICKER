@@ -11921,7 +11921,75 @@ Private Sub M_Timer_ReportRestartRefusal(ByVal EntryPoint As String)
 
 End Sub
 
-Private Sub M_Timer_CheckHealth()
+Public Sub M_Timer_EnsureHealthy(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                        ENSURE THE LIVE CLOCK IS HEALTHY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The only cross-module entry point to the timer health check
+'
+' WHY THIS EXISTS
+'   UF_DatePicker must be able to repair a dropped clock registration when the
+'   form is reactivated, and M_Timer_CheckHealth is Private
+'
+'   The form previously reached it through M_Timer_ApplyClockMode. That does not
+'   work. ApplyClockMode calls M_Timer_Stop unconditionally before anything else,
+'   which clears the running flag, so the health check inside M_Timer_Start then
+'   exits immediately and the recovery path was unreachable
+'
+'   In the case the call exists for it was worse than useless. With the
+'   registration already dropped, that Stop attempted to cancel a registration
+'   Excel no longer held; the cancellation failed, the unresolved barrier was
+'   retained, and the following start was refused, leaving the clock dead until
+'   the retained LatestTime expired
+'
+' INPUTS
+'   EntryPoint
+'     Name of the routine asking for the check, for diagnostics
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_Timer_CheckHealth and does nothing else
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_CheckHealth
+'
+' NOTES
+'   This routine must never stop the timer, load settings, reapply the clock
+'   mode, resolve the form or refresh the UI
+'
+'   A healthy registration produces no scheduling call at all. An expired current
+'   registration may produce exactly one replacement. A registration retained by
+'   a failed cancellation stays governed by the barrier and its drains
+'
+'   Public only because the form is a separate module. It takes an argument, so
+'   it does not appear in the macro dialog, and #25 classifies it as internal
+'   rather than supported API
+'
+' UPDATED
+'   2026-09-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DELEGATE
+'------------------------------------------------------------------------------
+    'Never let the bridge raise into a caller
+        On Error Resume Next
+    'Run the health check and nothing else
+        M_Timer_CheckHealth EntryPoint
+    'Clear any suppressed error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Timer_CheckHealth(ByVal EntryPoint As String)
 
 '
 '------------------------------------------------------------------------------
@@ -11941,7 +12009,8 @@ Private Sub M_Timer_CheckHealth()
 '   self-healing driven by the next DatePicker interaction, not a watchdog
 '
 ' INPUTS
-'   None
+'   EntryPoint
+'     Name of the routine asking for the check, for diagnostics
 '
 ' RETURNS
 '   Nothing
@@ -11967,7 +12036,7 @@ Private Sub M_Timer_CheckHealth()
 '   M_Timer_TryDrainUnresolved
 '
 ' UPDATED
-'   2026-08-30
+'   2026-09-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -12009,7 +12078,7 @@ Private Sub M_Timer_CheckHealth()
             mDP_NextTickTime = NextEarliest
             mDP_TimerLatestTime = NextLatest
         Else
-            Debug.Print "M_Timer_CheckHealth" & _
+            Debug.Print EntryPoint & " | M_Timer_CheckHealth" & _
                 " | Step=RescheduleDroppedTick" & _
                 " | Error=" & VBA.CStr(mDP_TimerLastErrNumber) & _
                 " | " & mDP_TimerLastErrDescription
@@ -12549,7 +12618,7 @@ Public Sub M_Timer_Start()
 '   reliably when multiple workbooks or add-ins are open
 '
 ' UPDATED
-'   2026-05-06
+'   2026-09-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -12574,7 +12643,7 @@ Public Sub M_Timer_Start()
     'Repair a chain Excel dropped before deciding the timer is already running.
     'This runs before the guard below because a dropped registration leaves the
     'running flag True with nothing scheduled
-        M_Timer_CheckHealth
+        M_Timer_CheckHealth PROC_NAME
 
 '------------------------------------------------------------------------------
 ' EXIT IF ALREADY RUNNING
@@ -12668,9 +12737,15 @@ Public Sub M_Timer_Stop()
 '   Nothing
 '
 ' BEHAVIOR
-'   Rebuilds the qualified timer procedure name when needed, attempts to cancel
-'   the next scheduled timer tick when a timer is active, and always clears the
-'   internal timer state
+'   Rebuilds the qualified timer procedure name when needed and attempts to
+'   cancel the next scheduled timer tick when a timer is active
+'
+'   A successful cancellation resolves the registration and leaves nothing
+'   outstanding. A failed cancellation retains the exact registration identity
+'   as unresolved, because that registration may still fire
+'
+'   The logical timer state is cleared either way, so an outstanding
+'   registration is never mistaken for a running timer
 '
 ' ERROR POLICY
 '   Best-effort cleanup. Cancellation errors are suppressed because OnTime
@@ -12688,10 +12763,17 @@ Public Sub M_Timer_Stop()
 ' NOTES
 '   This routine intentionally does not raise outward
 '
-'   Timer state is cleared even when the OnTime cancellation attempt fails
+'   Clearing the logical state is not the same as discarding the registration.
+'   Before #27 a failed cancellation reached only Debug.Print while the state
+'   claimed clean teardown, so a registration that could still fire was simply
+'   forgotten. It is now retained through M_Timer_RetainUnresolved and refuses
+'   a restart until one of its drains lifts the barrier
+'
+'   Whether an unresolved registration should also make shutdown incomplete and
+'   retain the provider lease is #50's contract, not this routine's
 '
 ' UPDATED
-'   2026-05-06
+'   2026-09-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
