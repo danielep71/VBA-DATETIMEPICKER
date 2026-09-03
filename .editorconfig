@@ -1,0 +1,85 @@
+#==============================================================================
+# VBA-DATETIMEPICKER .editorconfig
+#------------------------------------------------------------------------------
+# PURPOSE
+#   Keep exported modules, classes, UserForm text, RibbonX, workflows, and documentation consistent across editors.
+#
+# POLICY
+#   - Exported VBA source uses CRLF and 4-space indentation.
+#   - Repository text and cross-platform tooling use LF.
+#   - Markdown preserves intentional two-space hard line breaks.
+#   - VBA source encoding is not forced because the VBE exports text using the
+#     Windows system code page.
+#
+# RELATIONSHIP WITH .gitattributes
+#   .editorconfig controls editor behavior in the working tree. .gitattributes,
+#   where present, remains authoritative for Git normalization, binary
+#   classification, merge and diff behavior, Linguist, and archives.
+#==============================================================================
+
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+tab_width = 4
+
+# Exported standard modules, class modules, and UserForm text definitions.
+# Do not set charset here: preserve the VBE export contract.
+[*.{bas,cls,frm}]
+end_of_line = crlf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# UF_DatePicker.frx is binary and is intentionally outside EditorConfig.
+# RibbonX source is XML and uses compact two-space indentation.
+[*.xml]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# GitHub workflows use two-space YAML indentation.
+[*.{yml,yaml}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Documentation. Preserve intentional Markdown hard line breaks.
+[*.md]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = false
+
+[*.txt]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[LICENSE]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Repository control files.
+[{.editorconfig,.gitattributes,.gitignore,.gitkeep}]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
