@@ -1,43 +1,110 @@
 <div align="center">
 
-# 📄 Changelog
+# 📜 Changelog
 
-**All notable changes to VBA-DATETIMEPICKER**
+### Release history for the source-first Excel Date / Time Picker
 
-[![Semantic Versioning](https://img.shields.io/badge/Versioning-semver-6f42c1?style=flat-square)](https://semver.org/)
-[![Format](https://img.shields.io/badge/Format-Keep_a_changelog-0969da?style=flat-square)](https://keepachangelog.com/)
-[![Dates](https://img.shields.io/badge/Dates-YYYY--MM--DD-217346?style=flat-square)](#)
+[![Format](https://img.shields.io/badge/Format-Keep_a_Changelog-0969da?style=flat-square)](https://keepachangelog.com/en/1.1.0/)
+[![Versioning](https://img.shields.io/badge/Versioning-SemVer-6f42c1?style=flat-square)](https://semver.org/spec/v2.0.0.html)
+[![Dates](https://img.shields.io/badge/Dates-YYYY--MM--DD-217346?style=flat-square)](#date-and-version-rules)
+[![Staging](https://img.shields.io/badge/Staging-Unreleased_first-d97706?style=flat-square)](#unreleased)
+[![Contributing](https://img.shields.io/badge/Changes-Contribution_guide-2ea44f?style=flat-square)](CONTRIBUTING.md)
+
+<br>
+
+**User-visible history · Explicit compatibility · Reproducible evidence · Immutable releases**
 
 </div>
 
 ---
 
-Versioning applies to the **documented supported consumer API and its established
-behavioral contracts**. A member that is technically `Public` only because Excel,
-Office, RibbonX, `Application.Run`, CommandBars, `OnTime`, Shape callbacks, or
-test infrastructure must resolve it is **not automatically supported API**.
+All notable changes to **VBA Date / Time Picker** are documented here.
 
-Compatibility-sensitive contracts include documented API names/signatures,
-public enums and result types, established defaults, write-back semantics,
-settings persistence, runtime ownership, and the stable
-`VBA_DATETIMEPICKER` identifiers.
+This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and [Semantic Versioning](https://semver.org/spec/v2.0.0.html). It records
+released behavior and material unreleased changes; it is not a commit log, issue
+tracker, or substitute for release evidence.
+
+Versioning covers the documented consumer API and its behavioral contracts: names and signatures, enums and result types, defaults, write-back and formula semantics, settings persistence, runtime ownership, and stable integration identifiers. Members exposed only for Excel, RibbonX, callbacks, timers, shapes, or tests are not automatically supported API.
+
+---
+
+## 🧭 Maintenance policy
+
+- Add material changes under **Unreleased** in the same pull request as the
+  behavior or documentation they describe.
+- Write from the user's perspective: describe the observable result, contract,
+  compatibility impact, and migration need.
+- Link the owning issue or pull request when it contains useful engineering
+  detail.
+- Keep entries concise; do not duplicate implementation notes already preserved
+  in source, issues, or technical documentation.
+- Record only validation actually performed. State skipped environments and
+  known limitations plainly.
+- Move Unreleased entries into a dated version section during release.
+- Do not edit a published release entry except to correct a demonstrable factual
+  or link error; annotate material corrections instead of rewriting history.
+- Never claim that a tag, binary, workbook, hash, test run, or environment was
+  certified unless the evidence binds it to the released source.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for change and evidence requirements and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
+<a id="date-and-version-rules"></a>
+
+### Date and version rules
+
+| Rule | Standard |
+|---|---|
+| Version | `MAJOR.MINOR.PATCH`, without the leading `v` in headings |
+| Release heading | `## [X.Y.Z] - YYYY-MM-DD` |
+| Date | Gregorian calendar date in ISO `YYYY-MM-DD` format |
+| Ordering | Unreleased first; released versions newest to oldest |
+| Comparison | Unreleased → latest tag; each release → preceding tag |
+| Patch | Backward-compatible correction or hardening |
+| Minor | Backward-compatible capability |
+| Major | Incompatible public-contract change |
+| Pre-release | State maturity and compatibility boundaries explicitly |
+
+A repository may remain below `1.0.0` while its supported surface is still
+forming. Pre-release status does not excuse undocumented breaking changes.
 
 <details>
-<summary><strong>Section legend</strong></summary>
+<summary><strong>Entry categories</strong></summary>
 
 <br>
 
-| Section | Contains |
+| Category | Use for |
 |---|---|
-| ➕ **Added** | New supported capabilities, types, files or test capabilities |
-| 🔧 **Changed** | Final behavior or contract changes |
-| 🐛 **Fixed** | Defects corrected, with issue links for engineering detail |
-| 📖 **Documentation** | Current-state user, contributor and repository documentation |
-| 🧪 **Validation** | Evidence actually produced |
-| 🔗 **Compatibility** | Upgrade impact |
-| ⚠️ **Known limitations** | Deliberate boundaries that remain |
+| **Added** | New supported capabilities, APIs, files, or tests |
+| **Changed** | Changes to existing behavior, contracts, tooling, or documentation |
+| **Deprecated** | Supported behavior scheduled for removal |
+| **Removed** | Removed capabilities or compatibility |
+| **Fixed** | Corrected defects |
+| **Security** | Safely disclosed security corrections |
+| **Documentation** | Material documentation-only changes |
+| **Validation** | Evidence actually produced |
+| **Compatibility** | Upgrade or migration effects |
+| **Known limitations** | Deliberate, unresolved boundaries |
+
+Use only the categories needed by a release.
 
 </details>
+
+---
+
+<a id="unreleased"></a>
+
+## [Unreleased]
+
+### Changed
+
+- Standardized changelog governance and added an explicit Unreleased staging
+  section without altering published release history.
+
+### Validation
+
+- Verified historical version ordering, comparison links, and policy links.
 
 ---
 
