@@ -440,6 +440,24 @@ Option Explicit
     Private mDP_TimerUnresolvedProcedure As String              'Procedure of the unresolved registration
     Private mDP_TimerRefusalReported    As Boolean              'Diagnostic-only: restart refusal already reported
 
+
+    'Issue #50 lifecycle transaction / deterministic fault state
+    Private mDP_LifecycleFaultStep          As String           'One-shot lifecycle fault step, blank when disarmed
+    Private mDP_LifecycleFaultNumber        As Long             'One-shot lifecycle fault number
+    Private mDP_LifecycleLastTrace          As String           'Ordered cleanup trace from the last lifecycle transaction
+    Private mDP_LifecycleLastCleanupDetail  As String           'First cleanup failure from the last lifecycle transaction
+    Private mDP_LifecycleLastCriticalClean  As Boolean          'True when every critical cleanup step proved clean
+    Private mDP_LifecycleLastLeaseReleased  As Boolean          'True when the last transaction verified lease release
+    Private mDP_LifecycleLastPrimaryNumber  As Long             'Primary lifecycle failure number preserved across cleanup
+    Private mDP_LifecycleLastPrimaryStep    As String           'Primary lifecycle failure step preserved across cleanup
+    Private mDP_LifecycleLastPrimaryDescription As String       'Primary lifecycle failure description preserved across cleanup
+    Private mDP_LifecycleLastOperation      As String           'Lifecycle entry point represented by the current diagnostic state
+    Private mDP_LifecycleLastSucceeded      As Boolean          'True only when the lifecycle entry point completed its contract
+    Private mDP_LifecycleLastCleanupAttempted As Boolean        'True once the lifecycle cleanup transaction was entered
+    Private mDP_LifecycleLastCleanupFailureCount As Long        'Number of cleanup steps that actually failed
+    Private mDP_LifecycleLastLeaseWasAlreadyOwned As Boolean    'True when the provider lease pre-dated the lifecycle call
+    Private mDP_LifecycleLastLeaseAcquiredThisCall As Boolean   'True when the lifecycle call acquired the provider lease
+
 '------------------------------------------------------------------------------
 ' EMBEDDED GRID ICON
 '------------------------------------------------------------------------------
@@ -6614,6 +6632,790 @@ Public Function M_Lease_TryAcquire() As Boolean
 
 End Function
 
+Private Sub M_Lifecycle_ResetObservation()
+
+    mDP_LifecycleLastTrace = VBA.vbNullString
+    mDP_LifecycleLastCleanupDetail = VBA.vbNullString
+    mDP_LifecycleLastCriticalClean = False
+    mDP_LifecycleLastLeaseReleased = False
+    mDP_LifecycleLastPrimaryNumber = 0
+    mDP_LifecycleLastPrimaryStep = VBA.vbNullString
+    mDP_LifecycleLastPrimaryDescription = VBA.vbNullString
+
+    mDP_LifecycleLastOperation = VBA.vbNullString
+    mDP_LifecycleLastSucceeded = False
+    mDP_LifecycleLastCleanupAttempted = False
+    mDP_LifecycleLastCleanupFailureCount = 0
+    mDP_LifecycleLastLeaseWasAlreadyOwned = False
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
+End Sub
+
+Private Sub M_Lifecycle_SetPrimaryFailure( _
+    ByVal ErrorNumber As Long, _
+    ByVal StepName As String, _
+    ByVal ErrorDescription As String)
+
+    mDP_LifecycleLastPrimaryNumber = ErrorNumber
+    mDP_LifecycleLastPrimaryStep = StepName
+    mDP_LifecycleLastPrimaryDescription = ErrorDescription
+
+End Sub
+
+Private Function M_Lifecycle_TryConsumeFault( _
+    ByVal StepName As String, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+    M_Lifecycle_TryConsumeFault = False
+
+    If mDP_LifecycleFaultNumber = 0 Then Exit Function
+    If VBA.StrComp(mDP_LifecycleFaultStep, StepName, vbBinaryCompare) <> 0 Then Exit Function
+
+    ErrorNumber = mDP_LifecycleFaultNumber
+    ErrorDescription = "Injected lifecycle fault at " & StepName
+    mDP_LifecycleFaultStep = VBA.vbNullString
+    mDP_LifecycleFaultNumber = 0
+    M_Lifecycle_TryConsumeFault = True
+
+End Function
+
+Private Sub M_Lifecycle_RaiseIfFault(ByVal StepName As String)
+
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+
+    If M_Lifecycle_TryConsumeFault(StepName, ErrorNumber, ErrorDescription) Then
+        Err.Raise ErrorNumber, "M_Lifecycle_TestFault", ErrorDescription
+    End If
+
+End Sub
+
+Private Sub M_Lifecycle_RecordCleanupStep( _
+    ByVal StepName As String, _
+    ByVal Succeeded As Boolean, _
+    ByVal ErrorNumber As Long, _
+    ByVal ErrorDescription As String, _
+    Optional ByVal CountFailure As Boolean = True)
+
+    Dim StepText As String
+
+    If Succeeded Then
+        StepText = StepName & "=PASS"
+    Else
+        StepText = StepName & "=FAIL"
+        If ErrorNumber <> 0 Then StepText = StepText & "(" & VBA.CStr(ErrorNumber) & ")"
+    End If
+
+    If VBA.LenB(mDP_LifecycleLastTrace) = 0 Then
+        mDP_LifecycleLastTrace = StepText
+    Else
+        mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & " > " & StepText
+    End If
+
+    If Not Succeeded Then
+        If CountFailure Then
+            mDP_LifecycleLastCleanupFailureCount = _
+                mDP_LifecycleLastCleanupFailureCount + 1
+        End If
+        If VBA.LenB(mDP_LifecycleLastCleanupDetail) = 0 Then
+  mDP_LifecycleLastCleanupDetail = StepName
+  If ErrorNumber <> 0 Then
+      mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
+          " | Error=" & VBA.CStr(ErrorNumber)
+  End If
+  If VBA.LenB(ErrorDescription) > 0 Then
+      mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
+          " | " & ErrorDescription
+  End If
+        End If
+    End If
+
+End Sub
+
+Public Sub M_Lifecycle_Test_ArmFault(ByVal StepName As String, ByVal ErrorNumber As Long)
+
+    mDP_LifecycleFaultStep = VBA.Trim$(StepName)
+    mDP_LifecycleFaultNumber = ErrorNumber
+
+End Sub
+
+Public Sub M_Lifecycle_Test_Reset(ByVal ResetState As Boolean)
+
+    If Not ResetState Then Exit Sub
+
+    mDP_LifecycleFaultStep = VBA.vbNullString
+    mDP_LifecycleFaultNumber = 0
+    M_Lifecycle_ResetObservation
+
+End Sub
+
+Public Function M_Lifecycle_Test_LastTrace() As String
+
+    M_Lifecycle_Test_LastTrace = mDP_LifecycleLastTrace
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupDetail() As String
+
+    M_Lifecycle_Test_LastCleanupDetail = mDP_LifecycleLastCleanupDetail
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCriticalClean() As Boolean
+
+    M_Lifecycle_Test_LastCriticalClean = mDP_LifecycleLastCriticalClean
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseReleased() As Boolean
+
+    M_Lifecycle_Test_LastLeaseReleased = mDP_LifecycleLastLeaseReleased
+
+End Function
+
+Public Function M_Lifecycle_Test_HasLocalOwnerToken() As Boolean
+
+    M_Lifecycle_Test_HasLocalOwnerToken = (VBA.LenB(mDP_RuntimeOwnerId) > 0)
+
+End Function
+
+Public Function M_Lifecycle_Test_LastPrimaryNumber() As Long
+
+    M_Lifecycle_Test_LastPrimaryNumber = mDP_LifecycleLastPrimaryNumber
+
+End Function
+
+Public Function M_Lifecycle_Test_LastPrimaryStep() As String
+
+    M_Lifecycle_Test_LastPrimaryStep = mDP_LifecycleLastPrimaryStep
+
+End Function
+
+Public Function M_Lifecycle_Test_LastPrimaryDescription() As String
+
+    M_Lifecycle_Test_LastPrimaryDescription = mDP_LifecycleLastPrimaryDescription
+
+End Function
+
+Public Function M_Lifecycle_Test_LastOperation() As String
+
+    M_Lifecycle_Test_LastOperation = mDP_LifecycleLastOperation
+
+End Function
+
+Public Function M_Lifecycle_Test_LastSucceeded() As Boolean
+
+    M_Lifecycle_Test_LastSucceeded = mDP_LifecycleLastSucceeded
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupAttempted() As Boolean
+
+    M_Lifecycle_Test_LastCleanupAttempted = mDP_LifecycleLastCleanupAttempted
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupFailureCount() As Long
+
+    M_Lifecycle_Test_LastCleanupFailureCount = mDP_LifecycleLastCleanupFailureCount
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseWasAlreadyOwned() As Boolean
+
+    M_Lifecycle_Test_LastLeaseWasAlreadyOwned = mDP_LifecycleLastLeaseWasAlreadyOwned
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseAcquiredThisCall() As Boolean
+
+    M_Lifecycle_Test_LastLeaseAcquiredThisCall = mDP_LifecycleLastLeaseAcquiredThisCall
+
+End Function
+
+Private Function M_Lifecycle_TryReleaseManager( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Set gDP_Manager = Nothing
+    M_Lifecycle_TryReleaseManager = (gDP_Manager Is Nothing)
+    If Not M_Lifecycle_TryReleaseManager Then
+        ErrorNumber = vbObjectError + 2710
+        ErrorDescription = "DatePicker manager reference remained live after release"
+    End If
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryReleaseManager = False
+
+End Function
+
+Private Function M_Lifecycle_TryStopTimer( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    M_Timer_Stop
+    If mDP_TimerIsRunning Then
+        ErrorNumber = vbObjectError + 2711
+        ErrorDescription = "Timer remained logically active after stop"
+        Exit Function
+    End If
+    If mDP_TimerUnresolved Then
+        ErrorNumber = vbObjectError + 2712
+        ErrorDescription = "Timer cancellation is unresolved; the retained callback may still fire"
+        Exit Function
+    End If
+
+    M_Lifecycle_TryStopTimer = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryStopTimer = False
+
+End Function
+
+Private Function M_Lifecycle_TryClosePickerForm( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    Dim LoadedForm As Object
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    If Not LoadedForm Is Nothing Then
+        LoadedForm.Visible = False
+        Unload LoadedForm
+    End If
+    Set LoadedForm = Nothing
+
+    gDP_InitialDate = 0
+    gDP_HasInitialDate = False
+
+    Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    M_Lifecycle_TryClosePickerForm = (LoadedForm Is Nothing)
+    If Not M_Lifecycle_TryClosePickerForm Then
+        ErrorNumber = vbObjectError + 2713
+        ErrorDescription = "A DatePicker form remained loaded after unload"
+    End If
+    Set LoadedForm = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set LoadedForm = Nothing
+    Err.Clear
+    M_Lifecycle_TryClosePickerForm = False
+
+End Function
+
+Private Function M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
+    ByVal TargetWorkbook As Excel.Workbook, _
+    ByVal TargetShapeName As String, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    Dim CurWorksheet As Excel.Worksheet
+    Dim CurShape As Excel.Shape
+    Dim ShapeIndex As Long
+    Dim ShapeName As String
+    Dim DeleteErrNumber As Long
+    Dim DeleteErrDescription As String
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+    M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = True
+
+    If TargetWorkbook Is Nothing Then Exit Function
+    If VBA.LenB(TargetShapeName) = 0 Then Exit Function
+
+    For Each CurWorksheet In TargetWorkbook.Worksheets
+        For ShapeIndex = CurWorksheet.Shapes.Count To 1 Step -1
+  Set CurShape = CurWorksheet.Shapes(ShapeIndex)
+  ShapeName = VBA.CStr(CurShape.Name)
+  If VBA.StrComp(ShapeName, TargetShapeName, vbBinaryCompare) = 0 Then
+      If M_GridIcon_IsOwnedShape(CurShape) Then
+          On Error Resume Next
+          Err.Clear
+          CurShape.Delete
+          DeleteErrNumber = Err.Number
+          DeleteErrDescription = Err.Description
+          Err.Clear
+          On Error GoTo Failed
+          If DeleteErrNumber <> 0 Then
+              If M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook Then
+                  ErrorNumber = DeleteErrNumber
+                  ErrorDescription = DeleteErrDescription
+              End If
+              M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = False
+          End If
+      End If
+  End If
+  Set CurShape = Nothing
+        Next ShapeIndex
+    Next CurWorksheet
+
+    Set CurShape = Nothing
+    Set CurWorksheet = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set CurShape = Nothing
+    Set CurWorksheet = Nothing
+    Err.Clear
+    M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = False
+
+End Function
+
+Private Function M_Lifecycle_TryPurgeGridIcons( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    Dim CurWorkbook As Excel.Workbook
+    Dim LocalErrNumber As Long
+    Dim LocalErrDescription As String
+    Dim OverallSuccess As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+    OverallSuccess = True
+
+    For Each CurWorkbook In Excel.Application.Workbooks
+        LocalErrNumber = 0
+        LocalErrDescription = VBA.vbNullString
+        If Not M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
+  CurWorkbook, DP_GRID_ICON_NAME, LocalErrNumber, LocalErrDescription) Then
+  If OverallSuccess Then
+      ErrorNumber = LocalErrNumber
+      ErrorDescription = LocalErrDescription
+  End If
+  OverallSuccess = False
+        End If
+
+        LocalErrNumber = 0
+        LocalErrDescription = VBA.vbNullString
+        If Not M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
+  CurWorkbook, DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX, _
+  LocalErrNumber, LocalErrDescription) Then
+  If OverallSuccess Then
+      ErrorNumber = LocalErrNumber
+      ErrorDescription = LocalErrDescription
+  End If
+  OverallSuccess = False
+        End If
+    Next CurWorkbook
+
+    If M_GridIcon_TrackedShapeIsLive() Then
+        On Error Resume Next
+        Err.Clear
+        gDP_GridIconShape.Delete
+        LocalErrNumber = Err.Number
+        LocalErrDescription = Err.Description
+        Err.Clear
+        On Error GoTo Failed
+        If LocalErrNumber <> 0 Then
+  If OverallSuccess Then
+      ErrorNumber = LocalErrNumber
+      ErrorDescription = LocalErrDescription
+  End If
+  OverallSuccess = False
+        End If
+    End If
+
+    If Not M_GridIcon_TrackedShapeIsLive() Then Set gDP_GridIconShape = Nothing
+    M_GridIcon_ClearRefusalKey
+    M_GridIcon_ClearLastTarget
+
+    If OverallSuccess Then
+        If M_GridIcon_TrackedShapeIsLive() Then
+  OverallSuccess = False
+  ErrorNumber = vbObjectError + 2714
+  ErrorDescription = "A tracked DatePicker grid icon remained live after purge"
+        End If
+    End If
+
+    M_Lifecycle_TryPurgeGridIcons = OverallSuccess
+    Set CurWorkbook = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set CurWorkbook = Nothing
+    Err.Clear
+    M_Lifecycle_TryPurgeGridIcons = False
+
+End Function
+
+Private Function M_Lifecycle_ContextMenuBarIsClean( _
+    ByVal CommandBarName As String, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    Dim TargetCommandBar As CommandBar
+    Dim ControlItem As CommandBarControl
+    Dim ControlTag As String
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Set TargetCommandBar = Excel.Application.CommandBars(CommandBarName)
+    If TargetCommandBar Is Nothing Then
+        ErrorNumber = vbObjectError + 2715
+        ErrorDescription = "Command bar could not be resolved: " & CommandBarName
+        Exit Function
+    End If
+
+    For Each ControlItem In TargetCommandBar.Controls
+        ControlTag = VBA.CStr(ControlItem.Tag)
+        If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
+  ErrorNumber = vbObjectError + 2716
+  ErrorDescription = "DatePicker control remained on command bar: " & CommandBarName
+  Set ControlItem = Nothing
+  Set TargetCommandBar = Nothing
+  Exit Function
+        End If
+    Next ControlItem
+
+    M_Lifecycle_ContextMenuBarIsClean = True
+    Set ControlItem = Nothing
+    Set TargetCommandBar = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set ControlItem = Nothing
+    Set TargetCommandBar = Nothing
+    Err.Clear
+    M_Lifecycle_ContextMenuBarIsClean = False
+
+End Function
+
+Private Function M_Lifecycle_TryRemoveContextMenu( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    Dim LocalErrNumber As Long
+    Dim LocalErrDescription As String
+    Dim CellClean As Boolean
+    Dim ListClean As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    M_ContextMenu_Remove
+
+    CellClean = M_Lifecycle_ContextMenuBarIsClean( _
+        "Cell", LocalErrNumber, LocalErrDescription)
+    If Not CellClean Then
+        ErrorNumber = LocalErrNumber
+        ErrorDescription = LocalErrDescription
+    End If
+
+    LocalErrNumber = 0
+    LocalErrDescription = VBA.vbNullString
+    ListClean = M_Lifecycle_ContextMenuBarIsClean( _
+        "List Range Popup", LocalErrNumber, LocalErrDescription)
+    If Not ListClean And ErrorNumber = 0 Then
+        ErrorNumber = LocalErrNumber
+        ErrorDescription = LocalErrDescription
+    End If
+
+    M_Lifecycle_TryRemoveContextMenu = (CellClean And ListClean)
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRemoveContextMenu = False
+
+End Function
+
+Private Function M_Lifecycle_TryRemoveKeyboardShortcut( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Excel.Application.OnKey DP_KEYBOARD_SHORTCUT_KEY
+    M_Lifecycle_TryRemoveKeyboardShortcut = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRemoveKeyboardShortcut = False
+
+End Function
+
+Private Function M_Lifecycle_TryRestoreEnableEvents( _
+    ByVal DesiredValue As Boolean, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Excel.Application.EnableEvents = DesiredValue
+    If Excel.Application.EnableEvents <> DesiredValue Then
+        ErrorNumber = vbObjectError + 2722
+        ErrorDescription = "Application.EnableEvents did not restore to the caller state"
+        Exit Function
+    End If
+
+    M_Lifecycle_TryRestoreEnableEvents = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRestoreEnableEvents = False
+
+End Function
+
+Private Function M_Lifecycle_TryReleaseLease( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    Dim CurrentOwner As String
+    Dim LeaseBar As Object
+    Dim FaultErrNumber As Long
+    Dim FaultErrDescription As String
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
+        M_Lifecycle_TryReleaseLease = True
+        Exit Function
+    End If
+
+    CurrentOwner = M_Lease_ReadOwner()
+    If VBA.LenB(CurrentOwner) = 0 Then
+        mDP_RuntimeOwnerId = VBA.vbNullString
+        M_Lifecycle_TryReleaseLease = True
+        Exit Function
+    End If
+
+    If VBA.StrComp(CurrentOwner, mDP_RuntimeOwnerId, vbBinaryCompare) <> 0 Then
+        ErrorNumber = vbObjectError + 2717
+        ErrorDescription = "Provider lease owner is ambiguous or no longer matches the retained local token"
+        Exit Function
+    End If
+
+    If M_Lifecycle_TryConsumeFault("Lease.Delete", FaultErrNumber, FaultErrDescription) Then
+        ErrorNumber = FaultErrNumber
+        ErrorDescription = FaultErrDescription
+        Exit Function
+    End If
+
+    Set LeaseBar = M_Lease_GetBar()
+    If LeaseBar Is Nothing Then
+        CurrentOwner = M_Lease_ReadOwner()
+        If VBA.LenB(CurrentOwner) = 0 Then
+  mDP_RuntimeOwnerId = VBA.vbNullString
+  M_Lifecycle_TryReleaseLease = True
+        Else
+  ErrorNumber = vbObjectError + 2718
+  ErrorDescription = "Provider lease could not be resolved for verified deletion"
+        End If
+        Exit Function
+    End If
+
+    LeaseBar.Delete
+    Set LeaseBar = Nothing
+
+    CurrentOwner = M_Lease_ReadOwner()
+    If VBA.LenB(CurrentOwner) = 0 Then
+        mDP_RuntimeOwnerId = VBA.vbNullString
+        M_Lifecycle_TryReleaseLease = True
+    Else
+        ErrorNumber = vbObjectError + 2719
+        ErrorDescription = "Provider lease deletion did not produce a verified free lease"
+    End If
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set LeaseBar = Nothing
+    Err.Clear
+    M_Lifecycle_TryReleaseLease = False
+
+End Function
+
+Private Function M_Lifecycle_Cleanup( _
+    ByVal ReleaseLease As Boolean, _
+    ByVal EntryPoint As String, _
+    Optional ByVal RestoreApplicationEvents As Boolean = False, _
+    Optional ByVal DesiredEnableEvents As Boolean = True) As Boolean
+
+    Dim StepSucceeded As Boolean
+    Dim StepErrNumber As Long
+    Dim StepErrDescription As String
+    Dim CriticalClean As Boolean
+
+    mDP_LifecycleLastTrace = VBA.vbNullString
+    mDP_LifecycleLastCleanupDetail = VBA.vbNullString
+    mDP_LifecycleLastCriticalClean = False
+    mDP_LifecycleLastLeaseReleased = False
+    mDP_LifecycleLastCleanupAttempted = True
+    mDP_LifecycleLastCleanupFailureCount = 0
+    CriticalClean = True
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Manager", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryReleaseManager(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Manager", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Timer", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryStopTimer(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Timer", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Form", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryClosePickerForm(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Form", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Grid", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryPurgeGridIcons(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Grid", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.ContextMenu", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryRemoveContextMenu(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "ContextMenu", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Keyboard", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryRemoveKeyboardShortcut(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Keyboard", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    On Error Resume Next
+    Err.Clear
+    M_GetQualifiedMacroName_ClearCache
+    StepErrNumber = Err.Number
+    StepErrDescription = Err.Description
+    Err.Clear
+    On Error GoTo 0
+    StepSucceeded = (StepErrNumber = 0)
+    M_Lifecycle_RecordCleanupStep "CallbackCache", StepSucceeded, StepErrNumber, StepErrDescription
+
+    If RestoreApplicationEvents Then
+        StepErrNumber = 0
+        StepErrDescription = VBA.vbNullString
+        If M_Lifecycle_TryConsumeFault("Cleanup.EnableEvents", StepErrNumber, StepErrDescription) Then
+            StepSucceeded = False
+        Else
+            StepSucceeded = M_Lifecycle_TryRestoreEnableEvents( _
+                DesiredEnableEvents, StepErrNumber, StepErrDescription)
+        End If
+        M_Lifecycle_RecordCleanupStep "EnableEvents", StepSucceeded, StepErrNumber, StepErrDescription
+        CriticalClean = CriticalClean And StepSucceeded
+    End If
+
+    mDP_LifecycleLastCriticalClean = CriticalClean
+
+    If ReleaseLease Then
+        If CriticalClean Then
+  StepErrNumber = 0
+  StepErrDescription = VBA.vbNullString
+  If M_Lifecycle_TryConsumeFault("Cleanup.Lease", StepErrNumber, StepErrDescription) Then
+      StepSucceeded = False
+  Else
+      StepSucceeded = M_Lifecycle_TryReleaseLease(StepErrNumber, StepErrDescription)
+  End If
+  M_Lifecycle_RecordCleanupStep "Lease", StepSucceeded, StepErrNumber, StepErrDescription
+  mDP_LifecycleLastLeaseReleased = StepSucceeded
+        Else
+  M_Lifecycle_RecordCleanupStep "Lease", False, _
+      vbObjectError + 2720, "Lease retained because critical cleanup is incomplete", _
+      CountFailure:=False
+  mDP_LifecycleLastLeaseReleased = False
+        End If
+    Else
+        If VBA.LenB(mDP_LifecycleLastTrace) > 0 Then
+  mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & " > Lease=RETAINED"
+        Else
+  mDP_LifecycleLastTrace = "Lease=RETAINED"
+        End If
+    End If
+
+    M_Lifecycle_Cleanup = CriticalClean
+    If ReleaseLease Then M_Lifecycle_Cleanup = (CriticalClean And mDP_LifecycleLastLeaseReleased)
+
+    If Not M_Lifecycle_Cleanup Then
+        Debug.Print EntryPoint & " | Incomplete cleanup | " & _
+  mDP_LifecycleLastTrace & " | " & mDP_LifecycleLastCleanupDetail
+    End If
+
+End Function
+
 Public Sub M_Lease_Release()
 
 '
@@ -6621,73 +7423,23 @@ Public Sub M_Lease_Release()
 '                          RELEASE PROVIDER LEASE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Gives up the runtime lease, but only when this project can prove it holds it
-'
-' WHY THIS EXISTS
-'   This is the more important half of the model. Refusing a second provider at
-'   startup protects nothing if that same provider can later release the owner's
-'   lease and dismantle its registrations
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Deletes the lease bar when its marker matches this project's token, and does
-'   nothing otherwise
+'   Releases the provider lease only after deletion can be verified
 '
 ' ERROR POLICY
-'   Does not raise. A lease this project does not own is left alone silently
-'
-' DEPENDENCIES
-'   M_Lease_ReadOwner
-'   M_Lease_GetBar
-'
-' NOTES
-'   Three conditions each mean "do not touch it": no local token, a marker that
-'   differs, and an unverifiable lease. Only an exact match releases
-'
-'   A refused provider therefore cannot release the owner's lease through DP_Stop
-'   or DP_RepairRuntime, because it never held a token to match with
+'   Best-effort. A failed or ambiguous release preserves the local owner token so
+'   later teardown can retry rather than falsely reporting a released provider
 '
 ' UPDATED
-'   2026-08-23
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim LeaseBar        As Object       'Lease command bar
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
 
-'------------------------------------------------------------------------------
-' RELEASE ONLY WHAT THIS PROJECT OWNS
-'------------------------------------------------------------------------------
-    'Never let release raise into teardown
-        On Error Resume Next
-    'A project holding no token has nothing to release
-        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
-            Err.Clear
-            Exit Sub
-        End If
-    'The lease must still carry this project's token
-        If VBA.StrComp(M_Lease_ReadOwner(), mDP_RuntimeOwnerId, vbBinaryCompare) <> 0 Then
-            mDP_RuntimeOwnerId = VBA.vbNullString
-            Err.Clear
-            Exit Sub
-        End If
-    'Delete the lease this project owns
-        Set LeaseBar = M_Lease_GetBar()
-        If Not LeaseBar Is Nothing Then
-            LeaseBar.Delete
-        End If
-    'Clear the local token whether or not the delete succeeded
-        mDP_RuntimeOwnerId = VBA.vbNullString
-    'Release object references
-        Set LeaseBar = Nothing
-    'Clear any suppressed release error
-        Err.Clear
+    If Not M_Lifecycle_TryReleaseLease(ErrorNumber, ErrorDescription) Then
+        Debug.Print "M_Lease_Release | Retained | Error=" & _
+  VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+    End If
 
 End Sub
 
@@ -6698,141 +7450,103 @@ Public Sub DP_Start()
 '                           START DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Starts the DatePicker manager and synchronizes the interactive Excel UI
-'   integration points
-'
-' WHY THIS EXISTS
-'   The manager is event-driven. After workbook open, VBA reset, code import, or
-'   add-in reload, the manager must be explicitly bootstrapped before Excel
-'   Application events can move or remove the in-grid icon
-'
-'   Startup must also synchronize right-click menu and keyboard shortcut
-'   integration so all configured DatePicker entry points are available in the
-'   current Excel session
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Ensures the manager is alive and hooked
-'   Synchronizes the Excel right-click menu according to settings
-'   Synchronizes the keyboard shortcut according to settings
-'   Evaluates the current ActiveCell so stale icons are cleaned and the correct
-'   in-grid icon state is shown
+'   Starts and synchronizes the DatePicker runtime transactionally
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if startup fails
-'
-' DEPENDENCIES
-'   M_Picker_EnsureManager
-'   M_ContextMenu_Update
-'   M_KeyboardShortcut_Update
-'   gDP_Manager.Handle_SelectionChange
-'
-' NOTES
-'   Call this from Workbook_Open, Auto_Open, add-in startup, or manually after
-'   importing the project into a workbook
-'
-'   M_ContextMenu_Update and M_KeyboardShortcut_Update are intentionally called
-'   here because those integrations are session/UI state, not only persisted
-'   settings state
+'   Preserves the primary startup failure. A fresh-start failure rolls back all
+'   DatePicker-owned runtime resources and releases only a lease acquired by this
+'   call when critical cleanup proves complete. A repeated start never releases a
+'   lease that pre-existed the call
 '
 ' UPDATED
-'   2026-05-06
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "DP_Start" 'Current procedure name
+    Const PROC_NAME As String = "DP_Start"
 
-    Dim HandlerStep            As String       'Current handler step for diagnostics
-    Dim ErrorNumber            As Long         'Captured error number
-    Dim ErrorDescription       As String       'Captured error description
+    Dim HandlerStep As String
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+    Dim ErrorSource As String
+    Dim CallerEnableEvents As Boolean
+    Dim HasCallerEnableEvents As Boolean
+    Dim PreOwned As Boolean
+    Dim AcquiredThisCall As Boolean
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-    'Initialize diagnostic step
-        HandlerStep = "Initialize"
+    On Error GoTo ErrorHandler
+    M_Lifecycle_ResetObservation
 
-'------------------------------------------------------------------------------
-' ACQUIRE PROVIDER LEASE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Acquire provider lease"
-    'Claim the one-provider lease before touching anything application-wide. A
-    'second copy that registered first and discovered the conflict afterwards
-    'would already have displaced the owner's keyboard shortcut
-        If Not M_Lease_EnsureAdmitted(PROC_NAME) Then
-            Exit Sub
-        End If
+    mDP_LifecycleLastOperation = PROC_NAME
+    HandlerStep = "Capture caller event state"
+    CallerEnableEvents = Excel.Application.EnableEvents
+    HasCallerEnableEvents = True
 
-'------------------------------------------------------------------------------
-' ENSURE MANAGER
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Ensure manager"
-    'Ensure the DatePicker manager exists and Application events are hooked
-        M_Picker_EnsureManager
+    HandlerStep = "Classify existing provider lease"
+    PreOwned = M_Lease_IsOwner()
 
-'------------------------------------------------------------------------------
-' SYNCHRONIZE RIGHT-CLICK MENU
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Synchronize right-click menu"
-    'Synchronize the DatePicker right-click menu with current settings
-        M_ContextMenu_Update
+    mDP_LifecycleLastLeaseWasAlreadyOwned = PreOwned
+    HandlerStep = "Acquire provider lease"
+    If Not M_Lease_EnsureAdmitted(PROC_NAME) Then GoTo CleanExit
+    AcquiredThisCall = (Not PreOwned And M_Lease_IsOwner())
 
-'------------------------------------------------------------------------------
-' SYNCHRONIZE KEYBOARD SHORTCUT
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Synchronize keyboard shortcut"
-    'Synchronize the DatePicker keyboard shortcut with current settings
-        M_KeyboardShortcut_Update
+    mDP_LifecycleLastLeaseAcquiredThisCall = AcquiredThisCall
+    HandlerStep = "After provider admission"
+    M_Lifecycle_RaiseIfFault "Start.AfterAdmission"
 
-'------------------------------------------------------------------------------
-' PRE-CREATE GRID ICON
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Pre-create hidden grid icon"
-    'Pre-create the grid icon for fast selection-change reuse
-        M_GridIcon_PreCreateHidden
-        
-'------------------------------------------------------------------------------
-' REFRESH CURRENT UI
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Refresh current selection context"
-    'Force one initial current-context refresh
-        gDP_Manager.Handle_SelectionChange
+    HandlerStep = "Ensure manager"
+    M_Picker_EnsureManager
+    M_Lifecycle_RaiseIfFault "Start.AfterManager"
 
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
+    HandlerStep = "Synchronize right-click menu"
+    M_ContextMenu_Update
+    M_Lifecycle_RaiseIfFault "Start.AfterContextMenu"
 
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
+    HandlerStep = "Synchronize keyboard shortcut"
+    M_KeyboardShortcut_Update
+    M_Lifecycle_RaiseIfFault "Start.AfterKeyboard"
+
+    HandlerStep = "Pre-create hidden grid icon"
+    M_GridIcon_PreCreateHidden
+    M_Lifecycle_RaiseIfFault "Start.AfterGrid"
+
+    HandlerStep = "Refresh current selection context"
+    gDP_Manager.Handle_SelectionChange
+    M_Lifecycle_RaiseIfFault "Start.AfterRefresh"
+
+CleanExit:
+    HandlerStep = "Restore caller event state"
+    If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    mDP_LifecycleLastSucceeded = M_Lease_IsOwner()
+    Exit Sub
+
 ErrorHandler:
-    'Capture the original error number
-        ErrorNumber = Err.Number
-    'Capture the original error description
-        ErrorDescription = Err.Description
-    'Raise a descriptive startup error
-        Err.Raise ErrorNumber, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "DatePicker startup failed: " & ErrorDescription
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    ErrorSource = Err.Source
+    M_Lifecycle_SetPrimaryFailure ErrorNumber, HandlerStep, ErrorDescription
+
+    mDP_LifecycleLastSucceeded = False
+    On Error Resume Next
+    If AcquiredThisCall Then
+        M_Lifecycle_Cleanup True, PROC_NAME & ".Rollback", _
+            HasCallerEnableEvents, CallerEnableEvents
+    ElseIf PreOwned Then
+        mDP_LifecycleLastTrace = "PreOwnedRuntime=PRESERVED"
+        mDP_LifecycleLastCriticalClean = True
+        mDP_LifecycleLastLeaseReleased = False
+    End If
+    If Not AcquiredThisCall Then
+        If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    End If
+    Err.Clear
+    On Error GoTo 0
+
+    Err.Raise ErrorNumber, _
+        PROC_NAME & " | Step=" & HandlerStep & " | Source=" & ErrorSource, _
+        "DatePicker startup failed: " & ErrorDescription
 
 End Sub
+
 Public Sub DP_Show()
 
 '
@@ -7276,128 +7990,87 @@ Public Sub DP_RepairRuntime()
 '                           REPAIR DATEPICKER RUNTIME
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Repairs the interactive DatePicker runtime after interrupted macros, VBA
-'   reset, disabled Excel events, stale manager state, or stale grid icons
-'
-' WHY THIS EXISTS
-'   The DatePicker in-grid icon is event-driven. If Application.EnableEvents is
-'   False, Excel will not raise SheetSelectionChange and the icon cannot move,
-'   disappear, or refresh when the active cell changes
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Re-enables Excel events, purges stale grid icons, recreates the manager, and
-'   refreshes the current active-cell context
+'   Rebuilds the interactive runtime only after the previous owned runtime has
+'   been proven clean
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the repair cannot be completed
-'
-' DEPENDENCIES
-'   Application.EnableEvents
-'   M_GridIcon_PurgeAll
-'   M_Picker_EnsureManager
-'   gDP_Manager
-'
-' NOTES
-'   This routine is intended for interactive repair, startup, testing, and demo
-'   scenarios
-'
-'   It intentionally forces Application.EnableEvents = True because the
-'   DatePicker cannot operate interactively while Excel events are disabled
-'
-'   Do not call this inside a business macro that deliberately suppresses Excel
-'   events unless that macro is ready for events to be re-enabled
+'   Repair intentionally leaves Application.EnableEvents=True. It never releases
+'   the provider lease. Incomplete cleanup blocks rebuild; a rebuild failure keeps
+'   the primary error and attempts another lease-retaining cleanup
 '
 ' UPDATED
-'   2026-05-03
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "DP_RepairRuntime"
+    Const PROC_NAME As String = "DP_RepairRuntime"
 
-    Dim ErrorNumber             As Long         'Captured error number
-    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep As String
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+    Dim ErrorSource As String
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
+    On Error GoTo ErrorHandler
+    M_Lifecycle_ResetObservation
 
-'------------------------------------------------------------------------------
-' VERIFY PROVIDER OWNERSHIP
-'------------------------------------------------------------------------------
-    'Repair rebuilds application-wide registrations, so it is at least as
-    'destructive as teardown and needs the same guard
-        If Not M_Lease_IsOwner() Then
-            M_Lease_ReportRefusal "DP_RepairRuntime"
-            Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' RE-ENABLE EXCEL EVENTS
-'------------------------------------------------------------------------------
-    'Re-enable Excel events required by the DatePicker manager
-        Application.EnableEvents = True
-
-'------------------------------------------------------------------------------
-' CLEAR STALE GRID ICONS
-'------------------------------------------------------------------------------
-    'Purge stale worksheet icon artifacts
-        M_GridIcon_PurgeAll
-
-'------------------------------------------------------------------------------
-' RECREATE MANAGER
-'------------------------------------------------------------------------------
-    'Release the current manager reference
-        Set gDP_Manager = Nothing
-    'Recreate and hook the DatePicker manager
-        M_Picker_EnsureManager
-
-'------------------------------------------------------------------------------
-' SYNCHRONIZE RIGHT-CLICK MENU
-'------------------------------------------------------------------------------
-    'Synchronize the DatePicker right-click menu with current settings
-        M_ContextMenu_Update
-
-'------------------------------------------------------------------------------
-' SYNCHRONIZE KEYBOARD SHORTCUT
-'------------------------------------------------------------------------------
-    'Synchronize the DatePicker keyboard shortcut with current settings
-        M_KeyboardShortcut_Update
-
-'------------------------------------------------------------------------------
-' REFRESH CURRENT CONTEXT
-'------------------------------------------------------------------------------
-    'Refresh the DatePicker UI for the current active-cell context
-        If Not gDP_Manager Is Nothing Then
-            gDP_Manager.Handle_SelectionChange
-        End If
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
+    mDP_LifecycleLastOperation = PROC_NAME
+    mDP_LifecycleLastLeaseWasAlreadyOwned = M_Lease_IsOwner()
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
+    HandlerStep = "Verify provider ownership"
+    If Not M_Lease_IsOwner() Then
+        M_Lease_ReportRefusal PROC_NAME
         Exit Sub
+    End If
 
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
+    HandlerStep = "Re-enable Excel events"
+    Excel.Application.EnableEvents = True
+
+    HandlerStep = "Clean existing runtime"
+    If Not M_Lifecycle_Cleanup(False, PROC_NAME & ".Prepare") Then
+        Err.Raise vbObjectError + 2721, PROC_NAME, _
+  "DatePicker runtime repair refused to rebuild over incomplete cleanup: " & _
+  mDP_LifecycleLastCleanupDetail
+    End If
+
+    HandlerStep = "Recreate manager"
+    M_Picker_EnsureManager
+    M_Lifecycle_RaiseIfFault "Repair.AfterManager"
+
+    HandlerStep = "Synchronize right-click menu"
+    M_ContextMenu_Update
+    M_Lifecycle_RaiseIfFault "Repair.AfterContextMenu"
+
+    HandlerStep = "Synchronize keyboard shortcut"
+    M_KeyboardShortcut_Update
+    M_Lifecycle_RaiseIfFault "Repair.AfterKeyboard"
+
+    HandlerStep = "Refresh current selection context"
+    If Not gDP_Manager Is Nothing Then gDP_Manager.Handle_SelectionChange
+    M_Lifecycle_RaiseIfFault "Repair.AfterRefresh"
+
+
+    mDP_LifecycleLastSucceeded = True
+    Exit Sub
+
 ErrorHandler:
-    'Capture the error number
-        ErrorNumber = Err.Number
-    'Capture the error description
-        ErrorDescription = Err.Description
-    'Raise a descriptive repair error
-        Err.Raise ErrorNumber, PROC_NAME, _
-            "DatePicker runtime repair failed: " & ErrorDescription
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    ErrorSource = Err.Source
+    M_Lifecycle_SetPrimaryFailure ErrorNumber, HandlerStep, ErrorDescription
+
+    mDP_LifecycleLastSucceeded = False
+    On Error Resume Next
+    If M_Lease_IsOwner() Then
+        If VBA.StrComp(HandlerStep, "Clean existing runtime", vbBinaryCompare) <> 0 Then
+  M_Lifecycle_Cleanup False, PROC_NAME & ".Rollback"
+        End If
+    End If
+    Excel.Application.EnableEvents = True
+    Err.Clear
+    On Error GoTo 0
+
+    Err.Raise ErrorNumber, _
+        PROC_NAME & " | Step=" & HandlerStep & " | Source=" & ErrorSource, _
+        "DatePicker runtime repair failed: " & ErrorDescription
 
 End Sub
 
@@ -7588,124 +8261,49 @@ End Sub
 
 Public Sub DP_Stop()
 
-'
 '------------------------------------------------------------------------------
 '                           STOP DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Stops DatePicker session-level integrations and clears transient UI artifacts
-'
-' WHY THIS EXISTS
-'   The DatePicker uses application-wide and workbook-level transient surfaces:
-'     - Excel Application event manager
-'     - right-click command-bar entries
-'     - keyboard shortcut assignment
-'     - modeless UserForm
-'     - live-clock timer
-'     - worksheet grid icon shapes
-'
-'   Workbook close / add-in unload must remove those artifacts explicitly so
-'   nothing survives after the host project is closed
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Releases the global DatePicker manager, removes right-click menu entries,
-'   removes the keyboard shortcut, closes the DatePicker form, stops timer
-'   activity, and purges in-grid icon shapes from open workbooks
+'   Tears down DatePicker-owned runtime state and releases the provider lease only
+'   after every critical cleanup boundary is proven clean
 '
 ' ERROR POLICY
-'   Best-effort teardown
-'
-'   Suppresses cleanup errors because workbook shutdown must not be interrupted
-'   by missing forms, missing command bars, protected sheets, or stale shapes
-'
-' DEPENDENCIES
-'   gDP_Manager
-'   M_ContextMenu_Remove
-'   M_KeyboardShortcut_Remove
-'   DP_Close
-'   M_Timer_Stop
-'   M_GridIcon_PurgeAll
-'
-' NOTES
-'   Releasing gDP_Manager triggers cDatePickerManager.Class_Terminate when the
-'   manager exists
-'
-'   M_ContextMenu_Remove is called explicitly because right-click menu ownership
-'   is not delegated to cDatePickerManager teardown
-'
-'   This routine is safe to call more than once
+'   Best-effort outward behavior is preserved. Incomplete cleanup is diagnostic,
+'   retains ownership, and is retryable by a later DP_Stop call
 '
 ' UPDATED
-'   2026-05-10
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress shutdown errors
-        On Error Resume Next
+    Dim CallerEnableEvents As Boolean
+    Dim HasCallerEnableEvents As Boolean
+    Dim OwnedOnEntry As Boolean
 
-'------------------------------------------------------------------------------
-' VERIFY PROVIDER OWNERSHIP
-'------------------------------------------------------------------------------
-    'A provider that does not own the lease must not tear down the owner's
-    'registrations. Refusing a second provider at startup protects nothing while
-    'its teardown remains destructive
-        If Not M_Lease_IsOwner() Then
-            M_Lease_ReportRefusal "DP_Stop"
-            Exit Sub
-        End If
+    On Error Resume Next
+    M_Lifecycle_ResetObservation
+    mDP_LifecycleLastOperation = "DP_Stop"
 
-'------------------------------------------------------------------------------
-' RELEASE MANAGER
-'------------------------------------------------------------------------------
-    'Release the Application event manager and trigger its teardown path
-        Set gDP_Manager = Nothing
+    CallerEnableEvents = Excel.Application.EnableEvents
+    HasCallerEnableEvents = (Err.Number = 0)
+    Err.Clear
 
-'------------------------------------------------------------------------------
-' REMOVE APPLICATION-WIDE ENTRY POINTS
-'------------------------------------------------------------------------------
-    'Remove DatePicker right-click command-bar entries
-        M_ContextMenu_Remove
-    'Remove the DatePicker keyboard shortcut assignment
-        M_KeyboardShortcut_Remove
+    OwnedOnEntry = M_Lease_IsOwner()
+    mDP_LifecycleLastLeaseWasAlreadyOwned = OwnedOnEntry
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
 
-'------------------------------------------------------------------------------
-' CLEAR TRANSIENT UI
-'------------------------------------------------------------------------------
-    'Stop any active live-clock timer
-        M_Timer_Stop
-    'Close any loaded DatePicker form
-        DP_Close
-    'Purge all DatePicker grid icons from open workbooks
-        M_GridIcon_PurgeAll
+    If Not OwnedOnEntry Then
+        M_Lease_ReportRefusal "DP_Stop"
+        mDP_LifecycleLastSucceeded = False
+        GoTo CleanExit
+    End If
 
-'------------------------------------------------------------------------------
-' CLEAR CALLBACK CACHE
-'------------------------------------------------------------------------------
-    'Clear cached workbook-qualified callback names
-        M_GetQualifiedMacroName_ClearCache
+    mDP_LifecycleLastSucceeded = M_Lifecycle_Cleanup( _
+        True, "DP_Stop", HasCallerEnableEvents, CallerEnableEvents)
 
-'------------------------------------------------------------------------------
-' RELEASE PROVIDER LEASE
-'------------------------------------------------------------------------------
-    'Give up the lease last, so this provider still owns it while tearing its own
-    'registrations down
-        M_Lease_Release
-
-'------------------------------------------------------------------------------
-' EXIT
-'------------------------------------------------------------------------------
-    'Clear any suppressed teardown error
-        Err.Clear
-    'Restore normal error handling
-        On Error GoTo 0
+CleanExit:
+    Err.Clear
+    On Error GoTo 0
 
 End Sub
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
@@ -18920,90 +19518,25 @@ Public Sub M_GridIcon_PurgeAll()
 '                         PURGE ALL GRID ICONS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Removes DatePicker in-grid icon shapes from all open workbooks
-'
-' WHY THIS EXISTS
-'   Hard cleanup boundaries should remove stale DatePicker icons even when the
-'   tracked shape reference has been lost after VBA reset, workbook activation,
-'   add-in reload, or unexpected UI interruption
-'
-'   This routine provides a broader cleanup pass than the normal single-icon
-'   removal path
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Suppresses cleanup errors
-'   Deletes the tracked grid icon shape when available
-'   Clears the tracked grid icon shape reference
-'   Scans all open workbooks
-'   Deletes proven DatePicker-owned icons named DP_GRID_ICON_NAME from each
-'   open workbook, leaving same-named shapes it does not own untouched
-'   Restores normal error handling before exit
+'   Removes DatePicker-owned canonical and pending grid-icon Shapes from every
+'   open workbook while leaving foreign same-named Shapes untouched
 '
 ' ERROR POLICY
-'   Best-effort cleanup
-'   Suppresses workbook, worksheet, protection, and shape-deletion errors
-'   Does not raise custom errors
-'
-' DEPENDENCIES
-'   gDP_GridIconShape
-'   DP_GRID_ICON_NAME
-'   M_GridIcon_DeleteNamedShapeAcrossWorkbook
-'   Application.Workbooks
-'   Excel Workbook / Worksheet / Shape object model
-'
-' NOTES
-'   This routine is intentionally heavier than M_GridIcon_Remove
-'   Do not call this routine from high-frequency selection-change paths
+'   Best-effort public wrapper. Transactional lifecycle callers use the internal
+'   Boolean result so protected or otherwise undeletable owned Shapes remain an
+'   explicit incomplete-cleanup condition
 '
 ' UPDATED
-'   2026-08-30
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurWorkbook            As Workbook     'Workbook being scanned
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress cleanup errors
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' DELETE TRACKED SHAPE
-'------------------------------------------------------------------------------
-    'Delete the tracked grid icon shape when it still exists
-        If M_GridIcon_TrackedShapeIsLive() Then
-            gDP_GridIconShape.Delete
-        End If
-    'Clear the tracked shape reference
-        Set gDP_GridIconShape = Nothing
-    'Forget any refusal diagnostic so a later collision reports again
-        M_GridIcon_ClearRefusalKey
-    'Clear the cached last target
-        M_GridIcon_ClearLastTarget
-
-'------------------------------------------------------------------------------
-' PURGE OPEN WORKBOOKS
-'------------------------------------------------------------------------------
-    'Loop through all open workbooks
-        For Each CurWorkbook In Application.Workbooks
-            'Delete same-named grid icon shapes from this workbook
-                M_GridIcon_DeleteNamedShapeAcrossWorkbook CurWorkbook, DP_GRID_ICON_NAME
-        Next CurWorkbook
-
-'------------------------------------------------------------------------------
-' RESTORE ERROR HANDLING
-'------------------------------------------------------------------------------
-    'Restore normal error handling
-        On Error GoTo 0
+    If Not M_Lifecycle_TryPurgeGridIcons(ErrorNumber, ErrorDescription) Then
+        Debug.Print "M_GridIcon_PurgeAll | Incomplete | Error=" & _
+  VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+    End If
 
 End Sub
 
