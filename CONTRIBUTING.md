@@ -187,6 +187,20 @@ A contract-changing contribution must:
 Do not make an internal helper public merely to simplify a test. Use an explicit
 test seam where the project supports one.
 
+### Public invocation channels
+
+For every technically public routine, distinguish direct VBA calls from Excel
+macro entry points. Alt+F8 and assigned controls require a parameterless public
+`Sub`; Ribbon `onAction`, `Application.OnKey`, `Application.OnTime`,
+`Application.Run`, CommandBars and Shape callbacks each have their own signature
+and name-resolution contracts. A signature change must state which channels
+remain supported and add coverage for them.
+
+`Application.OnKey` is an explicit ownership exception. Excel exposes no getter
+for the predecessor binding. The DatePicker may remove only the binding it
+installed and can restore normal Excel handling, but it must never claim to
+capture or restore an unknown third-party predecessor.
+
 ### Excel state ownership
 
 Assume these surfaces belong to the caller or host unless the project explicitly
