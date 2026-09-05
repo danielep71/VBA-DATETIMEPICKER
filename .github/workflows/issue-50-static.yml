@@ -24,102 +24,56 @@ jobs:
           git diff --check 94c8127d1a69dbfe1fefc5f30c46ae05667c4a74..HEAD
           python3 - <<'PY'
           from pathlib import Path
-          import re
-
+          import re, subprocess
           src = Path('src/modules/M_DatePicker.bas').read_text(encoding='utf-8')
           tst = Path('test/M_cDP_Test.bas').read_text(encoding='utf-8')
-
-          names = set(Path(p).as_posix() for p in [])
-          # Net branch scope must be exactly production lifecycle source + harness.
-          import subprocess
-          changed = subprocess.check_output([
-              'git','diff','--name-only',
-              '94c8127d1a69dbfe1fefc5f30c46ae05667c4a74..HEAD'
-          ], text=True).splitlines()
-          expected = ['src/modules/M_DatePicker.bas', 'test/M_cDP_Test.bas']
+          changed = subprocess.check_output(['git','diff','--name-only','94c8127d1a69dbfe1fefc5f30c46ae05667c4a74..HEAD'], text=True).splitlines()
+          expected = ['.github/workflows/issue-50-static.yml','src/modules/M_DatePicker.bas','test/M_cDP_Test.bas']
           if sorted(changed) != sorted(expected):
-              raise SystemExit(f'Unexpected net files: {changed}')
-
-          # Supported lifecycle signatures stay parameterless.
+              raise SystemExit(f'Unexpected working-gate files: {changed}')
           for proc in ('DP_Start','DP_Stop','DP_RepairRuntime'):
               if len(re.findall(rf'^Public Sub {proc}\(\)\s*$', src, re.M)) != 1:
                   raise SystemExit(f'{proc} signature changed or duplicated')
-
-          # New internal Sub seams must not become parameterless Alt+F8 macros.
           for proc in ('M_Lifecycle_Test_ArmFault','M_Lifecycle_Test_Reset'):
               m = re.search(rf'^Public Sub {proc}\((.*?)\)\s*$', src, re.M)
               if not m or not m.group(1).strip():
-                  raise SystemExit(f'{proc} is missing or parameterless')
-
-          # Every lifecycle query used by the new suite is defined once.
+                  raise SystemExit(f'{proc} missing or parameterless')
           seams = sorted(set(re.findall(r'\b(M_Lifecycle_Test_[A-Za-z0-9_]+)\b', tst)))
-          missing = []
-          for seam in seams:
-              if not re.search(rf'^Public (?:Sub|Function) {re.escape(seam)}\b', src, re.M):
-                  missing.append(seam)
+          missing = [s for s in seams if not re.search(rf'^Public (?:Sub|Function) {re.escape(s)}\b', src, re.M)]
           if missing:
               raise SystemExit(f'Missing lifecycle seams: {missing}')
-
-          # Dedicated suite is wired exactly once into the dispatcher and switch.
           checks = {
               'dispatcher': tst.count('TST_DP_RunSuiteSafe "LifecycleTransaction"'),
               'switch': tst.count('Case "LIFECYCLETRANSACTION"'),
               'procedure': tst.count('Private Sub TST_DP_RunSuite_LifecycleTransaction()'),
-              'helper': tst.count('Private Sub TST_DP_Lifecycle_ForceCleanForTest()'),
-          }
+              'helper': tst.count('Private Sub TST_DP_Lifecycle_ForceCleanForTest()')}
           if any(v != 1 for v in checks.values()):
-              raise SystemExit(f'Lifecycle suite wiring invalid: {checks}')
-
-          # Existing 25 standard dispatches plus the new suite = 26; UI adds one.
+              raise SystemExit(f'Lifecycle wiring invalid: {checks}')
           dispatches = re.findall(r'TST_DP_RunSuiteSafe "([A-Za-z0-9_]+)"', tst)
           unique = []
           for d in dispatches:
-              if d not in unique:
-                  unique.append(d)
-          if len(unique) != 27 or 'UISmoke' not in unique or 'LifecycleTransaction' not in unique:
-              raise SystemExit(f'Unexpected unique suite topology ({len(unique)}): {unique}')
+              if d not in unique: unique.append(d)
           standard = [d for d in unique if d != 'UISmoke']
-          if len(standard) != 26:
-              raise SystemExit(f'Expected 26 standard suites, found {len(standard)}')
-
-          # Coarse VBA structure checks catch accidental truncation / malformed insertion.
-          def proc_balance(text, label):
-              starts = len(re.findall(r'^\s*(?:Public|Private|Friend)?\s*(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+[A-Za-z_][A-Za-z0-9_]*', text, re.M | re.I))
-              ends = len(re.findall(r'^\s*End\s+(?:Sub|Function|Property)\s*$', text, re.M | re.I))
-              if starts != ends:
-                  raise SystemExit(f'{label} procedure imbalance starts={starts} ends={ends}')
+          if len(unique) != 27 or len(standard) != 26 or 'UISmoke' not in unique or 'LifecycleTransaction' not in unique:
+              raise SystemExit(f'Unexpected topology: unique={len(unique)} standard={len(standard)} {unique}')
+          def balance(text, label):
+              starts = len(re.findall(r'^\s*(?:Public|Private|Friend)?\s*(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+[A-Za-z_][A-Za-z0-9_]*', text, re.M|re.I))
+              ends = len(re.findall(r'^\s*End\s+(?:Sub|Function|Property)\s*$', text, re.M|re.I))
+              if starts != ends: raise SystemExit(f'{label} imbalance starts={starts} ends={ends}')
               return starts
-
-          src_procs = proc_balance(src, 'M_DatePicker')
-          tst_procs = proc_balance(tst, 'M_cDP_Test')
-
-          if 'Continue For' in tst or 'Continue For' in src:
-              raise SystemExit('Unsupported VBA Continue For token found')
-
-          for label, text in [('M_DatePicker',src),('M_cDP_Test',tst)]:
-              long_lines = [(i+1,len(line)) for i,line in enumerate(text.splitlines()) if len(line) > 1023]
-              if long_lines:
-                  raise SystemExit(f'{label} has VBA-overlong lines: {long_lines[:5]}')
-
-          required_faults = [
-              'Start.AfterAdmission','Start.AfterManager','Start.AfterContextMenu',
-              'Start.AfterKeyboard','Start.AfterGrid','Start.AfterRefresh',
-              'Cleanup.Manager','Cleanup.Timer','Cleanup.Form','Cleanup.Grid',
-              'Cleanup.ContextMenu','Cleanup.Keyboard','Cleanup.EnableEvents',
-              'Cleanup.Lease','Lease.Delete','Repair.AfterManager',
-              'Repair.AfterContextMenu','Repair.AfterKeyboard','Repair.AfterRefresh'
-          ]
-          absent = [f for f in required_faults if f not in src or f not in tst]
-          if absent:
-              raise SystemExit(f'Fault boundary not represented in both source and test: {absent}')
-
+          sp = balance(src,'M_DatePicker'); tp = balance(tst,'M_cDP_Test')
+          if 'Continue For' in src or 'Continue For' in tst: raise SystemExit('Unsupported Continue For')
+          for label, content in [('M_DatePicker',src),('M_cDP_Test',tst)]:
+              long_lines = [(i+1,len(x)) for i,x in enumerate(content.splitlines()) if len(x)>1023]
+              if long_lines: raise SystemExit(f'{label} overlong lines {long_lines[:5]}')
+          required = ['Start.AfterAdmission','Start.AfterManager','Start.AfterContextMenu','Start.AfterKeyboard','Start.AfterGrid','Start.AfterRefresh','Cleanup.Manager','Cleanup.Timer','Cleanup.Form','Cleanup.Grid','Cleanup.ContextMenu','Cleanup.Keyboard','Cleanup.EnableEvents','Cleanup.Lease','Lease.Delete','Repair.AfterManager','Repair.AfterContextMenu','Repair.AfterKeyboard','Repair.AfterRefresh']
+          absent = [x for x in required if x not in src or x not in tst]
+          if absent: raise SystemExit(f'Missing fault coverage {absent}')
           print('STATIC_GATE=PASS')
-          print('NET_FILES=' + ','.join(changed))
-          print(f'UNIQUE_SUITES={len(unique)} STANDARD={len(standard)} UI=1')
-          print(f'PROCEDURES=M_DatePicker:{src_procs},M_cDP_Test:{tst_procs}')
-          print('LIFECYCLE_SEAMS=' + ','.join(seams))
+          print(f'TOPOLOGY=STANDARD:{len(standard)} UI_TOTAL:{len(unique)}')
+          print(f'PROCEDURES=M_DatePicker:{sp},M_cDP_Test:{tp}')
+          print('SEAMS=' + ','.join(seams))
           PY
-
           rm .github/workflows/issue-50-static.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
