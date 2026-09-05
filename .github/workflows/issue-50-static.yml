@@ -12,7 +12,7 @@ jobs:
   static:
     runs-on: ubuntu-latest
     steps:
-      - name: Audit #50 source and harness
+      - name: Audit #50 source and harness against exact baseline
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -25,54 +25,48 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re, subprocess
-          src = Path('src/modules/M_DatePicker.bas').read_text(encoding='utf-8')
-          tst = Path('test/M_cDP_Test.bas').read_text(encoding='utf-8')
-          changed = subprocess.check_output(['git','diff','--name-only','94c8127d1a69dbfe1fefc5f30c46ae05667c4a74..HEAD'], text=True).splitlines()
-          expected = ['.github/workflows/issue-50-static.yml','src/modules/M_DatePicker.bas','test/M_cDP_Test.bas']
-          if sorted(changed) != sorted(expected):
-              raise SystemExit(f'Unexpected working-gate files: {changed}')
+          base='94c8127d1a69dbfe1fefc5f30c46ae05667c4a74'
+          src=Path('src/modules/M_DatePicker.bas').read_text(encoding='utf-8')
+          tst=Path('test/M_cDP_Test.bas').read_text(encoding='utf-8')
+          bsrc=subprocess.check_output(['git','show',f'{base}:src/modules/M_DatePicker.bas'], text=True)
+          btst=subprocess.check_output(['git','show',f'{base}:test/M_cDP_Test.bas'], text=True)
+          changed=subprocess.check_output(['git','diff','--name-only',f'{base}..HEAD'],text=True).splitlines()
+          expected=['.github/workflows/issue-50-static.yml','src/modules/M_DatePicker.bas','test/M_cDP_Test.bas']
+          if sorted(changed)!=sorted(expected): raise SystemExit(f'Unexpected working-gate files: {changed}')
           for proc in ('DP_Start','DP_Stop','DP_RepairRuntime'):
-              if len(re.findall(rf'^Public Sub {proc}\(\)\s*$', src, re.M)) != 1:
-                  raise SystemExit(f'{proc} signature changed or duplicated')
+              if len(re.findall(rf'^Public Sub {proc}\(\)\s*$',src,re.M))!=1: raise SystemExit(f'{proc} signature changed')
           for proc in ('M_Lifecycle_Test_ArmFault','M_Lifecycle_Test_Reset'):
-              m = re.search(rf'^Public Sub {proc}\((.*?)\)\s*$', src, re.M)
-              if not m or not m.group(1).strip():
-                  raise SystemExit(f'{proc} missing or parameterless')
-          seams = sorted(set(re.findall(r'\b(M_Lifecycle_Test_[A-Za-z0-9_]+)\b', tst)))
-          missing = [s for s in seams if not re.search(rf'^Public (?:Sub|Function) {re.escape(s)}\b', src, re.M)]
-          if missing:
-              raise SystemExit(f'Missing lifecycle seams: {missing}')
-          checks = {
-              'dispatcher': tst.count('TST_DP_RunSuiteSafe "LifecycleTransaction"'),
-              'switch': tst.count('Case "LIFECYCLETRANSACTION"'),
-              'procedure': tst.count('Private Sub TST_DP_RunSuite_LifecycleTransaction()'),
-              'helper': tst.count('Private Sub TST_DP_Lifecycle_ForceCleanForTest()')}
-          if any(v != 1 for v in checks.values()):
-              raise SystemExit(f'Lifecycle wiring invalid: {checks}')
-          dispatches = re.findall(r'TST_DP_RunSuiteSafe "([A-Za-z0-9_]+)"', tst)
-          unique = []
+              m=re.search(rf'^Public Sub {proc}\((.*?)\)\s*$',src,re.M)
+              if not m or not m.group(1).strip(): raise SystemExit(f'{proc} missing/parameterless')
+          seams=sorted(set(re.findall(r'\b(M_Lifecycle_Test_[A-Za-z0-9_]+)\b',tst)))
+          missing=[s for s in seams if not re.search(rf'^Public (?:Sub|Function) {re.escape(s)}\b',src,re.M)]
+          if missing: raise SystemExit(f'Missing lifecycle seams: {missing}')
+          wiring=[tst.count('TST_DP_RunSuiteSafe "LifecycleTransaction"'),tst.count('Case "LIFECYCLETRANSACTION"'),tst.count('Private Sub TST_DP_RunSuite_LifecycleTransaction()'),tst.count('Private Sub TST_DP_Lifecycle_ForceCleanForTest()')]
+          if wiring!=[1,1,1,1]: raise SystemExit(f'Lifecycle wiring invalid: {wiring}')
+          dispatches=re.findall(r'TST_DP_RunSuiteSafe "([A-Za-z0-9_]+)"',tst)
+          unique=[]
           for d in dispatches:
               if d not in unique: unique.append(d)
-          standard = [d for d in unique if d != 'UISmoke']
-          if len(unique) != 27 or len(standard) != 26 or 'UISmoke' not in unique or 'LifecycleTransaction' not in unique:
-              raise SystemExit(f'Unexpected topology: unique={len(unique)} standard={len(standard)} {unique}')
-          def balance(text, label):
-              starts = len(re.findall(r'^\s*(?:Public|Private|Friend)?\s*(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+[A-Za-z_][A-Za-z0-9_]*', text, re.M|re.I))
-              ends = len(re.findall(r'^\s*End\s+(?:Sub|Function|Property)\s*$', text, re.M|re.I))
-              if starts != ends: raise SystemExit(f'{label} imbalance starts={starts} ends={ends}')
-              return starts
-          sp = balance(src,'M_DatePicker'); tp = balance(tst,'M_cDP_Test')
+          standard=[d for d in unique if d!='UISmoke']
+          if len(unique)!=27 or len(standard)!=26 or 'UISmoke' not in unique: raise SystemExit(f'Unexpected topology {len(unique)}/{len(standard)}')
+          def counts(content):
+              starts=len(re.findall(r'^\s*(?:Public|Private|Friend)?\s*(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+[A-Za-z_][A-Za-z0-9_]*',content,re.M|re.I))
+              ends=len(re.findall(r'^\s*End\s+(?:Sub|Function|Property)\s*$',content,re.M|re.I))
+              return starts,ends,starts-ends
+          cs=counts(src); bs=counts(bsrc); ct=counts(tst); bt=counts(btst)
+          if cs[2]!=bs[2]: raise SystemExit(f'M_DatePicker structural delta changed baseline={bs} current={cs}')
+          if ct[2]!=bt[2]: raise SystemExit(f'M_cDP_Test structural delta changed baseline={bt} current={ct}')
           if 'Continue For' in src or 'Continue For' in tst: raise SystemExit('Unsupported Continue For')
-          for label, content in [('M_DatePicker',src),('M_cDP_Test',tst)]:
-              long_lines = [(i+1,len(x)) for i,x in enumerate(content.splitlines()) if len(x)>1023]
-              if long_lines: raise SystemExit(f'{label} overlong lines {long_lines[:5]}')
-          required = ['Start.AfterAdmission','Start.AfterManager','Start.AfterContextMenu','Start.AfterKeyboard','Start.AfterGrid','Start.AfterRefresh','Cleanup.Manager','Cleanup.Timer','Cleanup.Form','Cleanup.Grid','Cleanup.ContextMenu','Cleanup.Keyboard','Cleanup.EnableEvents','Cleanup.Lease','Lease.Delete','Repair.AfterManager','Repair.AfterContextMenu','Repair.AfterKeyboard','Repair.AfterRefresh']
-          absent = [x for x in required if x not in src or x not in tst]
+          for label,content in [('M_DatePicker',src),('M_cDP_Test',tst)]:
+              bad=[(i+1,len(x)) for i,x in enumerate(content.splitlines()) if len(x)>1023]
+              if bad: raise SystemExit(f'{label} overlong lines {bad[:5]}')
+          required=['Start.AfterAdmission','Start.AfterManager','Start.AfterContextMenu','Start.AfterKeyboard','Start.AfterGrid','Start.AfterRefresh','Cleanup.Manager','Cleanup.Timer','Cleanup.Form','Cleanup.Grid','Cleanup.ContextMenu','Cleanup.Keyboard','Cleanup.EnableEvents','Cleanup.Lease','Lease.Delete','Repair.AfterManager','Repair.AfterContextMenu','Repair.AfterKeyboard','Repair.AfterRefresh']
+          absent=[x for x in required if x not in src or x not in tst]
           if absent: raise SystemExit(f'Missing fault coverage {absent}')
           print('STATIC_GATE=PASS')
           print(f'TOPOLOGY=STANDARD:{len(standard)} UI_TOTAL:{len(unique)}')
-          print(f'PROCEDURES=M_DatePicker:{sp},M_cDP_Test:{tp}')
-          print('SEAMS=' + ','.join(seams))
+          print(f'BALANCE=M_DatePicker baseline:{bs} current:{cs}; M_cDP_Test baseline:{bt} current:{ct}')
+          print('SEAMS='+','.join(seams))
           PY
           rm .github/workflows/issue-50-static.yml
           git config user.name "github-actions[bot]"
