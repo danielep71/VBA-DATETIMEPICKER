@@ -451,6 +451,12 @@ Option Explicit
     Private mDP_LifecycleLastPrimaryNumber  As Long             'Primary lifecycle failure number preserved across cleanup
     Private mDP_LifecycleLastPrimaryStep    As String           'Primary lifecycle failure step preserved across cleanup
     Private mDP_LifecycleLastPrimaryDescription As String       'Primary lifecycle failure description preserved across cleanup
+    Private mDP_LifecycleLastOperation      As String           'Lifecycle entry point represented by the current diagnostic state
+    Private mDP_LifecycleLastSucceeded      As Boolean          'True only when the lifecycle entry point completed its contract
+    Private mDP_LifecycleLastCleanupAttempted As Boolean        'True once the lifecycle cleanup transaction was entered
+    Private mDP_LifecycleLastCleanupFailureCount As Long        'Number of cleanup steps that actually failed
+    Private mDP_LifecycleLastLeaseWasAlreadyOwned As Boolean    'True when the provider lease pre-dated the lifecycle call
+    Private mDP_LifecycleLastLeaseAcquiredThisCall As Boolean   'True when the lifecycle call acquired the provider lease
 
 '------------------------------------------------------------------------------
 ' EMBEDDED GRID ICON
@@ -6636,6 +6642,12 @@ Private Sub M_Lifecycle_ResetObservation()
     mDP_LifecycleLastPrimaryStep = VBA.vbNullString
     mDP_LifecycleLastPrimaryDescription = VBA.vbNullString
 
+    mDP_LifecycleLastOperation = VBA.vbNullString
+    mDP_LifecycleLastSucceeded = False
+    mDP_LifecycleLastCleanupAttempted = False
+    mDP_LifecycleLastCleanupFailureCount = 0
+    mDP_LifecycleLastLeaseWasAlreadyOwned = False
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
 End Sub
 
 Private Sub M_Lifecycle_SetPrimaryFailure( _
@@ -6684,7 +6696,8 @@ Private Sub M_Lifecycle_RecordCleanupStep( _
     ByVal StepName As String, _
     ByVal Succeeded As Boolean, _
     ByVal ErrorNumber As Long, _
-    ByVal ErrorDescription As String)
+    ByVal ErrorDescription As String, _
+    Optional ByVal CountFailure As Boolean = True)
 
     Dim StepText As String
 
@@ -6702,6 +6715,10 @@ Private Sub M_Lifecycle_RecordCleanupStep( _
     End If
 
     If Not Succeeded Then
+        If CountFailure Then
+            mDP_LifecycleLastCleanupFailureCount = _
+                mDP_LifecycleLastCleanupFailureCount + 1
+        End If
         If VBA.LenB(mDP_LifecycleLastCleanupDetail) = 0 Then
   mDP_LifecycleLastCleanupDetail = StepName
   If ErrorNumber <> 0 Then
@@ -6779,6 +6796,42 @@ End Function
 Public Function M_Lifecycle_Test_LastPrimaryDescription() As String
 
     M_Lifecycle_Test_LastPrimaryDescription = mDP_LifecycleLastPrimaryDescription
+
+End Function
+
+Public Function M_Lifecycle_Test_LastOperation() As String
+
+    M_Lifecycle_Test_LastOperation = mDP_LifecycleLastOperation
+
+End Function
+
+Public Function M_Lifecycle_Test_LastSucceeded() As Boolean
+
+    M_Lifecycle_Test_LastSucceeded = mDP_LifecycleLastSucceeded
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupAttempted() As Boolean
+
+    M_Lifecycle_Test_LastCleanupAttempted = mDP_LifecycleLastCleanupAttempted
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupFailureCount() As Long
+
+    M_Lifecycle_Test_LastCleanupFailureCount = mDP_LifecycleLastCleanupFailureCount
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseWasAlreadyOwned() As Boolean
+
+    M_Lifecycle_Test_LastLeaseWasAlreadyOwned = mDP_LifecycleLastLeaseWasAlreadyOwned
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseAcquiredThisCall() As Boolean
+
+    M_Lifecycle_Test_LastLeaseAcquiredThisCall = mDP_LifecycleLastLeaseAcquiredThisCall
 
 End Function
 
@@ -7239,6 +7292,8 @@ Private Function M_Lifecycle_Cleanup( _
     mDP_LifecycleLastCleanupDetail = VBA.vbNullString
     mDP_LifecycleLastCriticalClean = False
     mDP_LifecycleLastLeaseReleased = False
+    mDP_LifecycleLastCleanupAttempted = True
+    mDP_LifecycleLastCleanupFailureCount = 0
     CriticalClean = True
 
     StepErrNumber = 0
@@ -7339,7 +7394,8 @@ Private Function M_Lifecycle_Cleanup( _
   mDP_LifecycleLastLeaseReleased = StepSucceeded
         Else
   M_Lifecycle_RecordCleanupStep "Lease", False, _
-      vbObjectError + 2720, "Lease retained because critical cleanup is incomplete"
+      vbObjectError + 2720, "Lease retained because critical cleanup is incomplete", _
+      CountFailure:=False
   mDP_LifecycleLastLeaseReleased = False
         End If
     Else
@@ -7420,6 +7476,7 @@ Public Sub DP_Start()
     On Error GoTo ErrorHandler
     M_Lifecycle_ResetObservation
 
+    mDP_LifecycleLastOperation = PROC_NAME
     HandlerStep = "Capture caller event state"
     CallerEnableEvents = Excel.Application.EnableEvents
     HasCallerEnableEvents = True
@@ -7427,10 +7484,12 @@ Public Sub DP_Start()
     HandlerStep = "Classify existing provider lease"
     PreOwned = M_Lease_IsOwner()
 
+    mDP_LifecycleLastLeaseWasAlreadyOwned = PreOwned
     HandlerStep = "Acquire provider lease"
     If Not M_Lease_EnsureAdmitted(PROC_NAME) Then GoTo CleanExit
     AcquiredThisCall = (Not PreOwned And M_Lease_IsOwner())
 
+    mDP_LifecycleLastLeaseAcquiredThisCall = AcquiredThisCall
     HandlerStep = "After provider admission"
     M_Lifecycle_RaiseIfFault "Start.AfterAdmission"
 
@@ -7457,6 +7516,7 @@ Public Sub DP_Start()
 CleanExit:
     HandlerStep = "Restore caller event state"
     If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    mDP_LifecycleLastSucceeded = M_Lease_IsOwner()
     Exit Sub
 
 ErrorHandler:
@@ -7465,6 +7525,7 @@ ErrorHandler:
     ErrorSource = Err.Source
     M_Lifecycle_SetPrimaryFailure ErrorNumber, HandlerStep, ErrorDescription
 
+    mDP_LifecycleLastSucceeded = False
     On Error Resume Next
     If AcquiredThisCall Then
         M_Lifecycle_Cleanup True, PROC_NAME & ".Rollback", _
@@ -7951,6 +8012,9 @@ Public Sub DP_RepairRuntime()
     On Error GoTo ErrorHandler
     M_Lifecycle_ResetObservation
 
+    mDP_LifecycleLastOperation = PROC_NAME
+    mDP_LifecycleLastLeaseWasAlreadyOwned = M_Lease_IsOwner()
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
     HandlerStep = "Verify provider ownership"
     If Not M_Lease_IsOwner() Then
         M_Lease_ReportRefusal PROC_NAME
@@ -7983,6 +8047,8 @@ Public Sub DP_RepairRuntime()
     If Not gDP_Manager Is Nothing Then gDP_Manager.Handle_SelectionChange
     M_Lifecycle_RaiseIfFault "Repair.AfterRefresh"
 
+
+    mDP_LifecycleLastSucceeded = True
     Exit Sub
 
 ErrorHandler:
@@ -7991,6 +8057,7 @@ ErrorHandler:
     ErrorSource = Err.Source
     M_Lifecycle_SetPrimaryFailure ErrorNumber, HandlerStep, ErrorDescription
 
+    mDP_LifecycleLastSucceeded = False
     On Error Resume Next
     If M_Lease_IsOwner() Then
         If VBA.StrComp(HandlerStep, "Clean existing runtime", vbBinaryCompare) <> 0 Then
@@ -8194,14 +8261,12 @@ End Sub
 
 Public Sub DP_Stop()
 
-'
 '------------------------------------------------------------------------------
 '                           STOP DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Tears down DatePicker-owned runtime state and releases the provider lease only
-'   after every critical cleanup boundary, including caller event-state restore,
-'   is proven clean
+'   after every critical cleanup boundary is proven clean
 '
 ' ERROR POLICY
 '   Best-effort outward behavior is preserved. Incomplete cleanup is diagnostic,
@@ -8213,38 +8278,34 @@ Public Sub DP_Stop()
 
     Dim CallerEnableEvents As Boolean
     Dim HasCallerEnableEvents As Boolean
+    Dim OwnedOnEntry As Boolean
 
     On Error Resume Next
     M_Lifecycle_ResetObservation
+    mDP_LifecycleLastOperation = "DP_Stop"
 
     CallerEnableEvents = Excel.Application.EnableEvents
     HasCallerEnableEvents = (Err.Number = 0)
     Err.Clear
 
-    If Not M_Lease_IsOwner() Then
+    OwnedOnEntry = M_Lease_IsOwner()
+    mDP_LifecycleLastLeaseWasAlreadyOwned = OwnedOnEntry
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
+
+    If Not OwnedOnEntry Then
         M_Lease_ReportRefusal "DP_Stop"
+        mDP_LifecycleLastSucceeded = False
         GoTo CleanExit
     End If
 
-    If HasCallerEnableEvents Then
-        M_Lifecycle_Cleanup True, "DP_Stop", True, CallerEnableEvents
-    Else
-        M_Lifecycle_Cleanup False, "DP_Stop"
-        mDP_LifecycleLastCriticalClean = False
-        If VBA.LenB(mDP_LifecycleLastCleanupDetail) = 0 Then
-            mDP_LifecycleLastCleanupDetail = _
-                "Application.EnableEvents caller state could not be captured"
-        End If
-        mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & _
-            " > EnableEvents=FAIL > Lease=RETAINED"
-    End If
+    mDP_LifecycleLastSucceeded = M_Lifecycle_Cleanup( _
+        True, "DP_Stop", HasCallerEnableEvents, CallerEnableEvents)
 
 CleanExit:
     Err.Clear
     On Error GoTo 0
 
 End Sub
-
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 
 '
