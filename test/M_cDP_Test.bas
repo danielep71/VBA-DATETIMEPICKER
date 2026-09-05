@@ -6836,9 +6836,9 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '
 ' BEHAVIOR
 '   Tests that DP_Start, DP_Show, DP_Preload, and M_Picker_EnsureManager leave a
-'   pre-existing disabled state untouched, that the EventsDisabledByCaller output
-'   flag reports the caller state, that write-back restores both the enabled and
-'   the disabled case, and that DP_RepairRuntime still force-enables events
+'   pre-existing disabled state untouched, that write-back restores both the
+'   enabled and the disabled case, and that DP_RepairRuntime still force-enables
+'   events
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues
@@ -6863,10 +6863,8 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '   DP_Show is exercised here rather than in the UI smoke suite because event
 '   preservation is a release-blocking assertion and must run unconditionally
 '
-'   The caller event state is asserted twice: against Application.EnableEvents
-'   after the call, and against EventsDisabledByCaller on the returned result
-'
 ' UPDATED
+'   2026-09-03 - Removed the obsolete EnsureManager output-parameter assertion.
 '   2026-08-27
 '==============================================================================
 
@@ -6874,7 +6872,6 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim TargetCell          As Excel.Range  'Write-back target under test
-    Dim EventsDisabled      As Boolean      'Output flag from M_Picker_EnsureManager
     Dim WriteResult         As DP_WriteResult   'Structured write-back result
     Dim RestoredState       As Boolean      'Application.EnableEvents after write-back
     Dim ErrorNumber         As Long         'Captured error number
@@ -6895,13 +6892,10 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 ' BOOTSTRAP PRESERVES CALLER STATE
 '------------------------------------------------------------------------------
     'Bootstrap the manager while the caller has events suppressed
-        M_Picker_EnsureManager EventsDisabled
+        M_Picker_EnsureManager
     'Assert the bootstrapper did not re-enable events
         TST_DP_AssertFalse "M_Picker_EnsureManager preserves disabled events", _
             Excel.Application.EnableEvents
-    'Assert the bootstrapper reported the caller state
-        TST_DP_AssertTrue "M_Picker_EnsureManager reports EventsDisabledByCaller", _
-            EventsDisabled
     'Assert the manager was still created and hooked while events were suppressed
         TST_DP_AssertTrue "Manager is hooked while events are suppressed", _
             (Not gDP_Manager Is Nothing)
