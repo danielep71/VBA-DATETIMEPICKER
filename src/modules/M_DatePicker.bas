@@ -6774,6 +6774,12 @@ Public Function M_Lifecycle_Test_LastPrimaryStep() As String
 
 End Function
 
+Public Function M_Lifecycle_Test_LastPrimaryDescription() As String
+
+    M_Lifecycle_Test_LastPrimaryDescription = mDP_LifecycleLastPrimaryDescription
+
+End Function
+
 Private Function M_Lifecycle_TryReleaseManager( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
@@ -7117,6 +7123,33 @@ Failed:
 
 End Function
 
+Private Function M_Lifecycle_TryRestoreEnableEvents( _
+    ByVal DesiredValue As Boolean, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Excel.Application.EnableEvents = DesiredValue
+    If Excel.Application.EnableEvents <> DesiredValue Then
+        ErrorNumber = vbObjectError + 2722
+        ErrorDescription = "Application.EnableEvents did not restore to the caller state"
+        Exit Function
+    End If
+
+    M_Lifecycle_TryRestoreEnableEvents = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRestoreEnableEvents = False
+
+End Function
+
 Private Function M_Lifecycle_TryReleaseLease( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
@@ -7191,7 +7224,9 @@ End Function
 
 Private Function M_Lifecycle_Cleanup( _
     ByVal ReleaseLease As Boolean, _
-    ByVal EntryPoint As String) As Boolean
+    ByVal EntryPoint As String, _
+    Optional ByVal RestoreApplicationEvents As Boolean = False, _
+    Optional ByVal DesiredEnableEvents As Boolean = True) As Boolean
 
     Dim StepSucceeded As Boolean
     Dim StepErrNumber As Long
@@ -7273,6 +7308,19 @@ Private Function M_Lifecycle_Cleanup( _
     On Error GoTo 0
     StepSucceeded = (StepErrNumber = 0)
     M_Lifecycle_RecordCleanupStep "CallbackCache", StepSucceeded, StepErrNumber, StepErrDescription
+
+    If RestoreApplicationEvents Then
+        StepErrNumber = 0
+        StepErrDescription = VBA.vbNullString
+        If M_Lifecycle_TryConsumeFault("Cleanup.EnableEvents", StepErrNumber, StepErrDescription) Then
+            StepSucceeded = False
+        Else
+            StepSucceeded = M_Lifecycle_TryRestoreEnableEvents( _
+                DesiredEnableEvents, StepErrNumber, StepErrDescription)
+        End If
+        M_Lifecycle_RecordCleanupStep "EnableEvents", StepSucceeded, StepErrNumber, StepErrDescription
+        CriticalClean = CriticalClean And StepSucceeded
+    End If
 
     mDP_LifecycleLastCriticalClean = CriticalClean
 
@@ -7385,24 +7433,24 @@ Public Sub DP_Start()
     M_Lifecycle_RaiseIfFault "Start.AfterAdmission"
 
     HandlerStep = "Ensure manager"
-    M_Lifecycle_RaiseIfFault "Start.Manager"
     M_Picker_EnsureManager
+    M_Lifecycle_RaiseIfFault "Start.AfterManager"
 
     HandlerStep = "Synchronize right-click menu"
-    M_Lifecycle_RaiseIfFault "Start.ContextMenu"
     M_ContextMenu_Update
+    M_Lifecycle_RaiseIfFault "Start.AfterContextMenu"
 
     HandlerStep = "Synchronize keyboard shortcut"
-    M_Lifecycle_RaiseIfFault "Start.Keyboard"
     M_KeyboardShortcut_Update
+    M_Lifecycle_RaiseIfFault "Start.AfterKeyboard"
 
     HandlerStep = "Pre-create hidden grid icon"
-    M_Lifecycle_RaiseIfFault "Start.Grid"
     M_GridIcon_PreCreateHidden
+    M_Lifecycle_RaiseIfFault "Start.AfterGrid"
 
     HandlerStep = "Refresh current selection context"
-    M_Lifecycle_RaiseIfFault "Start.Refresh"
     gDP_Manager.Handle_SelectionChange
+    M_Lifecycle_RaiseIfFault "Start.AfterRefresh"
 
 CleanExit:
     If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
@@ -7416,13 +7464,16 @@ ErrorHandler:
 
     On Error Resume Next
     If AcquiredThisCall Then
-        M_Lifecycle_Cleanup True, PROC_NAME & ".Rollback"
+        M_Lifecycle_Cleanup True, PROC_NAME & ".Rollback", _
+            HasCallerEnableEvents, CallerEnableEvents
     ElseIf PreOwned Then
         mDP_LifecycleLastTrace = "PreOwnedRuntime=PRESERVED"
         mDP_LifecycleLastCriticalClean = True
         mDP_LifecycleLastLeaseReleased = False
     End If
-    If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    If Not AcquiredThisCall Then
+        If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    End If
     Err.Clear
     On Error GoTo 0
 
@@ -8146,7 +8197,8 @@ Public Sub DP_Stop()
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Tears down DatePicker-owned runtime state and releases the provider lease only
-'   after every critical cleanup boundary is proven clean
+'   after every critical cleanup boundary, including caller event-state restore,
+'   is proven clean
 '
 ' ERROR POLICY
 '   Best-effort outward behavior is preserved. Incomplete cleanup is diagnostic,
@@ -8158,6 +8210,10 @@ Public Sub DP_Stop()
 
     Dim CallerEnableEvents As Boolean
     Dim HasCallerEnableEvents As Boolean
+    Dim CleanupClean As Boolean
+    Dim StepSucceeded As Boolean
+    Dim StepErrNumber As Long
+    Dim StepErrDescription As String
 
     On Error Resume Next
     M_Lifecycle_ResetObservation
@@ -8171,21 +8227,43 @@ Public Sub DP_Stop()
         GoTo CleanExit
     End If
 
-    M_Lifecycle_Cleanup True, "DP_Stop"
+    CleanupClean = M_Lifecycle_Cleanup(False, "DP_Stop")
 
-CleanExit:
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
     If HasCallerEnableEvents Then
-        Err.Clear
-        Excel.Application.EnableEvents = CallerEnableEvents
-        If Err.Number <> 0 Then
-  If VBA.LenB(mDP_LifecycleLastCleanupDetail) = 0 Then
-      mDP_LifecycleLastCleanupDetail = "Application.EnableEvents restore" & _
-          " | Error=" & VBA.CStr(Err.Number) & " | " & Err.Description
-  End If
-  mDP_LifecycleLastCriticalClean = False
+        If M_Lifecycle_TryConsumeFault("Cleanup.EnableEvents", StepErrNumber, StepErrDescription) Then
+            StepSucceeded = False
+        Else
+            StepSucceeded = M_Lifecycle_TryRestoreEnableEvents( _
+                CallerEnableEvents, StepErrNumber, StepErrDescription)
         End If
+    Else
+        StepSucceeded = False
+        StepErrNumber = vbObjectError + 2723
+        StepErrDescription = "Caller Application.EnableEvents state could not be captured"
+    End If
+    M_Lifecycle_RecordCleanupStep "EnableEvents", StepSucceeded, StepErrNumber, StepErrDescription
+    CleanupClean = CleanupClean And StepSucceeded
+    mDP_LifecycleLastCriticalClean = CleanupClean
+
+    If CleanupClean Then
+        StepErrNumber = 0
+        StepErrDescription = VBA.vbNullString
+        If M_Lifecycle_TryConsumeFault("Cleanup.Lease", StepErrNumber, StepErrDescription) Then
+            StepSucceeded = False
+        Else
+            StepSucceeded = M_Lifecycle_TryReleaseLease(StepErrNumber, StepErrDescription)
+        End If
+        M_Lifecycle_RecordCleanupStep "Lease", StepSucceeded, StepErrNumber, StepErrDescription
+        mDP_LifecycleLastLeaseReleased = StepSucceeded
+    Else
+        M_Lifecycle_RecordCleanupStep "Lease", False, _
+            vbObjectError + 2720, "Lease retained because critical cleanup is incomplete"
+        mDP_LifecycleLastLeaseReleased = False
     End If
 
+CleanExit:
     Err.Clear
     On Error GoTo 0
 
