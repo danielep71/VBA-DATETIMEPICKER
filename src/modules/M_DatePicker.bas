@@ -5584,8 +5584,7 @@ Private Function M_Settings_BooleanToStorageValue(ByVal Value As Boolean) As Str
 
 End Function
 
-Public Sub M_Picker_EnsureManager( _
-    Optional ByRef EventsDisabledByCaller As Boolean)
+Public Sub M_Picker_EnsureManager()
 
 '
 '------------------------------------------------------------------------------
@@ -5603,17 +5602,16 @@ Public Sub M_Picker_EnsureManager( _
 '   Application event hook
 '
 ' INPUTS
-'   EventsDisabledByCaller
-'       Optional output flag. Set True when Application.EnableEvents was already
-'       False on entry. Left False otherwise
+'   None. The parameterless signature deliberately preserves eligibility for
+'   Alt+F8, assigned controls and other Excel macro entry points.
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Ensures persisted settings are loaded, reports the caller's Excel event state
-'   without modifying it, creates the manager when missing, and recreates it when
-'   the existing manager is not hooked
+'   Ensures persisted settings are loaded, preserves the caller's Excel event
+'   state, creates the manager when missing, and recreates it when the existing
+'   manager is not hooked
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, or if the
@@ -5647,6 +5645,7 @@ Public Sub M_Picker_EnsureManager( _
 '   DP_RepairRuntime is the only entry point that force-enables Excel events
 '
 ' UPDATED
+'   2026-09-03 - Restored a parameterless Excel macro entry point.
 '   2026-08-21
 '------------------------------------------------------------------------------
 
@@ -5683,12 +5682,6 @@ Public Sub M_Picker_EnsureManager( _
 '------------------------------------------------------------------------------
     'Ensure persisted DatePicker settings are available before manager startup
         M_Settings_EnsureLoaded
-
-'------------------------------------------------------------------------------
-' OBSERVE EXCEL EVENT STATE
-'------------------------------------------------------------------------------
-    'Report the caller's Excel event state without altering it
-        EventsDisabledByCaller = Not Excel.Application.EnableEvents
 
 '------------------------------------------------------------------------------
 ' RESOLVE MANAGER STATE

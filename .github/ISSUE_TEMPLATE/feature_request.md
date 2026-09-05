@@ -945,8 +945,9 @@ Third-party actions:
 Contributor-controlled code executed:
 ```
 
-The analytics `TRAFFIC_TOKEN` should remain isolated from jobs that execute
-repository build/test code.
+The repository-level `analytics` environment is not a workflow-identity
+boundary. No job that executes repository build/test/release code should
+declare it or receive `TRAFFIC_TOKEN`.
 
 </details>
 

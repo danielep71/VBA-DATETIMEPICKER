@@ -14,8 +14,9 @@
 #   Credentials
 #     TRAFFIC_TOKEN is a fine-grained personal access token with
 #     `Administration: read` on this repository, which is what the traffic API
-#     requires. It is scoped to the `analytics` environment so it cannot be
-#     read by any other workflow.
+#     requires. It is stored in the repository-level `analytics` environment.
+#     That environment is not a workflow-identity boundary: any job declaring
+#     it may request access, subject to the configured environment protections.
 #
 #     Rotate it every 90 days, and immediately if this workflow is ever
 #     modified by someone other than the maintainer. See SECURITY.md.
@@ -52,8 +53,9 @@ jobs:
     name: Export GitHub traffic
     runs-on: ubuntu-latest
 
-    # Isolates TRAFFIC_TOKEN to this workflow. A token with Administration
-    # read is worth protecting from every job that is not this one.
+    # Requests the repository-level analytics environment. Keep this declaration
+    # out of every code-executing build, test and release job; the environment
+    # name alone does not bind the secret to this workflow identity.
     environment: analytics
 
     steps:

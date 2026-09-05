@@ -872,7 +872,9 @@ M_KeyboardShortcut_Update
 M_GridIcon_PurgeAll
 ```
 
-`M_Picker_EnsureManager` reports caller event state without changing it.
+`M_Picker_EnsureManager` is deliberately parameterless so Excel can expose it
+through Alt+F8 or an assigned control. It preserves the caller's event state
+without changing it.
 
 ### Internal test seams — not supported API
 
