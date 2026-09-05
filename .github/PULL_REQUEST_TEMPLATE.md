@@ -1,917 +1,331 @@
 <!--
-  VBA-DATETIMEPICKER pull request template
-
-  Keep the PR focused. Delete sections that do not apply rather than filling
-  the template with "N/A".
-
-  The core sections near the top are intended for every substantive PR.
-  The subsystem sections below are collapsed on purpose: expand the ones your
-  change touches and delete the rest.
-
-  Evidence matters more than checkbox volume. Record only tests and environments
-  actually used.
+  Keep this pull request focused on one coherent outcome.
+  Complete every common section. Delete optional profile blocks that do not apply.
+  Use NOT RUN or NOT APPLICABLE with a reason; never manufacture PASS evidence.
+  Record only checks and environments exercised against the exact candidate.
+  Report vulnerabilities privately through SECURITY.md; do not disclose secrets,
+  exploitable details, confidential workbooks, or restricted data in a pull request.
 -->
 
 <div align="center">
 
-# 🔀 VBA-DATETIMEPICKER Pull Request
+# 🔀 VBA DateTimePicker Pull Request
 
-**Focused change · Explicit contract · Reproducible evidence · Known boundaries**
+### Write-back safety · Runtime ownership · UI lifecycle · Exact evidence
+
+[![Contributing](https://img.shields.io/badge/guide-CONTRIBUTING-217346?style=flat-square)](../CONTRIBUTING.md)
+[![Security](https://img.shields.io/badge/security-private%20reporting-d73a49?style=flat-square)](../SECURITY.md)
+[![Release](https://img.shields.io/badge/release-RELEASING-6f42c1?style=flat-square)](../RELEASING.md)
+[![Changelog](https://img.shields.io/badge/changes-Unreleased-d97706?style=flat-square)](../CHANGELOG.md)
 
 </div>
 
 ---
+
+> [!IMPORTANT]
+> Keep only the subsystem blocks touched by the pull request. The common evidence sections remain mandatory; do not retain hundreds of unchecked irrelevant boxes.
 
 ## 📌 Summary
 
-<!--
-What changed and why?
+<!-- State the observable outcome and why it is needed. Prefer one precise purpose. -->
 
-Prefer:
-  "Preserve formulas during ordinary write-back and report formula skips through
-   DP_WriteResult."
-
-Avoid:
-  "Various fixes and cleanup."
--->
-
-## 🎯 Problem / motivation
-
-<!--
-What concrete defect, limitation, maintenance problem, or user need does this PR
-address? State the pre-change behavior where useful.
--->
-
-## 🔗 Related issue
+## 🔗 Related issues
 
 ```text
 Closes #
+Related to #
 ```
 
-<!-- Use "Refs #" instead when the PR does not fully close the issue. -->
+Use a closing keyword only when this pull request satisfies the issue's complete acceptance criteria.
 
----
+## 🧭 Change classification
 
-## 🏷️ Type of change
-
-- [ ] 🐛 Functional / compatibility fix
-- [ ] 🎯 Write-scope / data-integrity fix
-- [ ] 🧮 Formula-safety change
-- [ ] 🔒 Application-state / runtime-ownership fix
-- [ ] 🪟 WinAPI / native-window hardening
-- [ ] ✨ Backward-compatible feature
-- [ ] ♻️ Internal refactor with no intended supported-behavior change
-- [ ] 🧪 Regression-harness / test change
-- [ ] 🖼️ Demo change
-- [ ] 🎛️ Ribbon / packaging change
-- [ ] 📖 Documentation-only change
-- [ ] 🧹 Repository / release-engineering maintenance
-- [ ] 🔐 Security-related change
+- [ ] Defect correction
+- [ ] Backward-compatible capability
+- [ ] Breaking API, behavior, deployment, or migration change
+- [ ] Internal refactor with no intended supported-behavior change
+- [ ] Test, fixture, reference-data, or validation change
+- [ ] Performance change
+- [ ] Security or trust-boundary hardening
+- [ ] Documentation-only change
+- [ ] Repository tooling, workflow, or governance change
+- [ ] Packaging or release preparation
+- [ ] Write-scope, formula-safety, or data-integrity change
+- [ ] Runtime ownership, event, timer, or recovery change
+- [ ] UserForm, RibbonX, shape, keyboard, or WinAPI change
 
 ## 🎚️ Affected surface
 
-**Supported consumer surface**
-
-- [ ] 🚀 Startup / lifecycle — `DP_Start`, `DP_Stop`
-- [ ] 🖱️ Picker UI — `DP_Show`, `DP_Close`, `DP_Preload`, `DP_Hide`
-- [ ] 📅 Direct write-back — `DP_Today`, `DP_Now`
-- [ ] 📊 Explicit Table fill — `DP_FillTableColumn`
-- [ ] 🛠️ Runtime recovery — `DP_RepairRuntime`
-- [ ] 🪪 Lease recovery — `DP_ForceReleaseProviderLease`
-- [ ] ⚙️ Settings namespace — `M_Settings_SetNamespace`, `M_Settings_GetNamespace`
-- [ ] 🧾 `DP_WriteResult`
-- [ ] 🪟 `DP_WindowStyleResult`
-- [ ] 🔢 Public enums / constants
-
-**Excel integration**
-
-- [ ] 🧠 Application event manager
-- [ ] ⌨️ `Application.OnKey`
-- [ ] 🧷 Cell context menu / CommandBars
-- [ ] 📌 In-grid worksheet icon
-- [ ] ⏱️ `Application.OnTime`
-- [ ] 🎛️ RibbonX callbacks / `customUI14.xml`
-- [ ] 🗃️ Registry-backed settings
-- [ ] 🪪 Process-visible provider lease
-
-**Component / repository**
-
-- [ ] 🖼️ `UF_DatePicker.frm/.frx`
-- [ ] 🧩 `cDatePickerManager`
-- [ ] 🏷️ `cDatePickerLabelHook`
-- [ ] 🪟 WinAPI styling / positioning / drag
-- [ ] 🧪 `M_cDP_Test`
-- [ ] 🖼️ Demo source
-- [ ] 📦 Release asset / provenance
-- [ ] ⚙️ Repository configuration / workflow
-- [ ] 📖 Documentation only
+- [ ] `DP_Start` / `DP_Stop` lifecycle
+- [ ] Picker show, hide, preload, and close APIs
+- [ ] Direct write-back and explicit table fill
+- [ ] Settings namespace and persistence
+- [ ] Application events, keyboard, context menu, grid icon, or timer
+- [ ] `DP_RepairRuntime`, provider lease, and `DP_ForceReleaseProviderLease` recovery
+- [ ] UserForm, label hooks, RibbonX, or WinAPI
+- [ ] No runtime or supported surface — documentation/repository-only
 
 ---
 
-## 🔒 Public API and Semantic Versioning
+## 📐 Scope and contract impact
+
+### In scope
+
+- <!-- Deliberate outcome -->
+
+### Out of scope
+
+- <!-- Reasonable adjacent work deliberately deferred -->
+
+### Supported behavior and compatibility
 
 ```text
-Supported behavior changed:
-Backward compatible:
-Suggested release:          patch / minor / major
+Supported behavior changed:       Yes / No
+Backward compatible:              Yes / No / Uncertain
+Suggested release impact:         none / patch / minor / major / uncertain
+New supported members:
+Removed or renamed members:
+Changed signatures or defaults:
+Changed results, errors, state, or side effects:
 Migration required:
-New Public VBA members:
-Removed / renamed members:
-```
-
-Review the change against the **supported consumer contract**, not only against
-the VBA keyword `Public`.
-
-Confirm impact on:
-
-- supported procedure/function names;
-- parameter order;
-- required vs optional arguments;
-- existing defaults;
-- enum numeric values;
-- structured-result fields and meaning;
-- safe selected-cell write-back default;
-- formula-preservation default;
-- settings namespace semantics;
-- runtime-provider ownership;
-- recovery behavior;
-- stable legacy identifiers.
-
-Write:
-
-```text
-No supported behavior change
-```
-
-when that is genuinely the case.
-
-> [!IMPORTANT]
-> The following are compatibility-sensitive:
->
-> ```text
-> VBA_DATETIMEPICKER
-> ```
->
-> as the legacy settings base name and context-menu identifier, plus the
-> established `DP_...` supported API.
->
-> A technically `Public` callback or test seam is not automatically a supported
-> consumer API. If this PR changes the distinction, explain it explicitly.
-
----
-
-## 🧭 Behavioral contract
-
-Complete the lines that matter to this PR.
-
-```text
-Intended target/scope:
-Caller-owned state preserved:
-Partial-success behavior:
-Failure / refusal behavior:
-Recovery path:
-Persistence impact:
-Runtime-ownership impact:
 Known limitation introduced or retained:
 ```
 
-<!--
-This section is deliberately short. It should let a reviewer understand the
-contract before reading the diff.
--->
+Assess compatibility against documented behavior, not merely the VBA `Public` keyword. Infrastructure callbacks, Ribbon entry points, test seams, and `Application.Run` targets are not automatically supported API.
+
+### Production source and package
+
+`M_DatePicker`, `cDatePickerManager`, `cDatePickerLabelHook`, and the complete `UF_DatePicker.frm`/`.frx` pair; Ribbon XML is package metadata when used.
+
+- [ ] Required source files and import order are unchanged.
+- [ ] Required source files or order changed and `INSTALLATION.md` was updated.
+- [ ] No production source/package impact.
+
+## 🔧 Implementation notes
+
+```text
+Approach and key invariant:
+Alternatives considered:
+New dependency, reference, or generated input:
+State ownership and cleanup:
+Failure behavior:
+```
+
+Explain decisions a future reviewer cannot safely infer from the diff.
 
 ---
 
-# ✅ Validation
+## ✅ Verification
 
-## Testing performed
+### Candidate identity
+
+| Evidence | Result |
+| --- | --- |
+| Exact PR HEAD SHA | <!-- Full 40-character SHA --> |
+| Base branch and base SHA | <!-- Branch + full SHA --> |
+| Working tree used locally | <!-- clean / dirty; explain --> |
+| Source or package tested | <!-- Exact candidate source / artifact / N/A --> |
+
+Evidence from another commit does not certify this candidate.
+
+### Static and repository checks
+
+- `git diff --check`
+- Repository source/export inspection — no hosted static source gate is currently configured
+
+| Check | Result / evidence |
+| --- | --- |
+| Hosted required checks | <!-- PASS / FAIL / NOT RUN + workflow URL --> |
+| Local static command | <!-- Command + PASS / FAIL / NOT RUN --> |
+| Formatting / `git diff --check` | <!-- PASS / FAIL --> |
+| Machine-readable artifact | <!-- Name / URL / not produced --> |
+
+### Excel and VBA execution
+
+- [ ] Required and completed against the exact PR HEAD.
+- [ ] Required but incomplete — reason and merge/release consequence stated.
+- [ ] Not required — documentation/repository-only change with no executable or packaging impact.
+
+Relevant entry points:
+
+- `TST_DP_RunAll`
+- `TST_DP_RunAll_WithUISmoke`
+- Manual `DP_Show` / `DP_Close` / `DP_Stop` / `DP_Start` scenarios
+
+| Evidence | Result |
+| --- | --- |
+| Tested commit SHA | <!-- Full SHA or N/A --> |
+| `Debug → Compile VBAProject` | <!-- PASS / FAIL / NOT RUN / N/A --> |
+| Regression/certification entry point | <!-- Exact procedure --> |
+| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN --> |
+| Cases / assertions / failures | <!-- Counts or N/A --> |
+| Skipped / cleanup outcome | <!-- Counts and state or N/A --> |
+| Focused and manual checks | <!-- Scenarios + result --> |
+| Evidence file or workflow | <!-- Name / URL / N/A --> |
+
+### Validation environment
 
 ```text
-Debug → Compile VBAProject          →
-
-TST_DP_RunAll                       →
-TST_DP_RunAll_WithUISmoke           →
-
-Manual DP_Show / DP_Close           →
-Manual DP_Stop / DP_Start           →
-Manual DP_RepairRuntime              →
-
-Other focused/manual validation     →
+Excel product, version, and build:
+Office bitness:                    32-bit / 64-bit
+Windows version/build:
+Workbook or add-in host:
+Deployment model:
+Deployment: embedded source / add-in
+Other DatePicker provider and version
+Settings namespace
+Display scaling and monitor configuration
+Worksheet protection and Excel event state
 ```
 
-Delete tests that do not apply rather than marking an unperformed test as
-successful.
+Record only tested environments. Source inspection does not constitute host execution, and one Office bitness does not execute the other conditional branch.
 
-### Harness verdict
+### Regression coverage
 
-Paste the **actual** summary line:
+- [ ] Existing tests cover the changed success path.
+- [ ] New or amended tests cover each corrected defect.
+- [ ] Boundary, invalid-input, failure, fallback, and cleanup paths are covered as applicable.
+- [ ] Test entry points and inventory/count metadata remain synchronized.
+- [ ] Expected results come from the contract or an independent reference.
+- [ ] No regression change is needed — rationale recorded below.
 
 ```text
-State=; Run=; Passed=; Failed=; CleanupFailures=
+Coverage rationale and new test names:
+Unexecuted or deferred coverage:
 ```
-
-The latest recorded v1.2.0 standard pack has reached:
-
-```text
-State=PASS; Run=302; Passed=302; Failed=0; CleanupFailures=0
-```
-
-That is a historical baseline, **not a required fixed assertion count**.
-
-> [!CAUTION]
-> Only `PASS` is a passing run.
->
-> ```text
-> FAIL
-> FAIL_CLEANUP
-> FAIL_DIRTY_START
-> INCOMPLETE_SKIPPED
-> ```
->
-> are not release-quality evidence, even when some or all executed assertions
-> passed.
-
-### Evidence classification
-
-- [ ] VBA compile
-- [ ] Automated regression
-- [ ] UI smoke
-- [ ] Manual scenario validation
-- [ ] Source inspection
-- [ ] Package-level validation
-- [ ] Platform/documented contract
-- [ ] Unresolved hypothesis remains
-
-<!--
-Do not call a source inspection "tested" or a one-host non-reproduction
-"verified everywhere".
--->
 
 ---
 
-## 🖥️ Validation environment
+## ⚠️ Risk, rollback, and recovery
 
-Record only environments actually tested.
+- [ ] Low — documentation, metadata, or mechanically verified change.
+- [ ] Medium — bounded runtime, tooling, or compatibility impact.
+- [ ] High — numerical integrity, shared Excel state, native API, security, release, or breaking impact.
 
 ```text
-Source tag / full commit SHA:
-Excel product/version/build:
-Office bitness:                   32-bit / 64-bit
-Windows version:
-Workbook host:                    .xlsm / .xlsb / .xlam
-Deployment:                       embedded / add-in
-Display scaling:
-Monitors:
-Worksheet protection state:
-WinAPI setting:
-Other add-ins loaded:
-Other DatePicker provider:        none / version / deployment
-Settings namespace:               legacy default / value
-Application.EnableEvents at start:
+Principal failure modes:
+Residual risk after validation:
+Rollback or revert procedure:
+Excel-process, workbook, data, or artifact recovery:
+Conditions that make rollback unsafe:
 ```
 
-For multi-provider behavior, record **both provider versions**.
+## 🔐 Security, data, and provenance
+
+- [ ] No credential, secret, signing material, internal URL, or personal path is included.
+- [ ] No client, employer, counterparty, student, personal, or restricted production data is included.
+- [ ] Test data is synthetic, anonymized, or explicitly redistributable.
+- [ ] External algorithms, code, datasets, and market/vendor data have attributable provenance and compatible licensing.
+- [ ] Formula, command, path, callback, deserialization, and external-content injection surfaces were assessed.
+- [ ] No security-sensitive detail belongs in private disclosure instead of this pull request.
+- [ ] Generated evidence identifies its inputs, tool/runtime version, candidate SHA, and limitations.
+
+```text
+Security or privacy impact:
+Source/data provenance:
+New trust boundary:
+```
+
+## 📚 Documentation and release hygiene
+
+- [ ] `README.md` reflects supported behavior and examples.
+- [ ] `INSTALLATION.md` reflects paths, dependencies, import order, validation, upgrades, and removal.
+- [ ] `CONTRIBUTING.md` reflects development and evidence requirements.
+- [ ] `CHANGELOG.md` records material change under `[Unreleased]`.
+- [ ] `SECURITY.md` reflects supported versions or trust boundaries.
+- [ ] `RELEASING.md` reflects certification, package, provenance, or recovery changes.
+- [ ] Source headers, API references, demos, Wiki pages, and counts remain synchronized.
+- [ ] Version markers remain unchanged unless this is the deliberate release-stamp change.
+- [ ] No documentation change is required — reason recorded below.
+
+```text
+Documentation impact:
+Release, artifact, or migration impact:
+```
 
 ---
 
-# 📋 Always required
+## 🧩 Project-specific review
 
-## 🧹 Source and repository hygiene
+<details>
+<summary><strong>🎯 Write-back, formulas, and table scope</strong></summary>
 
-- [ ] Current branch/base was confirmed before committing.
-- [ ] The project compiled with the complete source set required by the change.
-- [ ] Changed components were exported to the correct repository paths.
-- [ ] `UF_DatePicker.frm` and matching `UF_DatePicker.frx` remain synchronized.
-- [ ] Procedure/module `UPDATED` metadata was reviewed where affected.
-- [ ] No conflict markers, duplicate procedures, or accidental VBE export noise remain.
-- [ ] The diff contains only intended changes.
-- [ ] No generated workbook/add-in binary was committed unintentionally.
-- [ ] No lock, backup, log, credential, signing key, client data, or production-data file is included.
-- [ ] `.gitattributes` / `.gitignore` behavior remains intentional where affected.
-- [ ] No unrelated formatting churn is mixed into the functional change.
+Keep when target resolution or cell writes can change.
 
-## 🔒 Caller-owned state and cleanup
-
-- [ ] Normal DatePicker paths preserve the caller's `Application.EnableEvents`.
-- [ ] `DP_RepairRuntime` remains the explicit recovery exception that may re-enable events.
-- [ ] Every new registration has a deliberate teardown path.
-- [ ] Teardown removes only DatePicker-owned resources.
-- [ ] `Application.OnTime` cancellation uses the exact schedule/procedure identity recorded at registration.
-- [ ] Context-menu cleanup uses the DatePicker identifier rather than collection position.
-- [ ] Retained worksheet `Shape` references are not assumed live without validation.
-- [ ] No unsolicited low-level production `MsgBox` was introduced.
-
-## 🎯 Data integrity
-
-- [ ] Normal interactive Table behavior remains selected-cell / resolved-target by default.
-- [ ] Whole-column Table write requires explicit `DP_FillTableColumn` intent.
+- [ ] Ordinary interaction remains limited to the selected/resolved target.
+- [ ] Whole-column table writes require explicit `DP_FillTableColumn` intent.
 - [ ] Formula cells remain preserved by default.
-- [ ] `OverwriteFormulas:=True` remains explicit/destructive where supported.
-- [ ] Array-formula / non-writable cases remain controlled.
-- [ ] Partial writes remain observable rather than silently promoted to full success.
-- [ ] Write-back restores caller event state on success and failure paths.
+- [ ] Destructive overwrite remains explicit and observable.
+- [ ] Array-formula, protected, non-writable, merged, and partial-success paths are controlled.
+- [ ] `DP_WriteResult` describes the real post-operation state.
+- [ ] Caller event state is restored on every exit.
 
-## 🧾 Error and diagnostic integrity
-
-- [ ] `Err` values are captured before calls / `On Error` statements can destroy them.
-- [ ] Anything reachable from an error handler cannot replace the original failure.
-- [ ] `On Error Resume Next` scopes remain narrow and deliberate.
-- [ ] The implemented error policy matches the procedure banner/documentation.
-- [ ] Structured results describe the real post-operation state.
-- [ ] Refusal / fail-closed outcomes are not reported as success.
-
-## 📖 Documentation
-
-- [ ] README updated where user-facing behavior/API changed.
-- [ ] INSTALLATION updated where deployment/startup/upgrade behavior changed.
-- [ ] CONTRIBUTING updated where engineering rules changed.
-- [ ] SECURITY updated where trust/security boundaries changed.
-- [ ] Wiki updated where the reviewed v1.2.0 contract changed.
-- [ ] `CHANGELOG.md` updated for user-visible behavior.
-- [ ] No documentation change is required.
-
-> [!TIP]
-> Documentation belongs in this PR when it describes this PR.
->
-> A knowingly stale README/Wiki after a behavior change is part of the defect.
-
----
-
-# 🧩 Subsystem review sections
-
-<!--
-Expand the sections that apply and delete the others before review.
--->
-
-## 🎯 Write-back / Excel Table scope
-
+</details>
 <details>
-<summary>Expand when target resolution, Today/Now, calendar selection, Table behavior, or DP_FillTableColumn changed</summary>
+<summary><strong>🪪 Provider, settings, events, and timers</strong></summary>
 
-<br>
+Keep when runtime ownership or shared Excel registrations can change.
 
-```text
-Entry point(s):
-Selection / target before:
-Selection / target after:
-Table expansion possible:
-Confirmation behavior:
-Predicted scope:
-AttemptedCount:
-WrittenCount:
-Skipped / failed classifications:
-```
+- [ ] Settings namespace is configured before settings load and retains its compatibility semantics.
+- [ ] Every entry path enforces the single-provider lease before shared registration.
+- [ ] A refused provider cannot remove the active provider's state.
+- [ ] Manager startup, workbook lifecycle, VBA reset, repair, and teardown are covered.
+- [ ] `Application.OnTime` cancellation uses the exact registered identity.
+- [ ] Keyboard, CommandBar, event, and shape cleanup removes only owned resources.
+- [ ] Recovery and force-release behavior fail closed where ownership is uncertain.
 
-- [ ] Selected-cell behavior inside an Excel Table remains safe by default.
-- [ ] Broad Table scope is reached only through explicit caller/user intent.
-- [ ] Previewed scope is checked against `AttemptedCount`, not `WrittenCount`.
-- [ ] Locked/formula/failure outcomes do not make a correct target prediction look wrong.
-- [ ] Target metadata is attached once from the resolver rather than re-derived inconsistently.
-- [ ] Multi-area behavior remains deliberate.
-- [ ] No write path returns without populating its structured result semantics.
-- [ ] User-facing shortfall messaging occurs once per operation, not once per cell/area.
+</details>
+<details>
+<summary><strong>🪟 UserForm, RibbonX, shape, and WinAPI</strong></summary>
 
-### Scope regression cases
+Keep for visible UI or native-window changes.
 
-- [ ] Omitted/default safe scope
-- [ ] Explicit internal broad-scope path where still required by architecture/tests
-- [ ] `DP_FillTableColumn`
-- [ ] Locked cells
-- [ ] Formula cells
-- [ ] Array-formula / non-writable cell
-- [ ] Multi-area target where applicable
+- [ ] `UF_DatePicker.frm` and `.frx` remain synchronized.
+- [ ] Label hooks and dynamically created controls are wired and released safely.
+- [ ] Ribbon callback names and `customUI14.xml` remain synchronized.
+- [ ] 32-bit and 64-bit declarations and valid-zero WinAPI returns are handled correctly.
+- [ ] Positioning, borders, drag, scaling, multi-monitor, and modeless interaction are checked as applicable.
+- [ ] No unsolicited production `MsgBox` or persistent worksheet artifact is introduced.
+
+</details>
+<details>
+<summary><strong>📦 Regression, demo, and release package</strong></summary>
+
+Keep for test harness, demo, add-in, or release-asset changes.
+
+- [ ] Harness completion state distinguishes PASS, failure, cleanup failure, dirty start, and incomplete/skipped work.
+- [ ] Demo-builder worksheet creation and partial-success cleanup are verified when affected.
+- [ ] No fixed historical assertion count is treated as the current contract.
+- [ ] The demo/add-in is built from the exact candidate and tested after final save.
+- [ ] Source, form resources, Ribbon metadata, artifact hashes, and release notes identify one candidate.
 
 </details>
 
 ---
 
-## 🧮 Formula policy / `DP_WriteResult`
-
-<details>
-<summary>Expand when formulas, write classifications, counts, addresses, or result fields changed</summary>
-
-<br>
+## 👀 Reviewer focus
 
 ```text
-New / changed result fields:
-Formula default:
-Override behavior:
-Address reporting:
-Bulk-path behavior:
-Balance assertion updated:
+Highest-risk decision:
+Files and procedures to inspect first:
+Evidence to challenge:
+Known boundary not proved by this pull request:
+Unresolved question or accepted trade-off:
 ```
 
-Completed-result invariant:
+## ☑️ Final author check
 
-```text
-AttemptedCount =
-    WrittenCount +
-    LockedSkippedCount +
-    FormulaSkippedCount +
-    FailedCount
-```
-
-- [ ] Ordinary formulas are preserved by default.
-- [ ] Date-returning formulas are not treated as literals merely because they display a date.
-- [ ] Explicit overwrite does not become an implicit/persisted global preference.
-- [ ] Array formulas remain non-overridable where the engine cannot safely write them.
-- [ ] Counts remain exact even when diagnostic address strings are capped.
-- [ ] Bulk writes contribute their own correct counts.
-- [ ] `WrittenCount` is not inferred by subtraction when Excel can silently refuse an assignment.
-- [ ] `M_WriteBack_DescribeShortfall` / reporting reflects any new classification.
-- [ ] `TST_DP_AssertWriteResultBalances` or equivalent balance coverage was updated.
-
-</details>
+- [ ] The title describes the observable outcome.
+- [ ] The pull request has one coherent purpose and no unrelated churn.
+- [ ] Linked issue acceptance criteria are met or remaining work is explicit.
+- [ ] Compatibility and release impact are assessed.
+- [ ] Evidence belongs to the exact candidate claimed.
+- [ ] Required checks are terminal and passing; incomplete work is not presented as PASS.
+- [ ] Executable VBA was compiled and tested when required.
+- [ ] Failure, cleanup, and recovery behavior were reviewed.
+- [ ] The complete diff, including comments, metadata, binary companions, and documentation, was reviewed.
+- [ ] No merge marker, stale placeholder, unexplained N/A, accidental binary, or private material remains.
 
 ---
 
-## ⚙️ Settings persistence / namespace
-
-<details>
-<summary>Expand when registry settings, defaults, namespace resolution, or settings lifecycle changed</summary>
-
-<br>
-
-```text
-Legacy default affected:
-Namespace behavior affected:
-Effective application name:
-Migration behavior:
-Load / save timing:
-```
-
-- [ ] `VBA_DATETIMEPICKER` remains the stable legacy base name unless a breaking change is explicit.
-- [ ] Effective settings name is resolved centrally.
-- [ ] `M_Settings_SetNamespace` still must run before settings are loaded.
-- [ ] Namespace remains locked after load.
-- [ ] No automatic migration silently copies legacy settings into a new namespace.
-- [ ] Namespace is a stable deployment identity, not a version/path/workbook-name identity.
-- [ ] Settings namespace is not used as runtime-provider identity.
-- [ ] No secret/credential storage was introduced into DatePicker settings.
-- [ ] Default and namespaced persistence were both tested where relevant.
-
-</details>
-
----
-
-## 🪪 Runtime provider ownership
-
-<details>
-<summary>Expand when DP_Start, DP_Stop, DP_RepairRuntime, the CommandBar lease, or multi-provider behavior changed</summary>
-
-<br>
-
-```text
-Provider A version/deployment:
-Provider B version/deployment:
-Lease acquired before registration:
-Refused-provider behavior:
-Owner teardown behavior:
-Stale-lease behavior:
-Force-release behavior:
-Mixed-version boundary:
-```
-
-Lease name:
-
-```text
-__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__
-```
-
-- [ ] Ownership is acquired before the first shared Excel registration.
-- [ ] A second participating current-version provider is refused before it can displace owner state.
-- [ ] `DP_Stop` is ownership-guarded.
-- [ ] `DP_RepairRuntime` is ownership-guarded.
-- [ ] A refused provider cannot dismantle the owner.
-- [ ] Release requires a local token and exact matching lease token.
-- [ ] Unreadable/ambiguous lease state fails closed.
-- [ ] Stale lease after VBA reset is not automatically reclaimed.
-- [ ] `DP_ForceReleaseProviderLease` remains explicit operator-only recovery.
-- [ ] Force release is never called automatically.
-- [ ] `v1.2.0 + pre-v1.2.0` remains documented as unprotected unless the architecture genuinely changes.
-- [ ] Multi-provider manual scenarios were run when ownership logic changed.
-
-</details>
-
----
-
-## ⌨️ Keyboard / access paths
-
-<details>
-<summary>Expand when OnKey, right-click, grid icon, Ribbon access, or access-path settings changed</summary>
-
-<br>
-
-```text
-Shortcut:
-Right-click:
-Grid icon:
-Ribbon:
-Zero-built-in-access configuration:
-Third-party OnKey predecessor behavior:
-```
-
-This remains a valid configuration:
-
-```text
-ShowRightClick = False
-ShowGridIcon = False
-EnableKeyboardShortcut = False
-```
-
-- [ ] Keyboard registration reflects explicit `EnableKeyboardShortcut` configuration only.
-- [ ] No code silently enables the keyboard shortcut because other paths are disabled.
-- [ ] Removal restores Excel default handling rather than claiming to restore an unobservable predecessor.
-- [ ] Documentation does not claim DatePicker can read/restore a third-party `Application.OnKey` assignment.
-- [ ] Right-click and grid-icon setters do not create hidden coupling to keyboard state.
-- [ ] New access paths document registration lifetime, teardown, ownership, conflicts, persistence and testability.
-
-</details>
-
----
-
-## 📌 In-grid icon / worksheet lifecycle
-
-<details>
-<summary>Expand when Shape creation, tracking, movement, purge, sheet deletion, or protection behavior changed</summary>
-
-<br>
-
-```text
-Tracked shape lifecycle:
-Sheet deletion case:
-Shape deletion case:
-Protected-sheet behavior:
-High-frequency selection behavior:
-```
-
-- [ ] A retained `Shape` reference is validated before reuse.
-- [ ] Stale tracked state is cleared rather than treated as live.
-- [ ] Purge removes only DatePicker-owned shapes.
-- [ ] High-frequency selection handling favors show/move/hide/reuse over needless recreate cycles.
-- [ ] Sheet/workbook lifecycle cases were tested where changed.
-- [ ] Protected-sheet behavior is documented and does not silently weaken host protection.
-
-</details>
-
----
-
-## 🧠 Application events / manager lifecycle
-
-<details>
-<summary>Expand when cDatePickerManager, selection handling, workbook lifecycle, or EnableEvents behavior changed</summary>
-
-<br>
-
-```text
-Event(s) affected:
-Manager creation:
-Caller EnableEvents at entry:
-Caller EnableEvents at exit:
-Re-entrancy / recursion treatment:
-Workbook lifecycle treatment:
-```
-
-- [ ] `cDatePickerManager` remains the central Application-event orchestrator.
-- [ ] No duplicate host `SelectionChange` orchestration was introduced without an explicit new contract.
-- [ ] Normal paths do not force `Application.EnableEvents = True`.
-- [ ] Caller event state is preserved through failure paths.
-- [ ] `DP_RepairRuntime` remains explicitly different from ordinary bootstrap/show paths.
-- [ ] High-frequency event handlers remain best-effort where intended.
-- [ ] Teardown removes/neutralizes manager state cleanly.
-
-</details>
-
----
-
-## ⏱️ Timer / `Application.OnTime`
-
-<details>
-<summary>Expand when live clock scheduling or teardown changed</summary>
-
-<br>
-
-```text
-Scheduled procedure:
-Scheduled time stored:
-Qualification:
-Cancellation path:
-Failure/restart behavior:
-```
-
-- [ ] Cancellation uses the exact scheduled timestamp.
-- [ ] Cancellation uses the exact qualified procedure identity.
-- [ ] The component does not claim to enumerate/own unrelated Excel `OnTime` jobs.
-- [ ] A failed/stale callback cannot create an uncontrolled rescheduling loop.
-- [ ] `DP_Close` / `DP_Stop` behavior remains deliberate for pending timer state.
-- [ ] No timer survives lifecycle boundaries unintentionally.
-
-</details>
-
----
-
-## 🪟 WinAPI / `DP_WindowStyleResult`
-
-<details>
-<summary>Expand when window style, positioning, drag, native declarations, rollback, or fault injection changed</summary>
-
-<br>
-
-```text
-Native API(s):
-Handle resolver:
-32-bit path:
-64-bit path:
-Commit point:
-Post-commit failure point(s):
-Rollback:
-RecoveryRequired condition:
-Independent native verification:
-```
-
-- [ ] VBA7 and legacy declaration branches remain correct where applicable.
-- [ ] 32-bit and 64-bit paths were considered/tested as applicable.
-- [ ] Window handle resolution remains centralized unless a deliberate test isolation requires duplication.
-- [ ] Ambiguous native zero returns are handled according to the API contract.
-- [ ] Native commit is distinguishable from full application success.
-- [ ] Post-commit failures attempt rollback.
-- [ ] Rollback failure produces `RecoveryRequired=True`.
-- [ ] `DP_WindowStyleResult` fields describe the real state.
-- [ ] A test seam remains one-shot and cannot poison a later real call.
-- [ ] Tests verify native state independently rather than trusting only the returned result.
-- [ ] `UserForm.Caption` is not used in a way that unintentionally restores `WS_CAPTION`.
-- [ ] Multi-window / real-host behavior was checked where relevant.
-
-</details>
-
----
-
-## 🧪 Regression harness
-
-<details>
-<summary>Expand when test/M_cDP_Test.bas or harness lifecycle changed</summary>
-
-<br>
-
-```text
-Suites added/changed:
-Assertions added/changed:
-Run-state logic changed:
-Preflight changed:
-Scratch-sheet setup changed:
-Cleanup changed:
-Result-sheet behavior changed:
-```
-
-Run states:
-
-```text
-PASS
-FAIL
-FAIL_CLEANUP
-FAIL_DIRTY_START
-INCOMPLETE_SKIPPED
-```
-
-- [ ] New suite is wired into the runner and safe dispatcher.
-- [ ] Mandatory-suite completion remains observable.
-- [ ] Dirty-start preflight runs before the current run mutates the workbook.
-- [ ] Module-state and persistent worksheet dirty-start evidence remain deliberate.
-- [ ] A dirty start does not execute normal suites and manufacture evidence.
-- [ ] Cleanup failure cannot be reported as `PASS`.
-- [ ] Final observable cleanup state is checked before `PASS`.
-- [ ] `SuiteFail` captures `Err` before anything can reset it.
-- [ ] Calls that clear the caller's handler are followed by deliberate re-arming where required.
-- [ ] Harness test/fault injections are reset/consumed safely.
-- [ ] `TST_DP_SCRATCH` does not remain after a clean pass.
-
-### `Worksheets.Add` partial-success recovery
-
-- [ ] Zero-new-sheet failure remains fail-loud.
-- [ ] Exactly-one-new-sheet failure is resolved by object identity and validated before adoption.
-- [ ] More-than-one-new-sheet failure remains ambiguous / delete-none / fail.
-- [ ] The harness does not blindly retry `Worksheets.Add`.
-- [ ] Scratch-sheet identity semantics continue to protect `FAIL_DIRTY_START`.
-
-</details>
-
----
-
-## 🖼️ UserForm
-
-<details>
-<summary>Expand when UF_DatePicker.frm/.frx, runtime controls, keyboard interaction, overlays, or visual behavior changed</summary>
-
-<br>
-
-```text
-Visual area changed:
-.frm changed:
-.frx changed:
-Runtime-created controls changed:
-Keyboard behavior changed:
-Scaling / DPI checked:
-```
-
-- [ ] Matching `.frm` / `.frx` pair was exported and reviewed together where required.
-- [ ] `TST_DP_RunAll_WithUISmoke` was run.
-- [ ] `DP_Show` / `DP_Close` was manually checked.
-- [ ] Modeless behavior remains intact.
-- [ ] No unexpected focus/key capture was introduced.
-- [ ] Runtime label hooks are created/released correctly.
-- [ ] Settings overlays open/close correctly where affected.
-- [ ] Borderless/title-bar behavior remains recoverable where affected.
-- [ ] Any DPI/high-contrast/accessibility limitation is stated rather than assumed solved.
-
-</details>
-
----
-
-## 🎛️ RibbonX / Office package
-
-<details>
-<summary>Expand when Ribbon callbacks, customUI14.xml, or release packaging changed</summary>
-
-<br>
-
-```text
-Callbacks changed:
-customUI14.xml changed:
-Package tested:
-Embedded deployment tested:
-.xlam deployment tested:
-External resources introduced:
-```
-
-- [ ] Every `onAction` name resolves to the intended public callback exactly.
-- [ ] Ribbon callbacks remain thin and delegate to normal DatePicker API behavior.
-- [ ] XML/package changes were tested in an actual Office package, not only by calling the VBA callback directly.
-- [ ] No unexpected external resource or executable reference was introduced.
-- [ ] Ribbon behavior remains optional; non-Ribbon entry points still work as documented.
-- [ ] Package/source synchronization is stated accurately.
-
-</details>
-
----
-
-## 🖼️ Demo source / release demo
-
-<details>
-<summary>Expand when demo/M_DP_DEMO.bas, demo/M_DEMO_BUILDER.bas, or demo release assets changed</summary>
-
-<br>
-
-```text
-Demo sections changed:
-Builder changed:
-Rebuilt using:
-Visual inspection:
-Release demo binary rebuilt:
-```
-
-- [ ] Demo was rebuilt from committed source.
-- [ ] Rebuilding does not accumulate duplicate controls/content.
-- [ ] New controls have valid `OnAction` targets.
-- [ ] Demo illustrates current v1.2.x behavior, not superseded Table/formula behavior.
-- [ ] Formula examples remain formulas after normal picker interaction.
-- [ ] Table examples distinguish selected-cell write from explicit column fill.
-- [ ] No personal data, machine-local path, secret, or scratch content entered the demo source/artifact.
-- [ ] Any release binary was built from the intended source and package-level smoke tested.
-
-</details>
-
----
-
-## 📦 Release engineering / provenance
-
-<details>
-<summary>Expand when release assets, manifests, release notes, workflow gates, checksums, or certification evidence changed</summary>
-
-<br>
-
-```text
-Release candidate:
-Source commit:
-Assets:
-Source regression:
-Package smoke:
-Manual scenarios:
-Checksums / manifest:
-Exact source↔asset binding:
-```
-
-- [ ] Source regression evidence and package-level evidence are distinguished.
-- [ ] A passing `TST_DP_RunAll` is not presented as proof of an unverified later-saved binary.
-- [ ] Asset names/version match the intended release.
-- [ ] Release notes / CHANGELOG match the actual source.
-- [ ] No unsupported exact-SHA provenance claim is made.
-- [ ] Checksums/manifests, if added, bind the correct files.
-- [ ] Generated `.xlam` / `.xlsm` remains a release artifact rather than ordinary repository source.
-- [ ] Workflow failures, missed runs, or credential failures cannot silently masquerade as certification where this PR touches automation.
-
-</details>
-
----
-
-## 🔐 Security / repository automation
-
-<details>
-<summary>Expand when SECURITY.md, GitHub Actions, credentials, permissions, release trust, or sensitive logging changed</summary>
-
-<br>
-
-```text
-Workflow(s):
-Secrets:
-Environment:
-Permissions before:
-Permissions after:
-Third-party actions:
-Sensitive logging:
-```
-
-Current analytics workflow boundary:
-
-```text
-.github/workflows/daily-traffic.yml
-TRAFFIC_TOKEN
-analytics environment
-contents: write
-issues: write
-```
-
-- [ ] Analytics credentials remain isolated from jobs that execute contributor-controlled build/test code.
-- [ ] Workflow permissions are least-privilege for the actual behavior.
-- [ ] New third-party actions are pinned to immutable full commit SHAs.
-- [ ] No secret/token is printed or committed.
-- [ ] No credential was moved from an environment-scoped secret to a wider scope without explicit review.
-- [ ] Traffic/analytics automation is not represented as software-quality certification.
-- [ ] Security-relevant release/provenance claims are accurate.
-- [ ] Confidential workbook/user data is not added to logs or artifacts.
-
-</details>
-
----
-
-## 📚 Documentation consistency
-
-<details>
-<summary>Expand for documentation-heavy or cross-document contract changes</summary>
-
-<br>
-
-```text
-README:
-INSTALLATION:
-CONTRIBUTING:
-SECURITY:
-CODE_OF_CONDUCT:
-CHANGELOG:
-Wiki pages:
-Reviewed Wiki commit metadata:
-```
-
-- [ ] Same API name/signature is documented consistently everywhere.
-- [ ] `DP_FillTableColumn` is described as returning `DP_WriteResult`.
-- [ ] Formula-preservation policy is consistent.
-- [ ] Normal `Application.EnableEvents` preservation vs `DP_RepairRuntime` is consistent.
-- [ ] Zero-built-in-access-path configuration remains documented as valid.
-- [ ] Provider lease / mixed-version boundary is consistent.
-- [ ] Settings namespace / before-load rule is consistent.
-- [ ] Source regression is not conflated with packaged release certification.
-- [ ] Wiki page review/version metadata was updated if the reviewed contract changed.
-- [ ] No rewritten-away / superseded commit SHA was introduced into issue/document history.
-
-</details>
-
----
-
-# 💬 Reviewer notes
-
-<!--
-Trade-offs, known limitations, tests not run, environments not covered,
-follow-up work, or evidence boundaries.
-
-A limitation stated here is reviewable.
-A limitation discovered after release is a defect.
--->
-
-## Known boundary / not proved by this PR
-
-```text
-
-```
-
-## Follow-up
-
-```text
-
-```
-
----
-
-<div align="center">
-
-**PR principle: state the contract, show the evidence, preserve caller ownership, and make uncertainty visible.**
-
-</div>
+**Review principle:** approve the smallest coherent change whose contract, evidence, risk, and recovery can all be explained from this pull request.

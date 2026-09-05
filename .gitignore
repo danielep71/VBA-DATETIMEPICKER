@@ -2,42 +2,31 @@
 # VBA-DATETIMEPICKER .gitignore
 #------------------------------------------------------------------------------
 # PURPOSE
-#   Keep the repository source-first and reviewable.
-#
-#   Ignore local, temporary, generated, sensitive, and release-binary files
-#   while preserving the exported VBA source, UserForm resources, RibbonX,
-#   demo builders, regression tests, documentation, workflows, and screenshots
-#   that define the project.
+#   Keep the repository source-first, reviewable, reproducible, and safe to
+#   clone. Ignore workstation state, generated output, secrets, caches, and
+#   unintended Office packages while preserving authoritative source and
+#   repository evidence.
 #
 # REPOSITORY POLICY
-#   - Exported VBA source is version-controlled.
-#   - UF_DatePicker.frm AND UF_DatePicker.frx are version-controlled together.
-#   - RibbonX source (customUI14.xml) is version-controlled.
-#   - Demo workbook SOURCE is version-controlled.
-#   - Generated .xlsm / .xlam and other Office binaries are NOT source files.
-#   - Tested binaries are distributed as GitHub Release assets.
-#   - dist/README.md remains version-controlled even though local release
-#     binaries may be staged under dist/.
-#   - Editor state, logs, caches, build output, local secrets, Office lock files,
-#     and OS metadata do not belong in Git.
+#   - Exported VBA, UF_DatePicker.frm, and UF_DatePicker.frx are version-controlled together.
+#   - RibbonX, demo builders, regression source, and dist/README.md are authoritative.
+#   - Generated workbooks and add-ins are distributed as GitHub Release assets.
+#   - Project-wide editor policy is version-controlled in .editorconfig.
 #
 # SAFETY RULE
-#   Do not add broad rules that can hide:
-#
-#       *.bas  *.cls  *.frm  *.frx  *.xml  *.md  assets/  images/  .github/
-#
-#   Those paths contain authoritative project source or repository evidence.
+#   Never add broad rules for exported VBA source, documentation, repository
+#   automation, or evidence directories. Exceptions for intentional Office
+#   packages must use exact rooted paths.
 #==============================================================================
 
 
 #------------------------------------------------------------------------------
 # MICROSOFT OFFICE TEMPORARY / LOCK / RECOVERY FILES
 #------------------------------------------------------------------------------
-# Office creates owner/lock files beside an open workbook or document.
-# The general ~$* rule intentionally covers Excel, Word and PowerPoint forms.
-#------------------------------------------------------------------------------
-
 ~$*
+.~lock.*#
+*.laccdb
+*.ldb
 
 *.tmp
 *.temp
@@ -47,22 +36,13 @@
 *.asd
 *.wbk
 
-# LibreOffice / OpenOffice lock files that can appear during cross-tool checks.
-.~lock.*#
-
 
 #------------------------------------------------------------------------------
-# GENERATED EXCEL / OFFICE BINARIES
+# GENERATED OFFICE PACKAGES
 #------------------------------------------------------------------------------
-# The repository tracks the source used to build the DatePicker, demo workbook,
-# and add-in. Generated Office binaries belong in GitHub Releases, not Git.
-#
-# These rules are global rather than demo/-only or dist/-only. A workbook saved
-# accidentally at the repository root, under test/, or in another folder should
-# still remain untracked.
-#------------------------------------------------------------------------------
-
-# Excel workbooks, templates, add-ins and legacy/binary formats
+# Office packages are generated or release artifacts by default. These global
+# rules prevent an accidental workbook saved anywhere in the tree from becoming
+# source. Re-include an intentional package only by its exact rooted path.
 *.xls
 *.xlsx
 *.xlsm
@@ -75,7 +55,6 @@
 *.xll
 *.xlw
 
-# Adjacent Office macro/binary formats that are not project source
 *.docm
 *.dotm
 *.pptm
@@ -83,68 +62,65 @@
 *.ppsm
 *.accdb
 *.accde
+*.accdr
 *.mdb
 *.mde
+*.ade
 
-# If a binary fixture ever genuinely belongs in source control, re-include it
-# by EXPLICIT path so that the exception is visible in code review.
-#
-# Example:
-# !test/fixtures/known-good-example.xlsm
+# If a binary fixture becomes authoritative, add one exact rooted exception:
+# !/test/fixtures/known-good-example.xlsm
 
 
 #------------------------------------------------------------------------------
-# RELEASE-ASSET / LOCAL BUILD STAGING
+# RELEASE / BUILD STAGING
 #------------------------------------------------------------------------------
-# Keep dist/README.md and the dist/ directory policy documentation in Git.
-# Office binaries placed under dist/ are already ignored by the rules above.
-#
-# Use release-assets/ for local staging of generated binaries, hashes, manifests
-# or files being prepared for a GitHub Release.
-#------------------------------------------------------------------------------
+# Root anchoring prevents a generated-directory name from hiding an
+# authoritative nested source or evidence directory.
+/release-assets/
+/build/
+/out/
+/output/
+/outputs/
 
-release-assets/
-build/
-out/
-output/
-outputs/
+# DatePicker distributes from dist/ but keeps its policy document tracked.
+/dist/*
+!/dist/README.md
 
 
 #------------------------------------------------------------------------------
-# REGRESSION / LOCAL TEST OUTPUT
+# LOCAL TEST / CERTIFICATION OUTPUT
 #------------------------------------------------------------------------------
-# The committed regression harness is source:
-#
-#   test/M_cDP_Test.bas
-#
-# Local output generated while investigating or automating tests is not.
-#------------------------------------------------------------------------------
+/test-output/
+/test-results/
+/coverage/
+/htmlcov/
 
-test-output/
-test-results/
-coverage/
 .coverage
+.coverage.*
+coverage.xml
 
-# Optional future local certification evidence. Published release evidence,
-# when implemented, belongs in the GitHub Release process rather than being
-# committed from a workstation accidentally.
-DATETIMEPICKER_certification_*.json
-DATETIMEPICKER_certification_*.txt
+.pytest_cache/
+.hypothesis/
+.tox/
+.nox/
+
+# Repository-specific local run evidence. Root anchoring keeps similarly named
+# fixtures or publishable evidence in nested directories visible.
+/DATETIMEPICKER_certification_*.json
+/DATETIMEPICKER_certification_*.txt
 
 
 #------------------------------------------------------------------------------
-# LOCAL TEMPORARY WORKING DIRECTORIES
+# LOCAL TEMPORARY DIRECTORIES
 #------------------------------------------------------------------------------
-
-temp/
-tmp/
-.cache/
+/temp/
+/tmp/
+/.cache/
 
 
 #------------------------------------------------------------------------------
 # WINDOWS FILE-SYSTEM / SHELL METADATA
 #------------------------------------------------------------------------------
-
 Thumbs.db
 ehthumbs.db
 ehthumbs_vista.db
@@ -153,17 +129,13 @@ $RECYCLE.BIN/
 System Volume Information/
 *.stackdump
 
-# Windows reserved-name artifact occasionally created by redirect/CLI mistakes
+# Reserved-name artifact occasionally created by shell redirection mistakes.
 nul
 
 
 #------------------------------------------------------------------------------
-# MACOS / NETWORK / UNIX FILE-SYSTEM METADATA
+# MACOS / NETWORK / UNIX METADATA
 #------------------------------------------------------------------------------
-# The production target is Excel for Windows, but the repository may still be
-# inspected or edited from macOS, WSL, containers, NAS shares, or CI runners.
-#------------------------------------------------------------------------------
-
 .DS_Store
 .AppleDouble
 .LSOverride
@@ -179,27 +151,28 @@ Icon?
 
 
 #------------------------------------------------------------------------------
-# EDITOR / IDE / AI-ASSISTANT LOCAL STATE
+# EDITOR / IDE / LOCAL ASSISTANT STATE
 #------------------------------------------------------------------------------
-# Project-wide editor configuration can be added deliberately later by explicit
-# exception. These defaults keep personal workspace state out of the repo.
-#------------------------------------------------------------------------------
-
+# Project-wide configuration belongs in the repository; personal workspaces do
+# not. Re-include a specific shared editor file explicitly if one is introduced.
 .vscode/
 .idea/
 .vs/
 .history/
+.fleet/
 
 *.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
 *.swp
 *.swo
 *~
 
-# Notepad++ backup/session artifacts
 *.nppBackup
 session.xml
 
-# Local assistant/editor state
 .claude/
 .cursor/
 .aider*
@@ -209,31 +182,23 @@ session.xml
 #------------------------------------------------------------------------------
 # MERGE / PATCH / CONFLICT ARTIFACTS
 #------------------------------------------------------------------------------
-# Exported VBA files are large enough that accidental .orig/.rej files can look
-# like legitimate modules. Never let conflict debris become project source.
-#------------------------------------------------------------------------------
-
 *.orig
 *.rej
 *.patch.tmp
 
 
 #------------------------------------------------------------------------------
-# LOGS / CRASH DUMPS / DIAGNOSTIC DEBRIS
+# LOGS / CRASH DUMPS
 #------------------------------------------------------------------------------
-
 *.log
 *.dmp
 *.dump
 
 
 #------------------------------------------------------------------------------
-# LOCAL ENVIRONMENT / SECRET MATERIAL
+# LOCAL ENVIRONMENT / SECRET / SIGNING MATERIAL
 #------------------------------------------------------------------------------
-# Never commit workstation-specific environment files or private signing keys.
-# Keep a deliberately sanitized example file trackable when one is introduced.
-#------------------------------------------------------------------------------
-
+# Sanitized examples remain trackable.
 .env
 .env.*
 !.env.example
@@ -242,20 +207,22 @@ session.xml
 *.p12
 *.pvk
 *.key
+*.pem
 
 
 #------------------------------------------------------------------------------
-# PYTHON / SCRIPTING CACHE AND LOCAL ENVIRONMENTS
+# PYTHON CACHE / LOCAL ENVIRONMENTS
 #------------------------------------------------------------------------------
-# Repository-maintenance or release tooling may use Python later. Source scripts
-# remain trackable; interpreter caches and local virtual environments do not.
-#------------------------------------------------------------------------------
-
+# Source, manifests, lock files, and requirements remain trackable.
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
-.pytest_cache/
+.eggs/
+pip-wheel-metadata/
+
 .mypy_cache/
+.pyright/
 .ruff_cache/
 .ipynb_checkpoints/
 
@@ -266,51 +233,33 @@ venv/
 #------------------------------------------------------------------------------
 # NODE / JAVASCRIPT LOCAL DEPENDENCIES
 #------------------------------------------------------------------------------
-# Ribbon, documentation, or repository-quality tooling may use Node locally.
-# Source/package manifests remain trackable; installed dependencies do not.
-#------------------------------------------------------------------------------
-
+# Package manifests and lock files remain trackable. Only installed dependencies,
+# machine caches, and diagnostic logs are ignored.
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/install-state.gz
+.yarn/build-state.yml
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 
 #------------------------------------------------------------------------------
-# KEEP THESE AUTHORITATIVE REPOSITORY ASSETS TRACKABLE
+# AUTHORITATIVE CONTENT THAT MUST REMAIN TRACKABLE
 #------------------------------------------------------------------------------
-# These comments are intentional guardrails for future maintenance.
+# These are documentation guardrails, not negation rules:
+#   src/modules/*.bas, src/classes/*.cls
+#   src/forms/*.frm, src/forms/*.frx
+#   src/ribbon/*.xml, demo/*.bas, test/*.bas
+#   dist/README.md, docs/**, *.md
+#   assets/**, images/**, .github/**
+#   .editorconfig, .gitattributes, .gitignore
 #
-# Production VBA source:
-#   src/modules/*.bas
-#   src/classes/*.cls
-#   src/forms/*.frm
-#   src/forms/*.frx
-#
-# Ribbon source:
-#   src/ribbon/customUI14.xml
-#
-# Demo source:
-#   demo/M_DEMO_BUILDER.bas
-#   demo/M_DP_DEMO.bas
-#
-# Regression source:
-#   test/M_cDP_Test.bas
-#
-# Documentation / governance:
-#   README.md
-#   CHANGELOG.md
-#   CONTRIBUTING.md
-#   SECURITY.md
-#   CODE_OF_CONDUCT.md
-#   dist/README.md
-#
-# Repository configuration / automation:
-#   .gitignore
-#   .gitattributes
-#   .github/**
-#
-# Visual documentation:
-#   assets/**
-#   images/**
-#
-# Do not add broad ignore rules for source extensions or source directories.
-# Generated Office binaries should be published as GitHub Release assets.
+# Do not ignore exported VBA extensions or authoritative source, documentation,
+# benchmark, evidence, asset, or .github directories.
 #==============================================================================
