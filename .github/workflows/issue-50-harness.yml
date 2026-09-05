@@ -6,6 +6,7 @@ on:
       - fix/50-lifecycle-transaction
     paths:
       - .github/tmp_issue50_harness_patch.py
+      - .github/workflows/issue-50-harness.yml
 
 permissions:
   contents: write
