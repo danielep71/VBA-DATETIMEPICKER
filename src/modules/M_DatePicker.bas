@@ -22423,6 +22423,78 @@ ErrorHandler:
 End Sub
 
 
+Public Function M_DemoSheet_ResolveShowOnToggle( _
+    ByVal ExistedBefore As Boolean, _
+    ByVal VisibleBefore As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                     RESOLVE THE DEMO SHEET TOGGLE ACTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether the Ribbon demo command should show the demo sheet or hide it
+'
+' WHY THIS EXISTS
+'   Ribbon_Demo read the sheet's visibility after ensuring it existed. Ensuring it
+'   builds it visible on first use, so the very first click built the demo sheet
+'   and immediately hid it again, and the command appeared to do nothing
+'
+'   The decision depends on state that exists only before the sheet is ensured,
+'   so it cannot be read from the sheet afterwards. Isolating it here gives the
+'   regression a deterministic target without pulling the demo builder into the
+'   harness
+'
+' INPUTS
+'   ExistedBefore
+'     True when the demo sheet already existed before this command ran
+'
+'   VisibleBefore
+'     True when that pre-existing sheet was visible. Ignored when ExistedBefore
+'     is False
+'
+' RETURNS
+'   True to show and activate the sheet, False to hide it
+'
+' BEHAVIOR
+'   A sheet that did not exist has just been built and is always shown. A sheet
+'   that existed toggles on the visibility it had before the command ran
+'
+' ERROR POLICY
+'   Cannot raise. Boolean logic only
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   xlSheetHidden and xlSheetVeryHidden are the same pre-existing state for this
+'   decision. The caller collapses both to VisibleBefore = False, so a demo sheet
+'   hidden either way is shown by the next click
+'
+'   Ribbon_Demo is the only production consumer. The regression asserts through
+'   this routine rather than restating the condition, so a change here cannot
+'   pass a test that no longer describes the callback
+'
+'   Public only because the regression harness is a separate module. It takes
+'   arguments, so it does not appear in the macro dialog, and #25 classifies it
+'   as internal rather than supported API
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE THE ACTION
+'------------------------------------------------------------------------------
+    'A sheet this command just built is always shown, never hidden
+        If Not ExistedBefore Then
+            M_DemoSheet_ResolveShowOnToggle = True
+            Exit Function
+        End If
+    'A pre-existing sheet toggles on the visibility it had beforehand
+        M_DemoSheet_ResolveShowOnToggle = Not VisibleBefore
+
+End Function
+
 Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 
 '
@@ -22456,6 +22528,7 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   DP_DemoSheet_ResolveHostWorkbook
 '   DP_Demo_EnsureDemoSheet
 '   DP_DEMO_SHEET_NAME
+'   M_DemoSheet_ResolveShowOnToggle
 '   DP_DemoSheet_Show
 '   DP_DemoSheet_HideVeryHidden
 '   Ribbon_ReportError
@@ -22483,6 +22556,9 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 
     Dim HostBook    As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet   As Excel.Worksheet       'DatePicker demo worksheet
+    Dim ExistingSheet As Excel.Worksheet     'Demo sheet as it stood before this command
+    Dim ExistedBefore As Boolean             'True when the demo sheet already existed
+    Dim VisibleBefore As Boolean             'True when that pre-existing sheet was visible
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -22506,21 +22582,35 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
+    'Record whether the demo sheet already existed, and whether it was visible,
+    'before anything can create it. Ensuring the sheet builds it visible, so a
+    'visibility read taken afterwards cannot distinguish a sheet this command
+    'just built from one the user had already opened
+        On Error Resume Next
+        Set ExistingSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo ErrorHandler
+        ExistedBefore = Not (ExistingSheet Is Nothing)
+    'Collapse xlSheetHidden and xlSheetVeryHidden to one hidden state
+        If ExistedBefore Then
+            VisibleBefore = (ExistingSheet.Visible = xlSheetVisible)
+        End If
+        Set ExistingSheet = Nothing
     'Build the demo sheet on first use, then return it
         Set DemoSheet = DP_Demo_EnsureDemoSheet(HostBook)
 
 '------------------------------------------------------------------------------
 ' TOGGLE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Hide the demo sheet when it is already visible
-        With DemoSheet
-            If .Visible = xlSheetVisible Then
-                DP_DemoSheet_HideVeryHidden
-            Else
-                .Visible = xlSheetVisible
-                .Activate
-            End If
-        End With
+    'Apply the action resolved from the state captured before the sheet was
+    'ensured, so a sheet this command just built is shown rather than hidden
+        If M_DemoSheet_ResolveShowOnToggle(ExistedBefore, VisibleBefore) Then
+            DemoSheet.Visible = xlSheetVisible
+            DemoSheet.Activate
+        Else
+            DP_DemoSheet_HideVeryHidden
+        End If
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE

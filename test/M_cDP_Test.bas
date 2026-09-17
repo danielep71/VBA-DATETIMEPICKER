@@ -1041,6 +1041,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "PreCreateHidden"
     'Run M_Picker_SelectDate write-back and state-management checks
         TST_DP_RunSuiteSafe "SelectDate"
+    'Run Ribbon demo-sheet toggle decision checks
+        TST_DP_RunSuiteSafe "RibbonDemo"
 
     'Run the application-state suite
         TST_DP_RunSuiteSafe "ApplicationState"
@@ -1384,6 +1386,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             
             Case "SELECTDATE"
                 TST_DP_RunSuite_SelectDate
+
+            Case "RIBBONDEMO"
+                TST_DP_RunSuite_RibbonDemo
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
             Case "WINDOWRECOVERY"
@@ -7340,6 +7345,112 @@ SuiteFail:
         Set TargetCell = Nothing
     'Record the suite-level failure and clear the error
         TST_DP_RecordFail "SelectDate suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_RibbonDemo()
+
+'
+'==============================================================================
+'                            RIBBON DEMO SUITE
+'==============================================================================
+' PURPOSE
+'   Validates the decision the Ribbon demo command makes about showing or hiding
+'   the demo sheet
+'
+' WHY THIS EXISTS
+'   Ribbon_Demo read the sheet's visibility after ensuring it existed. Ensuring
+'   builds the sheet visible on first use, so the first click built the demo
+'   sheet and immediately hid it again. The defect predates v1.2.0 and survived
+'   four releases because nothing exercised the callback at all
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives M_DemoSheet_ResolveShowOnToggle across the three reachable input
+'   states and asserts the action it resolves
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+' DEPENDENCIES
+'   M_DemoSheet_ResolveShowOnToggle
+'
+' NOTES
+'   The assertions go through the same routine Ribbon_Demo calls rather than
+'   restating its condition. A harness that reimplemented the Boolean would keep
+'   passing after the callback stopped agreeing with it, which is how #42 passed
+'   at v1.2.0 while the real save path still forced the shortcut back on
+'
+'   Building an actual demo sheet is deliberately not done here. It would run the
+'   full demo builder, mutate the host workbook and deepen the harness-to-demo
+'   coupling #35 exists to remove. Verifying real creation and toggling in a
+'   packaged build belongs to #63
+'
+'   xlSheetHidden and xlSheetVeryHidden are one state for this decision. The
+'   callback collapses both before calling the resolver, so the resolver sees a
+'   Boolean and this suite asserts the Boolean
+'
+' UPDATED
+'   2026-09-17
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FreshBuild      As Boolean      'Action resolved for a sheet that did not exist
+    Dim ExistingVisible As Boolean      'Action resolved for a pre-existing visible sheet
+    Dim ExistingHidden  As Boolean      'Action resolved for a pre-existing hidden sheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "RibbonDemo"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' RESOLVE THE THREE REACHABLE STATES
+'------------------------------------------------------------------------------
+    'Capture all three decisions before asserting any of them, so the suite reads
+    'as the contract rather than as three unrelated calls
+        FreshBuild = M_DemoSheet_ResolveShowOnToggle(False, False)
+        ExistingVisible = M_DemoSheet_ResolveShowOnToggle(True, True)
+        ExistingHidden = M_DemoSheet_ResolveShowOnToggle(True, False)
+
+'------------------------------------------------------------------------------
+' ASSERT THE TOGGLE CONTRACT
+'------------------------------------------------------------------------------
+    'A sheet this command just built must be shown. This is the defect: the old
+    'callback hid it instead
+        TST_DP_AssertTrue "A freshly built demo sheet is shown, not hidden", _
+            FreshBuild
+    'A pre-existing visible sheet toggles closed
+        TST_DP_AssertFalse "A visible demo sheet is hidden by the next click", _
+            ExistingVisible
+    'A pre-existing hidden sheet toggles open
+        TST_DP_AssertTrue "A hidden demo sheet is shown by the next click", _
+            ExistingHidden
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "RibbonDemo suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
         Err.Clear
 
