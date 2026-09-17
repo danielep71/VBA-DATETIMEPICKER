@@ -6634,6 +6634,46 @@ End Function
 
 Private Sub M_Lifecycle_ResetObservation()
 
+'
+'------------------------------------------------------------------------------
+'                        RESET LIFECYCLE OBSERVATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears every field describing the previous lifecycle operation
+'
+' WHY THIS EXISTS
+'   The observation fields are module-level and outlive the call that wrote them.
+'   A later operation that failed before reaching a given step would otherwise be
+'   read through the previous operation's values, which is worse than having none
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Zeroes the trace, the cleanup detail and count, the primary failure, the
+'   operation name, and every lease and success flag
+'
+' ERROR POLICY
+'   Cannot raise. Assignment to module-level scalars only
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* observation fields
+'
+' NOTES
+'   Called at the top of DP_Start, DP_Stop and DP_RepairRuntime, before anything
+'   those routines do can fail. Every entry point must reset before it observes,
+'   or a refused call reports the last successful one
+'
+'   This clears observation only. It never touches the provider lease, the
+'   manager, the timer or any Excel state
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     mDP_LifecycleLastTrace = VBA.vbNullString
     mDP_LifecycleLastCleanupDetail = VBA.vbNullString
     mDP_LifecycleLastCriticalClean = False
@@ -6655,6 +6695,51 @@ Private Sub M_Lifecycle_SetPrimaryFailure( _
     ByVal StepName As String, _
     ByVal ErrorDescription As String)
 
+'
+'------------------------------------------------------------------------------
+'                        RECORD THE PRIMARY FAILURE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records the failure that caused a lifecycle operation to stop
+'
+' WHY THIS EXISTS
+'   Cleanup runs after the primary failure and can fail in its own right. Keeping
+'   the primary cause in dedicated fields is what stops a cleanup failure from
+'   overwriting the reason the operation stopped
+'
+' INPUTS
+'   ErrorNumber
+'     Number of the primary failure
+'
+'   StepName
+'     Transaction step that produced it
+'
+'   ErrorDescription
+'     Description of the primary failure
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the three values in the primary-failure observation fields
+'
+' ERROR POLICY
+'   Cannot raise. Assignment to module-level scalars only
+'
+' DEPENDENCIES
+'   mDP_LifecycleLastPrimaryNumber
+'   mDP_LifecycleLastPrimaryStep
+'   mDP_LifecycleLastPrimaryDescription
+'
+' NOTES
+'   The caller captures Err before any cleanup runs and passes the captured
+'   values here. Reading the live Err object after cleanup would report whatever
+'   the last suppressed cleanup operation left behind
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     mDP_LifecycleLastPrimaryNumber = ErrorNumber
     mDP_LifecycleLastPrimaryStep = StepName
     mDP_LifecycleLastPrimaryDescription = ErrorDescription
@@ -6665,6 +6750,55 @@ Private Function M_Lifecycle_TryConsumeFault( _
     ByVal StepName As String, _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       CONSUME AN INJECTED LIFECYCLE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a fault is armed for the named transaction step, and consumes
+'   it when it is
+'
+' WHY THIS EXISTS
+'   Startup and shutdown have to be proven to roll back from a failure at every
+'   boundary, and none of those boundaries can be made to fail on demand by any
+'   ordinary input. Without an injection seam the transaction logic would only
+'   ever execute during a real defect
+'
+' INPUTS
+'   StepName
+'     Boundary being entered, for example Cleanup.Timer or Lease.Delete
+'
+'   ErrorNumber
+'     Receives the armed error number when the fault fires
+'
+'   ErrorDescription
+'     Receives a description naming the step
+'
+' RETURNS
+'   True when a fault was armed for this step and has now been consumed
+'
+' BEHAVIOR
+'   Matches the armed step name exactly, hands back the armed number, and disarms
+'
+' ERROR POLICY
+'   Cannot raise. Comparison and assignment only
+'
+' DEPENDENCIES
+'   mDP_LifecycleFaultStep
+'   mDP_LifecycleFaultNumber
+'
+' NOTES
+'   One-shot by construction: the armed step and number are cleared as the fault
+'   is handed back, so an armed fault can never affect a second boundary or leak
+'   into a later suite
+'
+'   The comparison is binary, so a step name that differs only in case does not
+'   match. Callers pass literals that must equal the literals the tests arm
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     ErrorNumber = 0
     ErrorDescription = VBA.vbNullString
@@ -6683,6 +6817,44 @@ End Function
 
 Private Sub M_Lifecycle_RaiseIfFault(ByVal StepName As String)
 
+'
+'------------------------------------------------------------------------------
+'                        RAISE AN INJECTED LIFECYCLE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Raises an armed fault outward, for boundaries that report failure by raising
+'
+' WHY THIS EXISTS
+'   The cleanup helpers report failure through a Boolean and ByRef error fields,
+'   but the startup steps run under a live error handler and fail by raising.
+'   Both shapes need the same seam, so the seam is offered in both forms
+'
+' INPUTS
+'   StepName
+'     Boundary being entered
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Consumes a fault armed for the step and raises it. Returns silently when no
+'   fault is armed for that step
+'
+' ERROR POLICY
+'   Deliberately raises outward when a fault fires. The caller's own handler
+'   decides what that means for the transaction
+'
+' DEPENDENCIES
+'   M_Lifecycle_TryConsumeFault
+'
+' NOTES
+'   The raised Source is M_Lifecycle_TestFault rather than the calling routine,
+'   so an injected failure is never mistaken for a real one in a trace
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     Dim ErrorNumber As Long
     Dim ErrorDescription As String
 
@@ -6698,6 +6870,62 @@ Private Sub M_Lifecycle_RecordCleanupStep( _
     ByVal ErrorNumber As Long, _
     ByVal ErrorDescription As String, _
     Optional ByVal CountFailure As Boolean = True)
+
+'
+'------------------------------------------------------------------------------
+'                          RECORD ONE CLEANUP STEP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one step outcome to the cleanup trace and accounts for its failure
+'
+' WHY THIS EXISTS
+'   Teardown attempts every step even after one fails, so the outcome of a
+'   shutdown is a sequence rather than a single verdict. Before this, a
+'   suppressed cleanup failure left nothing behind at all and the operation still
+'   reported success
+'
+' INPUTS
+'   StepName
+'     Cleanup boundary being recorded
+'
+'   Succeeded
+'     True when the step completed
+'
+'   ErrorNumber
+'     Number the step reported, or zero
+'
+'   ErrorDescription
+'     Description the step reported
+'
+'   CountFailure
+'     False to record the step in the trace without counting it as a failure
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Appends StepName=PASS or StepName=FAIL(number) to the trace, increments the
+'   failure count unless the caller opted out, and keeps the first failure detail
+'
+' ERROR POLICY
+'   Cannot raise. String building and assignment only
+'
+' DEPENDENCIES
+'   mDP_LifecycleLastTrace
+'   mDP_LifecycleLastCleanupDetail
+'   mDP_LifecycleLastCleanupFailureCount
+'
+' NOTES
+'   Only the first failure detail is kept. A later failure is visible in the
+'   trace but does not overwrite the detail, so the earliest cause stays readable
+'
+'   CountFailure exists for steps that are recorded for completeness but are not
+'   part of the critical set, so an optional step cannot make a clean teardown
+'   look incomplete
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     Dim StepText As String
 
@@ -6720,15 +6948,15 @@ Private Sub M_Lifecycle_RecordCleanupStep( _
                 mDP_LifecycleLastCleanupFailureCount + 1
         End If
         If VBA.LenB(mDP_LifecycleLastCleanupDetail) = 0 Then
-  mDP_LifecycleLastCleanupDetail = StepName
-  If ErrorNumber <> 0 Then
-      mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
-          " | Error=" & VBA.CStr(ErrorNumber)
-  End If
-  If VBA.LenB(ErrorDescription) > 0 Then
-      mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
-          " | " & ErrorDescription
-  End If
+            mDP_LifecycleLastCleanupDetail = StepName
+            If ErrorNumber <> 0 Then
+                mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
+                    " | Error=" & VBA.CStr(ErrorNumber)
+            End If
+            If VBA.LenB(ErrorDescription) > 0 Then
+                mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
+                    " | " & ErrorDescription
+            End If
         End If
     End If
 
@@ -6736,12 +6964,86 @@ End Sub
 
 Public Sub M_Lifecycle_Test_ArmFault(ByVal StepName As String, ByVal ErrorNumber As Long)
 
+'
+'------------------------------------------------------------------------------
+'                            ARM A LIFECYCLE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a one-shot fault for one named transaction boundary
+'
+' WHY THIS EXISTS
+'   The regression matrix has to fail startup and shutdown at every boundary,
+'   and none of them can be made to fail by any ordinary input
+'
+' INPUTS
+'   StepName
+'     Boundary to fail, for example Cleanup.Timer or Start.AfterManager
+'
+'   ErrorNumber
+'     Error number the boundary reports; zero disarms
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Assigns module-level state only
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. It takes an
+'   argument, so it does not appear in the macro dialog, and #25 classifies it as
+'   internal rather than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     mDP_LifecycleFaultStep = VBA.Trim$(StepName)
     mDP_LifecycleFaultNumber = ErrorNumber
 
 End Sub
 
 Public Sub M_Lifecycle_Test_Reset(ByVal ResetState As Boolean)
+
+'
+'------------------------------------------------------------------------------
+'                          RESET LIFECYCLE TEST STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Disarms any armed fault and clears the observation fields
+'
+' WHY THIS EXISTS
+'   A fault or an observation left behind would be read by the next suite as
+'   though it belonged to that suite's own operation
+'
+' INPUTS
+'   ResetState
+'     False makes the call a no-op, so a suite can reset conditionally without
+'     branching at the call site
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Assigns module-level state only
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. It takes an
+'   argument, so it does not appear in the macro dialog, and #25 classifies it as
+'   internal rather than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     If Not ResetState Then Exit Sub
 
@@ -6753,11 +7055,79 @@ End Sub
 
 Public Function M_Lifecycle_Test_LastTrace() As String
 
+'
+'------------------------------------------------------------------------------
+'                               READ LAST TRACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the step-by-step trace of the last operation
+'
+' WHY THIS EXISTS
+'   Every cleanup step appends PASS or FAIL(number) here, so a shutdown that
+'   failed halfway is readable as a sequence rather than a single verdict
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_LastTrace = mDP_LifecycleLastTrace
 
 End Function
 
 Public Function M_Lifecycle_Test_LastCleanupDetail() As String
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST CLEANUP DETAIL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the first cleanup failure detail of the last operation
+'
+' WHY THIS EXISTS
+'   The first failure is the actionable one. Later failures stay visible in the
+'   trace without displacing it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastCleanupDetail = mDP_LifecycleLastCleanupDetail
 
@@ -6765,11 +7135,79 @@ End Function
 
 Public Function M_Lifecycle_Test_LastCriticalClean() As Boolean
 
+'
+'------------------------------------------------------------------------------
+'                           READ LAST CRITICAL CLEAN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether every critical cleanup step succeeded
+'
+' WHY THIS EXISTS
+'   This is the conjunction that authorises releasing the provider lease, so a
+'   test has to be able to read it independently of the operation result
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_LastCriticalClean = mDP_LifecycleLastCriticalClean
 
 End Function
 
 Public Function M_Lifecycle_Test_LastLeaseReleased() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST LEASE RELEASED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the provider lease was actually released
+'
+' WHY THIS EXISTS
+'   Release is conditional on critical cleanliness. Attempting it and achieving
+'   it are different facts and are reported separately
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastLeaseReleased = mDP_LifecycleLastLeaseReleased
 
@@ -6777,11 +7215,79 @@ End Function
 
 Public Function M_Lifecycle_Test_HasLocalOwnerToken() As Boolean
 
+'
+'------------------------------------------------------------------------------
+'                          READ HAS LOCAL OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether this project still holds its lease ownership token
+'
+' WHY THIS EXISTS
+'   The #50 defect was discarding this token while the lease survived. A test
+'   must be able to prove the token was retained when release failed
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_HasLocalOwnerToken = (VBA.LenB(mDP_RuntimeOwnerId) > 0)
 
 End Function
 
 Public Function M_Lifecycle_Test_LastPrimaryNumber() As Long
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST PRIMARY NUMBER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the error number that stopped the last operation
+'
+' WHY THIS EXISTS
+'   Cleanup runs after the primary failure and can fail in its own right. The
+'   primary cause is reported separately so cleanup cannot displace it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastPrimaryNumber = mDP_LifecycleLastPrimaryNumber
 
@@ -6789,11 +7295,79 @@ End Function
 
 Public Function M_Lifecycle_Test_LastPrimaryStep() As String
 
+'
+'------------------------------------------------------------------------------
+'                            READ LAST PRIMARY STEP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the transaction step that produced the primary failure
+'
+' WHY THIS EXISTS
+'   Knowing a startup failed is not enough to prove rollback covered the right
+'   steps; the boundary it failed at is what the matrix asserts against
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_LastPrimaryStep = mDP_LifecycleLastPrimaryStep
 
 End Function
 
 Public Function M_Lifecycle_Test_LastPrimaryDescription() As String
+
+'
+'------------------------------------------------------------------------------
+'                        READ LAST PRIMARY DESCRIPTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the description of the primary failure
+'
+' WHY THIS EXISTS
+'   Preserving the description across cleanup is the same contract #48 imposed
+'   on the write-back handlers
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastPrimaryDescription = mDP_LifecycleLastPrimaryDescription
 
@@ -6801,11 +7375,79 @@ End Function
 
 Public Function M_Lifecycle_Test_LastOperation() As String
 
+'
+'------------------------------------------------------------------------------
+'                             READ LAST OPERATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the name of the last lifecycle operation attempted
+'
+' WHY THIS EXISTS
+'   Start, stop and repair share the observation fields, so a test reading them
+'   must be able to confirm which operation wrote them
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_LastOperation = mDP_LifecycleLastOperation
 
 End Function
 
 Public Function M_Lifecycle_Test_LastSucceeded() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                             READ LAST SUCCEEDED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the last lifecycle operation succeeded
+'
+' WHY THIS EXISTS
+'   The operation result is deliberately distinct from critical cleanliness. A
+'   refused call fails without any cleanup having been attempted at all
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastSucceeded = mDP_LifecycleLastSucceeded
 
@@ -6813,11 +7455,79 @@ End Function
 
 Public Function M_Lifecycle_Test_LastCleanupAttempted() As Boolean
 
+'
+'------------------------------------------------------------------------------
+'                         READ LAST CLEANUP ATTEMPTED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a cleanup transaction ran at all
+'
+' WHY THIS EXISTS
+'   A refused operation and a failed cleanup both report failure. Only this
+'   distinguishes them, and they need different fixes
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_LastCleanupAttempted = mDP_LifecycleLastCleanupAttempted
 
 End Function
 
 Public Function M_Lifecycle_Test_LastCleanupFailureCount() As Long
+
+'
+'------------------------------------------------------------------------------
+'                       READ LAST CLEANUP FAILURE COUNT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports how many cleanup steps failed
+'
+' WHY THIS EXISTS
+'   Teardown attempts every step, so the count is the difference between one
+'   bad boundary and a comprehensively failed shutdown
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastCleanupFailureCount = mDP_LifecycleLastCleanupFailureCount
 
@@ -6825,11 +7535,79 @@ End Function
 
 Public Function M_Lifecycle_Test_LastLeaseWasAlreadyOwned() As Boolean
 
+'
+'------------------------------------------------------------------------------
+'                      READ LAST LEASE WAS ALREADY OWNED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the lease pre-existed the last operation
+'
+' WHY THIS EXISTS
+'   A repeated start must never release a lease it did not take. This is the
+'   fact that distinguishes a fresh start from a repeat
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     M_Lifecycle_Test_LastLeaseWasAlreadyOwned = mDP_LifecycleLastLeaseWasAlreadyOwned
 
 End Function
 
 Public Function M_Lifecycle_Test_LastLeaseAcquiredThisCall() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                      READ LAST LEASE ACQUIRED THIS CALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the last operation acquired the lease itself
+'
+' WHY THIS EXISTS
+'   Rollback releases only a lease this call acquired. Asserting that requires
+'   reading the classification the operation made, not inferring it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     M_Lifecycle_Test_LastLeaseAcquiredThisCall = mDP_LifecycleLastLeaseAcquiredThisCall
 
@@ -6838,6 +7616,38 @@ End Function
 Private Function M_Lifecycle_TryReleaseManager( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                        RELEASE THE MANAGER, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Releases the global manager reference and proves it is gone
+'
+' WHY THIS EXISTS
+'   Setting a reference to Nothing is not evidence that it is Nothing. Every step
+'   in this transaction verifies its own outcome rather than assuming the
+'   assignment took, because the lease is released only once the critical steps
+'   are proven clean
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the reference survives or the release raises
+'
+' RETURNS
+'   True when the manager reference is Nothing afterwards
+'
+' BEHAVIOR
+'   Clears gDP_Manager and re-tests it
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   gDP_Manager
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     On Error GoTo Failed
     ErrorNumber = 0
@@ -6862,6 +7672,44 @@ End Function
 Private Function M_Lifecycle_TryStopTimer( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           STOP THE TIMER, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stops the live clock and proves nothing is left pending
+'
+' WHY THIS EXISTS
+'   #27 made a failed cancellation observable: the registration is retained as
+'   unresolved rather than forgotten. Teardown must consume that state, because a
+'   retained callback can still fire after the runtime is gone
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the timer stays active or stays unresolved
+'
+' RETURNS
+'   True only when the timer is inactive and no registration is outstanding
+'
+' BEHAVIOR
+'   Calls M_Timer_Stop, then rejects both a still-running timer and an unresolved
+'   registration
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_Stop
+'   mDP_TimerIsRunning
+'   mDP_TimerUnresolved
+'
+' NOTES
+'   The two rejections are separate errors on purpose. A timer that is still
+'   running is a different defect from one that stopped but could not cancel
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     On Error GoTo Failed
     ErrorNumber = 0
@@ -6893,6 +7741,46 @@ End Function
 Private Function M_Lifecycle_TryClosePickerForm( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       CLOSE THE PICKER FORM, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Unloads the picker form, clears the initial-date bridge, and proves no form
+'   remains loaded
+'
+' WHY THIS EXISTS
+'   Unload can leave an instance behind when initialization raised, and that
+'   orphan is unreachable by name. Re-resolving after the unload is the only way
+'   to tell an unload that worked from one that only appeared to
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when a form is still loaded afterwards
+'
+' RETURNS
+'   True when no form resolves after the unload
+'
+' BEHAVIOR
+'   Hides and unloads any loaded form, clears the initial-date bridge state, then
+'   re-resolves to confirm
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_FormBridge_GetLoadedForm
+'   DP_FORM_NAME
+'   gDP_InitialDate
+'   gDP_HasInitialDate
+'
+' NOTES
+'   The bridge state is cleared between the unload and the verification, so a
+'   stale initial date cannot survive into the next runtime
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     Dim LoadedForm As Object
 
@@ -6934,6 +7822,53 @@ Private Function M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
 
+'
+'------------------------------------------------------------------------------
+'               DELETE OWNED SHAPES OF ONE NAME IN ONE WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Deletes every proven DatePicker-owned shape of a given name from one workbook
+'
+' WHY THIS EXISTS
+'   #53 established that the shape name selects candidates and never proves
+'   ownership. Teardown needs the same rule, so every candidate goes through the
+'   ownership predicate instead of being deleted by name
+'
+' INPUTS
+'   TargetWorkbook
+'     Workbook to clean; a missing workbook is a no-op success
+'
+'   TargetShapeName
+'     Canonical or pending grid-icon name; a blank name is a no-op success
+'
+'   ErrorNumber, ErrorDescription
+'     Receive the first deletion failure observed
+'
+' RETURNS
+'   True when every owned shape of that name was deleted
+'
+' BEHAVIOR
+'   Walks each worksheet backwards through the Shapes collection and, for each
+'   name match, deletes only when M_GridIcon_IsOwnedShape proves ownership
+'
+' ERROR POLICY
+'   Never raises outward. A deletion that fails is recorded and the walk
+'   continues
+'
+' DEPENDENCIES
+'   M_GridIcon_IsOwnedShape
+'
+' NOTES
+'   The index walk runs backwards because deleting a shape renumbers the
+'   collection. A forward walk would skip the shape after each deletion
+'
+'   A shape whose ownership cannot be proven is left completely untouched, which
+'   is the #53 contract: an unrelated user shape sharing the name survives
+'   teardown
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     Dim CurWorksheet As Excel.Worksheet
     Dim CurShape As Excel.Shape
     Dim ShapeIndex As Long
@@ -6951,27 +7886,27 @@ Private Function M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
 
     For Each CurWorksheet In TargetWorkbook.Worksheets
         For ShapeIndex = CurWorksheet.Shapes.Count To 1 Step -1
-  Set CurShape = CurWorksheet.Shapes(ShapeIndex)
-  ShapeName = VBA.CStr(CurShape.Name)
-  If VBA.StrComp(ShapeName, TargetShapeName, vbBinaryCompare) = 0 Then
-      If M_GridIcon_IsOwnedShape(CurShape) Then
-          On Error Resume Next
-          Err.Clear
-          CurShape.Delete
-          DeleteErrNumber = Err.Number
-          DeleteErrDescription = Err.Description
-          Err.Clear
-          On Error GoTo Failed
-          If DeleteErrNumber <> 0 Then
-              If M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook Then
-                  ErrorNumber = DeleteErrNumber
-                  ErrorDescription = DeleteErrDescription
-              End If
-              M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = False
-          End If
-      End If
-  End If
-  Set CurShape = Nothing
+            Set CurShape = CurWorksheet.Shapes(ShapeIndex)
+            ShapeName = VBA.CStr(CurShape.Name)
+            If VBA.StrComp(ShapeName, TargetShapeName, vbBinaryCompare) = 0 Then
+                If M_GridIcon_IsOwnedShape(CurShape) Then
+                    On Error Resume Next
+                    Err.Clear
+                    CurShape.Delete
+                    DeleteErrNumber = Err.Number
+                    DeleteErrDescription = Err.Description
+                    Err.Clear
+                    On Error GoTo Failed
+                    If DeleteErrNumber <> 0 Then
+                        If M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook Then
+                            ErrorNumber = DeleteErrNumber
+                            ErrorDescription = DeleteErrDescription
+                        End If
+                        M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = False
+                    End If
+                End If
+            End If
+            Set CurShape = Nothing
         Next ShapeIndex
     Next CurWorksheet
 
@@ -6993,6 +7928,47 @@ Private Function M_Lifecycle_TryPurgeGridIcons( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
 
+'
+'------------------------------------------------------------------------------
+'               PURGE OWNED GRID ICONS FROM EVERY OPEN WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes every owned grid icon, canonical and pending, from all open workbooks
+'
+' WHY THIS EXISTS
+'   Teardown cannot claim a clean shutdown while an icon it owns is still on a
+'   worksheet, and the icon follows the selection, so the purge has to span
+'   workbooks rather than only the host
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the first failure observed across all workbooks
+'
+' RETURNS
+'   True only when every workbook was purged without a failure
+'
+' BEHAVIOR
+'   Walks every open workbook and deletes both grid-icon names through the
+'   ownership-gated helper, keeping the first failure and continuing
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook
+'   DP_GRID_ICON_NAME
+'   DP_GRID_ICON_PENDING_SUFFIX
+'
+' NOTES
+'   Continuing past the first failure is deliberate. A workbook that refuses
+'   deletion, such as a protected sheet, must not stop the rest being cleaned
+'
+'   The pending name is purged as well, so an icon left half-created by an
+'   interrupted create path is not stranded
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     Dim CurWorkbook As Excel.Workbook
     Dim LocalErrNumber As Long
     Dim LocalErrDescription As String
@@ -7007,24 +7983,24 @@ Private Function M_Lifecycle_TryPurgeGridIcons( _
         LocalErrNumber = 0
         LocalErrDescription = VBA.vbNullString
         If Not M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
-  CurWorkbook, DP_GRID_ICON_NAME, LocalErrNumber, LocalErrDescription) Then
-  If OverallSuccess Then
-      ErrorNumber = LocalErrNumber
-      ErrorDescription = LocalErrDescription
-  End If
-  OverallSuccess = False
+            CurWorkbook, DP_GRID_ICON_NAME, LocalErrNumber, LocalErrDescription) Then
+            If OverallSuccess Then
+                ErrorNumber = LocalErrNumber
+                ErrorDescription = LocalErrDescription
+            End If
+            OverallSuccess = False
         End If
 
         LocalErrNumber = 0
         LocalErrDescription = VBA.vbNullString
         If Not M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
-  CurWorkbook, DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX, _
-  LocalErrNumber, LocalErrDescription) Then
-  If OverallSuccess Then
-      ErrorNumber = LocalErrNumber
-      ErrorDescription = LocalErrDescription
-  End If
-  OverallSuccess = False
+            CurWorkbook, DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX, _
+            LocalErrNumber, LocalErrDescription) Then
+            If OverallSuccess Then
+                ErrorNumber = LocalErrNumber
+                ErrorDescription = LocalErrDescription
+            End If
+            OverallSuccess = False
         End If
     Next CurWorkbook
 
@@ -7037,11 +8013,11 @@ Private Function M_Lifecycle_TryPurgeGridIcons( _
         Err.Clear
         On Error GoTo Failed
         If LocalErrNumber <> 0 Then
-  If OverallSuccess Then
-      ErrorNumber = LocalErrNumber
-      ErrorDescription = LocalErrDescription
-  End If
-  OverallSuccess = False
+            If OverallSuccess Then
+                ErrorNumber = LocalErrNumber
+                ErrorDescription = LocalErrDescription
+            End If
+            OverallSuccess = False
         End If
     End If
 
@@ -7051,9 +8027,9 @@ Private Function M_Lifecycle_TryPurgeGridIcons( _
 
     If OverallSuccess Then
         If M_GridIcon_TrackedShapeIsLive() Then
-  OverallSuccess = False
-  ErrorNumber = vbObjectError + 2714
-  ErrorDescription = "A tracked DatePicker grid icon remained live after purge"
+            OverallSuccess = False
+            ErrorNumber = vbObjectError + 2714
+            ErrorDescription = "A tracked DatePicker grid icon remained live after purge"
         End If
     End If
 
@@ -7075,6 +8051,43 @@ Private Function M_Lifecycle_ContextMenuBarIsClean( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
 
+'
+'------------------------------------------------------------------------------
+'                IS ONE COMMAND BAR FREE OF DATEPICKER CONTROLS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a named command bar still carries a DatePicker control
+'
+' WHY THIS EXISTS
+'   M_ContextMenu_Remove suppresses its own errors, so calling it proves nothing.
+'   The registration has to be read back, and it lives on two separate bars
+'
+' INPUTS
+'   CommandBarName
+'     Bar to inspect
+'
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the bar cannot be resolved or a control remains
+'
+' RETURNS
+'   True when the bar resolves and carries no tagged control
+'
+' BEHAVIOR
+'   Resolves the bar and scans its controls for the DatePicker tag
+'
+' ERROR POLICY
+'   Never raises outward. An unresolvable bar is a failure, not a clean result
+'
+' DEPENDENCIES
+'   DP_CONTEXT_MENU_TAG
+'
+' NOTES
+'   An unresolvable bar is deliberately not treated as clean. A bar that cannot
+'   be read might still hold a control, and this transaction fails closed
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     Dim TargetCommandBar As CommandBar
     Dim ControlItem As CommandBarControl
     Dim ControlTag As String
@@ -7093,11 +8106,11 @@ Private Function M_Lifecycle_ContextMenuBarIsClean( _
     For Each ControlItem In TargetCommandBar.Controls
         ControlTag = VBA.CStr(ControlItem.Tag)
         If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
-  ErrorNumber = vbObjectError + 2716
-  ErrorDescription = "DatePicker control remained on command bar: " & CommandBarName
-  Set ControlItem = Nothing
-  Set TargetCommandBar = Nothing
-  Exit Function
+            ErrorNumber = vbObjectError + 2716
+            ErrorDescription = "DatePicker control remained on command bar: " & CommandBarName
+            Set ControlItem = Nothing
+            Set TargetCommandBar = Nothing
+            Exit Function
         End If
     Next ControlItem
 
@@ -7119,6 +8132,42 @@ End Function
 Private Function M_Lifecycle_TryRemoveContextMenu( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                REMOVE THE CONTEXT MENU, VERIFIED ON BOTH BARS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes the DatePicker context-menu entries and verifies both bars
+'
+' WHY THIS EXISTS
+'   The component registers on the cell bar and the table bar. Verifying only one
+'   would report a clean teardown while the other still carried an entry
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the first bar failure observed
+'
+' RETURNS
+'   True only when both bars verify clean
+'
+' BEHAVIOR
+'   Calls M_ContextMenu_Remove once, then checks the Cell and List Range Popup
+'   bars independently and reports the first failure
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_ContextMenu_Remove
+'   M_Lifecycle_ContextMenuBarIsClean
+'
+' NOTES
+'   Both bars are checked even when the first fails, so the trace records the
+'   full picture rather than stopping at the first bad bar
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     Dim LocalErrNumber As Long
     Dim LocalErrDescription As String
@@ -7162,6 +8211,47 @@ Private Function M_Lifecycle_TryRemoveKeyboardShortcut( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
 
+'
+'------------------------------------------------------------------------------
+'                         REMOVE THE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Excel's default handling of the DatePicker shortcut key
+'
+' WHY THIS EXISTS
+'   The shortcut is an application-wide Application.OnKey binding and must not
+'   outlive the runtime that registered it
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the OnKey call raises
+'
+' RETURNS
+'   True when the OnKey call completed
+'
+' BEHAVIOR
+'   Calls Application.OnKey with the shortcut key and no procedure, which hands
+'   the key back to Excel
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DP_KEYBOARD_SHORTCUT_KEY
+'
+' NOTES
+'   This is the one cleanup step that cannot verify its own outcome. Excel
+'   exposes no getter for Application.OnKey, so success here means only that the
+'   call did not raise, not that the binding is gone. Every other step in this
+'   transaction reads its result back
+'
+'   That is the same limitation #42 recorded for the registration side, and it is
+'   why the keyboard shortcut is covered by manual validation rather than by a
+'   harness assertion
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
     On Error GoTo Failed
     ErrorNumber = 0
     ErrorDescription = VBA.vbNullString
@@ -7182,6 +8272,46 @@ Private Function M_Lifecycle_TryRestoreEnableEvents( _
     ByVal DesiredValue As Boolean, _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                     RESTORE APPLICATION EVENTS, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Application.EnableEvents to a caller-chosen value and proves it took
+'
+' WHY THIS EXISTS
+'   The component must leave the caller's event state as it found it. A business
+'   macro that deliberately suppressed events has to still have them suppressed
+'   when the DatePicker is done
+'
+' INPUTS
+'   DesiredValue
+'     State to restore, captured by the caller before the operation began
+'
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the value does not read back
+'
+' RETURNS
+'   True when Application.EnableEvents reads back as DesiredValue
+'
+' BEHAVIOR
+'   Assigns the value and re-reads it
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   Excel.Application.EnableEvents
+'
+' NOTES
+'   DP_RepairRuntime is the documented exception to caller preservation: it
+'   forces events on deliberately, because a caller that left them off is the
+'   condition repair exists to fix. That decision belongs to the caller, which is
+'   why the desired value is a parameter here rather than a policy
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     On Error GoTo Failed
     ErrorNumber = 0
@@ -7208,6 +8338,53 @@ End Function
 Private Function M_Lifecycle_TryReleaseLease( _
     ByRef ErrorNumber As Long, _
     ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                     RELEASE THE PROVIDER LEASE, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Releases the provider lease only when its deletion can be verified, and
+'   retains the local ownership token whenever it cannot
+'
+' WHY THIS EXISTS
+'   This is the defect #50 was filed for. Release cleared the local token whether
+'   or not the lease bar was actually deleted, so a failed teardown surrendered
+'   the proof of ownership while the lease survived. No project could then
+'   release it, and every guarded entry point refused
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when release cannot be verified
+'
+' RETURNS
+'   True only when the lease is verified free, was already free, or this project
+'   never held it
+'
+' BEHAVIOR
+'   Treats a missing local token and an already-free lease as released. Refuses
+'   when the current owner no longer matches the retained token. Otherwise
+'   deletes the bar and re-reads the owner, clearing the local token only once
+'   the lease reads as free
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_GetBar
+'   mDP_RuntimeOwnerId
+'
+' NOTES
+'   The ambiguous-owner refusal matters as much as the verification. A lease
+'   whose owner token has changed belongs to someone else, and deleting it would
+'   be the same class of defect as deleting an unowned grid-icon shape
+'
+'   Every failure path leaves mDP_RuntimeOwnerId intact, so a later retry still
+'   has the proof it needs
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     Dim CurrentOwner As String
     Dim LeaseBar As Object
@@ -7246,11 +8423,11 @@ Private Function M_Lifecycle_TryReleaseLease( _
     If LeaseBar Is Nothing Then
         CurrentOwner = M_Lease_ReadOwner()
         If VBA.LenB(CurrentOwner) = 0 Then
-  mDP_RuntimeOwnerId = VBA.vbNullString
-  M_Lifecycle_TryReleaseLease = True
+            mDP_RuntimeOwnerId = VBA.vbNullString
+            M_Lifecycle_TryReleaseLease = True
         Else
-  ErrorNumber = vbObjectError + 2718
-  ErrorDescription = "Provider lease could not be resolved for verified deletion"
+            ErrorNumber = vbObjectError + 2718
+            ErrorDescription = "Provider lease could not be resolved for verified deletion"
         End If
         Exit Function
     End If
@@ -7282,6 +8459,68 @@ Private Function M_Lifecycle_Cleanup( _
     ByVal EntryPoint As String, _
     Optional ByVal RestoreApplicationEvents As Boolean = False, _
     Optional ByVal DesiredEnableEvents As Boolean = True) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       THE SHUTDOWN CLEANUP TRANSACTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Runs every teardown boundary, records each outcome, and releases the provider
+'   lease only when the critical steps are proven clean
+'
+' WHY THIS EXISTS
+'   Teardown used to suppress its own errors and release the lease regardless, so
+'   a shutdown that failed halfway reported success and freed ownership while
+'   application-wide state survived. A new provider could then start on top of it
+'
+' INPUTS
+'   ReleaseLease
+'     True to attempt lease release once the critical steps are evaluated
+'
+'   EntryPoint
+'     Operation this cleanup belongs to, for diagnostics
+'
+'   RestoreApplicationEvents
+'     True to restore Application.EnableEvents as part of the transaction
+'
+'   DesiredEnableEvents
+'     Value to restore when RestoreApplicationEvents is True
+'
+' RETURNS
+'   True when every critical step succeeded and, where requested, the lease was
+'   verifiably released
+'
+' BEHAVIOR
+'   Resets the observation fields, then attempts manager, timer, form, grid,
+'   context-menu and keyboard cleanup in that order. Every step is attempted
+'   regardless of earlier failures and each outcome is appended to the trace.
+'   Critical cleanliness is the conjunction of the critical step results, and the
+'   lease is released only after that is known
+'
+' ERROR POLICY
+'   Never raises outward. Each step reports through its own return value, and the
+'   per-step fault seam is consulted before each one
+'
+' DEPENDENCIES
+'   M_Lifecycle_ResetObservation
+'   M_Lifecycle_TryConsumeFault
+'   M_Lifecycle_RecordCleanupStep
+'   the M_Lifecycle_Try* cleanup helpers
+'
+' NOTES
+'   Attempting every step even after one fails is the point. Stopping at the
+'   first failure would leave the remaining application-wide state registered
+'   with no owner able to remove it
+'
+'   Order matters. The timer is stopped before the form is unloaded so a pending
+'   tick cannot fire against a form that is going away, and the lease is last
+'   because it is the ownership that authorises all of it
+'
+'   The keyboard step contributes to critical cleanliness but cannot verify its
+'   own outcome; see M_Lifecycle_TryRemoveKeyboardShortcut
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
 
     Dim StepSucceeded As Boolean
     Dim StepErrNumber As Long
@@ -7383,26 +8622,26 @@ Private Function M_Lifecycle_Cleanup( _
 
     If ReleaseLease Then
         If CriticalClean Then
-  StepErrNumber = 0
-  StepErrDescription = VBA.vbNullString
-  If M_Lifecycle_TryConsumeFault("Cleanup.Lease", StepErrNumber, StepErrDescription) Then
-      StepSucceeded = False
-  Else
-      StepSucceeded = M_Lifecycle_TryReleaseLease(StepErrNumber, StepErrDescription)
-  End If
-  M_Lifecycle_RecordCleanupStep "Lease", StepSucceeded, StepErrNumber, StepErrDescription
-  mDP_LifecycleLastLeaseReleased = StepSucceeded
+            StepErrNumber = 0
+            StepErrDescription = VBA.vbNullString
+            If M_Lifecycle_TryConsumeFault("Cleanup.Lease", StepErrNumber, StepErrDescription) Then
+                StepSucceeded = False
+            Else
+                StepSucceeded = M_Lifecycle_TryReleaseLease(StepErrNumber, StepErrDescription)
+            End If
+            M_Lifecycle_RecordCleanupStep "Lease", StepSucceeded, StepErrNumber, StepErrDescription
+            mDP_LifecycleLastLeaseReleased = StepSucceeded
         Else
-  M_Lifecycle_RecordCleanupStep "Lease", False, _
-      vbObjectError + 2720, "Lease retained because critical cleanup is incomplete", _
-      CountFailure:=False
-  mDP_LifecycleLastLeaseReleased = False
+            M_Lifecycle_RecordCleanupStep "Lease", False, _
+                vbObjectError + 2720, "Lease retained because critical cleanup is incomplete", _
+                CountFailure:=False
+            mDP_LifecycleLastLeaseReleased = False
         End If
     Else
         If VBA.LenB(mDP_LifecycleLastTrace) > 0 Then
-  mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & " > Lease=RETAINED"
+            mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & " > Lease=RETAINED"
         Else
-  mDP_LifecycleLastTrace = "Lease=RETAINED"
+            mDP_LifecycleLastTrace = "Lease=RETAINED"
         End If
     End If
 
@@ -7411,7 +8650,7 @@ Private Function M_Lifecycle_Cleanup( _
 
     If Not M_Lifecycle_Cleanup Then
         Debug.Print EntryPoint & " | Incomplete cleanup | " & _
-  mDP_LifecycleLastTrace & " | " & mDP_LifecycleLastCleanupDetail
+            mDP_LifecycleLastTrace & " | " & mDP_LifecycleLastCleanupDetail
     End If
 
 End Function
@@ -7420,15 +8659,40 @@ Public Sub M_Lease_Release()
 
 '
 '------------------------------------------------------------------------------
-'                          RELEASE PROVIDER LEASE
+'                          RELEASE THE PROVIDER LEASE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Releases the provider lease only after deletion can be verified
+'   Supported wrapper that attempts to release the provider lease
+'
+' WHY THIS EXISTS
+'   The lease release is part of the shutdown transaction, but the operation is
+'   also reachable on its own. This keeps the supported name while delegating the
+'   verified release to the transaction helper
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_Lifecycle_TryReleaseLease and writes a diagnostic when the
+'   lease is retained rather than released
 '
 ' ERROR POLICY
-'   Best-effort. A failed or ambiguous release preserves the local owner token so
-'   later teardown can retry rather than falsely reporting a released provider
+'   Never raises outward
 '
+' DEPENDENCIES
+'   M_Lifecycle_TryReleaseLease
+'
+' NOTES
+'   Retention is not failure. A lease that could not be verifiably deleted is
+'   deliberately kept, along with the local ownership token, so a later retry
+'   still has the proof it needs. Before #50 this cleared the token regardless,
+'   which stranded the lease beyond any project's reach
+'
+'   The outcome is observable through M_Lifecycle_Test_HasLocalOwnerToken rather
+'   than from this routine, which reports nothing to its caller
 ' UPDATED
 '   2026-09-05
 '------------------------------------------------------------------------------
@@ -7438,7 +8702,7 @@ Public Sub M_Lease_Release()
 
     If Not M_Lifecycle_TryReleaseLease(ErrorNumber, ErrorDescription) Then
         Debug.Print "M_Lease_Release | Retained | Error=" & _
-  VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+            VBA.CStr(ErrorNumber) & " | " & ErrorDescription
     End If
 
 End Sub
@@ -7447,17 +8711,57 @@ Public Sub DP_Start()
 
 '
 '------------------------------------------------------------------------------
-'                           START DATEPICKER
+'                               START DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Starts and synchronizes the DatePicker runtime transactionally
+'   Starts and synchronizes the DatePicker runtime as a transaction
+'
+' WHY THIS EXISTS
+'   Startup registers application-wide state: a provider lease, Application
+'   event hooks, a context menu, a keyboard binding and a worksheet shape. A
+'   failure partway through used to leave some of that registered with nothing
+'   owning it, and a lease acquired by the failed attempt was surrendered anyway
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Captures the caller's event state, classifies whether the lease was already
+'   owned, then admits, creates the manager, synchronizes the menu, the keyboard
+'   shortcut and the hidden grid icon, and refreshes the selection context.
+'   Restores the caller's event state on every path
 '
 ' ERROR POLICY
-'   Preserves the primary startup failure. A fresh-start failure rolls back all
-'   DatePicker-owned runtime resources and releases only a lease acquired by this
-'   call when critical cleanup proves complete. A repeated start never releases a
-'   lease that pre-existed the call
+'   Preserves the primary startup failure and re-raises it with the step that
+'   produced it. A fresh-start failure rolls back every DatePicker-owned resource
+'   and releases the lease only when critical cleanup proves complete. A repeated
+'   start never releases a lease that pre-existed the call
 '
+' DEPENDENCIES
+'   M_Lease_EnsureAdmitted
+'   M_Picker_EnsureManager
+'   M_ContextMenu_Update
+'   M_KeyboardShortcut_Update
+'   M_GridIcon_PreCreateHidden
+'   M_Lifecycle_Cleanup
+'   M_Lifecycle_RaiseIfFault
+'
+' NOTES
+'   The pre-owned and freshly-acquired cases are deliberately asymmetric. A
+'   failed fresh start rolls back, because nothing was working before it. A
+'   failed repeated start preserves the existing runtime and records
+'   PreOwnedRuntime=PRESERVED, because rolling back would dismantle a runtime
+'   that was already serving the user
+'
+'   Refused admission exits through CleanExit rather than the error handler. A
+'   refusal is not a failure of this call; it is another provider owning the
+'   session, and the refusal is reported by the admission boundary
+'
+'   Every step is followed by a fault seam, so the regression matrix can fail
+'   startup at each boundary and assert what rollback did
 ' UPDATED
 '   2026-09-05
 '------------------------------------------------------------------------------
@@ -7987,17 +9291,45 @@ Public Sub DP_RepairRuntime()
 
 '
 '------------------------------------------------------------------------------
-'                           REPAIR DATEPICKER RUNTIME
+'                          REPAIR DATEPICKER RUNTIME
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Rebuilds the interactive runtime only after the previous owned runtime has
-'   been proven clean
+'   Rebuilds the interactive runtime, but only after the previous owned runtime
+'   has been proven clean
+'
+' WHY THIS EXISTS
+'   Repair addresses the most common real-world failure: Application.EnableEvents
+'   left False by an unrelated macro, which silently kills all event routing.
+'   Rebuilding on top of state that could not be cleaned would produce a second
+'   set of registrations rather than a repair
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Runs the cleanup transaction without releasing the lease, and rebuilds only
+'   when critical cleanup succeeded
 '
 ' ERROR POLICY
-'   Repair intentionally leaves Application.EnableEvents=True. It never releases
-'   the provider lease. Incomplete cleanup blocks rebuild; a rebuild failure keeps
-'   the primary error and attempts another lease-retaining cleanup
+'   Never releases the provider lease. Incomplete cleanup blocks the rebuild. A
+'   rebuild failure keeps the primary error and attempts another lease-retaining
+'   cleanup
 '
+' DEPENDENCIES
+'   M_Lifecycle_Cleanup
+'   M_Picker_EnsureManager
+'
+' NOTES
+'   Repair is the one documented exception to preserving the caller's event
+'   state: it leaves Application.EnableEvents True on purpose, because a caller
+'   that left them False is the condition being repaired
+'
+'   The lease is never released here. Repair means the same provider continues to
+'   own the session, so surrendering ownership would turn a repair into an
+'   unannounced shutdown
 ' UPDATED
 '   2026-09-05
 '------------------------------------------------------------------------------
@@ -8027,8 +9359,8 @@ Public Sub DP_RepairRuntime()
     HandlerStep = "Clean existing runtime"
     If Not M_Lifecycle_Cleanup(False, PROC_NAME & ".Prepare") Then
         Err.Raise vbObjectError + 2721, PROC_NAME, _
-  "DatePicker runtime repair refused to rebuild over incomplete cleanup: " & _
-  mDP_LifecycleLastCleanupDetail
+            "DatePicker runtime repair refused to rebuild over incomplete cleanup: " & _
+            mDP_LifecycleLastCleanupDetail
     End If
 
     HandlerStep = "Recreate manager"
@@ -8061,7 +9393,7 @@ ErrorHandler:
     On Error Resume Next
     If M_Lease_IsOwner() Then
         If VBA.StrComp(HandlerStep, "Clean existing runtime", vbBinaryCompare) <> 0 Then
-  M_Lifecycle_Cleanup False, PROC_NAME & ".Rollback"
+            M_Lifecycle_Cleanup False, PROC_NAME & ".Rollback"
         End If
     End If
     Excel.Application.EnableEvents = True
@@ -8261,17 +9593,45 @@ End Sub
 
 Public Sub DP_Stop()
 
+'
 '------------------------------------------------------------------------------
-'                           STOP DATEPICKER
+'                               STOP DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Tears down DatePicker-owned runtime state and releases the provider lease only
-'   after every critical cleanup boundary is proven clean
+'   Tears down the DatePicker runtime as a transaction and releases the provider
+'   lease only when critical cleanup is proven clean
+'
+' WHY THIS EXISTS
+'   Teardown used to suppress its own errors and release the lease regardless, so
+'   a shutdown that failed halfway reported success while application-wide state
+'   survived. A new provider could then start on top of it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Captures the caller's event state, refuses when this project does not own the
+'   lease, and otherwise runs the cleanup transaction with lease release enabled
 '
 ' ERROR POLICY
-'   Best-effort outward behavior is preserved. Incomplete cleanup is diagnostic,
-'   retains ownership, and is retryable by a later DP_Stop call
+'   Never raises outward. The outcome is reported through the observation fields
 '
+' DEPENDENCIES
+'   M_Lease_IsOwner
+'   M_Lease_ReportRefusal
+'   M_Lifecycle_Cleanup
+'
+' NOTES
+'   Ownership is checked before anything is touched. A refused copy must not be
+'   able to dismantle the owner's registrations, which is the defect #37 closed
+'   for the open paths and this closes for teardown
+'
+'   Retaining ownership when cleanup is incomplete is the point of the issue. A
+'   lease released over surviving shared state is worse than a lease held too
+'   long, because the next provider starts on top of it
 ' UPDATED
 '   2026-09-05
 '------------------------------------------------------------------------------
@@ -19535,7 +20895,7 @@ Public Sub M_GridIcon_PurgeAll()
 
     If Not M_Lifecycle_TryPurgeGridIcons(ErrorNumber, ErrorDescription) Then
         Debug.Print "M_GridIcon_PurgeAll | Incomplete | Error=" & _
-  VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+            VBA.CStr(ErrorNumber) & " | " & ErrorDescription
     End If
 
 End Sub
