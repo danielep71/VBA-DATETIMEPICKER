@@ -532,7 +532,7 @@ Check what you observed:
 - [ ] Refused provider removed owner state during teardown
 - [ ] Stale lease remained after VBA reset
 - [ ] Lease remained after **full Excel process restart**
-- [ ] Mixed-version (`v1.2.0` + older) interference
+- [ ] Lease-participating provider + pre-`v1.2.0` provider interference
 - [ ] Other
 
 The temporary lease should disappear when the Excel process actually exits.
@@ -855,7 +855,7 @@ Check anything that appears necessary for reproduction:
 - [ ] Embedded source only
 - [ ] `.xlam` only
 - [ ] Embedded + `.xlam`
-- [ ] Two lease-participating providers (`v1.2.0` or later)
+- [ ] Two lease-participating providers
 - [ ] Lease-participating provider + pre-`v1.2.0` provider
 - [ ] Another third-party add-in
 - [ ] Protected worksheet

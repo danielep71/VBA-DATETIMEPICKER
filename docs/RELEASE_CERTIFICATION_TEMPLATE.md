@@ -1,0 +1,210 @@
+# 🧾 Release Certification Record
+
+**Version:** `vX.Y.Z`
+**Certified by:** <!-- name -->
+**Date:** <!-- YYYY-MM-DD -->
+
+Fill this in as you certify, not afterwards from memory. Every field is a fact
+someone else must be able to check without asking you. A blank is better than a
+guess — a blank is visible, a guess is not.
+
+Procedure and rules live in
+[RELEASING.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/RELEASING.md);
+this file records what that procedure produced.
+
+---
+
+## 1. Identity
+
+| Field | Value |
+| --- | --- |
+| Reviewed source SHA | <!-- full 40-character SHA of the source the evidence describes --> |
+| Tagged SHA | <!-- full 40-character SHA the tag points at --> |
+| Previous release tag | <!-- e.g. v1.2.1 --> |
+| `VERSION` file contents | <!-- must equal the version above --> |
+| Branch | <!-- e.g. release/vX.Y.Z --> |
+
+> [!IMPORTANT]
+> The reviewed source SHA and the tagged SHA are recorded separately on purpose.
+> They are usually the same. When they are not — because documentation-only
+> commits landed after the last executable change — say which commit the
+> regression figures actually describe. Figures quoted against a commit that did
+> not produce them look like evidence and are not.
+
+If the two differ, state why:
+
+```text
+<!-- e.g. documentation-only commits between the reviewed source and the tag -->
+```
+
+---
+
+## 2. Environment
+
+Record only what you actually ran on.
+
+```text
+Excel product, version, build:
+Office bitness:                    32-bit / 64-bit
+Windows edition, version, build:
+Display scaling / monitors:
+Other add-ins loaded in the process:
+Clean VM or developer workstation:
+```
+
+> [!NOTE]
+> A developer workstation with other add-ins loaded is an acceptable environment
+> if it is recorded as one. `v1.2.1` was certified that way and said so. What is
+> not acceptable is leaving the reader to assume a clean machine.
+
+---
+
+## 3. Static gates
+
+| Gate | Result |
+| --- | --- |
+| `Debug → Compile VBAProject` | <!-- PASS / FAIL --> |
+| Encoding: source files are ASCII | <!-- PASS / FAIL --> |
+| Line endings match `.gitattributes` | <!-- PASS / FAIL --> |
+| No test-only or temporary instrumentation in the candidate | <!-- PASS / FAIL --> |
+| Working tree clean at the reviewed SHA | <!-- PASS / FAIL --> |
+
+Commands run and their output:
+
+```text
+<!-- e.g. git status --short ; git grep for probe markers -->
+```
+
+---
+
+## 4. Regression evidence — embedded `.xlsm`
+
+Paste the runner's own summary line, verbatim. Do not retype the counts into
+prose: the line is the evidence, a transcription is a claim about it.
+
+```text
+Host workbook:     <!-- filename, IsAddin=False -->
+
+TST_DP_RunAll
+<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
+
+TST_DP_RunAll_WithUISmoke
+<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
+
+Suite topology:    <!-- ## standard / ## with UI smoke -->
+```
+
+---
+
+## 5. Regression evidence — packaged `.xlam`
+
+**This section is required.** It has no default and is not satisfied by the
+embedded results above.
+
+```text
+Package filename:  <!-- exact name as it will be published -->
+
+TST_DP_RunAll
+<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
+
+TST_DP_RunAll_WithUISmoke
+<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
+
+Suite topology:    <!-- ## standard / ## with UI smoke -->
+```
+
+If the harness is not present in the package, say so here and record how the
+package was exercised instead:
+
+```text
+<!-- N/A if the harness ran; otherwise describe what was run -->
+```
+
+> [!IMPORTANT]
+> The embedded workbook and the packaged add-in are different artifacts and have
+> failed differently. `v1.2.1` certification was the first time the regression
+> pack was runnable inside a packaged `.xlam` at all, and the defects it found
+> were in the harness, not the component. An unqualified "PASS" that does not
+> name its host is not evidence.
+
+---
+
+## 6. Manual validation
+
+Record what you exercised and what happened. "Worked" is not a result.
+
+| Scenario | Result |
+| --- | --- |
+| `DP_Show` / `DP_Close` in a clean session | <!-- --> |
+| Single-cell write-back | <!-- --> |
+| Table-column fill | <!-- --> |
+| Formula preservation | <!-- --> |
+| Protected sheet / array-formula refusal | <!-- --> |
+| Each enabled entry path (keyboard, context menu, grid icon, Ribbon) | <!-- --> |
+| Second-provider refusal | <!-- --> |
+| `DP_Stop` leaves no registration behind | <!-- --> |
+
+Checks the regression pack cannot make, because they need a real Excel session
+or a real file:
+
+```text
+<!-- e.g. live OnTime delivery; workbook rename requalification; install path -->
+```
+
+---
+
+## 7. Artifacts
+
+| Artifact | Filename | SHA-256 | Size |
+| --- | --- | --- | --- |
+| Add-in | <!-- --> | <!-- --> | <!-- --> |
+| Demo workbook | <!-- --> | <!-- --> | <!-- --> |
+
+Built from SHA: <!-- must equal the reviewed source SHA above -->
+
+```text
+certutil -hashfile "<filename>" SHA256
+```
+
+### Source-identity discipline
+
+- [ ] No candidate source changed after these artifacts were built.
+- [ ] If it did: artifacts were rebuilt from the new SHA, package-tested again,
+      and re-hashed — and the prior package-test and hash evidence was discarded.
+- [ ] Nothing was rebuilt between tagging and upload.
+
+> [!CAUTION]
+> A rebuild after hashing silently invalidates the published digest. The file
+> people download then does not match the hash they are told to verify, and
+> nothing in the release surfaces the mismatch.
+
+---
+
+## 8. Deviations
+
+Anything that did not go to plan, was skipped, or was accepted as a known
+limitation. Write it here rather than leaving it out.
+
+```text
+<!-- none, or an itemized list with rationale and owning issue -->
+```
+
+---
+
+## 9. Sign-off
+
+- [ ] Every field above is filled or explicitly marked N/A with a reason.
+- [ ] Every figure was pasted from a run, not transcribed.
+- [ ] Both hosts are recorded.
+- [ ] Artifact hashes were computed from the exact published files.
+- [ ] Deviations are recorded, including any this certification chose to accept.
+
+**Certified:** <!-- name, date -->
+
+---
+
+## Related
+
+- [RELEASING.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/RELEASING.md) — the procedure this record documents
+- [CONTRIBUTING.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/CONTRIBUTING.md) — engineering contracts
+- [INSTALLATION.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/INSTALLATION.md) — install and validation paths
