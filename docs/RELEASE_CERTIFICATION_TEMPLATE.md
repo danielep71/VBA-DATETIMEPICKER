@@ -20,7 +20,7 @@ this file records what that procedure produced.
 | --- | --- |
 | Reviewed source SHA | <!-- full 40-character SHA of the source the evidence describes --> |
 | Tagged SHA | <!-- full 40-character SHA the tag points at --> |
-| Previous release tag | <!-- e.g. v1.2.1 --> |
+| Previous release tag | <!-- e.g. vX.Y.Z-1 --> |
 | `VERSION` file contents | <!-- must equal the version above --> |
 | Branch | <!-- e.g. release/vX.Y.Z --> |
 
@@ -54,12 +54,34 @@ Clean VM or developer workstation:
 
 > [!NOTE]
 > A developer workstation with other add-ins loaded is an acceptable environment
-> if it is recorded as one. `v1.2.1` was certified that way and said so. What is
-> not acceptable is leaving the reader to assume a clean machine.
+> if it is recorded as one. What is not acceptable is leaving the reader to
+> assume a clean machine.
 
 ---
 
-## 3. Static gates
+## 3. Required order
+
+Tick these in sequence as you go. The order is the guarantee: certifying a
+candidate that was built before it was frozen proves nothing about the artifacts
+that ship, and hashing before the package is tested means the hash may belong to
+a file that fails.
+
+- [ ] 1. Freeze the candidate and record its SHA.
+- [ ] 2. Static gates pass on that exact SHA.
+- [ ] 3. Certify in Excel on that exact SHA — embedded host.
+- [ ] 4. Build the release artifacts **from that same SHA**.
+- [ ] 5. Package-test the built artifacts — packaged host.
+- [ ] 6. Hash the tested artifacts, not earlier files.
+- [ ] 7. Tag the certified commit.
+- [ ] 8. Upload the already-hashed artifacts. Do not rebuild.
+- [ ] 9. Re-read the published release and verify it.
+
+If any step sends you backwards, every later step is void and must be redone.
+Record what was redone in **Deviations**.
+
+---
+
+## 4. Static gates
 
 | Gate | Result |
 | --- | --- |
@@ -77,7 +99,7 @@ Commands run and their output:
 
 ---
 
-## 4. Regression evidence — embedded `.xlsm`
+## 5. Regression evidence — embedded `.xlsm`
 
 Paste the runner's own summary line, verbatim. Do not retype the counts into
 prose: the line is the evidence, a transcription is a claim about it.
@@ -96,7 +118,7 @@ Suite topology:    <!-- ## standard / ## with UI smoke -->
 
 ---
 
-## 5. Regression evidence — packaged `.xlam`
+## 6. Regression evidence — packaged `.xlam`
 
 **This section is required.** It has no default and is not satisfied by the
 embedded results above.
@@ -122,14 +144,13 @@ package was exercised instead:
 
 > [!IMPORTANT]
 > The embedded workbook and the packaged add-in are different artifacts and have
-> failed differently. `v1.2.1` certification was the first time the regression
-> pack was runnable inside a packaged `.xlam` at all, and the defects it found
-> were in the harness, not the component. An unqualified "PASS" that does not
-> name its host is not evidence.
+> failed differently in this project's history, and a packaged run has found
+> defects an embedded run did not. An unqualified "PASS" that does not name its
+> host is not evidence.
 
 ---
 
-## 6. Manual validation
+## 7. Manual validation
 
 Record what you exercised and what happened. "Worked" is not a result.
 
@@ -153,7 +174,7 @@ or a real file:
 
 ---
 
-## 7. Artifacts
+## 8. Artifacts
 
 | Artifact | Filename | SHA-256 | Size |
 | --- | --- | --- | --- |
@@ -180,7 +201,7 @@ certutil -hashfile "<filename>" SHA256
 
 ---
 
-## 8. Deviations
+## 9. Deviations
 
 Anything that did not go to plan, was skipped, or was accepted as a known
 limitation. Write it here rather than leaving it out.
@@ -191,13 +212,66 @@ limitation. Write it here rather than leaving it out.
 
 ---
 
-## 9. Sign-off
+## 10. Post-publication verification
+
+Performed after the release is public, by re-reading GitHub rather than trusting
+what was uploaded.
+
+| Check | Result |
+| --- | --- |
+| Tag resolves to the recorded tag target SHA | <!-- --> |
+| Release points at that tag | <!-- --> |
+| `VERSION` and the dated changelog section match the tag | <!-- --> |
+| Asset filenames match exactly what was hashed | <!-- --> |
+| Each asset downloads, and its SHA-256 matches the published digest | <!-- --> |
+| Packaged artifact opens from the downloaded copy and passes its smoke test | <!-- --> |
+| Source archive contains the expected release files | <!-- --> |
+| Installation links and examples in the release notes resolve | <!-- --> |
+| Default branch is ready for the next Unreleased cycle | <!-- --> |
+
+Re-hash the **downloaded** files, not the local build outputs:
+
+```text
+certutil -hashfile "<downloaded filename>" SHA256
+```
+
+> [!CAUTION]
+> Never delete and recreate a public tag to correct a mistake. Anyone who already
+> fetched it keeps the old object. Correct forward instead, and record the
+> correction here.
+
+---
+
+## 11. Provenance limits
+
+State these plainly in the release rather than letting a reader infer stronger
+guarantees than exist.
+
+- [ ] No CI runs the regression pack. Every figure in this record was produced by
+      a human on a named host
+      ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15) remains
+      open).
+- [ ] Artifact hashes establish file identity only. They are not cryptographic
+      source-to-binary provenance: nothing here proves the published binary was
+      built from the recorded source
+      ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16) remains
+      open).
+- [ ] The `Public` surface is larger than the supported API, and formal
+      classification is outstanding
+      ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25) remains
+      open).
+
+---
+
+## 12. Sign-off
 
 - [ ] Every field above is filled or explicitly marked N/A with a reason.
 - [ ] Every figure was pasted from a run, not transcribed.
 - [ ] Both hosts are recorded.
 - [ ] Artifact hashes were computed from the exact published files.
 - [ ] Deviations are recorded, including any this certification chose to accept.
+- [ ] The required order was followed, or every departure is recorded.
+- [ ] Post-publication verification was performed against the live release.
 
 **Certified:** <!-- name, date -->
 
