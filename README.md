@@ -10,7 +10,7 @@
 
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
-[![Source](https://img.shields.io/badge/Source-v1.2.1_Integrity_Hotfix-6f42c1?style=for-the-badge)](#release-status)
+[![Source](https://img.shields.io/badge/Source-v1.2.2_Candidate-6f42c1?style=for-the-badge)](#release-status)
 [![Tests](https://img.shields.io/badge/Regression-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge)](LICENSE)
 
@@ -433,7 +433,9 @@ AttemptedCount =
 
 A result with `TechnicalFailureOccurred = True` does **not** obey that identity. An unexpected error stops population rather than continuing to mutate the workbook, so the result reports only the outcomes observed before the fault, and `TechnicalFailureStep`, `TechnicalFailureNumber` and `TechnicalFailureDescription` carry the original cause. Test for `TechnicalFailureOccurred` before reconciling counts.
 
-Skipped/failed address lists are worksheet-qualified and bounded for diagnostics while the counts remain exact. The bound is applied **per target area**, not per operation, so a discontiguous write can report more addresses in a category than a single-area write. Moving to one cap per operation is deferred to `v1.2.2`.
+Skipped/failed address lists are worksheet-qualified and bounded for diagnostics while the counts remain exact. The bound is applied **per write operation**, not per target area, and independently per outcome category: locked, formula-skipped and failed each retain up to 25 addresses across the whole operation, however many areas it spans.
+
+The structured address fields contain worksheet addresses only. When a category retains fewer addresses than it classified, the shortfall is reported in the human-readable description rather than by a marker inside the address list.
 
 Example:
 
@@ -1269,6 +1271,103 @@ No third-party DLL, package manager, COM component or external runtime is requir
 
 ---
 
+## 🔒 Candidate contracts — `v1.2.2`
+
+These are the behavioral contracts the `v1.2.2` candidate adds. They are
+development-host verified; packaged `.xlam` evidence belongs to
+[#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+
+### Grid-icon shape ownership
+
+The shape name selects candidates; it never proves ownership. A shape is treated
+as DatePicker-owned only when it carries the canonical or pending grid-icon name
+**and** a recognized marker in `AlternativeText`:
+
+```text
+DatePicker Grid Entry Point                                        v0, legacy
+DatePicker Grid Entry Point | dp-owner-v1=<provider-token>         v1
+```
+
+The `v1` token must parse. A blank marker, a malformed one, an unknown schema, or
+an unreadable shape all fail closed: the shape is never moved, resized, rebound,
+re-marked or deleted. Ownership is product-level for this release, so an icon
+left behind by a crashed provider — legacy `v0`, or `v1` carrying another
+provider's token — is reclaimable. Creation fails closed too: if a foreign shape
+holds the canonical name, no icon is created over it
+([#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53)).
+
+### Live-clock registration
+
+Every tick is scheduled with an explicit delivery window:
+
+```text
+LatestTime = EarliestTime + 30 seconds
+```
+
+Cancellation matches the exact `EarliestTime` and `Procedure` that were
+scheduled. A cancellation that fails retains that exact registration as
+unresolved rather than forgetting it, and refuses a restart until one of three
+drains clears it: the stale callback arriving, a retry cancellation against the
+retained identity succeeding, or the retained `LatestTime` passing.
+
+The bounded window means a tick that misses it is dropped rather than delayed,
+which ends the chain. Recovery is opportunistic, not a watchdog: the next
+DatePicker interaction reaches the health check, which replaces an expired
+registration exactly once. A healthy registration inside its window produces no
+scheduling call at all
+([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)).
+
+### Lifecycle transaction
+
+Shutdown attempts every cleanup step even after one fails, records each outcome,
+and releases the provider lease **last** — only once critical cleanup is proven
+clean. A lease-bar deletion that cannot be verified retains the local ownership
+token rather than discarding it, so a later retry still holds the proof it needs.
+
+Startup is deliberately asymmetric. A **fresh** start that fails rolls back
+everything it did and releases the lease it acquired. A **repeated** start into a
+runtime that already owned the lease preserves that runtime instead, because
+rolling back would dismantle something already serving the user, and it never
+releases a lease that pre-existed the call.
+
+`DP_RepairRuntime` never releases the lease — repair means the same provider
+continues to own the session — and it is the one documented exception to
+preserving the caller's event state: it leaves `Application.EnableEvents` `True`
+on purpose, because a caller that left it `False` is the condition being
+repaired. Force-releasing a lease remains an explicit operator action
+([#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50)).
+
+### Demo fast mode
+
+Entry captures `ScreenUpdating`, `EnableEvents`, `DisplayAlerts` and
+`Calculation` before the first mutation, and rolls back everything it applied if
+it fails partway. Exit attempts every restoration independently, so one failure
+cannot abandon the rest.
+
+A demo sheet that was successfully constructed is reported as a **failed
+operation** if Application state could not be restored. The sheet may remain
+visible and correct; that does not outweigh leaving Excel with
+`EnableEvents=False`, `Calculation=Manual` or alerts suppressed
+([#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52)).
+
+### Ribbon demo toggle
+
+The command decides from the sheet's state *before* it ensures the sheet exists:
+
+```text
+absent                      create, show and activate
+existing and visible        hide
+existing and hidden         show and activate
+```
+
+`xlSheetHidden` and `xlSheetVeryHidden` are the same pre-existing state for this
+decision. Host resolution is unchanged — the demo sheet is still resolved by the
+policy recorded under
+[#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23)
+([#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64)).
+
+---
+
 ## ⚠️ Known limitations and boundaries
 
 ### One current-version provider at a time
@@ -1410,8 +1509,8 @@ Certified at [`7d55cc7`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit
 Both hosts — the embedded demo `.xlsm` and the packaged `.xlam`:
 
 ```text
-standard:       State=PASS; Run=879; Passed=879; Failed=0; CleanupFailures=0
-with UI smoke:  State=PASS; Run=882; Passed=882; Failed=0; CleanupFailures=0
+standard:       State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+with UI smoke:  State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0
 ```
 
 Certification voided three candidate commits. Every defect it found was in the
@@ -1501,7 +1600,7 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Source status:** `v1.2.1` integrity-hotfix scope complete, on the `v1.2.0` safety-release baseline.
+**Source status:** `v1.2.2` candidate, on the `v1.2.1` integrity-hotfix baseline. Latest published release remains `v1.2.1`; the candidate is certified and tagged by [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
 
 The project is suitable for controlled Excel/VBA environments when the documented ownership, settings and application-wide shortcut boundaries are respected.
 

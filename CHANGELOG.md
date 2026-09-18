@@ -104,15 +104,26 @@ Use only the categories needed by a release.
 - Added a root `VERSION` marker, now at `1.2.2` for the release candidate.
 
 - Grid-icon shapes now carry a durable ownership marker in `AlternativeText`.
-  Show, move, create, remove, purge and cross-workbook cleanup all prove
-  ownership before adopting, mutating or deleting a shape. An unrelated shape
-  that merely shares the `DP_GridIcon` name is left completely untouched
+  The shape name selects candidates and never proves ownership. Two markers are
+  recognized: the legacy `DatePicker Grid Entry Point`, and
+  `DatePicker Grid Entry Point | dp-owner-v1=<provider-token>` whose token must
+  parse. Blank, malformed, unknown-schema and unreadable markers all fail
+  closed, so an unrelated shape sharing the `DP_GridIcon` name is never moved,
+  resized, rebound, re-marked or deleted — and creation refuses rather than
+  promoting over it. Ownership is product-level for this release, so a legacy
+  icon or one carrying another provider's token is reclaimable
   ([#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53)).
 
-- Live-clock registrations are observable and recoverable. Every tick is
-  scheduled with an explicit 30-second delivery window, a cancellation that
-  fails retains the exact registration instead of forgetting it, and a dropped
-  tick is repaired opportunistically by the next DatePicker interaction
+- Live-clock registrations are observable and recoverable. Every scheduling call
+  records the exact `EarliestTime`, `LatestTime` and `Procedure` it asked Excel
+  for, and every tick is scheduled with `LatestTime = EarliestTime + 30 seconds`
+  so a registration can be shown to be dead. Cancellation matches the exact
+  scheduled values; one that fails retains that registration as unresolved and
+  refuses a restart until a stale callback arrives, a retry cancellation against
+  the retained identity succeeds, or the retained `LatestTime` passes. Because a
+  tick that misses its window is dropped rather than delayed, a new
+  health-check-only bridge lets the form repair a dropped registration on
+  reactivation; a healthy registration produces no scheduling call
   ([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)).
 
 ### Changed
@@ -132,10 +143,18 @@ Use only the categories needed by a release.
   ([#51](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/51)).
 
 - Shutdown and repair are transactional. Every cleanup step is attempted even
-  after an earlier one fails, each outcome is recorded, and the provider lease
-  is released only once critical cleanup is proven clean. A lease-bar deletion
-  that cannot be verified retains the local ownership token rather than
-  discarding it ([#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50)).
+  after an earlier one fails, each outcome is recorded, and the provider lease is
+  released **last**, only once critical cleanup is proven clean. A lease-bar
+  deletion that cannot be verified retains the local ownership token rather than
+  discarding it, so a later retry still holds the proof it needs. Startup is
+  deliberately asymmetric: a fresh start that fails rolls back its own work and
+  releases the lease it acquired, while a repeated start into a runtime that
+  already owned the lease preserves that runtime and never releases a
+  pre-existing lease. `DP_RepairRuntime` never releases the lease, and remains
+  the one documented exception to preserving the caller's event state — it
+  leaves `Application.EnableEvents` `True` on purpose. Force-releasing a lease
+  stays an explicit operator action
+  ([#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50)).
 
 - Demo fast mode is exception-safe. Entry captures all four `Application`
   properties before the first mutation and rolls back everything it applied if
@@ -148,9 +167,14 @@ Use only the categories needed by a release.
 ### Fixed
 
 - **The Ribbon demo command now shows the demo sheet on the click that builds
-  it.** It previously built the sheet visible, read that visibility back and
-  hid it again, so the first click appeared to do nothing. This supersedes the
-  `1.2.1` note recording the defect as deferred and unfiled
+  it.** It previously built the sheet visible, read that visibility back and hid
+  it again, so the first click appeared to do nothing. The decision is now taken
+  from the sheet's state before it is ensured: absent creates, shows and
+  activates; existing and visible hides; existing and hidden shows and
+  activates, with `xlSheetHidden` and `xlSheetVeryHidden` treated as one
+  pre-existing state. Host resolution is unchanged from the policy recorded
+  under [#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23). This
+  supersedes the `1.2.1` note recording the defect as deferred and unfiled
   ([#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64)).
 
 - Corrected the regression harness's error-handling model. A called routine
@@ -161,6 +185,15 @@ Use only the categories needed by a release.
 ### Validation
 
 - Verified historical version ordering, comparison links, and policy links.
+
+- Clarified the `1.2.1` error-preservation contract recorded under
+  [#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48). The
+  original error **number** and **causal description** are preserved when a
+  failure is re-raised; `Err.Source` is deliberately re-contextualized to name
+  the raising procedure and the step it failed in. The published wording
+  describing capture of number, source and description and re-raising "the
+  original" is too easily read as source preservation, and is superseded by this
+  note rather than rewritten.
 
 - Corrected the `1.2.1` description of
   [#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47) coverage.
