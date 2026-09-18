@@ -11,7 +11,7 @@
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
 [![Source](https://img.shields.io/badge/Source-v1.2.1_Integrity_Hotfix-6f42c1?style=for-the-badge)](#release-status)
-[![Tests](https://img.shields.io/badge/Regression-431%2F431-2ea44f?style=for-the-badge)](#regression-testing)
+[![Tests](https://img.shields.io/badge/Regression-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge)](LICENSE)
 
 <br>
@@ -318,12 +318,11 @@ Download the add-in asset from
 `v1.2.1` it is:
 
 ```text
-DATETIMEPICKER v1.2.1.xlam
+DATETIMEPICKER.v1.2.1.xlam
 ```
 
-The `.xlam` filename separator has varied between releases — `v1.2.0` published
-`DATETIMEPICKER.v1.2.0.xlam` — so take the exact name from the Release page, and
-check its SHA-256 against the one published there.
+Take the exact name from the Release page and check its SHA-256 against the one
+published there.
 
 Use this when you want the DatePicker available across workbooks and your Excel policy allows add-in installation.
 
@@ -872,9 +871,11 @@ M_KeyboardShortcut_Update
 M_GridIcon_PurgeAll
 ```
 
-`M_Picker_EnsureManager` is deliberately parameterless so Excel can expose it
-through Alt+F8 or an assigned control. It preserves the caller's event state
-without changing it.
+`M_Picker_EnsureManager` preserves the caller's event state without changing it.
+It is currently parameterless, which leaves it reachable from Alt+F8 and from an
+assigned control. That reachability is present technical exposure, not a
+supported design pattern: [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)
+will classify this surface and hide what does not need to be reachable.
 
 ### Internal test seams — not supported API
 
@@ -888,6 +889,13 @@ M_WriteBack_Test_SetFaultInjection
 ```
 
 They are internal infrastructure, may change or disappear without notice, and are to be classified `internal` under [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). Do not call them from host code.
+
+Being `Public` is a consequence of the harness living in a separate module, not a
+decision that these belong on the callable surface. Several newer seams take
+arguments, which keeps them out of the macro dialog; that is a mitigation while
+#25 is open, not the intended end state. #25 will move this surface behind
+`Option Private Module` boundaries or make it `Private` wherever the harness does
+not genuinely require reach.
 
 ---
 
@@ -1152,10 +1160,12 @@ It does not blindly retry `Worksheets.Add`.
 ## Latest recorded regression figures
 
 ```text
-State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
+State=PASS; Run=879; Passed=879; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the `v1.2.1` cycle. With the UI smoke suite the figure is `434`. Both the embedded `.xlsm` and the packaged `.xlam` pass; `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
+This is the latest recorded **standard regression pack** for the `v1.2.2` candidate. With the UI smoke suite the figure is `882`. The candidate runs 28 standard suites, 29 with UI smoke.
+
+These are development-host figures, taken on the embedded macro-enabled workbook. Packaged `.xlam` evidence for `v1.2.2` is produced by certification ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)) and is not claimed here. `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
 
 > [!IMPORTANT]
 > Tests manipulate real Excel state: worksheets, settings, application flags,
@@ -1313,14 +1323,6 @@ The project is designed and documented for Excel desktop on Windows. Optional bo
 
 High-DPI, high-contrast and accessibility behavior should be validated in the target deployment environment; they are not yet treated as fully certified across all Office/display configurations. Tracked as [#29](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/29).
 
-### Known defect — `Ribbon_Demo` sheet toggle
-
-`Ribbon_Demo` builds the demo sheet visible, then reads it as already visible and hides it again. The defect predates `v1.2.0` and was out of scope for the `v1.2.1` integrity hotfix. Deferred to `v1.2.2`; not yet filed as an issue.
-
-### Diagnostic address caps are per area
-
-Classification totals are always exact, but the bounded address lists are capped per target area rather than per operation. Deferred to `v1.2.2`.
-
 ### Release evidence is procedural, not automated
 
 No CI runs the regression pack — the only workflow in the repository is repository traffic analytics ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
@@ -1408,8 +1410,8 @@ Certified at [`7d55cc7`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit
 Both hosts — the embedded demo `.xlsm` and the packaged `.xlam`:
 
 ```text
-standard:       State=PASS; Run=431; Passed=431; Failed=0; CleanupFailures=0
-with UI smoke:  State=PASS; Run=434; Passed=434; Failed=0; CleanupFailures=0
+standard:       State=PASS; Run=879; Passed=879; Failed=0; CleanupFailures=0
+with UI smoke:  State=PASS; Run=882; Passed=882; Failed=0; CleanupFailures=0
 ```
 
 Certification voided three candidate commits. Every defect it found was in the

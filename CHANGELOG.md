@@ -101,8 +101,19 @@ Use only the categories needed by a release.
 
 - Added a standardized installation and maintainer release documentation set with project-specific deployment, certification, provenance, recovery, and post-publication controls.
 
-- Added a root `VERSION` marker at `1.2.1`, aligned with the latest published
-  release and the existing source-version contract.
+- Added a root `VERSION` marker, now at `1.2.2` for the release candidate.
+
+- Grid-icon shapes now carry a durable ownership marker in `AlternativeText`.
+  Show, move, create, remove, purge and cross-workbook cleanup all prove
+  ownership before adopting, mutating or deleting a shape. An unrelated shape
+  that merely shares the `DP_GridIcon` name is left completely untouched
+  ([#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53)).
+
+- Live-clock registrations are observable and recoverable. Every tick is
+  scheduled with an explicit 30-second delivery window, a cancellation that
+  fails retains the exact registration instead of forgetting it, and a dropped
+  tick is repaired opportunistically by the next DatePicker interaction
+  ([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)).
 
 ### Changed
 
@@ -111,9 +122,52 @@ Use only the categories needed by a release.
 - Standardized changelog governance and added an explicit Unreleased staging
   section without altering published release history.
 
+- **Diagnostic address caps are now per write operation, not per target area.**
+  This supersedes the `1.2.1` note recording the per-area behavior. Budgets are
+  per outcome category and per operation: locked, formula-skipped and failed
+  each retain up to 25 addresses across the whole operation. Structured address
+  fields now contain only worksheet addresses; the truncation sentinel that
+  used to appear inside them is gone, and the omitted count is reported in the
+  human-readable shortfall description instead
+  ([#51](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/51)).
+
+- Shutdown and repair are transactional. Every cleanup step is attempted even
+  after an earlier one fails, each outcome is recorded, and the provider lease
+  is released only once critical cleanup is proven clean. A lease-bar deletion
+  that cannot be verified retains the local ownership token rather than
+  discarding it ([#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50)).
+
+- Demo fast mode is exception-safe. Entry captures all four `Application`
+  properties before the first mutation and rolls back everything it applied if
+  it fails partway; exit attempts every restoration independently. A demo sheet
+  that was successfully constructed is now reported as a **failed operation** if
+  `Application` state could not be restored, because leaving Excel with
+  `EnableEvents=False`, `Calculation=Manual` or alerts suppressed outweighs a
+  correct sheet ([#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52)).
+
+### Fixed
+
+- **The Ribbon demo command now shows the demo sheet on the click that builds
+  it.** It previously built the sheet visible, read that visibility back and
+  hid it again, so the first click appeared to do nothing. This supersedes the
+  `1.2.1` note recording the defect as deferred and unfiled
+  ([#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64)).
+
+- Corrected the regression harness's error-handling model. A called routine
+  cannot arm, disarm or replace its caller's handler; 42 re-arms and 34
+  comments asserting otherwise were removed, and the rule is now regression-
+  locked ([#32](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/32)).
+
 ### Validation
 
 - Verified historical version ordering, comparison links, and policy links.
+
+- Corrected the `1.2.1` description of
+  [#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47) coverage.
+  The injected fault is consumed in `UserForm_Initialize`; `UserForm_Activate`
+  is verified by source inspection, not by a second injected fault. The
+  published `1.2.1` entry describing injected coverage of both is superseded by
+  this note rather than rewritten.
 
 ---
 
