@@ -195,6 +195,8 @@ Public Sub DP_Demo_CreateDemoSheet( _
     Dim Wb                  As Workbook                 'Resolved target workbook
     Dim WS                  As Worksheet                'Demo worksheet
     Dim FastModeState       As tDEMOFastModeState       'Saved Application-state snapshot
+    Dim ResolvedErrNumber   As Long                     'Number the operation must report
+    Dim ResolvedErrDescription As String                'Description the operation must report
     Dim SavedErrNumber      As Long                     'Captured error number
     Dim SavedErrDescription As String                   'Captured error description
     Dim HandlerStep         As String                   'Current handler step for diagnostics
@@ -308,11 +310,17 @@ CleanExit:
         Err.Clear
         On Error GoTo 0
 
-    'Re-raise the original error when the build failed
-        If SavedErrNumber <> 0 Then
-            Err.Raise SavedErrNumber, _
+    'Resolve the outcome from the build failure, if any, and from whatever the
+    'fast-mode transaction could not roll back or restore. A build that
+    'succeeded while Excel was left with events off, calculation manual or
+    'alerts suppressed is not a successful operation: the sheet may be visible
+    'and correct, and the session is still damaged
+        If DEMO_FastMode_ResolveFailure(SavedErrNumber, _
+            "Demo sheet creation failed: " & SavedErrDescription, _
+            FastModeState, ResolvedErrNumber, ResolvedErrDescription) Then
+            Err.Raise ResolvedErrNumber, _
                 PROC_NAME & " | Step=" & HandlerStep, _
-                "Demo sheet creation failed: " & SavedErrDescription
+                ResolvedErrDescription
         End If
 
     'Exit after a successful build

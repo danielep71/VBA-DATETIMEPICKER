@@ -7727,6 +7727,20 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
     Dim InertRaised     As Boolean      'End on an inert record raised
     Dim SecondEndRaised As Boolean      'A second End raised
 
+    Dim EntryFaults     As Variant      'Capture and apply boundaries swept
+    Dim ExitFaults      As Variant      'Restore boundaries swept
+    Dim FaultIndex      As Long         'Sweep index
+    Dim Swept           As tDEMOFastModeState 'Record used by the sweeps
+    Dim EntryPrimaryHeld As Boolean     'Every entry boundary raised its injected error
+    Dim EntryStateClean As Boolean      'Every entry boundary left Excel as found
+    Dim ExitCounted     As Boolean      'Every restore boundary counted one failure
+    Dim ExitOthersRan   As Boolean      'Every restore boundary restored the others
+    Dim CompoundErr     As Long         'Primary error of the compound rollback case
+    Dim ResolvedNumber  As Long         'Resolver output number
+    Dim ResolvedText    As String       'Resolver output description
+    Dim ResolverSaysFail As Boolean     'Resolver verdict
+    Dim Clean           As tDEMOFastModeState 'Record with nothing recorded
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -7877,6 +7891,149 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
             Excel.Application.ScreenUpdating = True
         TST_DP_AssertFalse "The record is released despite the failure", _
             State.Active
+
+
+'------------------------------------------------------------------------------
+' EVERY ENTRY BOUNDARY ROLLS BACK COMPLETELY
+'------------------------------------------------------------------------------
+    'Capture and apply are eight separate boundaries. Hand-picking one proves
+    'only that one, so the whole set is swept and the aggregate asserted
+        EntryFaults = VBA.Array( _
+            "Capture.ScreenUpdating", "Capture.EnableEvents", _
+            "Capture.DisplayAlerts", "Capture.Calculation", _
+            "Begin.ScreenUpdating", "Begin.EnableEvents", _
+            "Begin.DisplayAlerts", "Begin.Calculation")
+
+        EntryPrimaryHeld = True
+        EntryStateClean = True
+        For FaultIndex = LBound(EntryFaults) To UBound(EntryFaults)
+            Excel.Application.ScreenUpdating = True
+            Excel.Application.DisplayAlerts = True
+            Excel.Application.Calculation = xlCalculationAutomatic
+
+            DEMO_FastMode_Test_ArmFault VBA.CStr(EntryFaults(FaultIndex)), INJECTED_ERROR
+            On Error Resume Next
+            Err.Clear
+            DEMO_FastMode_Begin Swept
+            If Err.Number <> INJECTED_ERROR Then EntryPrimaryHeld = False
+            Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+            On Error GoTo SuiteFail
+
+            If Excel.Application.ScreenUpdating <> True Then EntryStateClean = False
+            If Excel.Application.DisplayAlerts <> True Then EntryStateClean = False
+            If Excel.Application.Calculation <> xlCalculationAutomatic Then EntryStateClean = False
+            If Swept.Active Then EntryStateClean = False
+            If Swept.Captured Then EntryStateClean = False
+        Next FaultIndex
+
+'------------------------------------------------------------------------------
+' EVERY RESTORE BOUNDARY IS INDEPENDENT
+'------------------------------------------------------------------------------
+    'One failed restoration must not abandon the others, at every boundary
+        ExitFaults = VBA.Array("End.ScreenUpdating", "End.EnableEvents", _
+            "End.DisplayAlerts", "End.Calculation")
+
+        ExitCounted = True
+        ExitOthersRan = True
+        For FaultIndex = LBound(ExitFaults) To UBound(ExitFaults)
+            Excel.Application.ScreenUpdating = True
+            Excel.Application.DisplayAlerts = True
+            Excel.Application.Calculation = xlCalculationAutomatic
+
+            DEMO_FastMode_Begin Swept
+            DEMO_FastMode_Test_ArmFault VBA.CStr(ExitFaults(FaultIndex)), INJECTED_ERROR
+            DEMO_FastMode_End Swept
+
+            If Swept.RestoreFailureCount <> 1 Then ExitCounted = False
+            If Swept.Active Then ExitCounted = False
+    'Whichever property was faulted, the others must have been restored
+            If VBA.CStr(ExitFaults(FaultIndex)) <> "End.ScreenUpdating" Then
+                If Excel.Application.ScreenUpdating <> True Then ExitOthersRan = False
+            End If
+            If VBA.CStr(ExitFaults(FaultIndex)) <> "End.DisplayAlerts" Then
+                If Excel.Application.DisplayAlerts <> True Then ExitOthersRan = False
+            End If
+            If VBA.CStr(ExitFaults(FaultIndex)) <> "End.Calculation" Then
+                If Excel.Application.Calculation <> xlCalculationAutomatic Then ExitOthersRan = False
+            End If
+    'Put Excel back for the next iteration whatever this one left behind
+            Excel.Application.ScreenUpdating = True
+            Excel.Application.EnableEvents = RunEvents
+            Excel.Application.DisplayAlerts = True
+            Excel.Application.Calculation = xlCalculationAutomatic
+        Next FaultIndex
+
+'------------------------------------------------------------------------------
+' A ROLLBACK FAILURE IS RECORDED WITHOUT DISPLACING THE PRIMARY
+'------------------------------------------------------------------------------
+    'Fail entry at the third property and fail one of its rollbacks. The entry
+    'error must survive, the rollback failure must be counted separately, and the
+    'remaining rollback steps must still run
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Test_ArmFault "Begin.DisplayAlerts", INJECTED_ERROR
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_Begin Swept
+        CompoundErr = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' ASSERT THE BOUNDARY SWEEPS
+'------------------------------------------------------------------------------
+    'Every capture and apply boundary reports the failure that stopped it
+        TST_DP_AssertTrue "Every entry boundary raises its injected error", _
+            EntryPrimaryHeld
+    'Every capture and apply boundary leaves Excel and the record as it found them
+        TST_DP_AssertTrue "Every entry boundary rolls back completely", _
+            EntryStateClean
+    'Every restore boundary counts exactly the restoration that failed
+        TST_DP_AssertTrue "Every restore boundary counts one failure", ExitCounted
+    'Every restore boundary still restores the properties it did not fault
+        TST_DP_AssertTrue "Every restore boundary restores the others", ExitOthersRan
+    'A failed entry reports the entry failure, not a rollback error
+        TST_DP_AssertEqualsLong "A compound failure reports the entry error", _
+            INJECTED_ERROR, CompoundErr
+
+'------------------------------------------------------------------------------
+' ASSERT THE OPERATION OUTCOME RESOLVER
+'------------------------------------------------------------------------------
+    'A clean operation is a success
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(0, VBA.vbNullString, _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertFalse "A clean operation resolves to success", ResolverSaysFail
+
+    'A primary failure is reported unchanged
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(INJECTED_ERROR, "Primary cause", _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertEqualsLong "A primary failure keeps its error number", _
+            INJECTED_ERROR, ResolvedNumber
+        TST_DP_AssertTrue "A primary failure keeps its causal description", _
+            VBA.InStr(1, ResolvedText, "Primary cause", vbBinaryCompare) > 0
+
+    'Cleanup evidence accompanies the primary rather than replacing it
+        Clean.RestoreFailureCount = 1
+        Clean.RestoreFailureDetail = "EnableEvents | Error=5 | injected"
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(INJECTED_ERROR, "Primary cause", _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertEqualsLong "Cleanup evidence does not replace the primary number", _
+            INJECTED_ERROR, ResolvedNumber
+        TST_DP_AssertTrue "Cleanup evidence is appended to the primary cause", _
+            (VBA.InStr(1, ResolvedText, "Primary cause", vbBinaryCompare) > 0) And _
+            (VBA.InStr(1, ResolvedText, "EnableEvents", vbBinaryCompare) > 0)
+
+    'A successful build with unrestored state is still a failed operation
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(0, VBA.vbNullString, _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertTrue "An unrestored Application fails a successful build", _
+            ResolverSaysFail
+        TST_DP_AssertTrue "The cleanup failure names the property", _
+            VBA.InStr(1, ResolvedText, "EnableEvents", vbBinaryCompare) > 0
 
 '------------------------------------------------------------------------------
 ' SUITE EXIT
