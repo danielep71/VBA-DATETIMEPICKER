@@ -72,27 +72,43 @@ or copied workbooks.
 | 3 | `src/classes/cDatePickerLabelHook.cls` | `cDatePickerLabelHook` | Runtime MSForms label-event routing |
 | 4 | `src/forms/UF_DatePicker.frm` with adjacent `.frx` | `UF_DatePicker` | Modeless Date / Time Picker UI and resources |
 
-Optional material is not part of the normal runtime unless stated otherwise:
+Additional source. Only the RibbonX metadata is genuinely optional; the rest is
+required to compile or to test the project as it currently stands:
 
 | Source | Purpose |
 |---|---|
 | `src/ribbon/customUI14.xml` | Optional RibbonX package metadata; not a VBE module |
 | `test/M_cDP_Test.bas` | Regression harness |
-| `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **and a dependency of the regression harness** |
-| `demo/M_DP_DEMO.bas` | Source-built demonstration entry points; not required by the harness |
+| `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
+| `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
 
 > [!IMPORTANT]
-> The regression harness does not stand alone. `test/M_cDP_Test.bas` calls into
-> `demo/M_DEMO_BUILDER.bas` — it builds its result sheet through
-> `DEMO_Sheet_BuildTemplate`, and it exercises the fast-mode transaction through
-> `DEMO_FastMode_Begin`, `DEMO_FastMode_End`, `DEMO_FastMode_Test_ArmFault`,
-> `DEMO_FastMode_ResolveFailure` and `tDEMOFastModeState`. `TST_DP_RunAll` will
-> not compile without that module imported alongside it.
+> The four `src/` components above do not compile on their own. `M_DatePicker`
+> exposes the Ribbon demo command, and that command calls
+> `DP_Demo_EnsureDemoSheet`, which lives in `demo/M_DP_DEMO.bas`. Omitting the
+> demo source leaves an unresolved reference at **Debug → Compile VBAProject**.
 >
-> `demo/M_DP_DEMO.bas` is **not** required by the harness. Import it only when
-> you want the demonstration entry points themselves. Decoupling the harness
+> The current compile and test dependencies are:
+>
+> ~~~text
+> M_DatePicker.bas  ->  M_DP_DEMO.bas  ->  M_DEMO_BUILDER.bas
+> M_cDP_Test.bas    ->  M_DEMO_BUILDER.bas
+> ~~~
+>
+> So a compilable project needs both demo modules, and the regression harness
+> additionally needs `M_DEMO_BUILDER.bas` in its own right: it builds its result
+> sheet through `DEMO_Sheet_BuildTemplate` and exercises the fast-mode
+> transaction through `DEMO_FastMode_Begin`, `DEMO_FastMode_End`,
+> `DEMO_FastMode_Test_ArmFault`, `DEMO_FastMode_ResolveFailure` and
+> `tDEMOFastModeState`. The harness makes no reference to `M_DP_DEMO`.
+>
+> This is recorded as current fact, not as intended architecture. Production
+> source depending on demonstration source is a boundary problem: it predates
+> `v1.2.0` and is not introduced by any `v1.2.2` change. Decoupling the harness
 > from the demo builder is tracked as
-> [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35).
+> [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35); the
+> production-to-demo dependency belongs with the module-boundary work in
+> [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24).
 
 > [!CAUTION]
 > A `.frm` and its `.frx` companion are one logical component. Keep them in
@@ -105,6 +121,8 @@ Optional material is not part of the normal runtime unless stated otherwise:
 
 1. Back up the macro-enabled destination workbook and stop any existing DatePicker runtime.
 2. Import the standard module, both classes, and the UserForm in the listed order. Keep `UF_DatePicker.frx` beside the `.frm`; do not import it separately.
+   Import `demo/M_DP_DEMO.bas` and `demo/M_DEMO_BUILDER.bas` as well — the
+   project does not compile without them.
 3. Compile the complete VBA project.
 4. Wire `DP_Start` and `DP_Stop` into the workbook lifecycle if the component must start automatically.
 5. Set any deployment-specific settings namespace before the runtime loads.
