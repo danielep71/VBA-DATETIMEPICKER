@@ -194,14 +194,14 @@ Use only the categories needed by a release.
 - Reviewed executable source baseline for this candidate:
   `d99fefaa8fec97348ffb990e066d42371a0cdb69`. Every entry above describes
   behavior present at that commit. Later commits on the release branch change
-  documentation only; certification and tagging of the frozen source belong to
-  [#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54) and
-  [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+  documentation only. Freezing, certifying, tagging and publishing that source
+  belong to [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)
+  and have not yet been performed.
 
-- Reconciled the candidate documentation set — README, changelog, installation,
-  release and certification guidance, and the repository templates — against the
-  source baseline above
-  ([#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54)).
+- Reconciled `README.md`, `CHANGELOG.md` and `VERSION` against the executable
+  source baseline above. Installation, release and certification guidance and the
+  repository templates remain outstanding under
+  [#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54).
 
 - Converged the release branch with the standardized repository baseline from
   `main` ([#75](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/75)).

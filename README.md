@@ -1616,7 +1616,7 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Source status:** `v1.2.2` candidate, on the `v1.2.1` integrity-hotfix baseline. Latest published release remains `v1.2.1`; the candidate is certified and tagged by [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+**Source status:** `v1.2.2` candidate, on the `v1.2.1` integrity-hotfix baseline. Latest published release remains `v1.2.1`; certification and tagging of the `v1.2.2` candidate are owned by [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) and have not yet been performed.
 
 **Reviewed executable source baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). Every behavioral claim on this page describes that commit. Later commits on the release branch change documentation only.
 
