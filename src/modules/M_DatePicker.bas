@@ -10840,7 +10840,7 @@ Private Function M_WriteBack_CountRetainedAddresses( _
     If VBA.LenB(VBA.Trim$(AddressList)) = 0 Then Exit Function
     AddressParts = VBA.Split(AddressList, ", ")
     M_WriteBack_CountRetainedAddresses = _
-        VBA.UBound(AddressParts) - VBA.LBound(AddressParts) + 1
+        UBound(AddressParts) - LBound(AddressParts) + 1
 
 SafeExit:
     Err.Clear

@@ -195,7 +195,6 @@ Public Sub DP_Demo_CreateDemoSheet( _
     Dim Wb                  As Workbook                 'Resolved target workbook
     Dim WS                  As Worksheet                'Demo worksheet
     Dim FastModeState       As tDEMOFastModeState       'Saved Application-state snapshot
-    Dim FastModeOn          As Boolean                  'True once fast mode was entered
     Dim SavedErrNumber      As Long                     'Captured error number
     Dim SavedErrDescription As String                   'Captured error description
     Dim HandlerStep         As String                   'Current handler step for diagnostics
@@ -209,10 +208,11 @@ Public Sub DP_Demo_CreateDemoSheet( _
     'Resolve the workbook that will receive the demo sheet
         Set Wb = DP_Demo_ResolveTargetWorkbook(TargetWorkbook)
 
-    'Capture and apply fast-mode Application settings
+    'Capture and apply fast-mode Application settings. The record tracks whether
+    'fast mode is active, so no separate local flag is kept: two places holding
+    'the same fact is how they come to disagree
         HandlerStep = "Enter fast mode"
         DEMO_FastMode_Begin FastModeState
-        FastModeOn = True
 
     'Show the wait cursor while the sheet is rebuilt
         Application.Cursor = xlWait
@@ -297,8 +297,10 @@ CleanExit:
         On Error Resume Next
     'Restore the default cursor
         Application.Cursor = xlDefault
-    'Restore the captured Application state
-        If FastModeOn Then DEMO_FastMode_End FastModeState
+    'Restore the captured Application state. End is inert on a record that never
+    'captured anything, so it is safe after a Begin that failed and rolled itself
+    'back, and safe if it somehow runs twice
+        DEMO_FastMode_End FastModeState
     'Release object references
         Set WS = Nothing
         Set Wb = Nothing

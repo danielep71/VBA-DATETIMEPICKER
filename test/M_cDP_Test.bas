@@ -1043,6 +1043,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "SelectDate"
     'Run Ribbon demo-sheet toggle decision checks
         TST_DP_RunSuiteSafe "RibbonDemo"
+    'Run demo builder fast-mode transaction checks
+        TST_DP_RunSuiteSafe "DemoFastMode"
 
     'Run the application-state suite
         TST_DP_RunSuiteSafe "ApplicationState"
@@ -1389,6 +1391,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "RIBBONDEMO"
                 TST_DP_RunSuite_RibbonDemo
+
+            Case "DEMOFASTMODE"
+                TST_DP_RunSuite_DemoFastMode
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
             Case "WINDOWRECOVERY"
@@ -3650,7 +3655,7 @@ Private Function TST_DP_CountWriteAddressesForTest( _
     If VBA.LenB(VBA.Trim$(AddressList)) = 0 Then Exit Function
     Parts = VBA.Split(AddressList, ", ")
     TST_DP_CountWriteAddressesForTest = _
-        VBA.UBound(Parts) - VBA.LBound(Parts) + 1
+        UBound(Parts) - LBound(Parts) + 1
 
 End Function
 
@@ -7642,6 +7647,263 @@ SuiteFail:
         TST_DP_RecordFail "RibbonDemo suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
         Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_DemoFastMode()
+
+'
+'==============================================================================
+'                           DEMO FAST MODE SUITE
+'==============================================================================
+' PURPOSE
+'   Validates the demo builder's fast-mode entry and exit as a transaction
+'
+' WHY THIS EXISTS
+'   DEMO_FastMode_Begin captured and mutated four Application properties in
+'   sequence with no rollback, so a failure partway through left Excel half in
+'   fast mode with the caller holding an incomplete snapshot. End restored
+'   sequentially too, so one failed restoration abandoned the rest
+'
+'   Losing EnableEvents that way is invisible: the caller sees no error, only a
+'   workbook that has silently stopped reacting
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives DEMO_FastMode_Begin and DEMO_FastMode_End against real Application
+'   state, with faults injected at entry and restoration boundaries
+'
+' ERROR POLICY
+'   Records suite-level failures and continues. Restores the harness's own
+'   Application state on every path
+'
+' DEPENDENCIES
+'   DEMO_FastMode_Begin
+'   DEMO_FastMode_End
+'   DEMO_FastMode_Test_ArmFault
+'   tDEMOFastModeState
+'
+' NOTES
+'   These cases mutate real Application state deliberately: the contract is about
+'   what Excel is left holding, and a mocked property would prove nothing. The
+'   run's own values are captured on entry and restored in both exit paths
+'
+'   This suite is demo-builder coverage living in the harness, which deepens the
+'   coupling #35 exists to remove. #35 and #62 must relocate it with the demo
+'   split rather than drop it as obsolete
+'
+'   The record is declared locally. Every fact the transaction reports lives in
+'   tDEMOFastModeState, so no observation seam is needed and an abandoned record
+'   can never lock out a later run
+'
+' UPDATED
+'   2026-09-17
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const INJECTED_ERROR As Long = vbObjectError + 2850
+
+    Dim State           As tDEMOFastModeState   'Record under test
+    Dim Inert           As tDEMOFastModeState   'Record that never entered fast mode
+
+    Dim RunScreen       As Boolean      'Harness ScreenUpdating on entry
+    Dim RunEvents       As Boolean      'Harness EnableEvents on entry
+    Dim RunAlerts       As Boolean      'Harness DisplayAlerts on entry
+    Dim RunCalc         As XlCalculation 'Harness Calculation on entry
+
+    Dim AppliedAll      As Boolean      'All four properties reported as applied
+    Dim FastValues      As Boolean      'Excel actually sits at the fast-mode values
+    Dim RestoredExact   As Boolean      'Captured values came back exactly
+    Dim ReEntryRaised   As Boolean      'A second Begin on an active record raised
+    Dim RollbackClean   As Boolean      'A failed Begin left every property as found
+    Dim BeginErrNumber  As Long         'Error a failed Begin reported
+    Dim InertRaised     As Boolean      'End on an inert record raised
+    Dim SecondEndRaised As Boolean      'A second End raised
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "DemoFastMode"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Capture the run's own Application state before anything moves it
+        RunScreen = Excel.Application.ScreenUpdating
+        RunEvents = Excel.Application.EnableEvents
+        RunAlerts = Excel.Application.DisplayAlerts
+        RunCalc = Excel.Application.Calculation
+    'Never let an armed fault survive into this suite
+        DEMO_FastMode_Test_ArmFault VBA.vbNullString, 0
+
+'------------------------------------------------------------------------------
+' ENTRY CAPTURES AND APPLIES
+'------------------------------------------------------------------------------
+    'Put Excel into values that differ from fast mode, so a restoration that does
+    'nothing cannot pass by coincidence
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Begin State
+        AppliedAll = State.Active And State.Captured And _
+            State.ScreenUpdatingApplied And State.EnableEventsApplied And _
+            State.DisplayAlertsApplied And State.CalculationApplied
+        FastValues = (Excel.Application.ScreenUpdating = False) And _
+            (Excel.Application.DisplayAlerts = False) And _
+            (Excel.Application.Calculation = xlCalculationManual)
+
+'------------------------------------------------------------------------------
+' RE-ENTRY ON AN ACTIVE RECORD IS REFUSED
+'------------------------------------------------------------------------------
+    'A second Begin would capture the values fast mode just applied and store
+    'them as the caller's originals
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_Begin State
+        ReEntryRaised = (Err.Number <> 0)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' EXIT RESTORES EXACTLY
+'------------------------------------------------------------------------------
+        DEMO_FastMode_End State
+        RestoredExact = (Excel.Application.ScreenUpdating = True) And _
+            (Excel.Application.DisplayAlerts = True) And _
+            (Excel.Application.Calculation = xlCalculationAutomatic) And _
+            (State.RestoreFailureCount = 0) And _
+            (State.Active = False)
+
+'------------------------------------------------------------------------------
+' A SECOND EXIT IS INERT
+'------------------------------------------------------------------------------
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_End State
+        SecondEndRaised = (Err.Number <> 0)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' AN EXIT ON A RECORD THAT NEVER ENTERED IS INERT
+'------------------------------------------------------------------------------
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_End Inert
+        InertRaised = (Err.Number <> 0)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' A PARTIAL ENTRY ROLLS ITSELF BACK
+'------------------------------------------------------------------------------
+    'Fail on the third property, so two are already applied when it stops
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Test_ArmFault "Begin.DisplayAlerts", INJECTED_ERROR
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_Begin State
+        BeginErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        RollbackClean = (Excel.Application.ScreenUpdating = True) And _
+            (Excel.Application.DisplayAlerts = True) And _
+            (Excel.Application.Calculation = xlCalculationAutomatic) And _
+            (State.Active = False) And (State.Captured = False) And _
+            (State.ScreenUpdatingApplied = False) And _
+            (State.EnableEventsApplied = False)
+
+'------------------------------------------------------------------------------
+' ASSERT ENTRY, EXIT AND ROLLBACK
+'------------------------------------------------------------------------------
+    'Entry reports every property it changed
+        TST_DP_AssertTrue "Entry captures and applies all four properties", _
+            AppliedAll
+    'Excel really sits at the fast-mode values
+        TST_DP_AssertTrue "Entry leaves Excel at the fast-mode values", FastValues
+    'A second entry on an active record is refused
+        TST_DP_AssertTrue "Re-entry on an active record is refused", ReEntryRaised
+    'Exit restores what the caller had, not what fast mode applied
+        TST_DP_AssertTrue "Exit restores the captured values exactly", RestoredExact
+    'Exit is safe to repeat
+        TST_DP_AssertFalse "A second exit does not raise", SecondEndRaised
+    'Exit is safe on a record that never entered
+        TST_DP_AssertFalse "Exit on a record that never entered does not raise", _
+            InertRaised
+    'A failed entry raises the failure that stopped it, not a rollback error
+        TST_DP_AssertEqualsLong "A failed entry preserves the original error", _
+            INJECTED_ERROR, BeginErrNumber
+    'A failed entry leaves Excel and the record exactly as it found them
+        TST_DP_AssertTrue "A failed entry rolls back every applied property", _
+            RollbackClean
+
+'------------------------------------------------------------------------------
+' ONE FAILED RESTORATION DOES NOT ABANDON THE REST
+'------------------------------------------------------------------------------
+    'Enter cleanly, then fail the second restoration. The remaining two must
+    'still be restored, which is the half of the contract a sequential End lost
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Begin State
+        DEMO_FastMode_Test_ArmFault "End.EnableEvents", INJECTED_ERROR
+        DEMO_FastMode_End State
+
+        TST_DP_AssertEqualsLong "A failed restoration is counted", _
+            1, State.RestoreFailureCount
+        TST_DP_AssertTrue "The failure detail names the property", _
+            VBA.InStr(1, State.RestoreFailureDetail, "EnableEvents", _
+                vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Restorations after the failure still ran", _
+            (Excel.Application.DisplayAlerts = True) And _
+            (Excel.Application.Calculation = xlCalculationAutomatic)
+        TST_DP_AssertTrue "Restorations before the failure still ran", _
+            Excel.Application.ScreenUpdating = True
+        TST_DP_AssertFalse "The record is released despite the failure", _
+            State.Active
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm any fault and put the run's own Application state back
+        On Error Resume Next
+        DEMO_FastMode_Test_ArmFault VBA.vbNullString, 0
+        Excel.Application.Calculation = RunCalc
+        Excel.Application.DisplayAlerts = RunAlerts
+        Excel.Application.EnableEvents = RunEvents
+        Excel.Application.ScreenUpdating = RunScreen
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "DemoFastMode suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore the run's Application state regardless
+        Resume SuiteExit
 
 End Sub
 
