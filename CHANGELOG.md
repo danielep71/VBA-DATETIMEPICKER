@@ -191,12 +191,15 @@ Use only the categories needed by a release.
 
 - Verified historical version ordering, comparison links, and policy links.
 
-- Reviewed executable source baseline for this candidate:
-  `d99fefaa8fec97348ffb990e066d42371a0cdb69`. Every entry above describes
-  behavior present at that commit. Later commits on the release branch change
-  documentation only. Freezing, certifying, tagging and publishing that source
-  belong to [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)
-  and have not yet been performed.
+- Reviewed executable implementation baseline for this candidate:
+  `d99fefaa8fec97348ffb990e066d42371a0cdb69`. Every behavioral entry above
+  describes behavior present at that implementation commit. Subsequent
+  release-line commits through the documentation reconciliation do not change
+  `src/`, `test/` or `demo/`. This SHA is the implementation-review
+  baseline, not the final release identity: after the release line is integrated
+  to `main`, [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)
+  certifies the resulting `main` commit and the annotated `v1.2.2` tag targets
+  that exact certified commit.
 
 - Reconciled the candidate documentation set against the executable source
   baseline above: `README.md`, `CHANGELOG.md`, `VERSION`, `dist/README.md`,

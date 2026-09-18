@@ -1618,7 +1618,7 @@ rather than a closed compiled-only component.
 
 **Source status:** `v1.2.2` candidate, on the `v1.2.1` integrity-hotfix baseline. Latest published release remains `v1.2.1`; certification and tagging of the `v1.2.2` candidate are owned by [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) and have not yet been performed.
 
-**Reviewed executable source baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). Every behavioral claim on this page describes that commit. Later commits on the release branch change documentation only.
+**Reviewed executable implementation baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). The `v1.2.2` behavioral claims on this page were reviewed against that implementation commit; subsequent release-line commits through the documentation reconciliation do not change `src/`, `test/` or `demo/`. This SHA is retained as the implementation-review baseline, **not** as the final release identity. Under [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), the resulting `main` commit is certified and the annotated `v1.2.2` tag targets that exact certified commit.
 
 The project is suitable for controlled Excel/VBA environments when the documented ownership, settings and application-wide shortcut boundaries are respected.
 
