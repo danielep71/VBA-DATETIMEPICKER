@@ -13,10 +13,10 @@
 
 ### Write-back safety · Runtime ownership · UI lifecycle · Exact evidence
 
-[![Contributing](https://img.shields.io/badge/guide-CONTRIBUTING-217346?style=flat-square)](../CONTRIBUTING.md)
-[![Security](https://img.shields.io/badge/security-private%20reporting-d73a49?style=flat-square)](../SECURITY.md)
-[![Release](https://img.shields.io/badge/release-RELEASING-6f42c1?style=flat-square)](../RELEASING.md)
-[![Changelog](https://img.shields.io/badge/changes-Unreleased-d97706?style=flat-square)](../CHANGELOG.md)
+[![Contributing](https://img.shields.io/badge/guide-CONTRIBUTING-217346?style=flat-square)](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/CONTRIBUTING.md)
+[![Security](https://img.shields.io/badge/security-private%20reporting-d73a49?style=flat-square)](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/SECURITY.md)
+[![Release](https://img.shields.io/badge/release-RELEASING-6f42c1?style=flat-square)](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/RELEASING.md)
+[![Changelog](https://img.shields.io/badge/changes-Unreleased-d97706?style=flat-square)](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/CHANGELOG.md)
 
 </div>
 
@@ -154,14 +154,35 @@ Relevant entry points:
 
 | Evidence | Result |
 | --- | --- |
-| Tested commit SHA | <!-- Full SHA or N/A --> |
+| Tested commit SHA | <!-- Full 40-character SHA, or N/A --> |
+| Host | <!-- embedded .xlsm / packaged .xlam — name which --> |
 | `Debug → Compile VBAProject` | <!-- PASS / FAIL / NOT RUN / N/A --> |
-| Regression/certification entry point | <!-- Exact procedure --> |
-| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN --> |
-| Cases / assertions / failures | <!-- Counts or N/A --> |
-| Skipped / cleanup outcome | <!-- Counts and state or N/A --> |
 | Focused and manual checks | <!-- Scenarios + result --> |
 | Evidence file or workflow | <!-- Name / URL / N/A --> |
+
+Paste the runner's own summary line verbatim for each entry point you ran. Do
+not retype the counts into prose: the line is the evidence, and a transcribed
+figure is a claim about the evidence.
+
+```text
+TST_DP_RunAll
+<!-- e.g. INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
+
+TST_DP_RunAll_WithUISmoke
+<!-- e.g. INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
+
+Suite topology:   <!-- ## standard / ## with UI smoke -->
+```
+
+> [!IMPORTANT]
+> Figures belong to the SHA they were produced on. If the branch moves after a
+> run — even for a documentation-only commit — either re-run or state plainly
+> which SHA the figures describe. A figure quoted against the wrong commit is
+> worse than no figure, because it looks like evidence.
+>
+> An unqualified `PASS` is not evidence either. Name the host: the embedded
+> `.xlsm` and the packaged `.xlam` are different artifacts and have failed
+> differently before.
 
 ### Validation environment
 

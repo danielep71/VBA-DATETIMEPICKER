@@ -77,9 +77,9 @@ main
 Identify the exact source you tested.
 
 ```text
-Release tag:         <e.g. v1.2.0 / N/A>
+Release tag:         <e.g. v1.2.1 / N/A>
 Commit SHA:          <full 40-character SHA if known>
-Branch:              <main / release/v1.2.0 / other / N/A>
+Branch:              <main / release/x.y.z / other / N/A>
 Source obtained from:<official repository / GitHub Release / other>
 ```
 
@@ -254,10 +254,12 @@ Other provider type:    embedded / .xlam / unknown
 > For provider/registration problems, the **version of every DatePicker copy in
 > the same Excel process matters**.
 >
-> `v1.2.0 + v1.2.0` participates in the provider-lease protocol.
+> Two copies at `v1.2.0` or later both participate in the provider-lease
+> protocol.
 >
-> `v1.2.0 + pre-v1.2.0` is a mixed-version session and is not protected in the
-> same way.
+> A copy at `v1.2.0` or later alongside a **pre-`v1.2.0`** copy is a
+> mixed-version session and is not protected in the same way. `v1.2.0` is the
+> genuine protocol boundary: the lease did not exist before it.
 
 ---
 
@@ -396,7 +398,7 @@ Number format:
 Formula/value after:
 ```
 
-Expected v1.2.0 normal behavior includes:
+Expected normal behavior includes:
 
 ```text
 selected Table cell
@@ -524,8 +526,8 @@ Excel fully restarted after:   yes / no
 
 Check what you observed:
 
-- [ ] Second `v1.2.0` provider was correctly refused
-- [ ] Second `v1.2.0` provider was not refused
+- [ ] Second lease-participating provider was correctly refused
+- [ ] Second lease-participating provider was not refused
 - [ ] Refused provider altered owner state
 - [ ] Refused provider removed owner state during teardown
 - [ ] Stale lease remained after VBA reset
@@ -853,8 +855,8 @@ Check anything that appears necessary for reproduction:
 - [ ] Embedded source only
 - [ ] `.xlam` only
 - [ ] Embedded + `.xlam`
-- [ ] Two `v1.2.0` providers
-- [ ] `v1.2.0` + pre-v1.2.0 provider
+- [ ] Two lease-participating providers (`v1.2.0` or later)
+- [ ] Lease-participating provider + pre-`v1.2.0` provider
 - [ ] Another third-party add-in
 - [ ] Protected worksheet
 - [ ] Excel Table

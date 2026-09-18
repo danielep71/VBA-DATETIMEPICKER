@@ -303,7 +303,7 @@ Preview/confirmation required:
 Behavior if target changes before write:
 ```
 
-Current v1.2.0 safety baseline:
+Current safety baseline:
 
 ```text
 normal calendar / Today / Now
@@ -486,7 +486,7 @@ for them at all.
 
 <br>
 
-Current v1.2.0 model:
+Current model:
 
 ```text
 one participating current-version provider per Excel process
@@ -539,7 +539,7 @@ Recovery:
 How should the feature behave with:
 
 ```text
-new version + current v1.2.0
+new version + current release
 new version + pre-v1.2.0
 ```
 
