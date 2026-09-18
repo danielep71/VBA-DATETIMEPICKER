@@ -78,15 +78,20 @@ Optional material is not part of the normal runtime unless stated otherwise:
 |---|---|
 | `src/ribbon/customUI14.xml` | Optional RibbonX package metadata; not a VBE module |
 | `test/M_cDP_Test.bas` | Regression harness |
-| `demo/M_DEMO_BUILDER.bas` and `demo/M_DP_DEMO.bas` | Source-built demonstration, **and a dependency of the regression harness** |
+| `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **and a dependency of the regression harness** |
+| `demo/M_DP_DEMO.bas` | Source-built demonstration entry points; not required by the harness |
 
 > [!IMPORTANT]
 > The regression harness does not stand alone. `test/M_cDP_Test.bas` calls into
 > `demo/M_DEMO_BUILDER.bas` — it builds its result sheet through
-> `DEMO_Sheet_BuildTemplate` and exercises the demo fast-mode transaction — so
-> `TST_DP_RunAll` will not compile without the demo modules imported alongside
-> it. Import the demo pair whenever you import the harness. Decoupling the
-> harness from the demo builder is tracked as
+> `DEMO_Sheet_BuildTemplate`, and it exercises the fast-mode transaction through
+> `DEMO_FastMode_Begin`, `DEMO_FastMode_End`, `DEMO_FastMode_Test_ArmFault`,
+> `DEMO_FastMode_ResolveFailure` and `tDEMOFastModeState`. `TST_DP_RunAll` will
+> not compile without that module imported alongside it.
+>
+> `demo/M_DP_DEMO.bas` is **not** required by the harness. Import it only when
+> you want the demonstration entry points themselves. Decoupling the harness
+> from the demo builder is tracked as
 > [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35).
 
 > [!CAUTION]
@@ -165,9 +170,12 @@ from source you imported.
 4. Confirm no second provider is already active: a refusal message naming the
    provider lease means another copy owns the Excel process.
 
-The regression harness is **not** included in the published `.xlam`. Harness
-evidence comes from the source package or from certification, not from the
-installed add-in.
+Do not assume anything about what a published `.xlam` contains. Package contents
+are release-specific and are determined by that release's build and
+certification process — the `v1.2.1` package, for instance, ran the regression
+pack inside the packaged add-in as part of its certification. Consumer
+validation should use the supported user-facing paths above; certification
+evidence for the exact package is recorded in the release itself.
 
 ### Remove
 
