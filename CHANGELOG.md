@@ -198,10 +198,30 @@ Use only the categories needed by a release.
   belong to [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)
   and have not yet been performed.
 
-- Reconciled `README.md`, `CHANGELOG.md` and `VERSION` against the executable
-  source baseline above. Installation, release and certification guidance and the
-  repository templates remain outstanding under
-  [#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54).
+- Reconciled the candidate documentation set against the executable source
+  baseline above: `README.md`, `CHANGELOG.md`, `VERSION`, `dist/README.md`,
+  `INSTALLATION.md`, `CONTRIBUTING.md`, `RELEASING.md`, the pull-request and
+  issue templates, and the new `docs/RELEASE_CERTIFICATION_TEMPLATE.md`
+  ([#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54)). The
+  project Wiki is maintained outside this repository and is reconciled
+  separately.
+
+- Documented the real compile dependency of the current product: `M_DatePicker`
+  reaches `DP_Demo_EnsureDemoSheet` in `demo/M_DP_DEMO.bas`, which in turn calls
+  `demo/M_DEMO_BUILDER.bas`, so `src/` does not compile on its own. This predates
+  `v1.2.0` and is recorded as current fact rather than intended architecture;
+  removing it is tracked as
+  [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86) under
+  [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24). The separate
+  harness dependency on `demo/M_DEMO_BUILDER.bas` remains
+  [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35).
+
+- Added `docs/RELEASE_CERTIFICATION_TEMPLATE.md`, which records certification
+  evidence in a fixed shape: reviewed source SHA and tagged SHA as separate
+  fields, mandatory evidence for both the embedded `.xlsm` and the packaged
+  `.xlam`, verbatim runner summary lines, and the source-identity rules that
+  force a rebuild, package retest and re-hash when candidate source changes after
+  artifacts exist.
 
 - Converged the release branch with the standardized repository baseline from
   `main` ([#75](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/75)).
