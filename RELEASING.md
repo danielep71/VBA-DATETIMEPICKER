@@ -92,8 +92,14 @@ Test both embedded-source and add-in consumption if both are advertised for the 
 git fetch --tags --prune
 git rev-parse HEAD
 git status --short
-git diff --stat <previous-tag>...HEAD
+git diff --stat <previous-tag>..HEAD
+git diff --name-status <previous-tag>..HEAD
 ```
+
+Use **direct previous-tag → candidate endpoint semantics** for the release delta.
+Do not use three-dot merge-base semantics here: release review asks what changed
+between the source actually released last time and the source being proposed
+now. Review the full diff as needed after the stat/name-status pass.
 
 A dirty tree, unknown generated file, or unreviewed binary delta is blocking.
 
@@ -150,7 +156,13 @@ Certification rules:
 - Record Excel version, Windows version, and Office bitness.
 - Test the advertised environment matrix.
 - Treat warnings, repairs, or unexplained numerical deltas as failures.
-- If code changes after certification, restart static and Excel validation.
+- If the candidate SHA changes after certification, the prior exact-source
+  evidence no longer certifies the new candidate; rerun the affected static and
+  Excel gates.
+- If the candidate SHA changes after release artifacts have been built, **discard
+  the prior package-test and hash evidence**. Rebuild the artifacts from the new
+  exact candidate, reopen and package-test them again, and compute new hashes
+  only after those exact rebuilt files pass.
 
 ## 7. Build release artifacts
 
@@ -192,7 +204,11 @@ Where policy requires a pull request, make these items easy to verify:
 - compatibility, migration, and security notes;
 - remaining limitations.
 
-Require configured checks and record the resulting `main` SHA. If the merge changes source identity, certify that commit before tagging.
+Require configured checks and record the resulting `main` SHA. If the merge
+changes source identity, do not carry pre-merge artifacts, package results or
+hashes forward. Return to the exact-candidate certification/build sequence:
+compile and certify the merged source, rebuild both release artifacts from that
+SHA, package-test the rebuilt files, and re-hash them before tagging.
 
 ## 9. Create the annotated tag
 

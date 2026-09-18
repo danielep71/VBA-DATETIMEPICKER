@@ -107,7 +107,9 @@ required to compile or to test the project as it currently stands:
 > `v1.2.0` and is not introduced by any `v1.2.2` change. Decoupling the harness
 > from the demo builder is tracked as
 > [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35); the
-> production-to-demo dependency belongs with the module-boundary work in
+> production-to-demo dependency is tracked as
+> [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86), under the
+> module-boundary work in
 > [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24).
 
 > [!CAUTION]
