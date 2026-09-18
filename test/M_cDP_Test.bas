@@ -7740,6 +7740,10 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
     Dim ResolvedText    As String       'Resolver output description
     Dim ResolverSaysFail As Boolean     'Resolver verdict
     Dim Clean           As tDEMOFastModeState 'Record with nothing recorded
+    Dim RollbackCounted As Boolean       'A real rollback failure was counted
+    Dim RollbackNamed   As Boolean       'The rollback detail names the property
+    Dim RollbackOthersRan As Boolean     'Rollback steps after the failure still ran
+    Dim CompoundResolved As String       'Resolver text for the compound failure
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -7974,7 +7978,12 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
         Excel.Application.DisplayAlerts = True
         Excel.Application.Calculation = xlCalculationAutomatic
 
+    'Two faults are staged. The entry fault fires at the third property, so
+    'ScreenUpdating and EnableEvents are already applied; the rollback fault then
+    'fires while EnableEvents is being undone. A single-slot injector could not
+    'do this: the entry fault consumes it and rollback runs clean
         DEMO_FastMode_Test_ArmFault "Begin.DisplayAlerts", INJECTED_ERROR
+        DEMO_FastMode_Test_ArmFault "Rollback.EnableEvents", INJECTED_ERROR
         On Error Resume Next
         Err.Clear
         DEMO_FastMode_Begin Swept
@@ -7982,6 +7991,20 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
         Err.Clear
     'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
+
+    'The rollback failure must be counted and named, and the rollback steps after
+    'it must still have run. ScreenUpdating is applied before EnableEvents, so it
+    'is rolled back after it
+        RollbackCounted = (Swept.RollbackFailureCount = 1)
+        RollbackNamed = (VBA.InStr(1, Swept.RollbackFailureDetail, "EnableEvents", _
+            vbBinaryCompare) > 0)
+        RollbackOthersRan = (Excel.Application.ScreenUpdating = True)
+    'Resolve the operation outcome from the real compound record
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(CompoundErr, "Primary cause", _
+            Swept, ResolvedNumber, CompoundResolved)
+    'EnableEvents was deliberately left unrolled; put it back before continuing
+        Excel.Application.EnableEvents = RunEvents
+        DEMO_FastMode_Test_ArmFault VBA.vbNullString, 0
 
 '------------------------------------------------------------------------------
 ' ASSERT THE BOUNDARY SWEEPS
@@ -7999,6 +8022,20 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
     'A failed entry reports the entry failure, not a rollback error
         TST_DP_AssertEqualsLong "A compound failure reports the entry error", _
             INJECTED_ERROR, CompoundErr
+    'The rollback failure is counted separately from the entry failure
+        TST_DP_AssertTrue "A failed rollback is counted", RollbackCounted
+    'And it names the property it could not undo
+        TST_DP_AssertTrue "The rollback detail names the property", RollbackNamed
+    'Rollback steps after the failed one still ran
+        TST_DP_AssertTrue "Rollback continues past a failed step", _
+            RollbackOthersRan
+    'The resolver keeps the entry error and appends the real rollback evidence
+        TST_DP_AssertTrue "The resolver appends the real rollback failure", _
+            ResolverSaysFail And _
+            (ResolvedNumber = INJECTED_ERROR) And _
+            (VBA.InStr(1, CompoundResolved, "rollback incomplete", _
+                vbTextCompare) > 0) And _
+            (VBA.InStr(1, CompoundResolved, "EnableEvents", vbBinaryCompare) > 0)
 
 '------------------------------------------------------------------------------
 ' ASSERT THE OPERATION OUTCOME RESOLVER

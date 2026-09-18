@@ -121,8 +121,11 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '------------------------------------------------------------------------------
 ' PRIVATE STATE
 '------------------------------------------------------------------------------
-    Private mDEMO_FastModeFaultStep   As String   'Fast-mode boundary armed to fail
-    Private mDEMO_FastModeFaultNumber As Long     'Error number that boundary reports
+    'Two slots, because one transaction can need two failures: an entry that
+    'fails and a rollback step that then also fails. A single slot is consumed by
+    'the entry fault and the rollback never sees one
+    Private mDEMO_FastModeFaultStep(0 To 1)   As String   'Fast-mode boundaries armed to fail
+    Private mDEMO_FastModeFaultNumber(0 To 1) As Long     'Error numbers those boundaries report
 
 '------------------------------------------------------------------------------
 ' PUBLIC ENUMS
@@ -738,8 +741,12 @@ Private Sub DEMO_FastMode_RaiseIfFault(ByVal StepName As String)
 '   mDEMO_FastModeFaultNumber
 '
 ' NOTES
-'   One-shot by construction: the armed step is cleared as the fault is raised,
-'   so an armed fault cannot affect a second boundary or leak into a later suite
+'   Each slot is one-shot: the matched slot is cleared as its fault is raised, so
+'   an armed fault cannot affect a second boundary or leak into a later suite
+'
+'   Only the matched slot is consumed. A fault armed for a later boundary, such
+'   as a rollback step, survives the one that fires first. That is what lets a
+'   single transaction fail at entry and then fail again while rolling back
 '
 '   The comparison is binary, so a step name differing only in case does not
 '   match
@@ -752,17 +759,29 @@ Private Sub DEMO_FastMode_RaiseIfFault(ByVal StepName As String)
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim FaultNumber As Long     'Armed number being consumed
+    Dim SlotIndex   As Long     'Slot being examined
+    Dim MatchedSlot As Long     'Slot holding this boundary, or -1
 
 '------------------------------------------------------------------------------
 ' CONSUME AND RAISE
 '------------------------------------------------------------------------------
+    'Find the slot armed for this boundary, if any
+        MatchedSlot = -1
+        For SlotIndex = LBound(mDEMO_FastModeFaultStep) To UBound(mDEMO_FastModeFaultStep)
+            If VBA.LenB(mDEMO_FastModeFaultStep(SlotIndex)) > 0 Then
+                If VBA.StrComp(mDEMO_FastModeFaultStep(SlotIndex), StepName, _
+                    vbBinaryCompare) = 0 Then
+                    MatchedSlot = SlotIndex
+                    Exit For
+                End If
+            End If
+        Next SlotIndex
     'Exit when nothing is armed for this boundary
-        If VBA.LenB(mDEMO_FastModeFaultStep) = 0 Then Exit Sub
-        If VBA.StrComp(mDEMO_FastModeFaultStep, StepName, vbBinaryCompare) <> 0 Then Exit Sub
-    'Consume the fault before raising it
-        FaultNumber = mDEMO_FastModeFaultNumber
-        mDEMO_FastModeFaultStep = VBA.vbNullString
-        mDEMO_FastModeFaultNumber = 0
+        If MatchedSlot < 0 Then Exit Sub
+    'Consume only the matched slot, leaving any other armed fault in place
+        FaultNumber = mDEMO_FastModeFaultNumber(MatchedSlot)
+        mDEMO_FastModeFaultStep(MatchedSlot) = VBA.vbNullString
+        mDEMO_FastModeFaultNumber(MatchedSlot) = 0
     'Raise the injected failure
         Err.Raise FaultNumber, "DEMO_FastMode_TestFault", _
             "Injected fast-mode failure at " & StepName
@@ -786,7 +805,7 @@ Public Sub DEMO_FastMode_Test_ArmFault( _
 '
 ' INPUTS
 '   StepName
-'     Boundary to fail; an empty string disarms
+'     Boundary to fail; an empty string disarms every slot
 '
 '   ErrorNumber
 '     Error number that boundary reports
@@ -805,6 +824,11 @@ Public Sub DEMO_FastMode_Test_ArmFault( _
 '   mDEMO_FastModeFaultNumber
 '
 ' NOTES
+'   Two faults can be armed at once, which is what a compound case needs: an
+'   entry boundary and a rollback boundary that fires while the entry failure is
+'   being undone. A single slot is consumed by the entry fault and the rollback
+'   never sees one
+'
 '   Public only because the regression harness is a separate module. It takes
 '   arguments, so it does not appear in the macro dialog, and #25 classifies it
 '   as internal rather than supported API
@@ -813,9 +837,35 @@ Public Sub DEMO_FastMode_Test_ArmFault( _
 '   2026-09-17
 '------------------------------------------------------------------------------
 
-    'Store the armed boundary
-        mDEMO_FastModeFaultStep = StepName
-        mDEMO_FastModeFaultNumber = ErrorNumber
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SlotIndex As Long   'Slot being filled
+
+'------------------------------------------------------------------------------
+' ARM THE BOUNDARY
+'------------------------------------------------------------------------------
+    'An empty name disarms every slot
+        If VBA.LenB(StepName) = 0 Then
+            For SlotIndex = LBound(mDEMO_FastModeFaultStep) To UBound(mDEMO_FastModeFaultStep)
+                mDEMO_FastModeFaultStep(SlotIndex) = VBA.vbNullString
+                mDEMO_FastModeFaultNumber(SlotIndex) = 0
+            Next SlotIndex
+            Exit Sub
+        End If
+    'Store the boundary in the first free slot
+        For SlotIndex = LBound(mDEMO_FastModeFaultStep) To UBound(mDEMO_FastModeFaultStep)
+            If VBA.LenB(mDEMO_FastModeFaultStep(SlotIndex)) = 0 Then
+                mDEMO_FastModeFaultStep(SlotIndex) = StepName
+                mDEMO_FastModeFaultNumber(SlotIndex) = ErrorNumber
+                Exit Sub
+            End If
+        Next SlotIndex
+    'Both slots are taken. Replace the oldest rather than silently ignoring the
+    'request, so a test that arms three faults fails visibly instead of quietly
+    'running with the first two
+        mDEMO_FastModeFaultStep(LBound(mDEMO_FastModeFaultStep)) = StepName
+        mDEMO_FastModeFaultNumber(LBound(mDEMO_FastModeFaultNumber)) = ErrorNumber
 
 End Sub
 
