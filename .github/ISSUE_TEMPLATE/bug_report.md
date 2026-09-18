@@ -254,12 +254,13 @@ Other provider type:    embedded / .xlam / unknown
 > For provider/registration problems, the **version of every DatePicker copy in
 > the same Excel process matters**.
 >
-> Two copies at `v1.2.0` or later both participate in the provider-lease
+> Two lease-participating providers both take part in the provider-lease
 > protocol.
 >
-> A copy at `v1.2.0` or later alongside a **pre-`v1.2.0`** copy is a
+> A lease-participating provider alongside a **pre-`v1.2.0`** copy is a
 > mixed-version session and is not protected in the same way. `v1.2.0` is the
-> genuine protocol boundary: the lease did not exist before it.
+> genuine protocol boundary: the lease did not exist before it, so any copy from
+> that release onward participates and anything older does not.
 
 ---
 

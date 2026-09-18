@@ -19,19 +19,27 @@ this file records what that procedure produced.
 | Field | Value |
 | --- | --- |
 | Reviewed source SHA | <!-- full 40-character SHA of the source the evidence describes --> |
-| Tagged SHA | <!-- full 40-character SHA the tag points at --> |
+| Tag name | <!-- e.g. vX.Y.Z --> |
+| Annotated tag object SHA | <!-- `git rev-parse vX.Y.Z` --> |
+| Tag target SHA | <!-- `git rev-parse vX.Y.Z^{commit}` --> |
 | Previous release tag | <!-- e.g. vX.Y.Z-1 --> |
 | `VERSION` file contents | <!-- must equal the version above --> |
 | Branch | <!-- e.g. release/vX.Y.Z --> |
 
 > [!IMPORTANT]
-> The reviewed source SHA and the tagged SHA are recorded separately on purpose.
+> An annotated tag is its own git object. `git rev-parse vX.Y.Z` returns the tag
+> object; `git rev-parse vX.Y.Z^{commit}` returns the commit it targets. Both are
+> recorded because only the target can be compared against the reviewed source,
+> and quoting the tag object SHA as though it were the commit is wrong in a way
+> nothing surfaces.
+>
+> The reviewed source SHA and the tag target SHA are also recorded separately.
 > They are usually the same. When they are not — because documentation-only
 > commits landed after the last executable change — say which commit the
 > regression figures actually describe. Figures quoted against a commit that did
 > not produce them look like evidence and are not.
 
-If the two differ, state why:
+If the reviewed source SHA and the tag target SHA differ, state why:
 
 ```text
 <!-- e.g. documentation-only commits between the reviewed source and the tag -->
@@ -219,7 +227,8 @@ what was uploaded.
 
 | Check | Result |
 | --- | --- |
-| Tag resolves to the recorded tag target SHA | <!-- --> |
+| `git rev-parse vX.Y.Z` matches the recorded tag object SHA | <!-- --> |
+| `git rev-parse vX.Y.Z^{commit}` matches the recorded tag target SHA | <!-- --> |
 | Release points at that tag | <!-- --> |
 | `VERSION` and the dated changelog section match the tag | <!-- --> |
 | Asset filenames match exactly what was hashed | <!-- --> |
