@@ -78,7 +78,16 @@ Optional material is not part of the normal runtime unless stated otherwise:
 |---|---|
 | `src/ribbon/customUI14.xml` | Optional RibbonX package metadata; not a VBE module |
 | `test/M_cDP_Test.bas` | Regression harness |
-| `demo/M_DEMO_BUILDER.bas` and `demo/M_DP_DEMO.bas` | Source-built demonstration |
+| `demo/M_DEMO_BUILDER.bas` and `demo/M_DP_DEMO.bas` | Source-built demonstration, **and a dependency of the regression harness** |
+
+> [!IMPORTANT]
+> The regression harness does not stand alone. `test/M_cDP_Test.bas` calls into
+> `demo/M_DEMO_BUILDER.bas` — it builds its result sheet through
+> `DEMO_Sheet_BuildTemplate` and exercises the demo fast-mode transaction — so
+> `TST_DP_RunAll` will not compile without the demo modules imported alongside
+> it. Import the demo pair whenever you import the harness. Decoupling the
+> harness from the demo builder is tracked as
+> [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35).
 
 > [!CAUTION]
 > A `.frm` and its `.frx` companion are one logical component. Keep them in
@@ -110,6 +119,66 @@ Optional material is not part of the normal runtime unless stated otherwise:
 Do not paste source into arbitrarily named modules when an exported component is
 available. VBE attributes, component identity, form resources, and line endings
 are part of a reproducible source installation.
+
+---
+
+## 📥 Published add-in installation
+
+Use this path when the project ships a `.xlam` asset and your Excel policy
+permits add-in installation. It is the **published binary** model from the
+deployment table: identity comes from the asset hash and its tag binding, not
+from source you imported.
+
+### Download and verify
+
+1. Open the
+   [Releases page](https://github.com/danielep71/VBA-DATETIMEPICKER/releases)
+   and choose the release you intend to run.
+2. Download the `.xlam` asset. Take the exact filename from the Release page.
+3. Verify its SHA-256 against the value published on that release before
+   enabling macros:
+
+   ~~~text
+   certutil -hashfile "<asset filename>" SHA256
+   ~~~
+
+4. Stop if the hash does not match. A mismatch means the file is not the
+   published artifact, whatever its name.
+
+### Install and enable
+
+1. Right-click the downloaded file, open **Properties**, and unblock it if
+   Windows marked it as coming from the internet.
+2. Copy it to your add-ins location, or to any trusted location your policy
+   allows.
+3. In Excel choose **File → Options → Add-ins**, set **Manage** to
+   **Excel Add-ins**, and select **Go…**.
+4. Use **Browse…** to select the file, then tick it in the list and confirm.
+5. Close and reopen Excel so the add-in loads in a clean session.
+
+### Validate
+
+1. Confirm the DatePicker Ribbon group appears.
+2. Select a date-formatted cell and confirm the entry path you expect —
+   grid icon, context menu, keyboard shortcut or Ribbon — opens the picker.
+3. Write a date back and confirm the target cell receives it.
+4. Confirm no second provider is already active: a refusal message naming the
+   provider lease means another copy owns the Excel process.
+
+The regression harness is **not** included in the published `.xlam`. Harness
+evidence comes from the source package or from certification, not from the
+installed add-in.
+
+### Remove
+
+1. **File → Options → Add-ins → Manage: Excel Add-ins → Go…** and clear the
+   checkbox.
+2. Close Excel, then delete the `.xlam` file.
+3. Reopen Excel and confirm the Ribbon group and all entry paths are gone.
+
+Clearing the checkbox alone leaves the file registered for re-enabling. Deleting
+the file without clearing the checkbox leaves Excel reporting a missing add-in on
+every start.
 
 ---
 

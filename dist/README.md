@@ -12,10 +12,12 @@ To get the add-in, download the latest release asset from the
 demo workbook is published there too. At `v1.2.1` the assets are:
 
 ```text
-DATETIMEPICKER v1.2.1.xlam
+DATETIMEPICKER.v1.2.1.xlam
 DATETIMEPICKER-demo-v1.2.1.xlsm
 ```
 
-The `.xlam` separator has varied between releases, so check the exact name on the
-Release page rather than assuming it. Each release lists a SHA-256 for its
-assets — verify it before enabling macros.
+Take the exact names from the Release page rather than assuming them. Each
+release lists a SHA-256 for its assets — verify it before enabling macros.
+
+Installing, enabling, validating and removing a published `.xlam` is described in
+[`../INSTALLATION.md`](../INSTALLATION.md).
