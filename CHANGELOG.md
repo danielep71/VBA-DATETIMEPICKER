@@ -107,7 +107,8 @@ Use only the categories needed by a release.
   The shape name selects candidates and never proves ownership. Two markers are
   recognized: the legacy `DatePicker Grid Entry Point`, and
   `DatePicker Grid Entry Point | dp-owner-v1=<provider-token>` whose token must
-  parse. Blank, malformed, unknown-schema and unreadable markers all fail
+  match `\d{14}-\d{8}-[0-9A-F]{1,8}` exactly. Blank, malformed, unknown-schema
+  and unreadable markers all fail
   closed, so an unrelated shape sharing the `DP_GridIcon` name is never moved,
   resized, rebound, re-marked or deleted — and creation refuses rather than
   promoting over it. Ownership is product-level for this release, so a legacy
@@ -118,12 +119,16 @@ Use only the categories needed by a release.
   records the exact `EarliestTime`, `LatestTime` and `Procedure` it asked Excel
   for, and every tick is scheduled with `LatestTime = EarliestTime + 30 seconds`
   so a registration can be shown to be dead. Cancellation matches the exact
-  scheduled values; one that fails retains that registration as unresolved and
-  refuses a restart until a stale callback arrives, a retry cancellation against
-  the retained identity succeeds, or the retained `LatestTime` passes. Because a
-  tick that misses its window is dropped rather than delayed, a new
-  health-check-only bridge lets the form repair a dropped registration on
-  reactivation; a healthy registration produces no scheduling call
+  scheduled values: the stored qualification retained from the original
+  registration is what a cancellation or retry must match, while a freshly
+  resolved qualification is used only for a new schedule. A cancellation that
+  fails retains that registration as unresolved and refuses a restart until a
+  stale callback arrives, a retry cancellation against the retained identity
+  succeeds, or the retained `LatestTime` passes. Because a tick that misses its
+  window is dropped rather than delayed, `M_Timer_EnsureHealthy(EntryPoint)` is
+  added as the single health-only bridge, letting the form repair a dropped
+  registration on reactivation without stopping the timer, reapplying the clock
+  mode or touching the form; a healthy registration produces no scheduling call
   ([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)).
 
 ### Changed
@@ -185,6 +190,21 @@ Use only the categories needed by a release.
 ### Validation
 
 - Verified historical version ordering, comparison links, and policy links.
+
+- Reviewed executable source baseline for this candidate:
+  `d99fefaa8fec97348ffb990e066d42371a0cdb69`. Every entry above describes
+  behavior present at that commit. Later commits on the release branch change
+  documentation only; certification and tagging of the frozen source belong to
+  [#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54) and
+  [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+
+- Reconciled the candidate documentation set — README, changelog, installation,
+  release and certification guidance, and the repository templates — against the
+  source baseline above
+  ([#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54)).
+
+- Converged the release branch with the standardized repository baseline from
+  `main` ([#75](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/75)).
 
 - Clarified the `1.2.1` error-preservation contract recorded under
   [#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48). The

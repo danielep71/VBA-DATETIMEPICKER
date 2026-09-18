@@ -116,7 +116,7 @@ It is especially useful when:
 
 ## 🎯 Core capabilities
 
-| Area | Capability | v1.2.1 behavior |
+| Area | Capability | Current behavior |
 |---|---|---|
 | Picker UX | Modeless Date / Time Picker | Excel remains interactive while the form is open |
 | Calendar | Fixed 6 × 7 grid | Month/year navigation, outside-month dates and keyboard focus |
@@ -1288,7 +1288,15 @@ DatePicker Grid Entry Point                                        v0, legacy
 DatePicker Grid Entry Point | dp-owner-v1=<provider-token>         v1
 ```
 
-The `v1` token must parse. A blank marker, a malformed one, an unknown schema, or
+The `v1` token must parse under an exact grammar:
+
+```text
+\d{14}-\d{8}-[0-9A-F]{1,8}
+```
+
+that is, a 14-digit timestamp, an 8-digit fractional component and 1 to 8
+uppercase hexadecimal characters, separated by hyphens. A blank marker, a token
+that does not match that grammar, an unknown schema, or
 an unreadable shape all fail closed: the shape is never moved, resized, rebound,
 re-marked or deleted. Ownership is product-level for this release, so an icon
 left behind by a crashed provider — legacy `v0`, or `v1` carrying another
@@ -1305,16 +1313,24 @@ LatestTime = EarliestTime + 30 seconds
 ```
 
 Cancellation matches the exact `EarliestTime` and `Procedure` that were
-scheduled. A cancellation that fails retains that exact registration as
-unresolved rather than forgetting it, and refuses a restart until one of three
-drains clears it: the stale callback arriving, a retry cancellation against the
-retained identity succeeding, or the retained `LatestTime` passing.
+scheduled. The qualified callback name is therefore used in two distinct roles:
+the **stored** qualification retained from the original registration is what a
+cancellation or retry must match, while a **freshly resolved** qualification is
+used only when scheduling something new. Cancelling with a freshly resolved name
+would silently fail to match a registration made under the old one.
+
+A cancellation that fails retains that exact registration as unresolved rather
+than forgetting it, and refuses a restart until one of three drains clears it:
+the stale callback arriving, a retry cancellation against the retained identity
+succeeding, or the retained `LatestTime` passing.
 
 The bounded window means a tick that misses it is dropped rather than delayed,
 which ends the chain. Recovery is opportunistic, not a watchdog: the next
-DatePicker interaction reaches the health check, which replaces an expired
-registration exactly once. A healthy registration inside its window produces no
-scheduling call at all
+DatePicker interaction reaches the health check through
+`M_Timer_EnsureHealthy(EntryPoint)`, the single health-only bridge, which
+replaces an expired registration exactly once and does nothing else — it never
+stops the timer, reapplies the clock mode or touches the form. A healthy
+registration inside its window produces no scheduling call at all
 ([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)).
 
 ### Lifecycle transaction
@@ -1601,6 +1617,8 @@ rather than a closed compiled-only component.
 ## 📌 Status
 
 **Source status:** `v1.2.2` candidate, on the `v1.2.1` integrity-hotfix baseline. Latest published release remains `v1.2.1`; the candidate is certified and tagged by [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+
+**Reviewed executable source baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). Every behavioral claim on this page describes that commit. Later commits on the release branch change documentation only.
 
 The project is suitable for controlled Excel/VBA environments when the documented ownership, settings and application-wide shortcut boundaries are respected.
 
