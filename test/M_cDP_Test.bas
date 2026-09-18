@@ -3232,6 +3232,16 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
     Dim ForwardResult   As DP_WriteResult   'Result with the writable area first
     Dim ReverseResult   As DP_WriteResult   'Result with the writable area last
     Dim ZeroResult      As DP_WriteResult   'Result for an all-zero-write target
+    Dim CapForwardResult As DP_WriteResult  '30 locked cells, first area first
+    Dim CapReverseResult As DP_WriteResult  'Same 30 locked cells, reversed areas
+    Dim IndependentResult As DP_WriteResult 'All three capped categories together
+    Dim ExactLimitResult As DP_WriteResult  'Exactly 25 classified addresses
+    Dim BelowLimitResult As DP_WriteResult  'Fewer than 25 classified addresses
+    Dim CapUnion        As Excel.Range      'Discontiguous cap-regression target
+    Dim ShortfallText   As String           'Human diagnostic under test
+    Dim FaultedCapResult As DP_WriteResult  'Cap state preserved through #21 failure
+    Dim Raised          As Boolean          'True if technical-failure case raised
+    Dim RaisedNumber    As Long             'Raised number for technical-failure case
     Dim WasProtected    As Boolean          'Sheet protection state on entry
 
 '------------------------------------------------------------------------------
@@ -3376,6 +3386,160 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
             VBA.CStr(ReverseResult.LockedSkippedCount)
 
 '------------------------------------------------------------------------------
+' OPERATION-LEVEL ADDRESS CAP: LOCKED CELLS ACROSS TWO AREAS
+'------------------------------------------------------------------------------
+    'Build two 15-cell locked areas. The old implementation capped each AreaResult
+    'independently, so this 30-cell operation retained all 30 addresses
+        If mTST_DP_ScratchSheet.ProtectContents Then mTST_DP_ScratchSheet.Unprotect
+        mTST_DP_ScratchSheet.Range("R20:T123").Clear
+        mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        gDP_WriteValue = VBA.DateSerial(2026, 9, 19)
+        mTST_DP_ScratchSheet.Protect
+
+    'Drive the real public write path with the first 15-cell area first
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("R20:R34"), _
+            mTST_DP_ScratchSheet.Range("R40:R54"))
+        CapUnion.Select
+        CapForwardResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(CapForwardResult)
+
+        TST_DP_AssertEqualsLong "30 locked cells keep exact uncapped total", _
+            30, VBA.CLng(CapForwardResult.LockedSkippedCount)
+        TST_DP_AssertEqualsLong "30 locked cells retain only 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(CapForwardResult.LockedSkippedAddresses)
+        TST_DP_AssertFalse "Locked structured addresses contain no truncation sentinel", _
+            VBA.InStr(1, CapForwardResult.LockedSkippedAddresses, "...", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Locked human diagnostic reports exact 5 omitted", _
+            VBA.InStr(1, ShortfallText, _
+                "5 additional classified cells omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertWriteResultBalances "30 locked-cell result balances", CapForwardResult
+
+    'Repeat with the two area arguments reversed. Totals and the one-operation cap
+    'must be invariant even though the retained first 25 follow enumeration order
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("R40:R54"), _
+            mTST_DP_ScratchSheet.Range("R20:R34"))
+        CapUnion.Select
+        CapReverseResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        TST_DP_AssertEqualsLong "Reversed locked areas keep exact total", _
+            30, VBA.CLng(CapReverseResult.LockedSkippedCount)
+        TST_DP_AssertEqualsLong "Reversed locked areas still cap at 25", _
+            25, TST_DP_CountWriteAddressesForTest(CapReverseResult.LockedSkippedAddresses)
+        TST_DP_AssertEqualsLong "Locked cap is independent of area order", _
+            VBA.CLng(CapForwardResult.LockedSkippedCount), _
+            VBA.CLng(CapReverseResult.LockedSkippedCount)
+
+'------------------------------------------------------------------------------
+' THREE CATEGORIES HAVE INDEPENDENT OPERATION-LEVEL BUDGETS
+'------------------------------------------------------------------------------
+    'Rebuild fixtures while unprotected. R remains locked; S is unlocked formula
+    'content; T is unlocked legacy array-formula content, which is classified as
+    'failed before the ordinary formula-preservation gate
+        mTST_DP_ScratchSheet.Unprotect
+        mTST_DP_ScratchSheet.Range("R20:T123").Clear
+        mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        mTST_DP_ScratchSheet.Range("S20:S39").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Range("S45:S64").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Range("S20:S39").Locked = False
+        mTST_DP_ScratchSheet.Range("S45:S64").Locked = False
+        mTST_DP_ScratchSheet.Range("T20:T34").FormulaArray = "=ROW()"
+        mTST_DP_ScratchSheet.Range("T40:T54").FormulaArray = "=ROW()"
+        mTST_DP_ScratchSheet.Range("T20:T34").Locked = False
+        mTST_DP_ScratchSheet.Range("T40:T54").Locked = False
+        mTST_DP_ScratchSheet.Protect
+
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("R20:R34"), _
+            mTST_DP_ScratchSheet.Range("R40:R54"), _
+            mTST_DP_ScratchSheet.Range("S20:S39"), _
+            mTST_DP_ScratchSheet.Range("S45:S64"), _
+            mTST_DP_ScratchSheet.Range("T20:T34"), _
+            mTST_DP_ScratchSheet.Range("T40:T54"))
+        CapUnion.Select
+        IndependentResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(IndependentResult)
+
+        TST_DP_AssertEqualsLong "Independent budget keeps 30 locked classifications", _
+            30, VBA.CLng(IndependentResult.LockedSkippedCount)
+        TST_DP_AssertEqualsLong "Independent budget keeps 40 formula classifications", _
+            40, VBA.CLng(IndependentResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "Independent budget keeps 30 failed classifications", _
+            30, VBA.CLng(IndependentResult.FailedCount)
+        TST_DP_AssertEqualsLong "Locked category independently retains 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(IndependentResult.LockedSkippedAddresses)
+        TST_DP_AssertEqualsLong "Formula category independently retains 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(IndependentResult.FormulaSkippedAddresses)
+        TST_DP_AssertEqualsLong "Failed category independently retains 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(IndependentResult.FailedAddresses)
+        TST_DP_AssertFalse "Independent structured fields contain no sentinel", _
+            VBA.InStr(1, IndependentResult.LockedSkippedAddresses & _
+                IndependentResult.FormulaSkippedAddresses & IndependentResult.FailedAddresses, _
+                "...", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Formula human diagnostic reports exact 15 omitted", _
+            VBA.InStr(1, ShortfallText, _
+                "15 additional classified cells omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertWriteResultBalances "Independent three-budget result balances", _
+            IndependentResult
+
+'------------------------------------------------------------------------------
+' TECHNICAL FAILURE PRESERVES THE CONSUMED OPERATION BUDGET
+'------------------------------------------------------------------------------
+    'Two 15-cell formula areas consume 30 classifications, then a third area
+    'fails before its first cell. #21 requires the observed facts to return, and
+    '#51 requires their address budget to stay capped rather than reset or vanish
+        mTST_DP_ScratchSheet.Unprotect
+        mTST_DP_ScratchSheet.Range("S20:S70").Clear
+        mTST_DP_ScratchSheet.Range("S20:S70").Locked = False
+        mTST_DP_ScratchSheet.Range("S20:S34").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Range("S45:S59").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Protect
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("S20:S34"), _
+            mTST_DP_ScratchSheet.Range("S45:S59"), _
+            mTST_DP_ScratchSheet.Range("S70"))
+        FaultedCapResult = TST_DP_WriteWithFaultForTest( _
+            CapUnion, VBA.DateSerial(2026, 9, 19), 3, 0, Raised, RaisedNumber)
+        ShortfallText = M_WriteBack_DescribeShortfall(FaultedCapResult)
+
+        TST_DP_AssertFalse "Capped technical failure returns the observed result", Raised
+        TST_DP_AssertTrue "Capped technical failure is explicit", _
+            FaultedCapResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "Technical failure preserves 30 formula classifications", _
+            30, VBA.CLng(FaultedCapResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "Technical failure preserves the 25-address budget", _
+            25, TST_DP_CountWriteAddressesForTest(FaultedCapResult.FormulaSkippedAddresses)
+        TST_DP_AssertTrue "Technical failure human text keeps exact 5 omitted", _
+            VBA.InStr(1, ShortfallText, _
+                "5 additional classified cells omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Technical failure result remains bounded by attempted", _
+            (FaultedCapResult.WrittenCount + FaultedCapResult.LockedSkippedCount + _
+   FaultedCapResult.FormulaSkippedCount + FaultedCapResult.FailedCount <= _
+   FaultedCapResult.AttemptedCount)
+
+'------------------------------------------------------------------------------
+' EXACTLY AT AND BELOW THE LIMIT
+'------------------------------------------------------------------------------
+    'Exactly 25 locked cells retain all 25 and produce no omission text
+        mTST_DP_ScratchSheet.Range("R70:R94").Select
+        ExactLimitResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(ExactLimitResult)
+        TST_DP_AssertEqualsLong "Exactly 25 locked cells retain 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(ExactLimitResult.LockedSkippedAddresses)
+        TST_DP_AssertFalse "Exactly 25 has no omission text", _
+            VBA.InStr(1, ShortfallText, "omitted from address list", vbBinaryCompare) > 0
+
+    'Twenty-four locked cells remain unchanged by the cap policy
+        mTST_DP_ScratchSheet.Range("R100:R123").Select
+        BelowLimitResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(BelowLimitResult)
+        TST_DP_AssertEqualsLong "Below-limit locked cells retain every address", _
+            24, TST_DP_CountWriteAddressesForTest(BelowLimitResult.LockedSkippedAddresses)
+        TST_DP_AssertFalse "Below-limit result has no omission text", _
+            VBA.InStr(1, ShortfallText, "omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertWriteResultBalances "Below-limit result balances", BelowLimitResult
+
+'------------------------------------------------------------------------------
 ' SUITE EXIT
 '------------------------------------------------------------------------------
 SuiteExit:
@@ -3386,6 +3550,9 @@ SuiteExit:
         End If
         mTST_DP_ScratchSheet.Range("M5:M12").ClearContents
         mTST_DP_ScratchSheet.Range("M5:M12").Locked = True
+        mTST_DP_ScratchSheet.Range("R20:T123").Clear
+        mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        Set CapUnion = Nothing
         If WasProtected Then
             mTST_DP_ScratchSheet.Protect
         End If
@@ -3462,6 +3629,28 @@ Private Function TST_DP_WriteTwoAreasForTest( _
 '------------------------------------------------------------------------------
     'Release the object reference
         Set UnionRange = Nothing
+
+End Function
+
+Private Function TST_DP_CountWriteAddressesForTest( _
+    ByVal AddressList As String) As Long
+
+'
+'==============================================================================
+'                    COUNT STRUCTURED WRITE ADDRESSES (TEST)
+'==============================================================================
+'   Counts the comma-space-delimited addresses in a DP_WriteResult structured
+'   address field. The #51 fixture uses ordinary worksheet addresses that contain
+'   no commas, so this is an independent count of retained entries rather than a
+'   call back into production cap logic.
+'==============================================================================
+
+    Dim Parts As Variant
+
+    If VBA.LenB(VBA.Trim$(AddressList)) = 0 Then Exit Function
+    Parts = VBA.Split(AddressList, ", ")
+    TST_DP_CountWriteAddressesForTest = _
+        VBA.UBound(Parts) - VBA.LBound(Parts) + 1
 
 End Function
 

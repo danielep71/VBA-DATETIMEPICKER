@@ -257,6 +257,7 @@ Option Explicit
 
     Private Const WS_CAPTION                       As Long = &HC00000                    'Window caption style flag
     Private Const DP_DEMO_SHEET_NAME               As String = "DATE PICKER DEMO"        'Demo worksheet name
+    Private Const DP_WRITEBACK_ADDRESS_LIMIT        As Long = 25                          'Maximum structured addresses retained per outcome category and operation
     
     Private Const DP_WM_NCLBUTTONDOWN              As Long = &HA1                        'Non-client left-button down message
     Private Const DP_HTCAPTION                     As Long = 2                          'Title-bar hit-test code
@@ -10730,51 +10731,47 @@ Private Sub M_WriteBack_AppendAddress( _
 '                          APPEND RESULT ADDRESS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Appends one cell address to a write-result address list
+'   Appends one real worksheet-qualified address to a structured write-result
+'   address list while enforcing the operation-level reporting budget
 '
 ' WHY THIS EXISTS
-'   A partial write has to report which cells were not written, but a failed
-'   write over a long table column would otherwise build an unbounded string
-'   inside the per-cell write loop
+'   A partial write has to identify cells that were not written, but an operation
+'   over a long or discontiguous target must not build unbounded diagnostic text
 '
 ' INPUTS
 '   AddressList
-'     Accumulated address list, modified in place
+'     Structured address list, modified in place
 '
 '   RecordedCount
-'     Number of addresses counted for this list so far, including this one
+'     Operation-level classified count for this category, including this item
 '
 '   AddressText
-'     Address to append
+'     Worksheet-qualified address to append
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Appends the address until the reporting cap is reached, then appends a single
-'   ellipsis so a truncated list is still recognizable as truncated
+'   Retains at most DP_WRITEBACK_ADDRESS_LIMIT addresses for one outcome category
+'   across the complete write operation. A new area does not reset that budget.
+'   Structured fields contain addresses only: no ellipsis or human truncation
+'   sentinel is ever appended
 '
 ' ERROR POLICY
-'   Best-effort. Never raises, because it runs inside a suppressed write loop
+'   Best-effort. Never raises, because it runs inside the per-cell write loop
 '
 ' DEPENDENCIES
-'   None
+'   DP_WRITEBACK_ADDRESS_LIMIT
 '
 ' NOTES
-'   Addresses are worksheet-qualified by the caller, in the form SheetName!A1, so
-'   a reported address is unambiguous and stable enough to assert against
-'
-'   The cap bounds the reported string, not the counters. WrittenCount,
-'   LockedSkippedCount and FailedCount stay exact however long the list gets
+'   The caller supplies worksheet-qualified addresses in SheetName!A1 form.
+'   Non-address diagnostics such as "(no cell)" are deliberately excluded from
+'   structured address fields. Exact category totals remain uncapped elsewhere;
+'   M_WriteBack_DescribeShortfall reports the exact omitted count to humans
 '
 ' UPDATED
-'   2026-08-22
+'   2026-09-17
 '------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const ADDRESS_LIMIT As Long = 25            'Maximum addresses reported
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -10783,16 +10780,22 @@ Private Sub M_WriteBack_AppendAddress( _
         On Error Resume Next
 
 '------------------------------------------------------------------------------
-' APPEND OR TRUNCATE
+' ENFORCE OPERATION-LEVEL ADDRESS BUDGET
 '------------------------------------------------------------------------------
-    'Mark truncation once past the reporting cap
-        If RecordedCount > ADDRESS_LIMIT Then
-            If VBA.Right$(AddressList, 3) <> "..." Then
-                AddressList = AddressList & ", ..."
-            End If
-            Exit Sub
-        End If
-    'Start the list or extend it
+    'Once this category has consumed its operation-level budget, retain only the
+    'exact classification count and leave the structured address list unchanged
+        If RecordedCount > DP_WRITEBACK_ADDRESS_LIMIT Then Exit Sub
+
+'------------------------------------------------------------------------------
+' REQUIRE A STRUCTURED WORKSHEET ADDRESS
+'------------------------------------------------------------------------------
+    'Structured address fields must contain only worksheet-qualified addresses
+        If VBA.InStr(1, AddressText, "!", vbBinaryCompare) <= 1 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' APPEND ADDRESS
+'------------------------------------------------------------------------------
+    'Start the list or extend it with the real address only
         If VBA.LenB(AddressList) = 0 Then
             AddressList = AddressText
         Else
@@ -10800,6 +10803,49 @@ Private Sub M_WriteBack_AppendAddress( _
         End If
 
 End Sub
+
+Private Function M_WriteBack_CountRetainedAddresses( _
+    ByVal AddressList As String) As Double
+
+'
+'------------------------------------------------------------------------------
+'                    COUNT RETAINED WRITE ADDRESSES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts the structured worksheet addresses actually retained in one result
+'   field so human omission reporting can be derived from observed output
+'
+' INPUTS
+'   AddressList
+'     Comma-space-delimited structured address field built by AppendAddress
+'
+' RETURNS
+'   Number of retained address entries; zero for a blank or unreadable list
+'
+' ERROR POLICY
+'   Best-effort. Returns zero on an unexpected parsing failure
+'
+' NOTES
+'   This counts the representation emitted by M_WriteBack_AppendAddress. It does
+'   not consult the classification total or the cap, so omitted count remains
+'   exactly: classified count minus addresses actually retained
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    Dim AddressParts As Variant
+
+    On Error GoTo SafeExit
+    If VBA.LenB(VBA.Trim$(AddressList)) = 0 Then Exit Function
+    AddressParts = VBA.Split(AddressList, ", ")
+    M_WriteBack_CountRetainedAddresses = _
+        VBA.UBound(AddressParts) - VBA.LBound(AddressParts) + 1
+
+SafeExit:
+    Err.Clear
+
+End Function
 
 Public Sub M_WriteBack_Test_SetFaultInjection( _
     ByVal FailInAreaOrdinal As Long, _
@@ -11096,43 +11142,42 @@ Public Function M_WriteBack_DescribeShortfall( _
 '   Builds one human-readable description of the cells a write-back did not write
 '
 ' WHY THIS EXISTS
-'   The skipped and failed cells are reported in more than one place. One
-'   formatter keeps those messages consistent and gives later write policies a
-'   single place to extend rather than a second reporting mechanism
+'   Structured result fields stay machine-readable and bounded. Human reporting
+'   adds the exact number of classified cells whose addresses were omitted by the
+'   operation-level cap without embedding a sentinel in the structured fields
 '
 ' INPUTS
 '   Result
 '     Completed DP_WriteResult to describe
 '
 ' RETURNS
-'   Description of the skipped and failed cells
-'
-'   An empty string when every attempted cell was written
+'   Description of skipped and failed cells; empty when there is no shortfall
 '
 ' BEHAVIOR
-'   Describes the protected locked cells and the suppressed failures, each with
-'   the addresses recorded for them
+'   Describes protected locked cells, preserved formulas and failures using the
+'   exact uncapped category totals plus the retained structured addresses. When a
+'   category exceeds DP_WRITEBACK_ADDRESS_LIMIT, reports the exact excess count
+'   as human text derived from total minus the addresses actually retained
 '
 ' ERROR POLICY
 '   Best-effort. Never raises, because it is called while reporting an outcome
 '
 ' DEPENDENCIES
-'   None
+'   DP_WRITEBACK_ADDRESS_LIMIT
 '
 ' NOTES
-'   Addresses are worksheet-qualified, in the form SheetName!A1
-'
-'   Address lists are capped by M_WriteBack_AppendAddress, so a long list ends
-'   with an ellipsis while the counts stay exact
+'   Structured address fields contain only worksheet-qualified addresses. Human
+'   omission text is derived here and is never stored back into DP_WriteResult
 '
 ' UPDATED
-'   2026-08-23
+'   2026-09-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Description     As String       'Accumulated description
+    Dim OmittedCount    As Double       'Exact category count omitted by the cap
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -11149,6 +11194,12 @@ Public Function M_WriteBack_DescribeShortfall( _
         If Result.LockedSkippedCount > 0 Then
             Description = VBA.CStr(Result.LockedSkippedCount) & " protected locked: " & _
                 Result.LockedSkippedAddresses
+            OmittedCount = Result.LockedSkippedCount - _
+                M_WriteBack_CountRetainedAddresses(Result.LockedSkippedAddresses)
+            If OmittedCount > 0 Then
+                Description = Description & " (" & VBA.CStr(OmittedCount) & _
+          " additional classified cells omitted from address list)"
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -11156,11 +11207,15 @@ Public Function M_WriteBack_DescribeShortfall( _
 '------------------------------------------------------------------------------
     'Describe the formula cells policy left in place
         If Result.FormulaSkippedCount > 0 Then
-            If VBA.LenB(Description) > 0 Then
-                Description = Description & VBA.vbCrLf
-            End If
+            If VBA.LenB(Description) > 0 Then Description = Description & VBA.vbCrLf
             Description = Description & VBA.CStr(Result.FormulaSkippedCount) & _
                 " formula cells preserved: " & Result.FormulaSkippedAddresses
+            OmittedCount = Result.FormulaSkippedCount - _
+                M_WriteBack_CountRetainedAddresses(Result.FormulaSkippedAddresses)
+            If OmittedCount > 0 Then
+                Description = Description & " (" & VBA.CStr(OmittedCount) & _
+          " additional classified cells omitted from address list)"
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -11168,24 +11223,24 @@ Public Function M_WriteBack_DescribeShortfall( _
 '------------------------------------------------------------------------------
     'Describe the cells that failed for another reason
         If Result.FailedCount > 0 Then
-            If VBA.LenB(Description) > 0 Then
-                Description = Description & VBA.vbCrLf
-            End If
+            If VBA.LenB(Description) > 0 Then Description = Description & VBA.vbCrLf
             Description = Description & VBA.CStr(Result.FailedCount) & " failed: " & _
                 Result.FailedAddresses
+            OmittedCount = Result.FailedCount - _
+                M_WriteBack_CountRetainedAddresses(Result.FailedAddresses)
+            If OmittedCount > 0 Then
+                Description = Description & " (" & VBA.CStr(OmittedCount) & _
+          " additional classified cells omitted from address list)"
+            End If
         End If
 
 '------------------------------------------------------------------------------
 ' DESCRIBE AN UNEXPECTED TECHNICAL FAILURE
 '------------------------------------------------------------------------------
-    'Describe an unexpected error that stopped the operation. This is not a
-    'classified cell outcome: the cells the operation never reached are absent
-    'from every count above, so without this line the message would describe a
-    'smaller operation than the one the user asked for
+    'Describe an unexpected error that stopped the operation. Cells the operation
+    'never reached are absent from every classified count above
         If Result.TechnicalFailureOccurred Then
-            If VBA.LenB(Description) > 0 Then
-                Description = Description & VBA.vbCrLf
-            End If
+            If VBA.LenB(Description) > 0 Then Description = Description & VBA.vbCrLf
             Description = Description & _
                 "The operation stopped early after an unexpected error at step """ & _
                 Result.TechnicalFailureStep & """. Any remaining cells were not attempted."
@@ -11991,6 +12046,9 @@ Public Sub M_WriteBack_PopulateRange( _
     Dim BulkAllowed     As Boolean          'True when the fast path may be used
     Dim AreaOrdinal     As Long             'Position of this area in the operation
     Dim HandlerStep     As String           'Current handler step for diagnostics
+    Dim PriorLockedSkippedCount As Double   'Operation locked count before this area
+    Dim PriorFormulaSkippedCount As Double  'Operation formula count before this area
+    Dim PriorFailedCount As Double          'Operation failure count before this area
 
     Dim SavedErrNumber      As Long         'Captured original error number
     Dim SavedErrDescription As String       'Captured original error description
@@ -12002,6 +12060,15 @@ Public Sub M_WriteBack_PopulateRange( _
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+    'Seed category counters from the operation result before this area starts.
+    'The per-cell classifier can then keep using AreaResult while its RecordedCount
+    'is operation-global, so a new target area cannot restart the 25-address budget.
+        PriorLockedSkippedCount = Result.LockedSkippedCount
+        PriorFormulaSkippedCount = Result.FormulaSkippedCount
+        PriorFailedCount = Result.FailedCount
+        AreaResult.LockedSkippedCount = PriorLockedSkippedCount
+        AreaResult.FormulaSkippedCount = PriorFormulaSkippedCount
+        AreaResult.FailedCount = PriorFailedCount
 
 '------------------------------------------------------------------------------
 ' RECORD AREA POSITION
@@ -12152,9 +12219,9 @@ Public Sub M_WriteBack_PopulateRange( _
             'operation or discarding what the other areas observed
                 Debug.Print PROC_NAME & _
                     " | Zero-write area | Attempted=" & VBA.CStr(AreaResult.AttemptedCount) & _
-                    "; LockedSkipped=" & VBA.CStr(AreaResult.LockedSkippedCount) & _
-                    "; FormulaSkipped=" & VBA.CStr(AreaResult.FormulaSkippedCount) & _
-                    "; Failed=" & VBA.CStr(AreaResult.FailedCount)
+                    "; LockedSkipped=" & VBA.CStr(AreaResult.LockedSkippedCount - PriorLockedSkippedCount) & _
+                    "; FormulaSkipped=" & VBA.CStr(AreaResult.FormulaSkippedCount - PriorFormulaSkippedCount) & _
+                    "; Failed=" & VBA.CStr(AreaResult.FailedCount - PriorFailedCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -12166,9 +12233,9 @@ AccumulateResult:
     'Add this range to the running totals
         Result.AttemptedCount = Result.AttemptedCount + AreaResult.AttemptedCount
         Result.WrittenCount = Result.WrittenCount + AreaResult.WrittenCount
-        Result.LockedSkippedCount = Result.LockedSkippedCount + AreaResult.LockedSkippedCount
-        Result.FormulaSkippedCount = Result.FormulaSkippedCount + AreaResult.FormulaSkippedCount
-        Result.FailedCount = Result.FailedCount + AreaResult.FailedCount
+        Result.LockedSkippedCount = AreaResult.LockedSkippedCount
+        Result.FormulaSkippedCount = AreaResult.FormulaSkippedCount
+        Result.FailedCount = AreaResult.FailedCount
         Result.AreasCount = Result.AreasCount + AreaResult.AreasCount
     'Join the skipped locked addresses
         If VBA.LenB(AreaResult.LockedSkippedAddresses) > 0 Then
