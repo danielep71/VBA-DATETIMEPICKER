@@ -60,23 +60,23 @@ Option Explicit
 '   TST_DP_HolidayCallbackError must remain Public so Application.Run can
 '   resolve them as holiday policy callbacks
 '
-'   Production routines that end with On Error GoTo 0 (M_GridIcon_ShowOrMove,
-'   M_GridIcon_Remove, M_GridIcon_PurgeAll, M_GridIcon_EnsureEmbeddedIconFile,
-'   M_GridIcon_PreCreateHidden, DP_Close, DP_Stop, Handle_SelectionChange, and
-'   the access-path setters SetShowRightClick and SetShowGridIcon) kill the
-'   suite SuiteFail handler on return. Every call to those routines is
-'   immediately followed by On Error GoTo SuiteFail to re-arm the handler.
+'   On Error state belongs to the procedure in which the statement executes. A
+'   called routine cannot arm, disarm or replace the handler of the procedure
+'   that called it, whatever it does to its own
 '
-'   DP_RepairRuntime and M_Picker_SelectDate use On Error GoTo ErrorHandler and
-'   raise outward on failure; they do not reset the caller SuiteFail handler and
-'   therefore do not need re-arming.
+'   A suite therefore re-arms On Error GoTo SuiteFail only where the suite
+'   procedure itself changed its own error mode, never because of what a
+'   production routine does internally
+'
+'   TST_DP_RunSuite_HarnessSelfCheck proves both halves of that rule, so a
+'   regression restores the correct model instead of the assumption
 '
 '   The write-back routines are Functions returning DP_WriteResult. Bare calls
 '   still compile and are kept where the outcome is not asserted, so the suite
 '   covers both call forms.
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -102,6 +102,7 @@ Option Explicit
     Private Const TST_DP_RESULT_FIRST_ROW   As Long = 5                         'First result data row on the result sheet
     Private Const TST_DP_STATUS_BAR_TEXT    As String = "Running DatePicker regression tests..."  'Status bar text the run displays
     Private Const TST_DP_STALE_SHEET_NAME   As String = "TST_DP_STALE"          'Temporary sheet used to strand a grid icon
+    Private Const TST_DP_ERRSCOPE_NUMBER    As Long = vbObjectError + 3232      'Error number raised by the error-scope probes
     Private Const TST_DP_COL_SEQ            As Long = 3                         'Result sequence number column index
     Private Const TST_DP_COL_TIMESTAMP      As Long = 4                         'Result timestamp column index
     Private Const TST_DP_COL_RESULT         As Long = 5                         'Result marker column index
@@ -1032,10 +1033,18 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "RuntimeAdmission"
     'Run DP_RepairRuntime behavior checks
         TST_DP_RunSuiteSafe "RepairRuntime"
+    'Run transactional startup / shutdown / repair fault matrices
+        TST_DP_RunSuiteSafe "LifecycleTransaction"
+    'Run deterministic live-clock timer registration and drain checks
+        TST_DP_RunSuiteSafe "Timer"
     'Run M_GridIcon_PreCreateHidden startup optimization checks
         TST_DP_RunSuiteSafe "PreCreateHidden"
     'Run M_Picker_SelectDate write-back and state-management checks
         TST_DP_RunSuiteSafe "SelectDate"
+    'Run Ribbon demo-sheet toggle decision checks
+        TST_DP_RunSuiteSafe "RibbonDemo"
+    'Run demo builder fast-mode transaction checks
+        TST_DP_RunSuiteSafe "DemoFastMode"
 
     'Run the application-state suite
         TST_DP_RunSuiteSafe "ApplicationState"
@@ -1368,11 +1377,23 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
             Case "REPAIRRUNTIME"
                 TST_DP_RunSuite_RepairRuntime
 
+            Case "LIFECYCLETRANSACTION"
+                TST_DP_RunSuite_LifecycleTransaction
+
+            Case "TIMER"
+                TST_DP_RunSuite_Timer
+
             Case "PRECREATEHIDDEN"
                 TST_DP_RunSuite_PreCreateHidden
             
             Case "SELECTDATE"
                 TST_DP_RunSuite_SelectDate
+
+            Case "RIBBONDEMO"
+                TST_DP_RunSuite_RibbonDemo
+
+            Case "DEMOFASTMODE"
+                TST_DP_RunSuite_DemoFastMode
             Case "APPLICATIONSTATE"
                 TST_DP_RunSuite_ApplicationState
             Case "WINDOWRECOVERY"
@@ -2121,7 +2142,7 @@ Private Sub TST_DP_RunSuite_SettingsNamespace()
 '   for the next run to find
 '
 ' UPDATED
-'   2026-08-23
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -2193,6 +2214,8 @@ Private Sub TST_DP_RunSuite_SettingsNamespace()
         M_Settings_SetNamespace "TooLate"
         RefusedLate = (Err.Number <> 0)
         Err.Clear
+    'This procedure changed its own error mode above, so it must restore its
+    'own handler before relying on it again
         On Error GoTo SuiteFail
         TST_DP_AssertTrue "Namespace change after settings load is refused", _
             RefusedLate
@@ -2211,6 +2234,7 @@ Private Sub TST_DP_RunSuite_SettingsNamespace()
         M_Settings_SetNamespace "bad\namespace"
         RefusedInvalid = (Err.Number <> 0)
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
         TST_DP_AssertTrue "Invalid namespace is refused", RefusedInvalid
 
@@ -3213,6 +3237,16 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
     Dim ForwardResult   As DP_WriteResult   'Result with the writable area first
     Dim ReverseResult   As DP_WriteResult   'Result with the writable area last
     Dim ZeroResult      As DP_WriteResult   'Result for an all-zero-write target
+    Dim CapForwardResult As DP_WriteResult  '30 locked cells, first area first
+    Dim CapReverseResult As DP_WriteResult  'Same 30 locked cells, reversed areas
+    Dim IndependentResult As DP_WriteResult 'All three capped categories together
+    Dim ExactLimitResult As DP_WriteResult  'Exactly 25 classified addresses
+    Dim BelowLimitResult As DP_WriteResult  'Fewer than 25 classified addresses
+    Dim CapUnion        As Excel.Range      'Discontiguous cap-regression target
+    Dim ShortfallText   As String           'Human diagnostic under test
+    Dim FaultedCapResult As DP_WriteResult  'Cap state preserved through #21 failure
+    Dim Raised          As Boolean          'True if technical-failure case raised
+    Dim RaisedNumber    As Long             'Raised number for technical-failure case
     Dim WasProtected    As Boolean          'Sheet protection state on entry
 
 '------------------------------------------------------------------------------
@@ -3357,6 +3391,160 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
             VBA.CStr(ReverseResult.LockedSkippedCount)
 
 '------------------------------------------------------------------------------
+' OPERATION-LEVEL ADDRESS CAP: LOCKED CELLS ACROSS TWO AREAS
+'------------------------------------------------------------------------------
+    'Build two 15-cell locked areas. The old implementation capped each AreaResult
+    'independently, so this 30-cell operation retained all 30 addresses
+        If mTST_DP_ScratchSheet.ProtectContents Then mTST_DP_ScratchSheet.Unprotect
+        mTST_DP_ScratchSheet.Range("R20:T123").Clear
+        mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        gDP_WriteValue = VBA.DateSerial(2026, 9, 19)
+        mTST_DP_ScratchSheet.Protect
+
+    'Drive the real public write path with the first 15-cell area first
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("R20:R34"), _
+            mTST_DP_ScratchSheet.Range("R40:R54"))
+        CapUnion.Select
+        CapForwardResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(CapForwardResult)
+
+        TST_DP_AssertEqualsLong "30 locked cells keep exact uncapped total", _
+            30, VBA.CLng(CapForwardResult.LockedSkippedCount)
+        TST_DP_AssertEqualsLong "30 locked cells retain only 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(CapForwardResult.LockedSkippedAddresses)
+        TST_DP_AssertFalse "Locked structured addresses contain no truncation sentinel", _
+            VBA.InStr(1, CapForwardResult.LockedSkippedAddresses, "...", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Locked human diagnostic reports exact 5 omitted", _
+            VBA.InStr(1, ShortfallText, _
+                "5 additional classified cells omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertWriteResultBalances "30 locked-cell result balances", CapForwardResult
+
+    'Repeat with the two area arguments reversed. Totals and the one-operation cap
+    'must be invariant even though the retained first 25 follow enumeration order
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("R40:R54"), _
+            mTST_DP_ScratchSheet.Range("R20:R34"))
+        CapUnion.Select
+        CapReverseResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        TST_DP_AssertEqualsLong "Reversed locked areas keep exact total", _
+            30, VBA.CLng(CapReverseResult.LockedSkippedCount)
+        TST_DP_AssertEqualsLong "Reversed locked areas still cap at 25", _
+            25, TST_DP_CountWriteAddressesForTest(CapReverseResult.LockedSkippedAddresses)
+        TST_DP_AssertEqualsLong "Locked cap is independent of area order", _
+            VBA.CLng(CapForwardResult.LockedSkippedCount), _
+            VBA.CLng(CapReverseResult.LockedSkippedCount)
+
+'------------------------------------------------------------------------------
+' THREE CATEGORIES HAVE INDEPENDENT OPERATION-LEVEL BUDGETS
+'------------------------------------------------------------------------------
+    'Rebuild fixtures while unprotected. R remains locked; S is unlocked formula
+    'content; T is unlocked legacy array-formula content, which is classified as
+    'failed before the ordinary formula-preservation gate
+        mTST_DP_ScratchSheet.Unprotect
+        mTST_DP_ScratchSheet.Range("R20:T123").Clear
+        mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        mTST_DP_ScratchSheet.Range("S20:S39").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Range("S45:S64").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Range("S20:S39").Locked = False
+        mTST_DP_ScratchSheet.Range("S45:S64").Locked = False
+        mTST_DP_ScratchSheet.Range("T20:T34").FormulaArray = "=ROW()"
+        mTST_DP_ScratchSheet.Range("T40:T54").FormulaArray = "=ROW()"
+        mTST_DP_ScratchSheet.Range("T20:T34").Locked = False
+        mTST_DP_ScratchSheet.Range("T40:T54").Locked = False
+        mTST_DP_ScratchSheet.Protect
+
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("R20:R34"), _
+            mTST_DP_ScratchSheet.Range("R40:R54"), _
+            mTST_DP_ScratchSheet.Range("S20:S39"), _
+            mTST_DP_ScratchSheet.Range("S45:S64"), _
+            mTST_DP_ScratchSheet.Range("T20:T34"), _
+            mTST_DP_ScratchSheet.Range("T40:T54"))
+        CapUnion.Select
+        IndependentResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(IndependentResult)
+
+        TST_DP_AssertEqualsLong "Independent budget keeps 30 locked classifications", _
+            30, VBA.CLng(IndependentResult.LockedSkippedCount)
+        TST_DP_AssertEqualsLong "Independent budget keeps 40 formula classifications", _
+            40, VBA.CLng(IndependentResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "Independent budget keeps 30 failed classifications", _
+            30, VBA.CLng(IndependentResult.FailedCount)
+        TST_DP_AssertEqualsLong "Locked category independently retains 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(IndependentResult.LockedSkippedAddresses)
+        TST_DP_AssertEqualsLong "Formula category independently retains 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(IndependentResult.FormulaSkippedAddresses)
+        TST_DP_AssertEqualsLong "Failed category independently retains 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(IndependentResult.FailedAddresses)
+        TST_DP_AssertFalse "Independent structured fields contain no sentinel", _
+            VBA.InStr(1, IndependentResult.LockedSkippedAddresses & _
+                IndependentResult.FormulaSkippedAddresses & IndependentResult.FailedAddresses, _
+                "...", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Formula human diagnostic reports exact 15 omitted", _
+            VBA.InStr(1, ShortfallText, _
+                "15 additional classified cells omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertWriteResultBalances "Independent three-budget result balances", _
+            IndependentResult
+
+'------------------------------------------------------------------------------
+' TECHNICAL FAILURE PRESERVES THE CONSUMED OPERATION BUDGET
+'------------------------------------------------------------------------------
+    'Two 15-cell formula areas consume 30 classifications, then a third area
+    'fails before its first cell. #21 requires the observed facts to return, and
+    '#51 requires their address budget to stay capped rather than reset or vanish
+        mTST_DP_ScratchSheet.Unprotect
+        mTST_DP_ScratchSheet.Range("S20:S70").Clear
+        mTST_DP_ScratchSheet.Range("S20:S70").Locked = False
+        mTST_DP_ScratchSheet.Range("S20:S34").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Range("S45:S59").Formula = "=ROW()"
+        mTST_DP_ScratchSheet.Protect
+        Set CapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("S20:S34"), _
+            mTST_DP_ScratchSheet.Range("S45:S59"), _
+            mTST_DP_ScratchSheet.Range("S70"))
+        FaultedCapResult = TST_DP_WriteWithFaultForTest( _
+            CapUnion, VBA.DateSerial(2026, 9, 19), 3, 0, Raised, RaisedNumber)
+        ShortfallText = M_WriteBack_DescribeShortfall(FaultedCapResult)
+
+        TST_DP_AssertFalse "Capped technical failure returns the observed result", Raised
+        TST_DP_AssertTrue "Capped technical failure is explicit", _
+            FaultedCapResult.TechnicalFailureOccurred
+        TST_DP_AssertEqualsLong "Technical failure preserves 30 formula classifications", _
+            30, VBA.CLng(FaultedCapResult.FormulaSkippedCount)
+        TST_DP_AssertEqualsLong "Technical failure preserves the 25-address budget", _
+            25, TST_DP_CountWriteAddressesForTest(FaultedCapResult.FormulaSkippedAddresses)
+        TST_DP_AssertTrue "Technical failure human text keeps exact 5 omitted", _
+            VBA.InStr(1, ShortfallText, _
+                "5 additional classified cells omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Technical failure result remains bounded by attempted", _
+            (FaultedCapResult.WrittenCount + FaultedCapResult.LockedSkippedCount + _
+   FaultedCapResult.FormulaSkippedCount + FaultedCapResult.FailedCount <= _
+   FaultedCapResult.AttemptedCount)
+
+'------------------------------------------------------------------------------
+' EXACTLY AT AND BELOW THE LIMIT
+'------------------------------------------------------------------------------
+    'Exactly 25 locked cells retain all 25 and produce no omission text
+        mTST_DP_ScratchSheet.Range("R70:R94").Select
+        ExactLimitResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(ExactLimitResult)
+        TST_DP_AssertEqualsLong "Exactly 25 locked cells retain 25 addresses", _
+            25, TST_DP_CountWriteAddressesForTest(ExactLimitResult.LockedSkippedAddresses)
+        TST_DP_AssertFalse "Exactly 25 has no omission text", _
+            VBA.InStr(1, ShortfallText, "omitted from address list", vbBinaryCompare) > 0
+
+    'Twenty-four locked cells remain unchanged by the cap policy
+        mTST_DP_ScratchSheet.Range("R100:R123").Select
+        BelowLimitResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+        ShortfallText = M_WriteBack_DescribeShortfall(BelowLimitResult)
+        TST_DP_AssertEqualsLong "Below-limit locked cells retain every address", _
+            24, TST_DP_CountWriteAddressesForTest(BelowLimitResult.LockedSkippedAddresses)
+        TST_DP_AssertFalse "Below-limit result has no omission text", _
+            VBA.InStr(1, ShortfallText, "omitted from address list", vbBinaryCompare) > 0
+        TST_DP_AssertWriteResultBalances "Below-limit result balances", BelowLimitResult
+
+'------------------------------------------------------------------------------
 ' SUITE EXIT
 '------------------------------------------------------------------------------
 SuiteExit:
@@ -3367,6 +3555,9 @@ SuiteExit:
         End If
         mTST_DP_ScratchSheet.Range("M5:M12").ClearContents
         mTST_DP_ScratchSheet.Range("M5:M12").Locked = True
+        mTST_DP_ScratchSheet.Range("R20:T123").Clear
+        mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        Set CapUnion = Nothing
         If WasProtected Then
             mTST_DP_ScratchSheet.Protect
         End If
@@ -3446,6 +3637,28 @@ Private Function TST_DP_WriteTwoAreasForTest( _
 
 End Function
 
+Private Function TST_DP_CountWriteAddressesForTest( _
+    ByVal AddressList As String) As Long
+
+'
+'==============================================================================
+'                    COUNT STRUCTURED WRITE ADDRESSES (TEST)
+'==============================================================================
+'   Counts the comma-space-delimited addresses in a DP_WriteResult structured
+'   address field. The #51 fixture uses ordinary worksheet addresses that contain
+'   no commas, so this is an independent count of retained entries rather than a
+'   call back into production cap logic.
+'==============================================================================
+
+    Dim Parts As Variant
+
+    If VBA.LenB(VBA.Trim$(AddressList)) = 0 Then Exit Function
+    Parts = VBA.Split(AddressList, ", ")
+    TST_DP_CountWriteAddressesForTest = _
+        UBound(Parts) - LBound(Parts) + 1
+
+End Function
+
 Private Sub TST_DP_RunSuite_WriteTechnicalFailure()
 
 '
@@ -3467,7 +3680,7 @@ Private Sub TST_DP_RunSuite_WriteTechnicalFailure()
 '   That path cannot be produced on demand. M_WriteBack_TryWriteCell classifies
 '   every per-cell failure it can observe and raises nothing, which is exactly why
 '   a controlled fault seam is required. The classified failures this suite does
-'   not use — array-formula refusal, locked cells, formula preservation — are a
+'   not use - array-formula refusal, locked cells, formula preservation - are a
 '   different path and are covered by MultiAreaWriteResult
 '
 ' BEHAVIOR
@@ -3500,7 +3713,7 @@ Private Sub TST_DP_RunSuite_WriteTechnicalFailure()
 '   is asserted instead
 '
 ' UPDATED
-'   2026-08-25
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -3990,7 +4203,8 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '                           GRID ICON SUITE
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Validates in-grid DatePicker icon creation, movement, removal, and purge
+'   Validates in-grid DatePicker icon creation, movement, removal, purge and
+'   shape ownership
 '
 ' WHY THIS EXISTS
 '   The grid icon is a high-frequency worksheet shape that is sensitive to stale
@@ -4023,7 +4237,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 '   triggering the settings setter side effects during the test
 '
 ' UPDATED
-'   2026-05-14
+'   2026-08-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4033,6 +4247,17 @@ Private Sub TST_DP_RunSuite_GridIcon()
     Dim ShapeLeftBefore     As Double   'Icon left position before the move
     Dim ShapeTopBefore      As Double   'Icon top position before the move
     Dim StaleSheet          As Excel.Worksheet  'Temporary sheet used to strand the icon
+
+    Dim ProbeWorkbook       As Excel.Workbook   'Second workbook used by the ownership cases
+    Dim ProbeWorkbookName   As String           'Name of the second workbook, for the closed check
+    Dim ProbeSheet          As Excel.Worksheet  'Worksheet in the second workbook
+    Dim ForeignShape        As Excel.Shape      'Unrelated same-named shape under test
+    Dim ForeignAltBefore    As String           'Foreign alternative text before the DatePicker ran
+    Dim ForeignActionBefore As String           'Foreign OnAction before the DatePicker ran
+    Dim ForeignLeftBefore   As Double           'Foreign left position before the DatePicker ran
+    Dim ForeignTopBefore    As Double           'Foreign top position before the DatePicker ran
+    Dim ForeignWidthBefore  As Double           'Foreign width before the DatePicker ran
+    Dim PurgeErrNumber      As Long             'Error escaping purge when deletion is unavailable
 
     Dim SavedErrNumber      As Long     'Captured original error number
     Dim SavedErrDescription As String   'Captured original error description
@@ -4050,17 +4275,13 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Enable the grid icon feature for this suite
         gDP_ShowGridIcon = True
     'Purge any stale grid icons before the suite
-    'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' EMBEDDED ICON FILE
 '------------------------------------------------------------------------------
     'Resolve the embedded icon file path
-    'M_GridIcon_EnsureEmbeddedIconFile resets On Error GoTo 0 on exit; re-arm
         IconPath = M_GridIcon_EnsureEmbeddedIconFile()
-        On Error GoTo SuiteFail
     'Assert the embedded icon path is not blank
         TST_DP_AssertTrue "Embedded grid icon path is not blank", _
             VBA.LenB(IconPath) > 0
@@ -4075,9 +4296,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'and restores it on exit, allowing the drawing layer to settle
         Excel.Application.ScreenUpdating = True
     'Create the grid icon beside the target cell
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Allow the drawing layer to process the shape creation
         DoEvents
     'Assert the grid icon exists on the scratch sheet
@@ -4104,9 +4323,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' MOVE ICON
 '------------------------------------------------------------------------------
     'Move the grid icon beside a different target cell
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("F8")
-        On Error GoTo SuiteFail
     'Allow the drawing layer to process the move
         DoEvents
     'Assert the grid icon still exists after the move
@@ -4132,9 +4349,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' REMOVE ICON
 '------------------------------------------------------------------------------
     'Remove the active grid icon
-    'M_GridIcon_Remove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_Remove
-        On Error GoTo SuiteFail
     'Assert the grid icon no longer exists on the scratch sheet
         TST_DP_AssertFalse "Grid icon is removed from the scratch sheet", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4143,13 +4358,9 @@ Private Sub TST_DP_RunSuite_GridIcon()
 ' PURGE ALL ICONS
 '------------------------------------------------------------------------------
     'Create the icon again for the purge test
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Purge all named grid icons from the host workbook
-    'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
     'Assert no named grid icon remains anywhere in the host workbook
         TST_DP_AssertEqualsLong "PurgeAll removes all grid icons from the workbook", _
             0, _
@@ -4161,9 +4372,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'Disable the grid icon feature directly
         gDP_ShowGridIcon = False
     'Attempt to show the icon while the feature is disabled
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Assert no icon was created while the feature is disabled
         TST_DP_AssertFalse "Grid icon is not shown when the feature is disabled", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4180,9 +4389,7 @@ Private Sub TST_DP_RunSuite_GridIcon()
         TST_DP_ActivateWorksheetForTest StaleSheet
 
     'Create the icon on the temporary worksheet
-    'M_GridIcon_ShowOrMove resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_ShowOrMove StaleSheet.Range("B2")
-        On Error GoTo SuiteFail
         DoEvents
         TST_DP_AssertTrue "Stale-reference setup creates a tracked icon", _
             Not (gDP_GridIconShape Is Nothing)
@@ -4193,14 +4400,12 @@ Private Sub TST_DP_RunSuite_GridIcon()
     'on would re-enable the delete prompt for everything that follows
         TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
-        On Error GoTo SuiteFail
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
     'A stale reference must not stop a new icon being created. Before the
     'liveness check, PreCreateHidden saw a non-Nothing variable and skipped
     'straight to hiding a shape that no longer existed
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
         DoEvents
         TST_DP_AssertTrue "Stale reference does not block icon creation", _
             TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4211,26 +4416,246 @@ Private Sub TST_DP_RunSuite_GridIcon()
             mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME)
         TST_DP_ActivateWorksheetForTest StaleSheet
         M_GridIcon_ShowOrMove StaleSheet.Range("B2")
-        On Error GoTo SuiteFail
         DoEvents
         TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
-        On Error GoTo SuiteFail
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
 
     'Remove must leave nothing tracked and must not raise
         M_GridIcon_Remove
-        On Error GoTo SuiteFail
         TST_DP_AssertTrue "Remove clears a stale tracked reference", _
             gDP_GridIconShape Is Nothing
 
     'Purge must tolerate the same condition
         M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
         TST_DP_AssertTrue "Purge clears the tracked reference", _
             gDP_GridIconShape Is Nothing
+
+
+'------------------------------------------------------------------------------
+' FOREIGN SHAPE SURVIVES THE CREATE PATH
+'------------------------------------------------------------------------------
+    'Before #53 a shape merely sharing the DP_GridIcon name was adopted by the
+    'show path: moved, resized, rebound to DP_Click and re-marked with DatePicker
+    'alternative text, which manufactured the ownership evidence a later purge
+    'relied on. Ownership must be proven, never granted by the component itself
+        M_GridIcon_PurgeAll
+        gDP_ShowGridIcon = True
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, DP_GRID_ICON_NAME, "User shape, not a DatePicker icon")
+
+    'Capture every property the adopt path used to overwrite
+        ForeignAltBefore = ForeignShape.AlternativeText
+        ForeignActionBefore = ForeignShape.OnAction
+        ForeignLeftBefore = ForeignShape.Left
+        ForeignTopBefore = ForeignShape.Top
+        ForeignWidthBefore = ForeignShape.Width
+
+    'Drive the normal show path against a cell on the same worksheet
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+
+    'The DatePicker must neither adopt the shape nor create a second one
+        TST_DP_AssertEqualsLong "Foreign collision creates no second grid icon", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "Foreign shape keeps its alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+        TST_DP_AssertEqualsString "Foreign shape keeps its OnAction", _
+            ForeignActionBefore, ForeignShape.OnAction
+        TST_DP_AssertTrue "Foreign shape keeps its position", _
+            (ForeignShape.Left = ForeignLeftBefore) And _
+            (ForeignShape.Top = ForeignTopBefore)
+        TST_DP_AssertTrue "Foreign shape keeps its size", _
+            ForeignShape.Width = ForeignWidthBefore
+        TST_DP_AssertTrue "Foreign collision leaves nothing tracked", _
+            gDP_GridIconShape Is Nothing
+
+    'The hidden pre-creation path reaches the same creation routine
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "PreCreateHidden refuses a foreign collision", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "PreCreateHidden leaves the foreign alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+'------------------------------------------------------------------------------
+' FOREIGN SHAPE SURVIVES THE DELETE PATHS
+'------------------------------------------------------------------------------
+    'Removal and purge both deleted by name alone. Neither may touch a shape
+    'whose ownership is not proven
+        M_GridIcon_Remove
+        TST_DP_AssertTrue "Remove leaves a foreign shape in place", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
+
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "PurgeAll leaves a foreign shape in place", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "Foreign shape survives purge unmutated", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+'------------------------------------------------------------------------------
+' MALFORMED MARKERS FAIL CLOSED
+'------------------------------------------------------------------------------
+    'A bare prefix must not confer ownership, and an unknown schema must not be
+    'interpreted as v1. Both cases stay foreign
+        ForeignShape.AlternativeText = "DatePicker Grid Entry Point | dp-owner-v1="
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "An empty owner token fails closed", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+        ForeignShape.AlternativeText = _
+            "DatePicker Grid Entry Point | dp-owner-v9=20200101010101-00000000-DEADBEEF"
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "An unknown marker schema fails closed", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+'------------------------------------------------------------------------------
+' MARKED SHAPES ARE RECLAIMABLE
+'------------------------------------------------------------------------------
+    'A valid v1 marker carrying another provider's token is reclaimable under the
+    'exclusive-provider model, which is what allows a crashed provider's icon to
+    'be cleaned up. #14 narrows this to token equality
+        ForeignShape.AlternativeText = _
+            "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF"
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "A stale provider-token icon is reclaimable", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        Set ForeignShape = Nothing
+
+    'Icons created before the marker existed carry the bare legacy string. They
+    'were written by released DatePicker code, so abandoning them across the
+    'upgrade would strand a shape in every saved workbook
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, DP_GRID_ICON_NAME, "DatePicker Grid Entry Point")
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "A legacy v0 icon is reclaimable", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        Set ForeignShape = Nothing
+
+
+'------------------------------------------------------------------------------
+' STALE PENDING SHAPE
+'------------------------------------------------------------------------------
+    'M_GridIcon_Create clears a stale DP_GridIcon_Pending shape left by an
+    'interrupted run. That shape is retrieved from Excel rather than created by
+    'the current transaction, so the internal name selects it but never proves it
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, _
+            DP_GRID_ICON_NAME & "_Pending", _
+            "User shape that happens to use the pending name")
+        ForeignAltBefore = ForeignShape.AlternativeText
+
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "A foreign pending shape survives icon creation", _
+            1, TST_DP_CountNamedShapes( _
+                mTST_DP_HostWorkbook, DP_GRID_ICON_NAME & "_Pending")
+        TST_DP_AssertEqualsString "A foreign pending shape keeps its alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+    'Clear both shapes before the owned case
+        M_GridIcon_PurgeAll
+        ForeignShape.Delete
+        Set ForeignShape = Nothing
+
+    'A pending shape carrying a valid marker is this component's own debris from
+    'an interrupted create and must still be reclaimed
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            mTST_DP_ScratchSheet, _
+            DP_GRID_ICON_NAME & "_Pending", _
+            "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF")
+        Set ForeignShape = Nothing
+
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "An owned pending orphan is reclaimed by creation", _
+            0, TST_DP_CountNamedShapes( _
+                mTST_DP_HostWorkbook, DP_GRID_ICON_NAME & "_Pending")
+        M_GridIcon_PurgeAll
+
+'------------------------------------------------------------------------------
+' CROSS-WORKBOOK PURGE
+'------------------------------------------------------------------------------
+    'PurgeAll walks every open workbook and deleted by name there too, so an
+    'unrelated shape in an unrelated workbook was destroyed silently. This is the
+    'case the issue was filed for
+        Set ProbeWorkbook = Excel.Application.Workbooks.Add
+        ProbeWorkbookName = ProbeWorkbook.Name
+        Set ProbeSheet = ProbeWorkbook.Worksheets(1)
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            ProbeSheet, DP_GRID_ICON_NAME, "Unrelated shape in another workbook")
+        ForeignAltBefore = ForeignShape.AlternativeText
+
+    'Create a genuine DatePicker icon in the host workbook
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+        M_GridIcon_ShowOrMove mTST_DP_ScratchSheet.Range("D5")
+        DoEvents
+        TST_DP_AssertEqualsLong "Owned icon exists in the host workbook before purge", _
+            1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+    'Purge must remove what it owns and leave what it does not
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "Purge removes the owned icon from the host workbook", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsLong "Purge leaves the unrelated shape in the second workbook", _
+            1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertEqualsString "Second-workbook shape keeps its alternative text", _
+            ForeignAltBefore, ForeignShape.AlternativeText
+
+
+'------------------------------------------------------------------------------
+' DELETION UNAVAILABLE ON A PROTECTED SHEET
+'------------------------------------------------------------------------------
+    'Ownership can be proven and deletion can still be impossible. Purge must
+    'leave the shape in place and must not raise into its caller. Reporting that
+    'outcome as a structured cleanup result belongs to #50, not here
+        ForeignShape.Delete
+        Set ForeignShape = Nothing
+        Set ForeignShape = TST_DP_AddNamedShapeForTest( _
+            ProbeSheet, _
+            DP_GRID_ICON_NAME, _
+            "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF")
+        TST_DP_AssertEqualsLong "Owned icon exists on the protected sheet before purge", _
+            1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+
+    'Protect the worksheet so Excel refuses the deletion
+        ProbeSheet.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True
+
+    'Suppress errors across the purge so an escaping error is asserted here
+    'rather than failing the suite from inside the call
+        On Error Resume Next
+        Err.Clear
+        M_GridIcon_PurgeAll
+        PurgeErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "Purge raises nothing when deletion is unavailable", _
+            0, PurgeErrNumber
+        TST_DP_AssertEqualsLong "Protection leaves the owned icon in place", _
+            1, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+
+    'Removing the protection restores the ability to reclaim the icon
+        ProbeSheet.Unprotect
+        M_GridIcon_PurgeAll
+        TST_DP_AssertEqualsLong "The owned icon is reclaimed once protection is removed", _
+            0, TST_DP_CountNamedShapes(ProbeWorkbook, DP_GRID_ICON_NAME)
+        Set ForeignShape = Nothing
+
+'------------------------------------------------------------------------------
+' RELEASE THE SECOND WORKBOOK
+'------------------------------------------------------------------------------
+    'Release the shape reference before the workbook that owns it
+        Set ForeignShape = Nothing
+        Set ProbeSheet = Nothing
+    'Close the second workbook without saving, then prove it is gone. A leaked
+    'workbook is a dirty environment for everything that follows, so it is
+    'asserted rather than merely attempted
+        TST_DP_CloseProbeWorkbook ProbeWorkbook
+        TST_DP_AssertTrue "The ownership probe workbook is closed", _
+            Not TST_DP_WorkbookIsOpen(ProbeWorkbookName)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -4258,6 +4683,13 @@ SuiteFail:
         TST_DP_DeleteWorksheetByReference StaleSheet
         TST_DP_DeleteWorksheetIfExists mTST_DP_HostWorkbook, TST_DP_STALE_SHEET_NAME
         Err.Clear
+    'Release the second workbook on the failure path too. This runs after the
+    'original error was captured above, so a cleanup failure here can never
+    'overwrite the assertion failure that brought the suite here
+        Set ForeignShape = Nothing
+        Set ProbeSheet = Nothing
+        TST_DP_CloseProbeWorkbook ProbeWorkbook
+        Err.Clear
     'Record the suite-level failure from the captured values
         TST_DP_RecordFail "GridIcon suite failed", _
             "Error " & VBA.CStr(SavedErrNumber) & " - " & SavedErrDescription & _
@@ -4265,6 +4697,208 @@ SuiteFail:
         Err.Clear
 
 End Sub
+
+Private Function TST_DP_AddNamedShapeForTest( _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByVal ShapeName As String, _
+    ByVal AlternativeTextValue As String) As Excel.Shape
+
+'
+'==============================================================================
+'                       ADD A NAMED SHAPE FOR OWNERSHIP TESTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Creates a plain worksheet shape with a chosen name and alternative text
+'
+' WHY THIS EXISTS
+'   The ownership cases need shapes the DatePicker did not create: an unrelated
+'   user shape that merely shares the canonical name, a shape carrying a legacy
+'   marker, and shapes carrying malformed markers. All of them are ordinary
+'   shapes distinguished only by their alternative text
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet receiving the shape
+'
+'   ShapeName
+'     Name to assign
+'
+'   AlternativeTextValue
+'     Alternative text to assign, which is the ownership marker under test
+'
+' RETURNS
+'   The created shape
+'
+' BEHAVIOR
+'   Adds a small rectangle well away from the icon anchor, names it and stamps
+'   the requested alternative text
+'
+' ERROR POLICY
+'   Raises outward. A setup failure must fail the suite rather than produce a
+'   case that silently tests nothing
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The shape is deliberately positioned and sized unlike a real grid icon, so a
+'   test that asserts position or size cannot pass by coincidence
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NewShape        As Excel.Shape  'Shape being created
+
+'------------------------------------------------------------------------------
+' CREATE THE SHAPE
+'------------------------------------------------------------------------------
+    'Add a shape that looks nothing like a grid icon
+        Set NewShape = TargetSheet.Shapes.AddShape(msoShapeRectangle, 300#, 300#, 40#, 18#)
+    'Apply the name and the marker under test
+        NewShape.Name = ShapeName
+        NewShape.AlternativeText = AlternativeTextValue
+    'Return the created shape
+        Set TST_DP_AddNamedShapeForTest = NewShape
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Release the local reference without releasing the returned shape
+        Set NewShape = Nothing
+
+End Function
+
+Private Sub TST_DP_CloseProbeWorkbook(ByRef ProbeWorkbook As Excel.Workbook)
+
+'
+'==============================================================================
+'                          CLOSE THE PROBE WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Closes the second workbook used by the ownership cases without saving
+'
+' WHY THIS EXISTS
+'   The cross-workbook case has to open a real second workbook. Leaking it would
+'   leave the Excel session dirty for every following suite and for the next run
+'
+' INPUTS
+'   ProbeWorkbook
+'     Workbook to close; set to Nothing on return
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Closes with SaveChanges:=False and releases the reference
+'
+' ERROR POLICY
+'   Best effort. Must not raise, because it runs on both the success and the
+'   failure path, and on the failure path the original error has already been
+'   captured and must not be replaced
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The workbook is held by object reference rather than by name, so a workbook
+'   the run did not create can never be closed by this routine
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLOSE THE WORKBOOK
+'------------------------------------------------------------------------------
+    'Never let cleanup raise into a caller
+        On Error Resume Next
+    'Exit when nothing is held
+        If ProbeWorkbook Is Nothing Then
+            Err.Clear
+            Exit Sub
+        End If
+    'Close the workbook without saving
+        ProbeWorkbook.Close SaveChanges:=False
+    'Release the reference whatever the close reported
+        Set ProbeWorkbook = Nothing
+    'Clear any suppressed close error
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_WorkbookIsOpen(ByVal WorkbookName As String) As Boolean
+
+'
+'==============================================================================
+'                            WORKBOOK IS OPEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a workbook with the given name is still open
+'
+' WHY THIS EXISTS
+'   Closing the probe workbook must be asserted, not assumed. A leaked workbook
+'   is exactly the kind of residue that makes a later run fail for reasons that
+'   look unrelated
+'
+' INPUTS
+'   WorkbookName
+'     Workbook name captured while it was open
+'
+' RETURNS
+'   True when a workbook of that name is still in the Workbooks collection
+'
+' BEHAVIOR
+'   Scans the open workbooks by name
+'
+' ERROR POLICY
+'   Never raises outward. Any failure reports False
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Names are compared case-insensitively, as Excel treats them
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CurWorkbook     As Excel.Workbook   'Workbook being scanned
+
+'------------------------------------------------------------------------------
+' SCAN THE OPEN WORKBOOKS
+'------------------------------------------------------------------------------
+    'Never let the scan raise into a caller
+        On Error Resume Next
+    'Assume the workbook is closed
+        TST_DP_WorkbookIsOpen = False
+    'Exit when no name was supplied
+        If VBA.LenB(WorkbookName) = 0 Then GoTo ExitProcedure
+    'Report a match from the open workbooks
+        For Each CurWorkbook In Excel.Application.Workbooks
+            If VBA.StrComp(CurWorkbook.Name, WorkbookName, vbTextCompare) = 0 Then
+                TST_DP_WorkbookIsOpen = True
+                GoTo ExitProcedure
+            End If
+        Next CurWorkbook
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release the local reference
+        Set CurWorkbook = Nothing
+    'Clear any suppressed scan error
+        Err.Clear
+
+End Function
 
 Private Function TST_DP_AddStaleSheetForTest( _
     ByVal HostWorkbook As Excel.Workbook, _
@@ -4440,7 +5074,7 @@ Private Sub TST_DP_RunSuite_Manager()
 '   which allows either the remove or the hide implementation path
 '
 ' UPDATED
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4463,9 +5097,7 @@ Private Sub TST_DP_RunSuite_Manager()
     'Activate the scratch sheet
         TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
     'Purge stale grid icons before the manager tests
-    'M_GridIcon_PurgeAll resets On Error GoTo 0 on exit; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
     'Enable grid icon gating for this suite
         gDP_ShowGridIcon = True
 
@@ -4476,9 +5108,7 @@ Private Sub TST_DP_RunSuite_Manager()
         TST_DP_AssertFalse "New manager is not busy", Manager.Is_Busy
 
     'Close any loaded picker before the visible / loaded checks
-    'DP_Close resets On Error GoTo 0 on exit; re-arm immediately
         DP_Close
-        On Error GoTo SuiteFail
 
     'Assert the picker is not visible after close
         TST_DP_AssertFalse "PickerVisible is False after DP_Close", _
@@ -4537,9 +5167,7 @@ Private Sub TST_DP_RunSuite_Manager()
     'Prepare a date value cell for the selection-change test
         mTST_DP_ScratchSheet.Range("E10").Value = VBA.DateSerial(2026, 9, 9)
     'Handle a selection change to an eligible target cell
-    'Handle_SelectionChange resets On Error GoTo 0 on exit; re-arm immediately
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E10")
-        On Error GoTo SuiteFail
     'Assert the manager created or showed the grid icon for the eligible target
         TST_DP_AssertTrue "Handle_SelectionChange shows a visible icon for an eligible target", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4548,9 +5176,7 @@ Private Sub TST_DP_RunSuite_Manager()
         mTST_DP_ScratchSheet.Range("E11").ClearContents
         mTST_DP_ScratchSheet.Range("E11").NumberFormat = "General"
     'Handle a selection change to the ineligible target cell
-    'Handle_SelectionChange resets On Error GoTo 0 on exit; re-arm immediately
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E11")
-        On Error GoTo SuiteFail
     'Assert no visible grid icon remains for the ineligible target
         TST_DP_AssertFalse "Handle_SelectionChange leaves no visible icon for an ineligible target", _
             TST_DP_ShapeIsVisible(mTST_DP_ScratchSheet, DP_GRID_ICON_NAME)
@@ -4559,9 +5185,7 @@ Private Sub TST_DP_RunSuite_Manager()
 ' RESET BEHAVIOR
 '------------------------------------------------------------------------------
     'Show the icon again for the reset test
-    'Handle_SelectionChange resets On Error GoTo 0 on exit; re-arm immediately
         Manager.Handle_SelectionChange mTST_DP_ScratchSheet.Range("E10")
-        On Error GoTo SuiteFail
     'Reset all DatePicker UI through the manager
         Manager.Reset_DatePickerUI
     'Assert the reset removed all grid icons from the host workbook
@@ -4640,18 +5264,13 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 '   TST_DP_CountNamedShapes
 '
 ' NOTES
-'   DP_Stop uses On Error Resume Next throughout and ends with On Error GoTo 0,
-'   which kills the SuiteFail handler on return. It is re-armed immediately
-'   after each DP_Stop call.
-'
-'   DP_Start uses On Error GoTo ErrorHandler and raises outward on failure.
-'   It does not reset the caller SuiteFail handler when it succeeds.
-'
-'   M_Picker_EnsureManager uses On Error GoTo ErrorHandler (raises outward)
-'   and does not reset the caller SuiteFail handler.
+'   DP_Stop suppresses its own errors and DP_Start raises outward. Neither
+'   changes the error handler of this suite, so neither is followed by a
+'   re-arm. What DP_Start reports on failure is asserted; what it does to its
+'   own error state is its own business
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -4671,9 +5290,7 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 ' FIRST STOP - TEARDOWN STATE
 '------------------------------------------------------------------------------
     'Call DP_Stop to tear down the DatePicker runtime
-    'DP_Stop uses OERN and ends with On Error GoTo 0; re-arm immediately
         DP_Stop
-        On Error GoTo SuiteFail
 
     'Assert the global manager reference is released after DP_Stop
         TST_DP_AssertTrue "Manager is Nothing after DP_Stop", _
@@ -4690,10 +5307,7 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
     'Capture the caller event state before the recovery start
         EventsBeforeStart = Excel.Application.EnableEvents
     'Call DP_Start to recreate the DatePicker runtime
-    'DP_Start internally calls Handle_SelectionChange which ends with
-    'On Error GoTo 0, killing the SuiteFail handler. Re-arm immediately.
         DP_Start
-        On Error GoTo SuiteFail
 
     'Assert the manager is recreated after DP_Start
         TST_DP_AssertFalse "Manager is instantiated after DP_Start", _
@@ -4713,9 +5327,7 @@ Private Sub TST_DP_RunSuite_LifecyclePair()
 ' SECOND STOP - IDEMPOTENT TEARDOWN
 '------------------------------------------------------------------------------
     'Call DP_Stop a second time to verify idempotent behavior
-    'DP_Stop uses OERN and ends with On Error GoTo 0; re-arm immediately
         DP_Stop
-        On Error GoTo SuiteFail
 
     'Assert the manager is released again after the second DP_Stop
         TST_DP_AssertTrue "Manager is Nothing after second DP_Stop", _
@@ -4938,7 +5550,7 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '   hide genuine provider conflicts from the operator
 '
 ' UPDATED
-'   2026-08-25
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5063,6 +5675,7 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
         M_Picker_EnsureManager
         GuardHeld = (Err.Number <> 0)
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
         TST_DP_AssertTrue _
             "Direct M_Picker_EnsureManager admission is refused", GuardHeld
@@ -5390,17 +6003,16 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 '   gDP_Manager
 '
 ' NOTES
-'   DP_RepairRuntime uses On Error GoTo ErrorHandler and raises outward on
-'   its own failure path. However, it calls Handle_SelectionChange internally,
-'   and Handle_SelectionChange ends with On Error GoTo 0 in its CleanExit.
-'   This kills the SuiteFail handler inside DP_RepairRuntime's call stack.
-'   Re-arm On Error GoTo SuiteFail after every DP_RepairRuntime call.
+'   DP_RepairRuntime raises outward on its own failure path and is not
+'   followed by a re-arm. Handle_SelectionChange runs inside its call stack
+'   and ends with On Error GoTo 0, but that statement belongs to
+'   Handle_SelectionChange and cannot reach this suite's handler
 '
-'   The RepairRuntime suite re-enables Application.EnableEvents = True.
-'   Subsequent suites that call mTST_DP_ScratchSheet.Activate must
-'   temporarily disable events before the Activate call to prevent the
-'   live manager from firing SheetActivate or SelectionChange during the
-'   sheet switch, which would reset the SuiteFail handler unexpectedly.
+'   This suite leaves Application.EnableEvents = True. A later suite that
+'   activates mTST_DP_ScratchSheet must suppress events across the Activate
+'   call, so the live manager does not react to the sheet switch and mutate
+'   grid-icon, selection or transient state a test is about to assert. The
+'   reason is test isolation, not error handling
 '
 '   The suite deliberately disables EnableEvents before calling DP_RepairRuntime.
 '   The harness has already set EnableEvents = False for its own operation.
@@ -5409,7 +6021,7 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 '   cleanup path at the end of the run.
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5435,12 +6047,7 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 ' CALL DP_REPAIRRUNTIME
 '------------------------------------------------------------------------------
     'Call DP_RepairRuntime to repair the DatePicker runtime
-    'DP_RepairRuntime raises outward on its own failure path.
-    'However it calls Handle_SelectionChange internally, which ends with
-    'On Error GoTo 0 in its CleanExit, killing the SuiteFail handler.
-    'Re-arm the handler after DP_RepairRuntime returns.
         DP_RepairRuntime
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' ASSERT REPAIRED STATE
@@ -5463,10 +6070,7 @@ Private Sub TST_DP_RunSuite_RepairRuntime()
 ' IDEMPOTENT CALL - HEALTHY RUNTIME
 '------------------------------------------------------------------------------
     'Call DP_RepairRuntime again against an already healthy runtime
-    'Handle_SelectionChange inside DP_RepairRuntime ends with On Error GoTo 0;
-    're-arm the handler after the call.
         DP_RepairRuntime
-        On Error GoTo SuiteFail
 
     'Assert EnableEvents is still True after the second repair call
         TST_DP_AssertTrue "EnableEvents is True after second DP_RepairRuntime", _
@@ -5499,6 +6103,1050 @@ SuiteFail:
         Excel.Application.EnableEvents = True
         Err.Clear
         On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_Lifecycle_ForceCleanForTest()
+
+'
+'==============================================================================
+'                 FORCE CLEAN LIFECYCLE STATE FOR TEST
+'==============================================================================
+'   Establishes a deterministic blank DatePicker runtime between #50 fault cases.
+'   This is harness-only cleanup and may use the explicit force-clear lease helper.
+'==============================================================================
+
+    On Error Resume Next
+    M_Lifecycle_Test_ArmFault VBA.vbNullString, 0
+    M_Timer_Test_ArmScheduleFault 0
+    M_Timer_Stop
+    M_Timer_Test_Reset
+    TST_DP_UnloadAllPickerFormsForTest
+    Set gDP_Manager = Nothing
+    M_ContextMenu_Remove
+    M_KeyboardShortcut_Remove
+    M_GridIcon_PurgeAll
+    TST_DP_ForceClearLeaseForTest
+    M_Lifecycle_Test_Reset True
+    Err.Clear
+    On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_RunSuite_LifecycleTransaction()
+
+'
+'==============================================================================
+'                    LIFECYCLE TRANSACTION SUITE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves #50 transactional startup, shutdown, repair, and lease-release rules
+'
+' BEHAVIOR
+'   Exercises every post-mutation startup fault point, pre-owned startup failure,
+'   every critical shutdown fault boundary, verified lease-deletion failure, a
+'   compound manager + unresolved-timer failure, protected owned-grid deletion,
+'   repair refusal on incomplete cleanup, and every post-mutation repair fault
+'
+' ERROR POLICY
+'   Captures intentionally injected errors locally, records assertion failures,
+'   and restores a clean owned runtime for following suites
+'
+' NOTES
+'   The suite contains no package-certification claim. It is source-host evidence
+'   only. #63 remains the final .xlsm/.xlam certification boundary.
+'
+' UPDATED
+'   2026-09-05
+'==============================================================================
+
+    Const INJECT_BASE As Long = vbObjectError + 3600
+
+    Dim StartupFaults As Variant
+    Dim StopFaults As Variant
+    Dim RepairFaults As Variant
+    Dim FaultIndex As Long
+    Dim FaultName As String
+    Dim StepName As String
+    Dim InjectedError As Long
+    Dim EscapedError As Long
+    Dim LeaseToken As String
+    Dim TraceText As String
+    Dim SavedEvents As Boolean
+    Dim SavedShowGrid As Boolean
+    Dim SavedShowRightClick As Boolean
+    Dim SavedKeyboard As Boolean
+    Dim SavedClockMode As DP_ClockMode
+    Dim OwnedShape As Excel.Shape
+    Dim ArmedEarliest As Date
+    Dim ArmedLatest As Date
+    Dim ArmedProcedure As String
+    Dim ArmedSchedule As Boolean
+    Dim ArmedError As Long
+    Dim ArmedCalls As Long
+
+'------------------------------------------------------------------------------
+' INITIALIZE AND CAPTURE CALLER STATE
+'------------------------------------------------------------------------------
+    mTST_DP_CurrentSuite = "LifecycleTransaction"
+    On Error GoTo SuiteFail
+
+    SavedEvents = Excel.Application.EnableEvents
+    SavedShowGrid = M_Settings_GetShowGridIcon()
+    SavedShowRightClick = M_Settings_GetShowRightClick()
+    SavedKeyboard = M_Settings_GetEnableKeyboardShortcut()
+    SavedClockMode = M_Settings_GetClockMode()
+
+    M_Settings_SetShowGridIcon True
+    M_Settings_SetShowRightClick True
+    M_Settings_SetEnableKeyboardShortcut True
+    M_Settings_SetClockMode DP_ClockMode_Static
+
+    TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+    mTST_DP_ScratchSheet.Range("D5").Value = VBA.DateSerial(2026, 9, 5)
+    mTST_DP_ScratchSheet.Range("D5").NumberFormat = "dd/mm/yyyy"
+    mTST_DP_ScratchSheet.Range("D5").Select
+
+'------------------------------------------------------------------------------
+' FRESH START: EVERY POST-MUTATION BOUNDARY ROLLS BACK
+'------------------------------------------------------------------------------
+    StartupFaults = Array( _
+        "Start.AfterAdmission", _
+        "Start.AfterManager", _
+        "Start.AfterContextMenu", _
+        "Start.AfterKeyboard", _
+        "Start.AfterGrid", _
+        "Start.AfterRefresh")
+
+    For FaultIndex = LBound(StartupFaults) To UBound(StartupFaults)
+        FaultName = VBA.CStr(StartupFaults(FaultIndex))
+        InjectedError = INJECT_BASE + FaultIndex
+
+        TST_DP_Lifecycle_ForceCleanForTest
+        Excel.Application.EnableEvents = False
+        M_Lifecycle_Test_Reset True
+        M_Lifecycle_Test_ArmFault FaultName, InjectedError
+
+        EscapedError = 0
+        On Error Resume Next
+        Err.Clear
+        DP_Start
+        EscapedError = Err.Number
+        Err.Clear
+        On Error GoTo SuiteFail
+
+        TraceText = M_Lifecycle_Test_LastTrace()
+
+        TST_DP_AssertEqualsLong "Fresh start preserves primary error | " & FaultName, _
+            InjectedError, EscapedError
+        TST_DP_AssertEqualsLong "Diagnostic primary error matches | " & FaultName, _
+            InjectedError, M_Lifecycle_Test_LastPrimaryNumber()
+        TST_DP_AssertEqualsString "Operation is DP_Start | " & FaultName, _
+            "DP_Start", M_Lifecycle_Test_LastOperation()
+        TST_DP_AssertFalse "Fresh failed start is not successful | " & FaultName, _
+            M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertFalse "Fresh start did not pre-own lease | " & FaultName, _
+            M_Lifecycle_Test_LastLeaseWasAlreadyOwned()
+        TST_DP_AssertTrue "Fresh start acquired lease this call | " & FaultName, _
+            M_Lifecycle_Test_LastLeaseAcquiredThisCall()
+        TST_DP_AssertTrue "Fresh start attempted rollback | " & FaultName, _
+            M_Lifecycle_Test_LastCleanupAttempted()
+        TST_DP_AssertTrue "Fresh rollback reaches critical-clean state | " & FaultName, _
+            M_Lifecycle_Test_LastCriticalClean()
+        TST_DP_AssertEqualsLong "Fresh rollback has no cleanup failures | " & FaultName, _
+            0, M_Lifecycle_Test_LastCleanupFailureCount()
+        TST_DP_AssertTrue "Fresh rollback releases newly acquired lease | " & FaultName, _
+            M_Lifecycle_Test_LastLeaseReleased()
+        TST_DP_AssertFalse "No lease remains after fresh rollback | " & FaultName, _
+            M_Lease_IsOwner()
+        TST_DP_AssertFalse "No local lease token remains after fresh rollback | " & FaultName, _
+            M_Lifecycle_Test_HasLocalOwnerToken()
+        TST_DP_AssertTrue "Fresh rollback trace reaches lease | " & FaultName, _
+            VBA.InStr(1, TraceText, "Lease=PASS", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Fresh rollback releases manager | " & FaultName, _
+            (gDP_Manager Is Nothing)
+        TST_DP_AssertFalse "Fresh rollback unloads picker | " & FaultName, _
+            TST_DP_IsPickerFormLoadedForTest()
+        TST_DP_AssertEqualsLong "Fresh rollback removes owned grid icon | " & FaultName, _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+        TST_DP_AssertFalse "Fresh rollback restores disabled caller events | " & FaultName, _
+            Excel.Application.EnableEvents
+    Next FaultIndex
+
+'------------------------------------------------------------------------------
+' PRE-OWNED START FAILURE MUST NOT RELEASE THE EXISTING RUNTIME
+'------------------------------------------------------------------------------
+    TST_DP_Lifecycle_ForceCleanForTest
+    Excel.Application.EnableEvents = False
+    DP_Start
+    LeaseToken = TST_DP_ReadLeaseOwnerForTest()
+
+    M_Lifecycle_Test_Reset True
+    InjectedError = INJECT_BASE + 20
+    M_Lifecycle_Test_ArmFault "Start.AfterContextMenu", InjectedError
+
+    EscapedError = 0
+    On Error Resume Next
+    Err.Clear
+    DP_Start
+    EscapedError = Err.Number
+    Err.Clear
+    On Error GoTo SuiteFail
+
+    TST_DP_AssertEqualsLong "Repeated start preserves its primary error", _
+        InjectedError, EscapedError
+    TST_DP_AssertTrue "Repeated start classifies lease as pre-owned", _
+        M_Lifecycle_Test_LastLeaseWasAlreadyOwned()
+    TST_DP_AssertFalse "Repeated start acquired no new lease", _
+        M_Lifecycle_Test_LastLeaseAcquiredThisCall()
+    TST_DP_AssertFalse "Repeated start does not destructively roll back pre-owned runtime", _
+        M_Lifecycle_Test_LastCleanupAttempted()
+    TST_DP_AssertFalse "Repeated start never reports lease release", _
+        M_Lifecycle_Test_LastLeaseReleased()
+    TST_DP_AssertEqualsString "Repeated start keeps exact pre-owned lease token", _
+        LeaseToken, TST_DP_ReadLeaseOwnerForTest()
+    TST_DP_AssertTrue "Repeated start keeps ownership", M_Lease_IsOwner()
+    TST_DP_AssertFalse "Repeated start keeps manager alive", (gDP_Manager Is Nothing)
+    TST_DP_AssertTrue "Repeated start records preserved pre-owned runtime", _
+        VBA.InStr(1, M_Lifecycle_Test_LastTrace(), _
+            "PreOwnedRuntime=PRESERVED", vbBinaryCompare) > 0
+
+    M_Lifecycle_Test_Reset True
+    DP_Stop
+
+'------------------------------------------------------------------------------
+' SHUTDOWN: EVERY CRITICAL BOUNDARY CONTINUES, RETAINS, THEN RETRIES
+'------------------------------------------------------------------------------
+    StopFaults = Array( _
+        "Cleanup.Manager", _
+        "Cleanup.Timer", _
+        "Cleanup.Form", _
+        "Cleanup.Grid", _
+        "Cleanup.ContextMenu", _
+        "Cleanup.Keyboard", _
+        "Cleanup.EnableEvents", _
+        "Cleanup.Lease")
+
+    For FaultIndex = LBound(StopFaults) To UBound(StopFaults)
+        FaultName = VBA.CStr(StopFaults(FaultIndex))
+        StepName = VBA.Mid$(FaultName, VBA.Len("Cleanup.") + 1)
+        InjectedError = INJECT_BASE + 40 + FaultIndex
+
+        TST_DP_Lifecycle_ForceCleanForTest
+        Excel.Application.EnableEvents = False
+        DP_Start
+        LeaseToken = TST_DP_ReadLeaseOwnerForTest()
+
+        M_Lifecycle_Test_Reset True
+        M_Lifecycle_Test_ArmFault FaultName, InjectedError
+        DP_Stop
+        TraceText = M_Lifecycle_Test_LastTrace()
+
+        TST_DP_AssertEqualsString "Stop operation is observable | " & StepName, _
+            "DP_Stop", M_Lifecycle_Test_LastOperation()
+        TST_DP_AssertFalse "Faulted stop is not successful | " & StepName, _
+            M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertTrue "Faulted stop records cleanup attempted | " & StepName, _
+            M_Lifecycle_Test_LastCleanupAttempted()
+        TST_DP_AssertEqualsLong "Faulted stop counts one failed cleanup | " & StepName, _
+            1, M_Lifecycle_Test_LastCleanupFailureCount()
+        TST_DP_AssertFalse "Faulted stop does not release lease | " & StepName, _
+            M_Lifecycle_Test_LastLeaseReleased()
+        TST_DP_AssertTrue "Faulted stop retains local ownership token | " & StepName, _
+            M_Lifecycle_Test_HasLocalOwnerToken()
+        TST_DP_AssertTrue "Faulted stop retains verified ownership | " & StepName, _
+            M_Lease_IsOwner()
+        TST_DP_AssertEqualsString "Faulted stop retains exact lease token | " & StepName, _
+            LeaseToken, TST_DP_ReadLeaseOwnerForTest()
+        TST_DP_AssertTrue "Fault trace records failed step | " & StepName, _
+            VBA.InStr(1, TraceText, StepName & "=FAIL", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Fault trace reaches lease decision | " & StepName, _
+            VBA.InStr(1, TraceText, "Lease=", vbBinaryCompare) > 0
+
+        If VBA.StrComp(StepName, "Lease", vbBinaryCompare) = 0 Then
+            TST_DP_AssertTrue "Lease-only fault follows critical-clean teardown", _
+                M_Lifecycle_Test_LastCriticalClean()
+        Else
+            TST_DP_AssertFalse "Pre-lease critical fault marks teardown unclean | " & StepName, _
+                M_Lifecycle_Test_LastCriticalClean()
+        End If
+
+        M_Lifecycle_Test_Reset True
+        DP_Stop
+        TST_DP_AssertTrue "Retry stop succeeds | " & StepName, _
+            M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertTrue "Retry releases lease | " & StepName, _
+            M_Lifecycle_Test_LastLeaseReleased()
+        TST_DP_AssertEqualsString "Retry leaves no lease | " & StepName, _
+            VBA.vbNullString, TST_DP_ReadLeaseOwnerForTest()
+    Next FaultIndex
+
+'------------------------------------------------------------------------------
+' VERIFIED LEASE DELETE FAILURE RETAINS BOTH LIVE LEASE AND LOCAL PROOF
+'------------------------------------------------------------------------------
+    TST_DP_Lifecycle_ForceCleanForTest
+    Excel.Application.EnableEvents = False
+    DP_Start
+    LeaseToken = TST_DP_ReadLeaseOwnerForTest()
+
+    M_Lifecycle_Test_Reset True
+    M_Lifecycle_Test_ArmFault "Lease.Delete", INJECT_BASE + 70
+    DP_Stop
+
+    TST_DP_AssertTrue "Lease-delete fault follows critical-clean teardown", _
+        M_Lifecycle_Test_LastCriticalClean()
+    TST_DP_AssertEqualsLong "Lease-delete fault counts one cleanup failure", _
+        1, M_Lifecycle_Test_LastCleanupFailureCount()
+    TST_DP_AssertFalse "Lease-delete fault does not report release", _
+        M_Lifecycle_Test_LastLeaseReleased()
+    TST_DP_AssertTrue "Lease-delete fault retains local owner token", _
+        M_Lifecycle_Test_HasLocalOwnerToken()
+    TST_DP_AssertEqualsString "Lease-delete fault retains exact live lease", _
+        LeaseToken, TST_DP_ReadLeaseOwnerForTest()
+
+    M_Lifecycle_Test_Reset True
+    DP_Stop
+    TST_DP_AssertTrue "Lease-delete retry releases cleanly", _
+        M_Lifecycle_Test_LastLeaseReleased()
+
+'------------------------------------------------------------------------------
+' COMPOUND FAILURE: MANAGER CLEANUP FAULT + REAL #27 UNRESOLVED TIMER
+'------------------------------------------------------------------------------
+    TST_DP_Lifecycle_ForceCleanForTest
+    Excel.Application.EnableEvents = False
+    DP_Start
+
+    M_Timer_Stop
+    M_Timer_Test_Reset
+    M_Timer_Start
+    M_Timer_Test_LastRegistration ArmedEarliest, ArmedLatest, ArmedProcedure, _
+        ArmedSchedule, ArmedError, ArmedCalls
+
+    M_Timer_Test_ArmScheduleFault 1004
+    M_Timer_Stop
+    TST_DP_AssertTrue "Compound setup creates unresolved timer registration", _
+        M_Timer_Test_IsUnresolved()
+
+    'Keep the unresolved retry failing when the lifecycle timer cleanup reaches it.
+    'Cleanup.Manager is injected too, so Class_Terminate cannot consume this timer fault first.
+    M_Timer_Test_ArmScheduleFault 1004
+    M_Lifecycle_Test_Reset True
+    M_Lifecycle_Test_ArmFault "Cleanup.Manager", INJECT_BASE + 80
+    DP_Stop
+    TraceText = M_Lifecycle_Test_LastTrace()
+
+    TST_DP_AssertEqualsLong "Compound cleanup records two independent failures", _
+        2, M_Lifecycle_Test_LastCleanupFailureCount()
+    TST_DP_AssertTrue "Compound trace records manager failure", _
+        VBA.InStr(1, TraceText, "Manager=FAIL", vbBinaryCompare) > 0
+    TST_DP_AssertTrue "Compound trace consumes #27 unresolved timer as failure", _
+        VBA.InStr(1, TraceText, "Timer=FAIL", vbBinaryCompare) > 0
+    TST_DP_AssertTrue "Compound cleanup continues after both failures", _
+        VBA.InStr(1, TraceText, "Keyboard=PASS", vbBinaryCompare) > 0
+    TST_DP_AssertFalse "Compound failure retains lease", _
+        M_Lifecycle_Test_LastLeaseReleased()
+    TST_DP_AssertTrue "Compound failure retains ownership", M_Lease_IsOwner()
+
+    TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+    M_Timer_Test_ArmScheduleFault 0
+    M_Timer_Test_Reset
+    M_Lifecycle_Test_Reset True
+    DP_Stop
+    TST_DP_AssertTrue "Compound-failure retry releases lease", _
+        M_Lifecycle_Test_LastLeaseReleased()
+
+'------------------------------------------------------------------------------
+' NATURAL #53 GRID FAILURE: OWNED SHAPE ON PROTECTED SHEET
+'------------------------------------------------------------------------------
+    TST_DP_Lifecycle_ForceCleanForTest
+    Excel.Application.EnableEvents = False
+    DP_Start
+    M_GridIcon_PurgeAll
+
+    Set OwnedShape = TST_DP_AddNamedShapeForTest( _
+        mTST_DP_ScratchSheet, _
+        DP_GRID_ICON_NAME, _
+        "DatePicker Grid Entry Point | dp-owner-v1=20200101010101-00000000-DEADBEEF")
+    mTST_DP_ScratchSheet.Protect DrawingObjects:=True, Contents:=True, Scenarios:=True
+
+    M_Lifecycle_Test_Reset True
+    DP_Stop
+    TraceText = M_Lifecycle_Test_LastTrace()
+
+    TST_DP_AssertTrue "Protected owned grid shape is reported as cleanup failure", _
+        VBA.InStr(1, TraceText, "Grid=FAIL", vbBinaryCompare) > 0
+    TST_DP_AssertEqualsLong "Protected grid case counts one cleanup failure", _
+        1, M_Lifecycle_Test_LastCleanupFailureCount()
+    TST_DP_AssertFalse "Protected owned grid blocks lease release", _
+        M_Lifecycle_Test_LastLeaseReleased()
+    TST_DP_AssertTrue "Protected owned grid keeps lease ownership", M_Lease_IsOwner()
+    TST_DP_AssertEqualsLong "Protected owned grid shape remains in place", _
+        1, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+    mTST_DP_ScratchSheet.Unprotect
+    Set OwnedShape = Nothing
+    M_Lifecycle_Test_Reset True
+    DP_Stop
+    TST_DP_AssertTrue "Unprotected owned grid retries and releases lease", _
+        M_Lifecycle_Test_LastLeaseReleased()
+    TST_DP_AssertEqualsLong "Retry reclaims formerly protected owned grid", _
+        0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+'------------------------------------------------------------------------------
+' REPAIR PREPARE FAILURE REFUSES TO REBUILD OVER INCOMPLETE CLEANUP
+'------------------------------------------------------------------------------
+    TST_DP_Lifecycle_ForceCleanForTest
+    Excel.Application.EnableEvents = False
+    DP_Start
+    LeaseToken = TST_DP_ReadLeaseOwnerForTest()
+
+    M_Lifecycle_Test_Reset True
+    M_Lifecycle_Test_ArmFault "Cleanup.Grid", INJECT_BASE + 90
+    EscapedError = 0
+    On Error Resume Next
+    Err.Clear
+    DP_RepairRuntime
+    EscapedError = Err.Number
+    Err.Clear
+    On Error GoTo SuiteFail
+
+    TST_DP_AssertTrue "Repair prepare failure raises to caller", EscapedError <> 0
+    TST_DP_AssertEqualsString "Repair prepare operation is observable", _
+        "DP_RepairRuntime", M_Lifecycle_Test_LastOperation()
+    TST_DP_AssertFalse "Repair does not report success over incomplete cleanup", _
+        M_Lifecycle_Test_LastSucceeded()
+    TST_DP_AssertTrue "Repair prepare records cleanup attempted", _
+        M_Lifecycle_Test_LastCleanupAttempted()
+    TST_DP_AssertFalse "Repair prepare does not release lease", _
+        M_Lifecycle_Test_LastLeaseReleased()
+    TST_DP_AssertEqualsString "Repair prepare retains exact lease", _
+        LeaseToken, TST_DP_ReadLeaseOwnerForTest()
+    TST_DP_AssertTrue "Repair prepare retains ownership", M_Lease_IsOwner()
+    TST_DP_AssertTrue "Repair remains the EnableEvents=True exception", _
+        Excel.Application.EnableEvents
+    TST_DP_AssertTrue "Repair does not rebuild manager over incomplete cleanup", _
+        (gDP_Manager Is Nothing)
+
+    M_Lifecycle_Test_Reset True
+    DP_RepairRuntime
+    TST_DP_AssertTrue "Repair retry succeeds after cleanup is available", _
+        M_Lifecycle_Test_LastSucceeded()
+    TST_DP_AssertFalse "Successful repair rebuilds manager", _
+        (gDP_Manager Is Nothing)
+
+'------------------------------------------------------------------------------
+' REPAIR: EVERY POST-MUTATION REBUILD FAULT CLEANS AGAIN AND RETAINS LEASE
+'------------------------------------------------------------------------------
+    RepairFaults = Array( _
+        "Repair.AfterManager", _
+        "Repair.AfterContextMenu", _
+        "Repair.AfterKeyboard", _
+        "Repair.AfterRefresh")
+
+    For FaultIndex = LBound(RepairFaults) To UBound(RepairFaults)
+        FaultName = VBA.CStr(RepairFaults(FaultIndex))
+        InjectedError = INJECT_BASE + 100 + FaultIndex
+
+        TST_DP_Lifecycle_ForceCleanForTest
+        Excel.Application.EnableEvents = False
+        DP_Start
+        LeaseToken = TST_DP_ReadLeaseOwnerForTest()
+
+        M_Lifecycle_Test_Reset True
+        M_Lifecycle_Test_ArmFault FaultName, InjectedError
+        EscapedError = 0
+        On Error Resume Next
+        Err.Clear
+        DP_RepairRuntime
+        EscapedError = Err.Number
+        Err.Clear
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "Repair preserves rebuild primary error | " & FaultName, _
+            InjectedError, EscapedError
+        TST_DP_AssertEqualsLong "Repair diagnostic keeps primary error | " & FaultName, _
+            InjectedError, M_Lifecycle_Test_LastPrimaryNumber()
+        TST_DP_AssertEqualsString "Repair operation remains observable | " & FaultName, _
+            "DP_RepairRuntime", M_Lifecycle_Test_LastOperation()
+        TST_DP_AssertFalse "Faulted repair is not successful | " & FaultName, _
+            M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertTrue "Faulted repair classifies lease as pre-owned | " & FaultName, _
+            M_Lifecycle_Test_LastLeaseWasAlreadyOwned()
+        TST_DP_AssertFalse "Faulted repair acquires no new lease | " & FaultName, _
+            M_Lifecycle_Test_LastLeaseAcquiredThisCall()
+        TST_DP_AssertTrue "Faulted repair attempts rollback cleanup | " & FaultName, _
+            M_Lifecycle_Test_LastCleanupAttempted()
+        TST_DP_AssertTrue "Faulted repair rollback is critical-clean | " & FaultName, _
+            M_Lifecycle_Test_LastCriticalClean()
+        TST_DP_AssertEqualsLong "Faulted repair rollback has no cleanup failures | " & FaultName, _
+            0, M_Lifecycle_Test_LastCleanupFailureCount()
+        TST_DP_AssertFalse "Faulted repair retains lease | " & FaultName, _
+            M_Lifecycle_Test_LastLeaseReleased()
+        TST_DP_AssertEqualsString "Faulted repair retains exact lease | " & FaultName, _
+            LeaseToken, TST_DP_ReadLeaseOwnerForTest()
+        TST_DP_AssertTrue "Faulted repair keeps ownership | " & FaultName, _
+            M_Lease_IsOwner()
+        TST_DP_AssertTrue "Faulted repair leaves events enabled | " & FaultName, _
+            Excel.Application.EnableEvents
+        TST_DP_AssertTrue "Faulted repair leaves no partial manager | " & FaultName, _
+            (gDP_Manager Is Nothing)
+
+        M_Lifecycle_Test_Reset True
+        DP_RepairRuntime
+        TST_DP_AssertTrue "Repair retry succeeds | " & FaultName, _
+            M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertFalse "Repair retry rebuilds manager | " & FaultName, _
+            (gDP_Manager Is Nothing)
+    Next FaultIndex
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    On Error Resume Next
+    If Not mTST_DP_ScratchSheet Is Nothing Then mTST_DP_ScratchSheet.Unprotect
+    Set OwnedShape = Nothing
+    TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+    M_Timer_Test_ArmScheduleFault 0
+    M_Timer_Test_Reset
+    TST_DP_Lifecycle_ForceCleanForTest
+
+    M_Settings_SetShowGridIcon SavedShowGrid
+    M_Settings_SetShowRightClick SavedShowRightClick
+    M_Settings_SetEnableKeyboardShortcut SavedKeyboard
+    M_Settings_SetClockMode SavedClockMode
+    Excel.Application.EnableEvents = SavedEvents
+
+    'Restore a normal owned runtime for the suites that follow.
+    DP_Start
+    Excel.Application.EnableEvents = SavedEvents
+    Err.Clear
+    On Error GoTo 0
+    Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    TST_DP_RecordFail "LifecycleTransaction suite failed", _
+        "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+    Err.Clear
+    Resume SuiteExit
+
+End Sub
+
+Private Sub TST_DP_RunSuite_Timer()
+
+'
+'==============================================================================
+'                              TIMER SUITE
+'==============================================================================
+' PURPOSE
+'   Validates live-clock registration identity, cancellation, the unresolved
+'   registration barrier and its drains, scheduling failure, and dropped-tick
+'   recovery
+'
+' WHY THIS EXISTS
+'   Before #27 the timer had no coverage at all. Cancellation failure reached
+'   only Debug.Print while the state claimed clean teardown, nothing could
+'   observe what had actually been scheduled, and a stale callback arriving after
+'   a restart could not be distinguished from a current one
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives M_Timer_Start, M_Timer_Stop and M_Timer_Tick directly and asserts
+'   against the recorded registration exposed by the timer test seams
+'
+' ERROR POLICY
+'   Suite-level handler records a failure and continues the run
+'
+' DEPENDENCIES
+'   M_Timer_Start
+'   M_Timer_Stop
+'   M_Timer_Tick
+'   M_Timer_Test_Reset
+'   M_Timer_Test_LastRegistration
+'   M_Timer_Test_ArmScheduleFault
+'   M_Timer_Test_IsRunning
+'   M_Timer_Test_IsUnresolved
+'   M_Timer_Test_ExpireRegistration
+'   M_Timer_EnsureHealthy
+'   TST_DP_CancelRegistrationForTest
+'
+' NOTES
+'   This suite must contain no DoEvents, and each section must perform all of its
+'   actions and capture every observation before it asserts anything
+'
+'   An Application.OnTime callback runs when Excel goes idle, and recording an
+'   assertion writes a row to the result worksheet, which yields to the message
+'   pump. A tick scheduled one second out therefore fires part-way through an
+'   assertion block, finds no loaded form and calls M_Timer_Stop, which both
+'   clears the running flag and adds a cancellation to the recorded call count
+'
+'   Capturing into locals first keeps the observed values contiguous with the
+'   actions that produced them. Asserting inline instead is what made this suite
+'   fail six cases on behavior that was correct
+'
+'   Cases that deliberately fail a cancellation leave a real registration armed
+'   in Excel. Draining the barrier clears this component's bookkeeping, not
+'   Excel's schedule, so each such case cancels the real registration through
+'   TST_DP_CancelRegistrationForTest. Otherwise a callback would fire after the
+'   suite and start a second clock chain
+'
+'   The workbook-rename criterion is deliberately absent. Renaming the host that
+'   carries the executing project and the results sheet is not something a run
+'   may do to itself; that case is manual integration evidence on a disposable
+'   copy, alongside the real Application.OnTime smoke
+'
+' UPDATED
+'   2026-09-01
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SavedErrNumber      As Long             'Original error number captured on failure
+    Dim SavedErrDescription As String           'Original error description captured on failure
+    Dim SavedErrSource      As String           'Original error source captured on failure
+
+    Dim RegEarliest         As Date             'Recorded EarliestTime of the last call
+    Dim RegLatest           As Date             'Recorded LatestTime of the last call
+    Dim RegProcedure        As String           'Recorded Procedure of the last call
+    Dim RegSchedule         As Boolean          'Recorded Schedule flag of the last call
+    Dim RegErrNumber        As Long             'Recorded error from the last call
+    Dim RegCallCount        As Long             'Recorded number of scheduling calls
+
+    Dim ArmedEarliest       As Date             'EarliestTime of a registration left armed in Excel
+    Dim ArmedProcedure      As String           'Procedure of a registration left armed in Excel
+    Dim BaselineCount       As Long             'Call count captured before an action
+    Dim StartErrNumber      As Long             'Error escaping a refused M_Timer_Start
+
+    Dim RunAfterStart       As Boolean          'Timer state captured immediately after the first start
+    Dim CountAfterStart     As Long             'Call count captured immediately after the first start
+    Dim CountAfterRepeat    As Long             'Call count captured immediately after the repeated start
+    Dim RunAfterRetry       As Boolean          'Timer state captured immediately after the retry drain
+    Dim UnresAfterRetry     As Boolean          'Barrier state captured immediately after the retry drain
+    Dim RunAfterExpiry      As Boolean          'Timer state captured immediately after the expiry drain
+    Dim UnresAfterExpiry    As Boolean          'Barrier state captured immediately after the expiry drain
+    Dim RunAfterRecovery    As Boolean          'Timer state captured immediately after recovery
+    Dim CountAfterRecovery  As Long             'Call count captured immediately after recovery
+    Dim SchedAfterRecovery  As Boolean          'Schedule flag captured immediately after recovery
+    Dim CountAfterHealthy   As Long             'Call count captured immediately after the healthy start
+    Dim RunAfterTick        As Boolean          'Timer state captured immediately after a formless tick
+    Dim CountAfterTick      As Long             'Call count captured immediately after a formless tick
+    Dim TickEarliest        As Date             'EarliestTime the formless tick cancelled
+    Dim TickSchedule        As Boolean          'Schedule flag recorded by the formless tick
+    Dim CountBridgeHealthy  As Long             'Call count captured after a bridge call on a healthy timer
+    Dim RunBridgeHealthy    As Boolean          'Timer state captured after a bridge call on a healthy timer
+    Dim CountBridgeRepair   As Long             'Call count captured after a bridge call on an expired timer
+    Dim RunBridgeRepair     As Boolean          'Timer state captured after a bridge call on an expired timer
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "Timer"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Start from a known timer state
+        M_Timer_Stop
+        M_Timer_Test_Reset
+
+'------------------------------------------------------------------------------
+' REGISTRATION IDENTITY
+'------------------------------------------------------------------------------
+    'Start must record exactly what it asked Excel for, because cancellation has
+    'to match the same EarliestTime and Procedure
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountAfterStart
+        RunAfterStart = M_Timer_Test_IsRunning()
+    'A second start must not schedule a competing registration. It runs here,
+    'before any assertion, because recording one would let a tick fire between
+    'the two starts and stop the timer
+        M_Timer_Start
+        M_Timer_Test_LastRegistration ArmedEarliest, RegLatest, ArmedProcedure, _
+            RegSchedule, RegErrNumber, CountAfterRepeat
+
+        TST_DP_AssertEqualsLong "Start makes exactly one scheduling call", _
+            1, CountAfterStart
+        TST_DP_AssertTrue "Start schedules rather than cancels", RegSchedule
+        TST_DP_AssertEqualsLong "Start reports no scheduling error", 0, RegErrNumber
+        TST_DP_AssertTrue "Start records a workbook-qualified callback name", _
+            VBA.InStr(1, RegProcedure, "M_Timer_Tick", vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Start bounds delivery to thirty seconds", _
+            RegLatest = RegEarliest + VBA.TimeSerial(0, 0, 30)
+        TST_DP_AssertTrue "Start leaves the timer running", RunAfterStart
+        TST_DP_AssertEqualsLong "A repeated start adds no scheduling call", _
+            1, CountAfterRepeat
+
+'------------------------------------------------------------------------------
+' CANCELLATION MATCHES THE SCHEDULED IDENTITY
+'------------------------------------------------------------------------------
+    'The identity captured after the repeated start is what Stop must match
+        M_Timer_Stop
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+
+        TST_DP_AssertFalse "Stop cancels rather than schedules", RegSchedule
+        TST_DP_AssertTrue "Stop cancels the exact scheduled time", _
+            RegEarliest = ArmedEarliest
+        TST_DP_AssertEqualsString "Stop cancels the exact scheduled procedure", _
+            ArmedProcedure, RegProcedure
+        TST_DP_AssertFalse "A stopped timer is not running", M_Timer_Test_IsRunning()
+        TST_DP_AssertFalse "A successful cancellation leaves nothing unresolved", _
+            M_Timer_Test_IsUnresolved()
+
+'------------------------------------------------------------------------------
+' A FAILED CANCELLATION RETAINS THE REGISTRATION
+'------------------------------------------------------------------------------
+    'A cancellation that fails leaves a registration that may still fire. The
+    'timer must be logically inactive without claiming clean teardown
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+
+        TST_DP_AssertTrue "A failed cancellation retains the registration", _
+            M_Timer_Test_IsUnresolved()
+        TST_DP_AssertFalse "A failed cancellation leaves the timer inactive", _
+            M_Timer_Test_IsRunning()
+
+'------------------------------------------------------------------------------
+' A RESTART IS REFUSED WHILE THE REGISTRATION IS OUTSTANDING
+'------------------------------------------------------------------------------
+    'The retry runs on every attempt, so failing it too is what proves refusal
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+
+        TST_DP_AssertFalse "A refused restart leaves the timer inactive", _
+            M_Timer_Test_IsRunning()
+        TST_DP_AssertFalse "A refused restart scheduled nothing", RegSchedule
+        TST_DP_AssertTrue "A refused restart keeps the registration outstanding", _
+            M_Timer_Test_IsUnresolved()
+
+'------------------------------------------------------------------------------
+' A SUCCESSFUL RETRY DRAINS THE REGISTRATION
+'------------------------------------------------------------------------------
+    'With no fault armed the retry cancels the retained identity and the barrier
+    'lifts immediately rather than waiting for expiry
+        M_Timer_Start
+        UnresAfterRetry = M_Timer_Test_IsUnresolved()
+        RunAfterRetry = M_Timer_Test_IsRunning()
+
+        TST_DP_AssertFalse "A successful retry drains the registration", _
+            UnresAfterRetry
+        TST_DP_AssertTrue "A drained barrier allows a fresh registration", _
+            RunAfterRetry
+
+    'Leave the timer stopped and Excel holding nothing
+        M_Timer_Stop
+
+'------------------------------------------------------------------------------
+' EXPIRY DRAINS THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Expiry is sound only because every tick carries an explicit LatestTime.
+    'Arming a second fault keeps the retry from draining it first
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+        M_Timer_Test_ExpireRegistration
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Start
+        UnresAfterExpiry = M_Timer_Test_IsUnresolved()
+        RunAfterExpiry = M_Timer_Test_IsRunning()
+
+        TST_DP_AssertFalse "An expired registration drains despite a failed retry", _
+            UnresAfterExpiry
+        TST_DP_AssertTrue "An expired registration allows a fresh schedule", _
+            RunAfterExpiry
+
+    'The original registration is still armed in Excel; cancel it directly
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+'------------------------------------------------------------------------------
+' A STALE CALLBACK DRAINS WITHOUT WORKING
+'------------------------------------------------------------------------------
+    'A callback arriving while the timer is inactive can only be the stale one.
+    'It must do no work, reschedule nothing, and drain the barrier
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+
+        M_Timer_Tick
+
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        TST_DP_AssertFalse "A stale callback drains the registration", _
+            M_Timer_Test_IsUnresolved()
+        TST_DP_AssertEqualsLong "A stale callback schedules nothing", _
+            BaselineCount, RegCallCount
+        TST_DP_AssertFalse "A stale callback does not restart the timer", _
+            M_Timer_Test_IsRunning()
+
+    'Cancel the registration the failed cancellation left armed
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+'------------------------------------------------------------------------------
+' A REFUSED SCHEDULE LEAVES THE TIMER INACTIVE
+'------------------------------------------------------------------------------
+    'The armed state must be established only after Excel accepts the schedule,
+    'never before it with an error handler expected to unwind it
+        M_Timer_Test_Reset
+        M_Timer_Test_ArmScheduleFault 1004
+
+        On Error Resume Next
+        Err.Clear
+        M_Timer_Start
+        StartErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertTrue "A refused schedule raises to the caller", _
+            StartErrNumber <> 0
+        TST_DP_AssertFalse "A refused schedule leaves the timer inactive", _
+            M_Timer_Test_IsRunning()
+
+'------------------------------------------------------------------------------
+' A DROPPED REGISTRATION IS REPAIRED
+'------------------------------------------------------------------------------
+    'A tick that misses its bounded window is dropped rather than delayed, which
+    'ends the chain while the running flag is still True. The next start repairs
+    'it, and must schedule exactly one replacement
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Test_ExpireRegistration
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            SchedAfterRecovery, RegErrNumber, CountAfterRecovery
+        RunAfterRecovery = M_Timer_Test_IsRunning()
+    'A registration still inside its window needs no replacement. This start runs
+    'before any assertion so no tick can fire between the two
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountAfterHealthy
+
+        TST_DP_AssertEqualsLong "Recovery schedules exactly one replacement", _
+            BaselineCount + 1, CountAfterRecovery
+        TST_DP_AssertTrue "Recovery leaves the timer running", RunAfterRecovery
+        TST_DP_AssertTrue "The replacement registration is a schedule", _
+            SchedAfterRecovery
+        TST_DP_AssertEqualsLong "A healthy registration schedules nothing extra", _
+            CountAfterRecovery, CountAfterHealthy
+
+    'Stop the replacement, then cancel the registration recovery abandoned
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+
+'------------------------------------------------------------------------------
+' AN ACTIVE TICK WITH NO LOADED FORM STOPS THE TIMER
+'------------------------------------------------------------------------------
+    'The live clock exists to refresh a loaded form. A tick that arrives while
+    'the timer is active but no form is loaded must stop the clock rather than
+    'reschedule, or the chain runs forever against nothing
+    '
+    'No form is loaded at this point in the run, and this path is what stopped
+    'the timer mid-suite while the cases above asserted inline. It is asserted
+    'here rather than left as an accident
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+        M_Timer_Tick
+        RunAfterTick = M_Timer_Test_IsRunning()
+        M_Timer_Test_LastRegistration TickEarliest, RegLatest, RegProcedure, _
+            TickSchedule, RegErrNumber, CountAfterTick
+
+        TST_DP_AssertFalse "An active tick with no loaded form stops the timer", _
+            RunAfterTick
+        TST_DP_AssertFalse "The stopping tick cancels rather than reschedules", _
+            TickSchedule
+        TST_DP_AssertTrue "The stopping tick cancels the scheduled registration", _
+            TickEarliest = ArmedEarliest
+        TST_DP_AssertEqualsLong "The stopping tick makes exactly one scheduling call", _
+            BaselineCount + 1, CountAfterTick
+
+'------------------------------------------------------------------------------
+' THE HEALTH BRIDGE THE FORM USES
+'------------------------------------------------------------------------------
+    'UF_DatePicker reaches the health check through M_Timer_EnsureHealthy. It
+    'previously went through M_Timer_ApplyClockMode, which stops the timer
+    'unconditionally first, so the check was unreachable and a dropped
+    'registration became a refused restart. Both bridge outcomes are asserted
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+
+    'A healthy registration must cost nothing at all
+        M_Timer_EnsureHealthy "TST_DP_RunSuite_Timer"
+        RunBridgeHealthy = M_Timer_Test_IsRunning()
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountBridgeHealthy
+
+    'An expired registration must be replaced exactly once
+        M_Timer_Test_ExpireRegistration
+        M_Timer_EnsureHealthy "TST_DP_RunSuite_Timer"
+        RunBridgeRepair = M_Timer_Test_IsRunning()
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, CountBridgeRepair
+
+        TST_DP_AssertEqualsLong "The bridge schedules nothing for a healthy timer", _
+            BaselineCount, CountBridgeHealthy
+        TST_DP_AssertTrue "The bridge leaves a healthy timer running", _
+            RunBridgeHealthy
+        TST_DP_AssertEqualsLong "The bridge replaces an expired registration once", _
+            BaselineCount + 1, CountBridgeRepair
+        TST_DP_AssertTrue "The bridge leaves the repaired timer running", _
+            RunBridgeRepair
+
+    'Stop the replacement, then cancel the registration recovery abandoned
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+
+'------------------------------------------------------------------------------
+' RESTORE TIMER STATE
+'------------------------------------------------------------------------------
+    'Leave the timer stopped and the recorder clean for the suites that follow
+        M_Timer_Stop
+        M_Timer_Test_Reset
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Capture the original error before any cleanup runs
+        SavedErrNumber = Err.Number
+        SavedErrDescription = Err.Description
+        SavedErrSource = Err.Source
+    'Release timer state on the failure path. This runs after the original error
+    'was captured, so a cleanup failure cannot overwrite the assertion failure
+        On Error Resume Next
+        M_Timer_Test_ArmScheduleFault 0
+        M_Timer_Stop
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+        M_Timer_Test_Reset
+        Err.Clear
+    'Record the suite-level failure from the captured values
+        TST_DP_RecordFail "Timer suite failed", _
+            "Error " & VBA.CStr(SavedErrNumber) & " - " & SavedErrDescription & _
+            " | Source=" & SavedErrSource
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_CancelRegistrationForTest( _
+    ByVal EarliestTime As Date, _
+    ByVal ProcedureName As String)
+
+'
+'==============================================================================
+'                  CANCEL A REGISTRATION LEFT ARMED BY A TEST
+'==============================================================================
+' PURPOSE
+'   Cancels an Application.OnTime registration directly, bypassing the production
+'   scheduling path
+'
+' WHY THIS EXISTS
+'   Cases that deliberately fail a cancellation leave a real registration armed
+'   in Excel. Draining the barrier clears this component's bookkeeping, not
+'   Excel's schedule. Without a direct cancellation those callbacks fire after the
+'   suite, find a later timer running, and start a second clock chain
+'
+' INPUTS
+'   EarliestTime
+'     Exact time the registration was scheduled for
+'
+'   ProcedureName
+'     Exact workbook-qualified callback name
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Calls Application.OnTime with Schedule:=False using the supplied identity
+'
+' ERROR POLICY
+'   Best effort. Never raises, because it runs on both the success and the
+'   failure path and must not replace a captured error
+'
+' DEPENDENCIES
+'   Application.OnTime
+'
+' NOTES
+'   This deliberately does not go through M_Timer_ApplySchedule. Routing it there
+'   would expose it to the injected fault the test just armed, which is the very
+'   thing that left the registration armed
+'
+'   Excel matches a cancellation on EarliestTime and Procedure, so both must be
+'   the exact recorded values
+'
+' UPDATED
+'   2026-08-30
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CANCEL THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Never let test cleanup raise into a caller
+        On Error Resume Next
+    'Exit when there is nothing identifiable to cancel
+        If VBA.LenB(ProcedureName) = 0 Or EarliestTime = 0 Then
+            Err.Clear
+            Exit Sub
+        End If
+    'Cancel the exact registration directly
+        Excel.Application.OnTime _
+            EarliestTime:=EarliestTime, _
+            Procedure:=ProcedureName, _
+            Schedule:=False
+    'Clear any suppressed cancellation error
+        Err.Clear
 
 End Sub
 
@@ -5550,16 +7198,6 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 '   TST_DP_CountNamedShapes
 '
 ' NOTES
-'   M_GridIcon_PreCreateHidden uses On Error Resume Next throughout and ends
-'   with On Error GoTo 0, which kills the SuiteFail handler on return.
-'   It is re-armed immediately after every call.
-'
-'   M_GridIcon_PurgeAll also ends with On Error GoTo 0; re-armed after each call.
-'
-'   The setter M_Settings_SetShowGridIcon internally calls M_GridIcon_Remove
-'   and M_KeyboardShortcut_Update, both of which end with On Error GoTo 0.
-'   It is re-armed after each setter call.
-'
 '   ScreenUpdating is set True before pre-creation because M_GridIcon_Create
 '   captures PreviousScreenUpdating. With ScreenUpdating = False the final
 '   shape show step may silently fail on some Excel builds. The tracked
@@ -5567,7 +7205,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 '   a rendering detail that this suite does not assert.
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5595,15 +7233,10 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' PREPARE FEATURE STATE
 '------------------------------------------------------------------------------
     'Enable the grid icon feature via setter
-    'M_Settings_SetShowGridIcon calls M_GridIcon_Remove and
-    'M_KeyboardShortcut_Update which both end with On Error GoTo 0; re-arm
         M_Settings_SetShowGridIcon True
-        On Error GoTo SuiteFail
 
     'Purge any stale grid icons before the suite
-    'M_GridIcon_PurgeAll ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' PRE-CREATE ON ELIGIBLE CELL
@@ -5612,9 +7245,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
     'PreviousScreenUpdating and restores it on exit
         Excel.Application.ScreenUpdating = True
     'Pre-create the grid icon using the scratch-sheet anchor cell
-    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
     'Suppress ScreenUpdating for remaining cleanup steps
         Excel.Application.ScreenUpdating = False
     'Allow the drawing layer to settle after pre-creation
@@ -5642,9 +7273,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' IDEMPOTENT SECOND CALL
 '------------------------------------------------------------------------------
     'Call M_GridIcon_PreCreateHidden again when a shape already exists
-    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
 
     'Assert only one shape exists after the second pre-create call
         TST_DP_AssertEqualsLong "PreCreateHidden is idempotent when shape already exists", _
@@ -5658,19 +7287,13 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' DISABLED FEATURE BEHAVIOR
 '------------------------------------------------------------------------------
     'Purge before the disabled test to ensure a clean state
-    'M_GridIcon_PurgeAll ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PurgeAll
-        On Error GoTo SuiteFail
 
     'Disable the grid icon feature via setter
-    'M_Settings_SetShowGridIcon calls removal routines ending with GoTo 0; re-arm
         M_Settings_SetShowGridIcon False
-        On Error GoTo SuiteFail
 
     'Call M_GridIcon_PreCreateHidden while the feature is disabled
-    'M_GridIcon_PreCreateHidden ends with On Error GoTo 0; re-arm immediately
         M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
-        On Error GoTo SuiteFail
 
     'Assert no shape was created while the feature is disabled
         TST_DP_AssertFalse "PreCreateHidden creates no shape when feature is disabled", _
@@ -5680,9 +7303,7 @@ Private Sub TST_DP_RunSuite_PreCreateHidden()
 ' RESTORE FEATURE STATE FOR SUBSEQUENT SUITES
 '------------------------------------------------------------------------------
     'Re-enable the grid icon feature via setter
-    'M_Settings_SetShowGridIcon calls removal routines ending with GoTo 0; re-arm
         M_Settings_SetShowGridIcon True
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -5749,14 +7370,6 @@ Private Sub TST_DP_RunSuite_SelectDate()
 '   mTST_DP_ScratchSheet
 '
 ' NOTES
-'   M_Picker_SelectDate uses On Error GoTo ErrorHandler and raises outward on
-'   failure. It does not reset the caller SuiteFail handler when it succeeds.
-'   No re-arm is needed after M_Picker_SelectDate calls.
-'
-'   M_Settings_SetCloseAfterSelection only calls M_Settings_Save internally.
-'   M_Settings_Save uses GoTo ErrorHandler and raises outward; it does not
-'   reset the SuiteFail handler. No re-arm is needed after setter calls.
-'
 '   gDP_WriteValue, gDP_HasSelectedDate, and gDP_SelectedDate are read directly
 '   after calls to verify transient state. No public getters exist for these
 '   transient fields. Direct reads are the correct approach for these.
@@ -5765,7 +7378,7 @@ Private Sub TST_DP_RunSuite_SelectDate()
 '   M_WriteBack_Apply uses the correct Excel selection as its write target.
 '
 ' UPDATED
-'   2026-05-26
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -5931,6 +7544,563 @@ SuiteFail:
 
 End Sub
 
+Private Sub TST_DP_RunSuite_RibbonDemo()
+
+'
+'==============================================================================
+'                            RIBBON DEMO SUITE
+'==============================================================================
+' PURPOSE
+'   Validates the decision the Ribbon demo command makes about showing or hiding
+'   the demo sheet
+'
+' WHY THIS EXISTS
+'   Ribbon_Demo read the sheet's visibility after ensuring it existed. Ensuring
+'   builds the sheet visible on first use, so the first click built the demo
+'   sheet and immediately hid it again. The defect predates v1.2.0 and survived
+'   four releases because nothing exercised the callback at all
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives M_DemoSheet_ResolveShowOnToggle across the three reachable input
+'   states and asserts the action it resolves
+'
+' ERROR POLICY
+'   Records suite-level failures and continues
+'
+' DEPENDENCIES
+'   M_DemoSheet_ResolveShowOnToggle
+'
+' NOTES
+'   The assertions go through the same routine Ribbon_Demo calls rather than
+'   restating its condition. A harness that reimplemented the Boolean would keep
+'   passing after the callback stopped agreeing with it, which is how #42 passed
+'   at v1.2.0 while the real save path still forced the shortcut back on
+'
+'   Building an actual demo sheet is deliberately not done here. It would run the
+'   full demo builder, mutate the host workbook and deepen the harness-to-demo
+'   coupling #35 exists to remove. Verifying real creation and toggling in a
+'   packaged build belongs to #63
+'
+'   xlSheetHidden and xlSheetVeryHidden are one state for this decision. The
+'   callback collapses both before calling the resolver, so the resolver sees a
+'   Boolean and this suite asserts the Boolean
+'
+' UPDATED
+'   2026-09-17
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FreshBuild      As Boolean      'Action resolved for a sheet that did not exist
+    Dim ExistingVisible As Boolean      'Action resolved for a pre-existing visible sheet
+    Dim ExistingHidden  As Boolean      'Action resolved for a pre-existing hidden sheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "RibbonDemo"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' RESOLVE THE THREE REACHABLE STATES
+'------------------------------------------------------------------------------
+    'Capture all three decisions before asserting any of them, so the suite reads
+    'as the contract rather than as three unrelated calls
+        FreshBuild = M_DemoSheet_ResolveShowOnToggle(False, False)
+        ExistingVisible = M_DemoSheet_ResolveShowOnToggle(True, True)
+        ExistingHidden = M_DemoSheet_ResolveShowOnToggle(True, False)
+
+'------------------------------------------------------------------------------
+' ASSERT THE TOGGLE CONTRACT
+'------------------------------------------------------------------------------
+    'A sheet this command just built must be shown. This is the defect: the old
+    'callback hid it instead
+        TST_DP_AssertTrue "A freshly built demo sheet is shown, not hidden", _
+            FreshBuild
+    'A pre-existing visible sheet toggles closed
+        TST_DP_AssertFalse "A visible demo sheet is hidden by the next click", _
+            ExistingVisible
+    'A pre-existing hidden sheet toggles open
+        TST_DP_AssertTrue "A hidden demo sheet is shown by the next click", _
+            ExistingHidden
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "RibbonDemo suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_DemoFastMode()
+
+'
+'==============================================================================
+'                           DEMO FAST MODE SUITE
+'==============================================================================
+' PURPOSE
+'   Validates the demo builder's fast-mode entry and exit as a transaction
+'
+' WHY THIS EXISTS
+'   DEMO_FastMode_Begin captured and mutated four Application properties in
+'   sequence with no rollback, so a failure partway through left Excel half in
+'   fast mode with the caller holding an incomplete snapshot. End restored
+'   sequentially too, so one failed restoration abandoned the rest
+'
+'   Losing EnableEvents that way is invisible: the caller sees no error, only a
+'   workbook that has silently stopped reacting
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives DEMO_FastMode_Begin and DEMO_FastMode_End against real Application
+'   state, with faults injected at entry and restoration boundaries
+'
+' ERROR POLICY
+'   Records suite-level failures and continues. Restores the harness's own
+'   Application state on every path
+'
+' DEPENDENCIES
+'   DEMO_FastMode_Begin
+'   DEMO_FastMode_End
+'   DEMO_FastMode_Test_ArmFault
+'   tDEMOFastModeState
+'
+' NOTES
+'   These cases mutate real Application state deliberately: the contract is about
+'   what Excel is left holding, and a mocked property would prove nothing. The
+'   run's own values are captured on entry and restored in both exit paths
+'
+'   This suite is demo-builder coverage living in the harness, which deepens the
+'   coupling #35 exists to remove. #35 and #62 must relocate it with the demo
+'   split rather than drop it as obsolete
+'
+'   The record is declared locally. Every fact the transaction reports lives in
+'   tDEMOFastModeState, so no observation seam is needed and an abandoned record
+'   can never lock out a later run
+'
+' UPDATED
+'   2026-09-17
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const INJECTED_ERROR As Long = vbObjectError + 2850
+
+    Dim State           As tDEMOFastModeState   'Record under test
+    Dim Inert           As tDEMOFastModeState   'Record that never entered fast mode
+
+    Dim RunScreen       As Boolean      'Harness ScreenUpdating on entry
+    Dim RunEvents       As Boolean      'Harness EnableEvents on entry
+    Dim RunAlerts       As Boolean      'Harness DisplayAlerts on entry
+    Dim RunCalc         As XlCalculation 'Harness Calculation on entry
+
+    Dim AppliedAll      As Boolean      'All four properties reported as applied
+    Dim FastValues      As Boolean      'Excel actually sits at the fast-mode values
+    Dim RestoredExact   As Boolean      'Captured values came back exactly
+    Dim ReEntryRaised   As Boolean      'A second Begin on an active record raised
+    Dim RollbackClean   As Boolean      'A failed Begin left every property as found
+    Dim BeginErrNumber  As Long         'Error a failed Begin reported
+    Dim InertRaised     As Boolean      'End on an inert record raised
+    Dim SecondEndRaised As Boolean      'A second End raised
+
+    Dim EntryFaults     As Variant      'Capture and apply boundaries swept
+    Dim ExitFaults      As Variant      'Restore boundaries swept
+    Dim FaultIndex      As Long         'Sweep index
+    Dim Swept           As tDEMOFastModeState 'Record used by the sweeps
+    Dim EntryPrimaryHeld As Boolean     'Every entry boundary raised its injected error
+    Dim EntryStateClean As Boolean      'Every entry boundary left Excel as found
+    Dim ExitCounted     As Boolean      'Every restore boundary counted one failure
+    Dim ExitOthersRan   As Boolean      'Every restore boundary restored the others
+    Dim CompoundErr     As Long         'Primary error of the compound rollback case
+    Dim ResolvedNumber  As Long         'Resolver output number
+    Dim ResolvedText    As String       'Resolver output description
+    Dim ResolverSaysFail As Boolean     'Resolver verdict
+    Dim Clean           As tDEMOFastModeState 'Record with nothing recorded
+    Dim RollbackCounted As Boolean       'A real rollback failure was counted
+    Dim RollbackNamed   As Boolean       'The rollback detail names the property
+    Dim RollbackOthersRan As Boolean     'Rollback steps after the failure still ran
+    Dim CompoundResolved As String       'Resolver text for the compound failure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "DemoFastMode"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Capture the run's own Application state before anything moves it
+        RunScreen = Excel.Application.ScreenUpdating
+        RunEvents = Excel.Application.EnableEvents
+        RunAlerts = Excel.Application.DisplayAlerts
+        RunCalc = Excel.Application.Calculation
+    'Never let an armed fault survive into this suite
+        DEMO_FastMode_Test_ArmFault VBA.vbNullString, 0
+
+'------------------------------------------------------------------------------
+' ENTRY CAPTURES AND APPLIES
+'------------------------------------------------------------------------------
+    'Put Excel into values that differ from fast mode, so a restoration that does
+    'nothing cannot pass by coincidence
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Begin State
+        AppliedAll = State.Active And State.Captured And _
+            State.ScreenUpdatingApplied And State.EnableEventsApplied And _
+            State.DisplayAlertsApplied And State.CalculationApplied
+        FastValues = (Excel.Application.ScreenUpdating = False) And _
+            (Excel.Application.DisplayAlerts = False) And _
+            (Excel.Application.Calculation = xlCalculationManual)
+
+'------------------------------------------------------------------------------
+' RE-ENTRY ON AN ACTIVE RECORD IS REFUSED
+'------------------------------------------------------------------------------
+    'A second Begin would capture the values fast mode just applied and store
+    'them as the caller's originals
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_Begin State
+        ReEntryRaised = (Err.Number <> 0)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' EXIT RESTORES EXACTLY
+'------------------------------------------------------------------------------
+        DEMO_FastMode_End State
+        RestoredExact = (Excel.Application.ScreenUpdating = True) And _
+            (Excel.Application.DisplayAlerts = True) And _
+            (Excel.Application.Calculation = xlCalculationAutomatic) And _
+            (State.RestoreFailureCount = 0) And _
+            (State.Active = False)
+
+'------------------------------------------------------------------------------
+' A SECOND EXIT IS INERT
+'------------------------------------------------------------------------------
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_End State
+        SecondEndRaised = (Err.Number <> 0)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' AN EXIT ON A RECORD THAT NEVER ENTERED IS INERT
+'------------------------------------------------------------------------------
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_End Inert
+        InertRaised = (Err.Number <> 0)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+'------------------------------------------------------------------------------
+' A PARTIAL ENTRY ROLLS ITSELF BACK
+'------------------------------------------------------------------------------
+    'Fail on the third property, so two are already applied when it stops
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Test_ArmFault "Begin.DisplayAlerts", INJECTED_ERROR
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_Begin State
+        BeginErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        RollbackClean = (Excel.Application.ScreenUpdating = True) And _
+            (Excel.Application.DisplayAlerts = True) And _
+            (Excel.Application.Calculation = xlCalculationAutomatic) And _
+            (State.Active = False) And (State.Captured = False) And _
+            (State.ScreenUpdatingApplied = False) And _
+            (State.EnableEventsApplied = False)
+
+'------------------------------------------------------------------------------
+' ASSERT ENTRY, EXIT AND ROLLBACK
+'------------------------------------------------------------------------------
+    'Entry reports every property it changed
+        TST_DP_AssertTrue "Entry captures and applies all four properties", _
+            AppliedAll
+    'Excel really sits at the fast-mode values
+        TST_DP_AssertTrue "Entry leaves Excel at the fast-mode values", FastValues
+    'A second entry on an active record is refused
+        TST_DP_AssertTrue "Re-entry on an active record is refused", ReEntryRaised
+    'Exit restores what the caller had, not what fast mode applied
+        TST_DP_AssertTrue "Exit restores the captured values exactly", RestoredExact
+    'Exit is safe to repeat
+        TST_DP_AssertFalse "A second exit does not raise", SecondEndRaised
+    'Exit is safe on a record that never entered
+        TST_DP_AssertFalse "Exit on a record that never entered does not raise", _
+            InertRaised
+    'A failed entry raises the failure that stopped it, not a rollback error
+        TST_DP_AssertEqualsLong "A failed entry preserves the original error", _
+            INJECTED_ERROR, BeginErrNumber
+    'A failed entry leaves Excel and the record exactly as it found them
+        TST_DP_AssertTrue "A failed entry rolls back every applied property", _
+            RollbackClean
+
+'------------------------------------------------------------------------------
+' ONE FAILED RESTORATION DOES NOT ABANDON THE REST
+'------------------------------------------------------------------------------
+    'Enter cleanly, then fail the second restoration. The remaining two must
+    'still be restored, which is the half of the contract a sequential End lost
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+        DEMO_FastMode_Begin State
+        DEMO_FastMode_Test_ArmFault "End.EnableEvents", INJECTED_ERROR
+        DEMO_FastMode_End State
+
+        TST_DP_AssertEqualsLong "A failed restoration is counted", _
+            1, State.RestoreFailureCount
+        TST_DP_AssertTrue "The failure detail names the property", _
+            VBA.InStr(1, State.RestoreFailureDetail, "EnableEvents", _
+                vbBinaryCompare) > 0
+        TST_DP_AssertTrue "Restorations after the failure still ran", _
+            (Excel.Application.DisplayAlerts = True) And _
+            (Excel.Application.Calculation = xlCalculationAutomatic)
+        TST_DP_AssertTrue "Restorations before the failure still ran", _
+            Excel.Application.ScreenUpdating = True
+        TST_DP_AssertFalse "The record is released despite the failure", _
+            State.Active
+
+
+'------------------------------------------------------------------------------
+' EVERY ENTRY BOUNDARY ROLLS BACK COMPLETELY
+'------------------------------------------------------------------------------
+    'Capture and apply are eight separate boundaries. Hand-picking one proves
+    'only that one, so the whole set is swept and the aggregate asserted
+        EntryFaults = VBA.Array( _
+            "Capture.ScreenUpdating", "Capture.EnableEvents", _
+            "Capture.DisplayAlerts", "Capture.Calculation", _
+            "Begin.ScreenUpdating", "Begin.EnableEvents", _
+            "Begin.DisplayAlerts", "Begin.Calculation")
+
+        EntryPrimaryHeld = True
+        EntryStateClean = True
+        For FaultIndex = LBound(EntryFaults) To UBound(EntryFaults)
+            Excel.Application.ScreenUpdating = True
+            Excel.Application.DisplayAlerts = True
+            Excel.Application.Calculation = xlCalculationAutomatic
+
+            DEMO_FastMode_Test_ArmFault VBA.CStr(EntryFaults(FaultIndex)), INJECTED_ERROR
+            On Error Resume Next
+            Err.Clear
+            DEMO_FastMode_Begin Swept
+            If Err.Number <> INJECTED_ERROR Then EntryPrimaryHeld = False
+            Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+            On Error GoTo SuiteFail
+
+            If Excel.Application.ScreenUpdating <> True Then EntryStateClean = False
+            If Excel.Application.DisplayAlerts <> True Then EntryStateClean = False
+            If Excel.Application.Calculation <> xlCalculationAutomatic Then EntryStateClean = False
+            If Swept.Active Then EntryStateClean = False
+            If Swept.Captured Then EntryStateClean = False
+        Next FaultIndex
+
+'------------------------------------------------------------------------------
+' EVERY RESTORE BOUNDARY IS INDEPENDENT
+'------------------------------------------------------------------------------
+    'One failed restoration must not abandon the others, at every boundary
+        ExitFaults = VBA.Array("End.ScreenUpdating", "End.EnableEvents", _
+            "End.DisplayAlerts", "End.Calculation")
+
+        ExitCounted = True
+        ExitOthersRan = True
+        For FaultIndex = LBound(ExitFaults) To UBound(ExitFaults)
+            Excel.Application.ScreenUpdating = True
+            Excel.Application.DisplayAlerts = True
+            Excel.Application.Calculation = xlCalculationAutomatic
+
+            DEMO_FastMode_Begin Swept
+            DEMO_FastMode_Test_ArmFault VBA.CStr(ExitFaults(FaultIndex)), INJECTED_ERROR
+            DEMO_FastMode_End Swept
+
+            If Swept.RestoreFailureCount <> 1 Then ExitCounted = False
+            If Swept.Active Then ExitCounted = False
+    'Whichever property was faulted, the others must have been restored
+            If VBA.CStr(ExitFaults(FaultIndex)) <> "End.ScreenUpdating" Then
+                If Excel.Application.ScreenUpdating <> True Then ExitOthersRan = False
+            End If
+            If VBA.CStr(ExitFaults(FaultIndex)) <> "End.DisplayAlerts" Then
+                If Excel.Application.DisplayAlerts <> True Then ExitOthersRan = False
+            End If
+            If VBA.CStr(ExitFaults(FaultIndex)) <> "End.Calculation" Then
+                If Excel.Application.Calculation <> xlCalculationAutomatic Then ExitOthersRan = False
+            End If
+    'Put Excel back for the next iteration whatever this one left behind
+            Excel.Application.ScreenUpdating = True
+            Excel.Application.EnableEvents = RunEvents
+            Excel.Application.DisplayAlerts = True
+            Excel.Application.Calculation = xlCalculationAutomatic
+        Next FaultIndex
+
+'------------------------------------------------------------------------------
+' A ROLLBACK FAILURE IS RECORDED WITHOUT DISPLACING THE PRIMARY
+'------------------------------------------------------------------------------
+    'Fail entry at the third property and fail one of its rollbacks. The entry
+    'error must survive, the rollback failure must be counted separately, and the
+    'remaining rollback steps must still run
+        Excel.Application.ScreenUpdating = True
+        Excel.Application.DisplayAlerts = True
+        Excel.Application.Calculation = xlCalculationAutomatic
+
+    'Two faults are staged. The entry fault fires at the third property, so
+    'ScreenUpdating and EnableEvents are already applied; the rollback fault then
+    'fires while EnableEvents is being undone. A single-slot injector could not
+    'do this: the entry fault consumes it and rollback runs clean
+        DEMO_FastMode_Test_ArmFault "Begin.DisplayAlerts", INJECTED_ERROR
+        DEMO_FastMode_Test_ArmFault "Rollback.EnableEvents", INJECTED_ERROR
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_Begin Swept
+        CompoundErr = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+    'The rollback failure must be counted and named, and the rollback steps after
+    'it must still have run. ScreenUpdating is applied before EnableEvents, so it
+    'is rolled back after it
+        RollbackCounted = (Swept.RollbackFailureCount = 1)
+        RollbackNamed = (VBA.InStr(1, Swept.RollbackFailureDetail, "EnableEvents", _
+            vbBinaryCompare) > 0)
+        RollbackOthersRan = (Excel.Application.ScreenUpdating = True)
+    'Resolve the operation outcome from the real compound record
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(CompoundErr, "Primary cause", _
+            Swept, ResolvedNumber, CompoundResolved)
+    'EnableEvents was deliberately left unrolled; put it back before continuing
+        Excel.Application.EnableEvents = RunEvents
+        DEMO_FastMode_Test_ArmFault VBA.vbNullString, 0
+
+'------------------------------------------------------------------------------
+' ASSERT THE BOUNDARY SWEEPS
+'------------------------------------------------------------------------------
+    'Every capture and apply boundary reports the failure that stopped it
+        TST_DP_AssertTrue "Every entry boundary raises its injected error", _
+            EntryPrimaryHeld
+    'Every capture and apply boundary leaves Excel and the record as it found them
+        TST_DP_AssertTrue "Every entry boundary rolls back completely", _
+            EntryStateClean
+    'Every restore boundary counts exactly the restoration that failed
+        TST_DP_AssertTrue "Every restore boundary counts one failure", ExitCounted
+    'Every restore boundary still restores the properties it did not fault
+        TST_DP_AssertTrue "Every restore boundary restores the others", ExitOthersRan
+    'A failed entry reports the entry failure, not a rollback error
+        TST_DP_AssertEqualsLong "A compound failure reports the entry error", _
+            INJECTED_ERROR, CompoundErr
+    'The rollback failure is counted separately from the entry failure
+        TST_DP_AssertTrue "A failed rollback is counted", RollbackCounted
+    'And it names the property it could not undo
+        TST_DP_AssertTrue "The rollback detail names the property", RollbackNamed
+    'Rollback steps after the failed one still ran
+        TST_DP_AssertTrue "Rollback continues past a failed step", _
+            RollbackOthersRan
+    'The resolver keeps the entry error and appends the real rollback evidence
+        TST_DP_AssertTrue "The resolver appends the real rollback failure", _
+            ResolverSaysFail And _
+            (ResolvedNumber = INJECTED_ERROR) And _
+            (VBA.InStr(1, CompoundResolved, "rollback incomplete", _
+                vbTextCompare) > 0) And _
+            (VBA.InStr(1, CompoundResolved, "EnableEvents", vbBinaryCompare) > 0)
+
+'------------------------------------------------------------------------------
+' ASSERT THE OPERATION OUTCOME RESOLVER
+'------------------------------------------------------------------------------
+    'A clean operation is a success
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(0, VBA.vbNullString, _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertFalse "A clean operation resolves to success", ResolverSaysFail
+
+    'A primary failure is reported unchanged
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(INJECTED_ERROR, "Primary cause", _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertEqualsLong "A primary failure keeps its error number", _
+            INJECTED_ERROR, ResolvedNumber
+        TST_DP_AssertTrue "A primary failure keeps its causal description", _
+            VBA.InStr(1, ResolvedText, "Primary cause", vbBinaryCompare) > 0
+
+    'Cleanup evidence accompanies the primary rather than replacing it
+        Clean.RestoreFailureCount = 1
+        Clean.RestoreFailureDetail = "EnableEvents | Error=5 | injected"
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(INJECTED_ERROR, "Primary cause", _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertEqualsLong "Cleanup evidence does not replace the primary number", _
+            INJECTED_ERROR, ResolvedNumber
+        TST_DP_AssertTrue "Cleanup evidence is appended to the primary cause", _
+            (VBA.InStr(1, ResolvedText, "Primary cause", vbBinaryCompare) > 0) And _
+            (VBA.InStr(1, ResolvedText, "EnableEvents", vbBinaryCompare) > 0)
+
+    'A successful build with unrestored state is still a failed operation
+        ResolverSaysFail = DEMO_FastMode_ResolveFailure(0, VBA.vbNullString, _
+            Clean, ResolvedNumber, ResolvedText)
+        TST_DP_AssertTrue "An unrestored Application fails a successful build", _
+            ResolverSaysFail
+        TST_DP_AssertTrue "The cleanup failure names the property", _
+            VBA.InStr(1, ResolvedText, "EnableEvents", vbBinaryCompare) > 0
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Disarm any fault and put the run's own Application state back
+        On Error Resume Next
+        DEMO_FastMode_Test_ArmFault VBA.vbNullString, 0
+        Excel.Application.Calculation = RunCalc
+        Excel.Application.DisplayAlerts = RunAlerts
+        Excel.Application.EnableEvents = RunEvents
+        Excel.Application.ScreenUpdating = RunScreen
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "DemoFastMode suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore the run's Application state regardless
+        Resume SuiteExit
+
+End Sub
+
 Private Sub TST_DP_RunSuite_ApplicationState()
 
 '
@@ -5985,7 +8155,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 '
 ' UPDATED
 '   2026-09-03 - Removed the obsolete EnsureManager output-parameter assertion.
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6027,9 +8197,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
 ' DP_START PRESERVES CALLER STATE
 '------------------------------------------------------------------------------
     'Start the runtime while the caller has events suppressed
-    'DP_Start resets On Error GoTo 0 on exit; re-arm immediately
         DP_Start
-        On Error GoTo SuiteFail
     'Assert DP_Start did not re-enable events
         TST_DP_AssertFalse "DP_Start preserves disabled events", _
             Excel.Application.EnableEvents
@@ -6040,9 +8208,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Restore the suppressed condition before the preload check
         Excel.Application.EnableEvents = False
     'Preload the form while the caller has events suppressed
-    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
         DP_Preload
-        On Error GoTo SuiteFail
     'Assert DP_Preload did not re-enable events
         TST_DP_AssertFalse "DP_Preload preserves disabled events", _
             Excel.Application.EnableEvents
@@ -6053,16 +8219,12 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Restore the suppressed condition before the show check
         Excel.Application.EnableEvents = False
     'Show the picker while the caller has events suppressed
-    'DP_Show resets On Error GoTo 0 on exit; re-arm immediately
         DP_Show
-        On Error GoTo SuiteFail
     'Assert DP_Show did not re-enable events
         TST_DP_AssertFalse "DP_Show preserves disabled events", _
             Excel.Application.EnableEvents
     'Close the picker before the write-back checks
-    'DP_Close resets On Error GoTo 0 on exit; re-arm immediately
         DP_Close
-        On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
 ' WRITE-BACK RESTORES THE DISABLED CASE
@@ -6077,9 +8239,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Establish the suppressed condition before the transaction
         Excel.Application.EnableEvents = False
     'Apply the write-back transaction
-    'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
         WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
-        On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the disabled caller state
@@ -6105,9 +8265,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Establish the enabled condition before the transaction
         Excel.Application.EnableEvents = True
     'Apply the write-back transaction
-    'M_WriteBack_Apply resets On Error GoTo 0 on exit; re-arm immediately
         WriteResult = M_WriteBack_Apply(DP_WriteAction_DatePicker, True)
-        On Error GoTo SuiteFail
     'Capture the restored state
         RestoredState = Excel.Application.EnableEvents
     'Assert write-back restored the enabled caller state
@@ -6122,9 +8280,7 @@ Private Sub TST_DP_RunSuite_ApplicationState()
     'Establish the suppressed condition before the repair check
         Excel.Application.EnableEvents = False
     'Repair the runtime, which is the only sanctioned force-enable path
-    'DP_RepairRuntime resets On Error GoTo 0 on exit; re-arm immediately
         DP_RepairRuntime
-        On Error GoTo SuiteFail
     'Assert DP_RepairRuntime re-enabled events
         TST_DP_AssertTrue "DP_RepairRuntime force-enables events", _
             Excel.Application.EnableEvents
@@ -6228,7 +8384,7 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
 '   state worth creating inside an unattended run
 '
 ' UPDATED
-'   2026-08-25
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6257,6 +8413,7 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
         On Error Resume Next
         Unload UF_DatePicker
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
 
 '------------------------------------------------------------------------------
@@ -6292,6 +8449,7 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
         Load UF_DatePicker
         LoadRaised = (Err.Number <> 0)
         Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
         On Error GoTo SuiteFail
         TST_DP_AssertTrue "Recovery-required styling fails the form load", _
             LoadRaised
@@ -6408,7 +8566,7 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '   left with its native title bar for whatever runs next
 '
 ' UPDATED
-'   2026-08-23
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6449,9 +8607,7 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 ' RESOLVE A REAL WINDOW HANDLE
 '------------------------------------------------------------------------------
     'Load the picker form without showing it
-    'DP_Preload resets On Error GoTo 0 on exit; re-arm immediately
         DP_Preload
-        On Error GoTo SuiteFail
     'Resolve the native window the transaction will operate on
         FormHandle = M_Window_GetUserFormHwnd(UF_DatePicker)
     'Assert the precondition. A missing handle is a setup failure, never a pass
@@ -6685,8 +8841,14 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
 '   detector fires on the evidence an abort leaves; that an abort leaves it is a
 '   manual validation step
 '
+'   The error-scope checks prove that On Error state is procedure-local in both
+'   directions: a callee cannot disarm this procedure's handler, and a procedure
+'   that disarms its own handler really does lose it. The harness relied on the
+'   opposite belief until #32, so the rule is regression-locked rather than
+'   documented
+'
 ' UPDATED
-'   2026-08-22
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6711,6 +8873,12 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
     Dim MenuProbeCount      As Long         'Context-menu controls seen by the probe
     Dim ProbeDirty          As Boolean      'Preflight verdict during the probe
     Dim ProbeDetail         As String       'Preflight detail during the probe
+
+    Dim CalleeZeroCaught    As Boolean      'Caller handler survived a callee's On Error GoTo 0
+    Dim CalleeOernCaught    As Boolean      'Caller handler survived a callee's On Error Resume Next
+    Dim SelfRearmCaught     As Boolean      'Local handler caught again after an explicit re-arm
+    Dim EscapedNumber       As Long         'Error number escaping a self-disarmed procedure
+    Dim EscapedDescription  As String       'Description escaping a self-disarmed procedure
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6795,6 +8963,28 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
         MenuProbeCount = TST_DP_ContextMenuControlCount()
 
 '------------------------------------------------------------------------------
+' PROBE PROCEDURE-LOCAL ERROR SCOPE
+'------------------------------------------------------------------------------
+    'A callee cannot disarm the handler of the procedure that called it, whatever
+    'it does to its own error state
+        CalleeZeroCaught = TST_DP_ErrorScope_CallerAfterCalleeDisarms()
+        CalleeOernCaught = TST_DP_ErrorScope_CallerAfterCalleeResumes()
+    'A procedure that disarms its own handler and then raises has no handler
+    'left, so the error escapes to whoever called it
+        EscapedNumber = 0
+        EscapedDescription = VBA.vbNullString
+        On Error Resume Next
+        Err.Clear
+        TST_DP_ErrorScope_SelfDisarmAndRaise
+        EscapedNumber = Err.Number
+        EscapedDescription = Err.Description
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+    'Explicit re-arming inside one procedure restores that procedure's handler
+        SelfRearmCaught = TST_DP_ErrorScope_SelfRearmAndRaise()
+
+'------------------------------------------------------------------------------
 ' RESTORE LIVE RUN STATE
 '------------------------------------------------------------------------------
     'Restore before the first assertion, so this suite's own result is honest
@@ -6861,6 +9051,25 @@ Private Sub TST_DP_RunSuite_HarnessSelfCheck()
             MenuProbeCount >= 0
 
 '------------------------------------------------------------------------------
+' ASSERT PROCEDURE-LOCAL ERROR SCOPE
+'------------------------------------------------------------------------------
+    'Assert a callee ending with On Error GoTo 0 leaves the caller armed
+        TST_DP_AssertTrue "Callee On Error GoTo 0 leaves the caller handler armed", _
+            CalleeZeroCaught
+    'Assert a callee running under On Error Resume Next leaves the caller armed
+        TST_DP_AssertTrue "Callee On Error Resume Next leaves the caller handler armed", _
+            CalleeOernCaught
+    'Assert a procedure that disarmed its own handler lets the error escape
+        TST_DP_AssertEqualsLong "Self-disarmed procedure lets its error escape", _
+            TST_DP_ERRSCOPE_NUMBER, EscapedNumber
+    'Assert the escaping error still carries usable evidence
+        TST_DP_AssertTrue "Escaping error keeps a meaningful description", _
+            VBA.LenB(EscapedDescription) > 0
+    'Assert an explicit same-procedure re-arm restores the local handler
+        TST_DP_AssertTrue "Same-procedure re-arm restores the local handler", _
+            SelfRearmCaught
+
+'------------------------------------------------------------------------------
 ' CLEAN EXIT
 '------------------------------------------------------------------------------
     'Exit after the suite completes
@@ -6886,6 +9095,397 @@ SuiteFail:
     Err.Clear
 
 End Sub
+
+Private Sub TST_DP_ErrorScope_CalleeDisarms()
+
+'
+'==============================================================================
+'                     ERROR SCOPE CALLEE - DISARMS ITSELF
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stands in for a production routine that suppresses its own errors and ends
+'   with On Error GoTo 0
+'
+' WHY THIS EXISTS
+'   The harness assumed a callee shaped like this disabled its caller's handler.
+'   Proving otherwise needs a callee whose error statements are the only thing
+'   under test
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Suppresses errors, swallows one raised error, restores its own default error
+'   handling and returns normally
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   The On Error GoTo 0 below is the statement the old harness comments claimed
+'   would reach the caller
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' SUPPRESS AND RESTORE LOCAL ERROR STATE
+'------------------------------------------------------------------------------
+    'Suppress errors inside this procedure only
+        On Error Resume Next
+    'Swallow one error so the suppression is not merely declared
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_CalleeDisarms", _
+            "Swallowed by the callee"
+        Err.Clear
+    'Restore default error handling for this procedure only
+        On Error GoTo 0
+
+End Sub
+
+Private Sub TST_DP_ErrorScope_CalleeResumes()
+
+'
+'==============================================================================
+'                    ERROR SCOPE CALLEE - LEAVES OERN ACTIVE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stands in for a routine that returns while On Error Resume Next is still the
+'   active mode in its own scope
+'
+' WHY THIS EXISTS
+'   Suppression is the other shape a callee can return in. It must be shown not
+'   to follow the return either
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Suppresses errors, swallows one raised error and returns without restoring
+'   its own error mode
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   Err is cleared before returning so a stale error cannot be mistaken for one
+'   the caller observed
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' SUPPRESS AND RETURN
+'------------------------------------------------------------------------------
+    'Suppress errors inside this procedure only
+        On Error Resume Next
+    'Swallow one error so the suppression is not merely declared
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_CalleeResumes", _
+            "Swallowed by the callee"
+    'Leave no error behind for the caller to read
+        Err.Clear
+
+End Sub
+
+Private Sub TST_DP_ErrorScope_SelfDisarmAndRaise()
+
+'
+'==============================================================================
+'                  ERROR SCOPE PROBE - SELF DISARM THEN RAISE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a local handler, disarms it in the same procedure and then raises
+'
+' WHY THIS EXISTS
+'   This is the case that genuinely requires a re-arm. Without one the error has
+'   no local handler and must escape to the caller
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Arms LocalHandler, disarms it with On Error GoTo 0, then raises
+'   TST_DP_ERRSCOPE_NUMBER, which therefore escapes this procedure
+'
+' ERROR POLICY
+'   Deliberately raises outward. The caller must suppress or handle the error
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   LocalHandler is unreachable while the disarm above stands. It exists so the
+'   probe fails visibly, rather than silently changing meaning, if the disarm is
+'   ever removed
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ARM, DISARM, RAISE
+'------------------------------------------------------------------------------
+    'Arm a local handler
+        On Error GoTo LocalHandler
+    'Disarm it again in this same procedure
+        On Error GoTo 0
+    'Raise with no active local handler, so the error escapes
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_SelfDisarmAndRaise", _
+            "Escapes a procedure that disarmed its own handler"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the unreachable handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Reached only if the disarm above is removed
+        Err.Clear
+
+End Sub
+
+Private Function TST_DP_ErrorScope_SelfRearmAndRaise() As Boolean
+
+'
+'==============================================================================
+'                  ERROR SCOPE PROBE - SELF REARM THEN RAISE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that a procedure which changed its own error mode gets its handler
+'   back by re-arming it explicitly
+'
+' WHY THIS EXISTS
+'   Removing the redundant re-arms is only safe if the necessary ones are
+'   understood. This is the pattern the five retained re-arms use
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the re-armed local handler caught the raised error
+'
+' BEHAVIOR
+'   Arms a local handler, suppresses errors, restores default handling, re-arms
+'   the local handler and raises TST_DP_ERRSCOPE_NUMBER
+'
+' ERROR POLICY
+'   Never raises outward while the re-arm stands
+'
+' DEPENDENCIES
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   Returns False rather than raising if the raise is somehow not reached, so a
+'   silent no-op cannot be read as a pass
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Assume the handler did not catch until it does
+        TST_DP_ErrorScope_SelfRearmAndRaise = False
+    'Arm a local handler
+        On Error GoTo LocalHandler
+
+'------------------------------------------------------------------------------
+' CHANGE AND RESTORE THIS PROCEDURE'S OWN ERROR MODE
+'------------------------------------------------------------------------------
+    'Suppress errors for one probe
+        On Error Resume Next
+        Err.Clear
+    'Restore default handling, which leaves this procedure with no handler
+        On Error GoTo 0
+    'Re-arm the local handler, which is what the retained suite re-arms do
+        On Error GoTo LocalHandler
+
+'------------------------------------------------------------------------------
+' RAISE INTO THE RE-ARMED HANDLER
+'------------------------------------------------------------------------------
+    'Raise so the re-armed handler is the thing under test
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, "TST_DP_ErrorScope_SelfRearmAndRaise", _
+            "Caught by a re-armed local handler"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Report that the re-armed handler caught the expected error
+        TST_DP_ErrorScope_SelfRearmAndRaise = (Err.Number = TST_DP_ERRSCOPE_NUMBER)
+    'Leave no error behind for the caller
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_ErrorScope_CallerAfterCalleeDisarms() As Boolean
+
+'
+'==============================================================================
+'              ERROR SCOPE PROBE - CALLER AFTER A CALLEE DISARMS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that a callee ending with On Error GoTo 0 leaves this procedure's
+'   handler armed
+'
+' WHY THIS EXISTS
+'   Forty-two harness re-arms existed only because the opposite was assumed. The
+'   assumption is now a test rather than a comment
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the local handler caught the error raised after the callee returned
+'
+' BEHAVIOR
+'   Arms a local handler, calls TST_DP_ErrorScope_CalleeDisarms, then raises
+'   TST_DP_ERRSCOPE_NUMBER without re-arming anything
+'
+' ERROR POLICY
+'   Never raises outward while the rule holds. If the local handler were lost the
+'   error would escape to the caller, which the suite records as a failure
+'
+' DEPENDENCIES
+'   TST_DP_ErrorScope_CalleeDisarms
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   The absence of a re-arm between the call and the raise is the point of the
+'   probe and must not be tidied away
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ARM, CALL, RAISE
+'------------------------------------------------------------------------------
+    'Assume the handler did not catch until it does
+        TST_DP_ErrorScope_CallerAfterCalleeDisarms = False
+    'Arm a local handler
+        On Error GoTo LocalHandler
+    'Call a routine that ends with On Error GoTo 0
+        TST_DP_ErrorScope_CalleeDisarms
+    'Raise with no re-arm, so only the original handler can catch it
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, _
+            "TST_DP_ErrorScope_CallerAfterCalleeDisarms", _
+            "Caught by a handler a callee could not disarm"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Report that the original handler was still armed
+        TST_DP_ErrorScope_CallerAfterCalleeDisarms = (Err.Number = TST_DP_ERRSCOPE_NUMBER)
+    'Leave no error behind for the caller
+        Err.Clear
+
+End Function
+
+Private Function TST_DP_ErrorScope_CallerAfterCalleeResumes() As Boolean
+
+'
+'==============================================================================
+'              ERROR SCOPE PROBE - CALLER AFTER A CALLEE SUPPRESSES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Proves that a callee returning under On Error Resume Next leaves this
+'   procedure's handler armed
+'
+' WHY THIS EXISTS
+'   Suppression is the other shape a production routine can return in, and the
+'   harness treated it the same way it treated On Error GoTo 0
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when the local handler caught the error raised after the callee returned
+'
+' BEHAVIOR
+'   Arms a local handler, calls TST_DP_ErrorScope_CalleeResumes, then raises
+'   TST_DP_ERRSCOPE_NUMBER without re-arming anything
+'
+' ERROR POLICY
+'   Never raises outward while the rule holds
+'
+' DEPENDENCIES
+'   TST_DP_ErrorScope_CalleeResumes
+'   TST_DP_ERRSCOPE_NUMBER
+'
+' NOTES
+'   If suppression did follow the return, the raise below would be ignored, the
+'   handler would never run and this function would return False rather than
+'   failing silently
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' ARM, CALL, RAISE
+'------------------------------------------------------------------------------
+    'Assume the handler did not catch until it does
+        TST_DP_ErrorScope_CallerAfterCalleeResumes = False
+    'Arm a local handler
+        On Error GoTo LocalHandler
+    'Call a routine that returns while suppression is active in its own scope
+        TST_DP_ErrorScope_CalleeResumes
+    'Raise with no re-arm, so only the original handler can catch it
+        Err.Raise TST_DP_ERRSCOPE_NUMBER, _
+            "TST_DP_ErrorScope_CallerAfterCalleeResumes", _
+            "Caught by a handler a callee could not suppress"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the handler
+        Exit Function
+
+'------------------------------------------------------------------------------
+' LOCAL HANDLER
+'------------------------------------------------------------------------------
+LocalHandler:
+    'Report that the original handler was still armed
+        TST_DP_ErrorScope_CallerAfterCalleeResumes = (Err.Number = TST_DP_ERRSCOPE_NUMBER)
+    'Leave no error behind for the caller
+        Err.Clear
+
+End Function
 
 Private Sub TST_DP_RunSuite_UISmoke()
 

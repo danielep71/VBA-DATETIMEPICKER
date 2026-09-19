@@ -101,8 +101,35 @@ Use only the categories needed by a release.
 
 - Added a standardized installation and maintainer release documentation set with project-specific deployment, certification, provenance, recovery, and post-publication controls.
 
-- Added a root `VERSION` marker at `1.2.1`, aligned with the latest published
-  release and the existing source-version contract.
+- Added a root `VERSION` marker, now at `1.2.2` for the release candidate.
+
+- Grid-icon shapes now carry a durable ownership marker in `AlternativeText`.
+  The shape name selects candidates and never proves ownership. Two markers are
+  recognized: the legacy `DatePicker Grid Entry Point`, and
+  `DatePicker Grid Entry Point | dp-owner-v1=<provider-token>` whose token must
+  match `\d{14}-\d{8}-[0-9A-F]{1,8}` exactly. Blank, malformed, unknown-schema
+  and unreadable markers all fail
+  closed, so an unrelated shape sharing the `DP_GridIcon` name is never moved,
+  resized, rebound, re-marked or deleted — and creation refuses rather than
+  promoting over it. Ownership is product-level for this release, so a legacy
+  icon or one carrying another provider's token is reclaimable
+  ([#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53)).
+
+- Live-clock registrations are observable and recoverable. Every scheduling call
+  records the exact `EarliestTime`, `LatestTime` and `Procedure` it asked Excel
+  for, and every tick is scheduled with `LatestTime = EarliestTime + 30 seconds`
+  so a registration can be shown to be dead. Cancellation matches the exact
+  scheduled values: the stored qualification retained from the original
+  registration is what a cancellation or retry must match, while a freshly
+  resolved qualification is used only for a new schedule. A cancellation that
+  fails retains that registration as unresolved and refuses a restart until a
+  stale callback arrives, a retry cancellation against the retained identity
+  succeeds, or the retained `LatestTime` passes. Because a tick that misses its
+  window is dropped rather than delayed, `M_Timer_EnsureHealthy(EntryPoint)` is
+  added as the single health-only bridge, letting the form repair a dropped
+  registration on reactivation without stopping the timer, reapplying the clock
+  mode or touching the form; a healthy registration produces no scheduling call
+  ([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)).
 
 ### Changed
 
@@ -111,9 +138,115 @@ Use only the categories needed by a release.
 - Standardized changelog governance and added an explicit Unreleased staging
   section without altering published release history.
 
+- **Diagnostic address caps are now per write operation, not per target area.**
+  This supersedes the `1.2.1` note recording the per-area behavior. Budgets are
+  per outcome category and per operation: locked, formula-skipped and failed
+  each retain up to 25 addresses across the whole operation. Structured address
+  fields now contain only worksheet addresses; the truncation sentinel that
+  used to appear inside them is gone, and the omitted count is reported in the
+  human-readable shortfall description instead
+  ([#51](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/51)).
+
+- Shutdown and repair are transactional. Every cleanup step is attempted even
+  after an earlier one fails, each outcome is recorded, and the provider lease is
+  released **last**, only once critical cleanup is proven clean. A lease-bar
+  deletion that cannot be verified retains the local ownership token rather than
+  discarding it, so a later retry still holds the proof it needs. Startup is
+  deliberately asymmetric: a fresh start that fails rolls back its own work and
+  releases the lease it acquired, while a repeated start into a runtime that
+  already owned the lease preserves that runtime and never releases a
+  pre-existing lease. `DP_RepairRuntime` never releases the lease, and remains
+  the one documented exception to preserving the caller's event state — it
+  leaves `Application.EnableEvents` `True` on purpose. Force-releasing a lease
+  stays an explicit operator action
+  ([#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50)).
+
+- Demo fast mode is exception-safe. Entry captures all four `Application`
+  properties before the first mutation and rolls back everything it applied if
+  it fails partway; exit attempts every restoration independently. A demo sheet
+  that was successfully constructed is now reported as a **failed operation** if
+  `Application` state could not be restored, because leaving Excel with
+  `EnableEvents=False`, `Calculation=Manual` or alerts suppressed outweighs a
+  correct sheet ([#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52)).
+
+### Fixed
+
+- **The Ribbon demo command now shows the demo sheet on the click that builds
+  it.** It previously built the sheet visible, read that visibility back and hid
+  it again, so the first click appeared to do nothing. The decision is now taken
+  from the sheet's state before it is ensured: absent creates, shows and
+  activates; existing and visible hides; existing and hidden shows and
+  activates, with `xlSheetHidden` and `xlSheetVeryHidden` treated as one
+  pre-existing state. Host resolution is unchanged from the policy recorded
+  under [#23](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/23). This
+  supersedes the `1.2.1` note recording the defect as deferred and unfiled
+  ([#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64)).
+
+- Corrected the regression harness's error-handling model. A called routine
+  cannot arm, disarm or replace its caller's handler; 42 re-arms and 34
+  comments asserting otherwise were removed, and the rule is now regression-
+  locked ([#32](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/32)).
+
 ### Validation
 
 - Verified historical version ordering, comparison links, and policy links.
+
+- Reviewed executable implementation baseline for this candidate:
+  `d99fefaa8fec97348ffb990e066d42371a0cdb69`. Every behavioral entry above
+  describes behavior present at that implementation commit. Subsequent
+  release-line commits through the documentation reconciliation do not change
+  `src/`, `test/` or `demo/`. This SHA is the implementation-review
+  baseline, not the final release identity: after the release line is integrated
+  to `main`, [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)
+  certifies the resulting `main` commit and the annotated `v1.2.2` tag targets
+  that exact certified commit.
+
+- Reconciled the candidate documentation set against the executable source
+  baseline above: `README.md`, `CHANGELOG.md`, `VERSION`, `dist/README.md`,
+  `INSTALLATION.md`, `CONTRIBUTING.md`, `RELEASING.md`, the pull-request and
+  issue templates, and the new `docs/RELEASE_CERTIFICATION_TEMPLATE.md`
+  ([#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54)). The
+  project Wiki is maintained outside this repository and was reconciled
+  separately against repository documentation baseline
+  `029d3d4a2fd33413009852b69c2602e03602a621`. Its page-level
+  `Reviewed commit` records the behavior/documentation review point, not the
+  later #63 certified/tag-target SHA.
+
+- Documented the real compile dependency of the current product: `M_DatePicker`
+  reaches `DP_Demo_EnsureDemoSheet` in `demo/M_DP_DEMO.bas`, which in turn calls
+  `demo/M_DEMO_BUILDER.bas`, so `src/` does not compile on its own. This predates
+  `v1.2.0` and is recorded as current fact rather than intended architecture;
+  removing it is tracked as
+  [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86) under
+  [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24). The separate
+  harness dependency on `demo/M_DEMO_BUILDER.bas` remains
+  [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35).
+
+- Added `docs/RELEASE_CERTIFICATION_TEMPLATE.md`, which records certification
+  evidence in a fixed shape: reviewed source SHA and tagged SHA as separate
+  fields, mandatory evidence for both the embedded `.xlsm` and the packaged
+  `.xlam`, verbatim runner summary lines, and the source-identity rules that
+  force a rebuild, package retest and re-hash when candidate source changes after
+  artifacts exist.
+
+- Converged the release branch with the standardized repository baseline from
+  `main` ([#75](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/75)).
+
+- Clarified the `1.2.1` error-preservation contract recorded under
+  [#48](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/48). The
+  original error **number** and **causal description** are preserved when a
+  failure is re-raised; `Err.Source` is deliberately re-contextualized to name
+  the raising procedure and the step it failed in. The published wording
+  describing capture of number, source and description and re-raising "the
+  original" is too easily read as source preservation, and is superseded by this
+  note rather than rewritten.
+
+- Corrected the `1.2.1` description of
+  [#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47) coverage.
+  The injected fault is consumed in `UserForm_Initialize`; `UserForm_Activate`
+  is verified by source inspection, not by a second injected fault. The
+  published `1.2.1` entry describing injected coverage of both is superseded by
+  this note rather than rewritten.
 
 ---
 

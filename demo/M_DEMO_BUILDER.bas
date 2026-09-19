@@ -103,7 +103,29 @@ Attribute VB_Name = "M_DEMO_BUILDER"
         EnableEvents    As Boolean       'Saved Application.EnableEvents
         DisplayAlerts   As Boolean       'Saved Application.DisplayAlerts
         Calculation     As XlCalculation 'Saved Application.Calculation
+
+        Captured        As Boolean       'True once every value above was captured
+        Active          As Boolean       'True between a completed Begin and its End
+
+        ScreenUpdatingApplied As Boolean 'True once fast mode changed ScreenUpdating
+        EnableEventsApplied   As Boolean 'True once fast mode changed EnableEvents
+        DisplayAlertsApplied  As Boolean 'True once fast mode changed DisplayAlerts
+        CalculationApplied    As Boolean 'True once fast mode changed Calculation
+
+        RestoreFailureCount   As Long    'Restorations End could not complete
+        RestoreFailureDetail  As String  'First restoration failure End observed
+        RollbackFailureCount  As Long    'Rollbacks a failed Begin could not complete
+        RollbackFailureDetail As String  'First rollback failure that Begin observed
     End Type
+
+'------------------------------------------------------------------------------
+' PRIVATE STATE
+'------------------------------------------------------------------------------
+    'Two slots, because one transaction can need two failures: an entry that
+    'fails and a rollback step that then also fails. A single slot is consumed by
+    'the entry fault and the rollback never sees one
+    Private mDEMO_FastModeFaultStep(0 To 1)   As String   'Fast-mode boundaries armed to fail
+    Private mDEMO_FastModeFaultNumber(0 To 1) As Long     'Error numbers those boundaries report
 
 '------------------------------------------------------------------------------
 ' PUBLIC ENUMS
@@ -196,37 +218,140 @@ Public Sub DEMO_FastMode_Begin( _
 '   None
 '
 ' BEHAVIOR
-'   - Captures current values for:
-'       * ScreenUpdating
-'       * EnableEvents
-'       * DisplayAlerts
-'       * Calculation
-'   - Applies reduced-noise builder settings
+'   Refuses re-entry on a record that is still active, resets the record,
+'   captures ScreenUpdating, EnableEvents, DisplayAlerts and Calculation before
+'   the first mutation, then applies the reduced-noise settings, recording each
+'   property it actually changed
 '
 ' ERROR POLICY
-'   Raises errors normally
+'   Entry is a transaction. A failure partway through rolls back every property
+'   already applied, leaves the record inert, and re-raises the original failure
+'   rather than anything rollback reported
+'
+' NOTES
+'   Capture happens once, before any mutation. Capturing and applying property
+'   by property would record values fast mode had itself just written, and End
+'   would then restore fast mode instead of the caller's state
+'
+'   The re-entry guard is record-local. A module-level lock would let a run that
+'   was abandoned before End leave the builder permanently unusable
 '
 ' UPDATED
-'   2026-04-24
+'   2026-09-17
 '------------------------------------------------------------------------------
+
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "DEMO_FastMode_Begin"
+
+    Dim SavedErrNumber      As Long     'Original failure number
+    Dim SavedErrDescription As String   'Original failure description
+
+'------------------------------------------------------------------------------
+' REFUSE RE-ENTRY ON AN ACTIVE RECORD
+'------------------------------------------------------------------------------
+    'A second Begin into a record that is still active would capture the values
+    'fast mode itself applied and store them as the caller's originals, so End
+    'would restore the wrong state. The guard is record-local on purpose: an
+    'abandoned record is a dead local variable and can never lock out a later run
+        If StateOut.Active Then
+            Err.Raise vbObjectError + 2801, PROC_NAME, _
+                "Fast mode is already active for this state record"
+        End If
+
+'------------------------------------------------------------------------------
+' RESET THE RECORD
+'------------------------------------------------------------------------------
+    'Never let a reused record carry applied flags or failures from last time
+        StateOut.Captured = False
+        StateOut.ScreenUpdatingApplied = False
+        StateOut.EnableEventsApplied = False
+        StateOut.DisplayAlertsApplied = False
+        StateOut.CalculationApplied = False
+        StateOut.RestoreFailureCount = 0
+        StateOut.RestoreFailureDetail = VBA.vbNullString
+        StateOut.RollbackFailureCount = 0
+        StateOut.RollbackFailureDetail = VBA.vbNullString
 
 '------------------------------------------------------------------------------
 ' CAPTURE CURRENT STATE
 '------------------------------------------------------------------------------
-    'Capture the current Excel Application state
+    'Any failure from here on must undo whatever was already applied
+        On Error GoTo BeginFailed
+    'Capture every value before the first mutation. Capturing and applying one
+    'property at a time would record a value fast mode had already changed
+        DEMO_FastMode_RaiseIfFault "Capture.ScreenUpdating"
         StateOut.ScreenUpdating = Application.ScreenUpdating
+        DEMO_FastMode_RaiseIfFault "Capture.EnableEvents"
         StateOut.EnableEvents = Application.EnableEvents
+        DEMO_FastMode_RaiseIfFault "Capture.DisplayAlerts"
         StateOut.DisplayAlerts = Application.DisplayAlerts
+        DEMO_FastMode_RaiseIfFault "Capture.Calculation"
         StateOut.Calculation = Application.Calculation
+    'A capture that failed leaves nothing applied, so the record stays inert and
+    'the failure reaches the caller without any rollback being needed
+        StateOut.Captured = True
 
 '------------------------------------------------------------------------------
 ' APPLY FAST MODE
 '------------------------------------------------------------------------------
-    'Reduce UI noise while building or rebuilding workbook structures
+    'Each property records that it was applied, so rollback and restoration touch
+    'only what this call actually changed
+        DEMO_FastMode_RaiseIfFault "Begin.ScreenUpdating"
         Application.ScreenUpdating = False
+        StateOut.ScreenUpdatingApplied = True
+
+        DEMO_FastMode_RaiseIfFault "Begin.EnableEvents"
         Application.EnableEvents = False
+        StateOut.EnableEventsApplied = True
+
+        DEMO_FastMode_RaiseIfFault "Begin.DisplayAlerts"
         Application.DisplayAlerts = False
+        StateOut.DisplayAlertsApplied = True
+
+        DEMO_FastMode_RaiseIfFault "Begin.Calculation"
         Application.Calculation = xlCalculationManual
+        StateOut.CalculationApplied = True
+
+'------------------------------------------------------------------------------
+' ARM THE RECORD
+'------------------------------------------------------------------------------
+    'Only a fully applied fast mode is active, so a caller that never reaches End
+    'after a failed Begin has nothing left to restore
+        StateOut.Active = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the failure handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' BEGIN FAILED
+'------------------------------------------------------------------------------
+BeginFailed:
+    'Capture the original failure before any rollback can replace it
+        SavedErrNumber = Err.Number
+        SavedErrDescription = Err.Description
+    'Undo only what this call applied, in reverse order. Rollback runs suppressed
+    'so one failed restoration cannot prevent the rest, and so a rollback failure
+    'can never displace the failure that caused it
+        DEMO_FastMode_RollbackCalculation StateOut
+        DEMO_FastMode_RollbackDisplayAlerts StateOut
+        DEMO_FastMode_RollbackEnableEvents StateOut
+        DEMO_FastMode_RollbackScreenUpdating StateOut
+    'Leave the record inert. A failed Begin owns nothing
+        StateOut.Active = False
+        StateOut.Captured = False
+        StateOut.ScreenUpdatingApplied = False
+        StateOut.EnableEventsApplied = False
+        StateOut.DisplayAlertsApplied = False
+        StateOut.CalculationApplied = False
+        On Error GoTo 0
+    'Re-raise the failure that stopped the entry, not whatever rollback reported
+        Err.Raise SavedErrNumber, PROC_NAME, SavedErrDescription
 
 End Sub
 
@@ -250,29 +375,909 @@ Public Sub DEMO_FastMode_End( _
 '   None
 '
 ' BEHAVIOR
-'   Restores:
-'     - ScreenUpdating
-'     - EnableEvents
-'     - DisplayAlerts
-'     - Calculation
+'   Exits silently on a record that captured nothing, then restores each
+'   property this record actually changed, independently of the others, and
+'   releases the record
 '
 ' ERROR POLICY
-'   Raises errors normally
+'   Never raises outward. Every restoration is attempted even after an earlier
+'   one fails, and failures are counted in the record rather than suppressed
+'   silently
+'
+' NOTES
+'   Safe to call after a failed Begin and safe to call twice. A failed Begin has
+'   already rolled itself back and left the record inert
+'
+'   RestoreFailureCount and RestoreFailureDetail survive the release, so a
+'   caller can report an incomplete restoration instead of assuming the
+'   Application was returned to its captured state
 '
 ' UPDATED
-'   2026-04-24
+'   2026-09-17
 '------------------------------------------------------------------------------
+
+
+'------------------------------------------------------------------------------
+' EXIT ON AN INERT RECORD
+'------------------------------------------------------------------------------
+    'A record that never captured anything has nothing to restore. This makes End
+    'safe to call after a failed Begin, and safe to call twice
+        If Not StateIn.Captured Then
+            StateIn.Active = False
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' RESTORE SAVED STATE
 '------------------------------------------------------------------------------
-    'Restore the previously captured Excel Application state
-        Application.ScreenUpdating = StateIn.ScreenUpdating
-        Application.EnableEvents = StateIn.EnableEvents
-        Application.DisplayAlerts = StateIn.DisplayAlerts
-        Application.Calculation = StateIn.Calculation
+    'Every restoration is attempted independently. One that fails must not
+    'prevent the others, because a half-restored Application is worse than a
+    'single property left wrong
+        DEMO_FastMode_RestoreScreenUpdating StateIn
+        DEMO_FastMode_RestoreEnableEvents StateIn
+        DEMO_FastMode_RestoreDisplayAlerts StateIn
+        DEMO_FastMode_RestoreCalculation StateIn
+
+'------------------------------------------------------------------------------
+' RELEASE THE RECORD
+'------------------------------------------------------------------------------
+    'The record no longer owns any Application state. The failure count and its
+    'detail survive so the caller can report an incomplete restoration
+        StateIn.Active = False
+        StateIn.Captured = False
+        StateIn.ScreenUpdatingApplied = False
+        StateIn.EnableEventsApplied = False
+        StateIn.DisplayAlertsApplied = False
+        StateIn.CalculationApplied = False
 
 End Sub
+
+Private Sub DEMO_FastMode_RecordRestoreFailure( _
+    ByRef StateIn As tDEMOFastModeState, _
+    ByVal StepName As String, _
+    ByVal ErrorNumber As Long, _
+    ByVal ErrorDescription As String)
+
+'
+'------------------------------------------------------------------------------
+'                      RECORD A FAILED RESTORATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts a restoration End could not complete and keeps the first detail
+'
+' WHY THIS EXISTS
+'   End suppresses its own errors so every restoration is attempted. Without an
+'   explicit record, a suppressed failure would leave the caller believing the
+'   Application was fully restored
+'
+' INPUTS
+'   StateIn
+'     Record being released
+'
+'   StepName
+'     Property that could not be restored
+'
+'   ErrorNumber, ErrorDescription
+'     What the restoration reported
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Increments the count and stores the detail when none is stored yet
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Only the first detail is kept. The count carries the rest, and the earliest
+'   failure is the one that explains the others
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Count every restoration that did not complete
+        StateIn.RestoreFailureCount = StateIn.RestoreFailureCount + 1
+    'Keep the first detail only
+        If VBA.LenB(StateIn.RestoreFailureDetail) = 0 Then
+            StateIn.RestoreFailureDetail = StepName & " | Error=" & _
+                VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+        End If
+
+End Sub
+
+Private Sub DEMO_FastMode_RestoreScreenUpdating(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                        RESTORE SCREEN UPDATING
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Application.ScreenUpdating when fast mode changed it
+'
+' WHY THIS EXISTS
+'   Each property is restored by its own routine so a failure in one cannot
+'   abandon the others, which is what a single suppressed block would do
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a failure when it does not take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRestoreFailure
+'
+' NOTES
+'   A property fast mode never applied is left alone. Restoring it would write a
+'   captured value over a change the caller made deliberately
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this record never changed
+        If Not StateIn.ScreenUpdatingApplied Then Exit Sub
+    'Attempt the restoration without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "End.ScreenUpdating"
+        If Err.Number = 0 Then Application.ScreenUpdating = StateIn.ScreenUpdating
+    'Record a restoration that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRestoreFailure StateIn, "ScreenUpdating", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RestoreEnableEvents(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                         RESTORE ENABLE EVENTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Application.EnableEvents when fast mode changed it
+'
+' WHY THIS EXISTS
+'   See DEMO_FastMode_RestoreScreenUpdating. Each property restores independently
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a failure when it does not take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRestoreFailure
+'
+' NOTES
+'   EnableEvents is the property whose loss is least visible and most damaging:
+'   a caller left with events off sees no error, only a workbook that has
+'   silently stopped reacting
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this record never changed
+        If Not StateIn.EnableEventsApplied Then Exit Sub
+    'Attempt the restoration without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "End.EnableEvents"
+        If Err.Number = 0 Then Application.EnableEvents = StateIn.EnableEvents
+    'Record a restoration that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRestoreFailure StateIn, "EnableEvents", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RestoreDisplayAlerts(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                        RESTORE DISPLAY ALERTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Application.DisplayAlerts when fast mode changed it
+'
+' WHY THIS EXISTS
+'   See DEMO_FastMode_RestoreScreenUpdating. Each property restores independently
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a failure when it does not take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRestoreFailure
+'
+' NOTES
+'   A caller left with alerts suppressed loses every confirmation prompt,
+'   including the one that guards a worksheet deletion
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this record never changed
+        If Not StateIn.DisplayAlertsApplied Then Exit Sub
+    'Attempt the restoration without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "End.DisplayAlerts"
+        If Err.Number = 0 Then Application.DisplayAlerts = StateIn.DisplayAlerts
+    'Record a restoration that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRestoreFailure StateIn, "DisplayAlerts", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RestoreCalculation(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                          RESTORE CALCULATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Application.Calculation when fast mode changed it
+'
+' WHY THIS EXISTS
+'   See DEMO_FastMode_RestoreScreenUpdating. Each property restores independently
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a failure when it does not take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRestoreFailure
+'
+' NOTES
+'   Calculation is restored last because setting it can trigger a recalculation,
+'   and the other three properties should already be back to the caller's values
+'   when that happens
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this record never changed
+        If Not StateIn.CalculationApplied Then Exit Sub
+    'Attempt the restoration without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "End.Calculation"
+        If Err.Number = 0 Then Application.Calculation = StateIn.Calculation
+    'Record a restoration that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRestoreFailure StateIn, "Calculation", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RaiseIfFault(ByVal StepName As String)
+
+'
+'------------------------------------------------------------------------------
+'                      RAISE AN INJECTED FAST-MODE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Raises an armed fault for one fast-mode boundary and consumes it
+'
+' WHY THIS EXISTS
+'   Neither an Application property assignment nor its restoration can be made to
+'   fail by any ordinary input, so without a seam the rollback and the
+'   independent-restore logic would only ever run during a real defect
+'
+' INPUTS
+'   StepName
+'     Boundary being entered, for example Begin.DisplayAlerts or End.EnableEvents
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Raises the armed number when the step matches, and disarms as it does so
+'
+' ERROR POLICY
+'   Deliberately raises when a fault fires. The caller decides what that means
+'
+' DEPENDENCIES
+'   mDEMO_FastModeFaultStep
+'   mDEMO_FastModeFaultNumber
+'
+' NOTES
+'   Each slot is one-shot: the matched slot is cleared as its fault is raised, so
+'   an armed fault cannot affect a second boundary or leak into a later suite
+'
+'   Only the matched slot is consumed. A fault armed for a later boundary, such
+'   as a rollback step, survives the one that fires first. That is what lets a
+'   single transaction fail at entry and then fail again while rolling back
+'
+'   The comparison is binary, so a step name differing only in case does not
+'   match
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FaultNumber As Long     'Armed number being consumed
+    Dim SlotIndex   As Long     'Slot being examined
+    Dim MatchedSlot As Long     'Slot holding this boundary, or -1
+
+'------------------------------------------------------------------------------
+' CONSUME AND RAISE
+'------------------------------------------------------------------------------
+    'Find the slot armed for this boundary, if any
+        MatchedSlot = -1
+        For SlotIndex = LBound(mDEMO_FastModeFaultStep) To UBound(mDEMO_FastModeFaultStep)
+            If VBA.LenB(mDEMO_FastModeFaultStep(SlotIndex)) > 0 Then
+                If VBA.StrComp(mDEMO_FastModeFaultStep(SlotIndex), StepName, _
+                    vbBinaryCompare) = 0 Then
+                    MatchedSlot = SlotIndex
+                    Exit For
+                End If
+            End If
+        Next SlotIndex
+    'Exit when nothing is armed for this boundary
+        If MatchedSlot < 0 Then Exit Sub
+    'Consume only the matched slot, leaving any other armed fault in place
+        FaultNumber = mDEMO_FastModeFaultNumber(MatchedSlot)
+        mDEMO_FastModeFaultStep(MatchedSlot) = VBA.vbNullString
+        mDEMO_FastModeFaultNumber(MatchedSlot) = 0
+    'Raise the injected failure
+        Err.Raise FaultNumber, "DEMO_FastMode_TestFault", _
+            "Injected fast-mode failure at " & StepName
+
+End Sub
+
+Public Sub DEMO_FastMode_Test_ArmFault( _
+    ByVal StepName As String, _
+    ByVal ErrorNumber As Long)
+
+'
+'------------------------------------------------------------------------------
+'                       ARM A FAST-MODE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a one-shot fault for one fast-mode boundary
+'
+' WHY THIS EXISTS
+'   The regression must be able to fail entry partway through and fail a single
+'   restoration, neither of which can be produced by ordinary input
+'
+' INPUTS
+'   StepName
+'     Boundary to fail; an empty string disarms every slot
+'
+'   ErrorNumber
+'     Error number that boundary reports
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the armed step and number
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   mDEMO_FastModeFaultStep
+'   mDEMO_FastModeFaultNumber
+'
+' NOTES
+'   Two faults can be armed at once, which is what a compound case needs: an
+'   entry boundary and a rollback boundary that fires while the entry failure is
+'   being undone. A single slot is consumed by the entry fault and the rollback
+'   never sees one
+'
+'   Public only because the regression harness is a separate module. It takes
+'   arguments, so it does not appear in the macro dialog, and #25 classifies it
+'   as internal rather than supported API
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim SlotIndex As Long   'Slot being filled
+
+'------------------------------------------------------------------------------
+' ARM THE BOUNDARY
+'------------------------------------------------------------------------------
+    'An empty name disarms every slot
+        If VBA.LenB(StepName) = 0 Then
+            For SlotIndex = LBound(mDEMO_FastModeFaultStep) To UBound(mDEMO_FastModeFaultStep)
+                mDEMO_FastModeFaultStep(SlotIndex) = VBA.vbNullString
+                mDEMO_FastModeFaultNumber(SlotIndex) = 0
+            Next SlotIndex
+            Exit Sub
+        End If
+    'Store the boundary in the first free slot
+        For SlotIndex = LBound(mDEMO_FastModeFaultStep) To UBound(mDEMO_FastModeFaultStep)
+            If VBA.LenB(mDEMO_FastModeFaultStep(SlotIndex)) = 0 Then
+                mDEMO_FastModeFaultStep(SlotIndex) = StepName
+                mDEMO_FastModeFaultNumber(SlotIndex) = ErrorNumber
+                Exit Sub
+            End If
+        Next SlotIndex
+    'Both slots are taken. Replace the oldest rather than silently ignoring the
+    'request, so a test that arms three faults fails visibly instead of quietly
+    'running with the first two
+        mDEMO_FastModeFaultStep(LBound(mDEMO_FastModeFaultStep)) = StepName
+        mDEMO_FastModeFaultNumber(LBound(mDEMO_FastModeFaultNumber)) = ErrorNumber
+
+End Sub
+
+Private Sub DEMO_FastMode_RecordRollbackFailure( _
+    ByRef StateIn As tDEMOFastModeState, _
+    ByVal StepName As String, _
+    ByVal ErrorNumber As Long, _
+    ByVal ErrorDescription As String)
+
+'
+'------------------------------------------------------------------------------
+'                       RECORD A FAILED ROLLBACK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts a rollback a failed entry could not complete and keeps the first detail
+'
+' WHY THIS EXISTS
+'   Rollback runs suppressed so one failure cannot abandon the rest, and so it can
+'   never displace the failure that caused it. Suppression without a record would
+'   leave the caller believing entry had undone itself cleanly
+'
+' INPUTS
+'   StateIn
+'     Record being rolled back
+'
+'   StepName
+'     Property that could not be rolled back
+'
+'   ErrorNumber, ErrorDescription
+'     What the rollback reported
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Increments the rollback count and stores the detail when none is stored yet
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Kept separate from the restore accounting. A rollback failure and a
+'   restoration failure happen on different paths and mean different things: one
+'   says entry could not undo itself, the other says exit could not put the
+'   caller's state back
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Count every rollback that did not complete
+        StateIn.RollbackFailureCount = StateIn.RollbackFailureCount + 1
+    'Keep the first detail only
+        If VBA.LenB(StateIn.RollbackFailureDetail) = 0 Then
+            StateIn.RollbackFailureDetail = StepName & " | Error=" & _
+                VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+        End If
+
+End Sub
+
+Private Sub DEMO_FastMode_RollbackScreenUpdating(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                       ROLL BACK SCREEN UPDATING
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Undoes this entry's ScreenUpdating change after a failed Begin
+'
+' WHY THIS EXISTS
+'   Each property rolls back through its own routine so one failure cannot
+'   abandon the others, and so the failure is recorded rather than suppressed
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a rollback failure when it does not
+'   take
+'
+' ERROR POLICY
+'   Never raises outward. A rollback failure must never displace the entry
+'   failure that caused the rollback
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRollbackFailure
+'
+' NOTES
+'   A property this entry never applied is left alone
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this entry never changed
+        If Not StateIn.ScreenUpdatingApplied Then Exit Sub
+    'Attempt the rollback without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "Rollback.ScreenUpdating"
+        If Err.Number = 0 Then Application.ScreenUpdating = StateIn.ScreenUpdating
+    'Record a rollback that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRollbackFailure StateIn, "ScreenUpdating", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RollbackEnableEvents(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                        ROLL BACK ENABLE EVENTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Undoes this entry's EnableEvents change after a failed Begin
+'
+' WHY THIS EXISTS
+'   See DEMO_FastMode_RollbackScreenUpdating. Each property rolls back
+'   independently
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a rollback failure when it does not
+'   take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRollbackFailure
+'
+' NOTES
+'   This is the property whose loss is least visible: a caller left with events
+'   off sees no error, only a workbook that has stopped reacting
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this entry never changed
+        If Not StateIn.EnableEventsApplied Then Exit Sub
+    'Attempt the rollback without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "Rollback.EnableEvents"
+        If Err.Number = 0 Then Application.EnableEvents = StateIn.EnableEvents
+    'Record a rollback that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRollbackFailure StateIn, "EnableEvents", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RollbackDisplayAlerts(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                       ROLL BACK DISPLAY ALERTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Undoes this entry's DisplayAlerts change after a failed Begin
+'
+' WHY THIS EXISTS
+'   See DEMO_FastMode_RollbackScreenUpdating. Each property rolls back
+'   independently
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a rollback failure when it does not
+'   take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRollbackFailure
+'
+' NOTES
+'   A caller left with alerts suppressed loses every confirmation prompt,
+'   including the one that guards a worksheet deletion
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this entry never changed
+        If Not StateIn.DisplayAlertsApplied Then Exit Sub
+    'Attempt the rollback without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "Rollback.DisplayAlerts"
+        If Err.Number = 0 Then Application.DisplayAlerts = StateIn.DisplayAlerts
+    'Record a rollback that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRollbackFailure StateIn, "DisplayAlerts", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Private Sub DEMO_FastMode_RollbackCalculation(ByRef StateIn As tDEMOFastModeState)
+
+'
+'------------------------------------------------------------------------------
+'                        ROLL BACK CALCULATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Undoes this entry's Calculation change after a failed Begin
+'
+' WHY THIS EXISTS
+'   See DEMO_FastMode_RollbackScreenUpdating. Each property rolls back
+'   independently
+'
+' INPUTS
+'   StateIn
+'     Record holding the captured value and the applied flag
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Restores the captured value and records a rollback failure when it does not
+'   take
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DEMO_FastMode_RaiseIfFault
+'   DEMO_FastMode_RecordRollbackFailure
+'
+' NOTES
+'   Rollback runs in reverse application order, so Calculation is undone first.
+'   Setting it can trigger a recalculation, and doing that while the other three
+'   are still at fast-mode values is the least disruptive point
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    'Skip a property this entry never changed
+        If Not StateIn.CalculationApplied Then Exit Sub
+    'Attempt the rollback without letting it stop the rest
+        On Error Resume Next
+        Err.Clear
+        DEMO_FastMode_RaiseIfFault "Rollback.Calculation"
+        If Err.Number = 0 Then Application.Calculation = StateIn.Calculation
+    'Record a rollback that did not complete
+        If Err.Number <> 0 Then
+            DEMO_FastMode_RecordRollbackFailure StateIn, "Calculation", _
+                Err.Number, Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+
+End Sub
+
+Public Function DEMO_FastMode_ResolveFailure( _
+    ByVal PrimaryNumber As Long, _
+    ByVal PrimaryDescription As String, _
+    ByRef State As tDEMOFastModeState, _
+    ByRef ResolvedNumber As Long, _
+    ByRef ResolvedDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                    RESOLVE THE FAST-MODE OPERATION OUTCOME
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether an operation that used fast mode must report failure, and
+'   with which error
+'
+' WHY THIS EXISTS
+'   The transaction recorded rollback and restoration failures in the record, and
+'   nothing read them. A build that succeeded while Excel was left with
+'   EnableEvents off still returned success, which is the failure #52 exists to
+'   prevent
+'
+'   A successfully constructed demo sheet does not outweigh leaving Excel with
+'   events off, calculation manual or alerts suppressed. The sheet may stay
+'   visible and correct; the operation is still a failure
+'
+' INPUTS
+'   PrimaryNumber
+'     Error number that stopped the operation, or zero
+'
+'   PrimaryDescription
+'     Causal description of that failure
+'
+'   State
+'     Fast-mode record carrying any rollback and restoration failures
+'
+'   ResolvedNumber
+'     Receives the number the caller must raise
+'
+'   ResolvedDescription
+'     Receives the description the caller must raise
+'
+' RETURNS
+'   False when the operation genuinely succeeded. True when the caller must raise
+'
+' BEHAVIOR
+'   A primary failure is always reported unchanged in number and cause, with any
+'   cleanup evidence appended as secondary detail. With no primary failure but an
+'   incomplete restoration, reports a dedicated fast-mode cleanup error naming
+'   the properties involved
+'
+' ERROR POLICY
+'   Pure. Reads no Application state, writes none, touches no Err object and
+'   reports nothing
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The primary error number is never replaced. That is the same rule #48 imposed
+'   on the write-back handlers and #50 on the lifecycle transaction: cleanup
+'   evidence is secondary to the failure that caused the cleanup
+'
+'   Rollback failures accompany a primary Begin failure by construction, so they
+'   normally appear in the appended branch rather than alone
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CleanupEvidence As String   'Secondary rollback and restoration detail
+
+'------------------------------------------------------------------------------
+' BUILD THE CLEANUP EVIDENCE
+'------------------------------------------------------------------------------
+    'Assume nothing needs reporting
+        ResolvedNumber = 0
+        ResolvedDescription = VBA.vbNullString
+        DEMO_FastMode_ResolveFailure = False
+    'Collect whatever the transaction could not complete
+        If State.RollbackFailureCount > 0 Then
+            CleanupEvidence = "Fast-mode rollback incomplete (" & _
+                VBA.CStr(State.RollbackFailureCount) & "): " & _
+                State.RollbackFailureDetail
+        End If
+        If State.RestoreFailureCount > 0 Then
+            If VBA.LenB(CleanupEvidence) > 0 Then
+                CleanupEvidence = CleanupEvidence & " | "
+            End If
+            CleanupEvidence = CleanupEvidence & "Fast-mode restoration incomplete (" & _
+                VBA.CStr(State.RestoreFailureCount) & "): " & _
+                State.RestoreFailureDetail
+        End If
+
+'------------------------------------------------------------------------------
+' A PRIMARY FAILURE IS REPORTED UNCHANGED
+'------------------------------------------------------------------------------
+    'The number and the cause survive. Cleanup evidence is appended, never
+    'substituted
+        If PrimaryNumber <> 0 Then
+            ResolvedNumber = PrimaryNumber
+            ResolvedDescription = PrimaryDescription
+            If VBA.LenB(CleanupEvidence) > 0 Then
+                ResolvedDescription = ResolvedDescription & " | " & CleanupEvidence
+            End If
+            DEMO_FastMode_ResolveFailure = True
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' A CLEAN BUILD WITH UNRESTORED STATE IS STILL A FAILURE
+'------------------------------------------------------------------------------
+    'Excel left in fast mode is not a successful operation, however good the
+    'sheet looks
+        If VBA.LenB(CleanupEvidence) > 0 Then
+            ResolvedNumber = vbObjectError + 2802
+            ResolvedDescription = "The operation completed but Excel Application " & _
+                "state was not fully restored. " & CleanupEvidence
+            DEMO_FastMode_ResolveFailure = True
+        End If
+
+End Function
 
 Public Sub DEMO_SB_SetProgress( _
     ByVal CurrentStep As Long, _

@@ -170,6 +170,36 @@ Exported source is authoritative.
 - Avoid new references, APIs, dependencies, or platform assumptions until their
   support and deployment impact is agreed.
 
+### Procedure-local error handling
+
+VBA `On Error` state is **procedure-local**. A called routine cannot arm,
+disable, or replace its caller's handler. Do not re-arm a caller's handler after
+a call merely because the callee uses `On Error Resume Next`, `On Error GoTo 0`
+or its own labelled handler.
+
+Re-arm only when the **current procedure** changed its own error mode and still
+needs labelled handling afterwards. A typical temporary suppression therefore
+has this shape:
+
+```vb
+On Error Resume Next
+' narrowly scoped operation that may fail
+Err.Clear
+On Error GoTo ProcedureFail
+```
+
+The final `On Error GoTo ProcedureFail` is required because this procedure
+changed its own mode, not because another procedure was called.
+
+If an error must survive cleanup or an error-mode change, capture
+`Err.Number`, `Err.Source` and `Err.Description` **before** any `On Error`
+statement or `Err.Clear` that would reset the live `Err` object. Preserve the
+primary non-zero error and causal description; cleanup diagnostics are
+secondary and must not replace the original failure.
+
+This rule is regression-locked by the harness under
+[#32](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/32).
+
 ### Public contracts and compatibility
 
 Treat documented procedures, functions, classes, enums, parameters, defaults,

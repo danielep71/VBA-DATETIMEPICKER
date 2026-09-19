@@ -239,6 +239,7 @@ Option Explicit
     Private Const DP_CONTEXT_MENU_BEFORE           As Long = 1                           'Context-menu insertion position
 
     Private Const DP_TIMER_SECONDS                 As Long = 1                           'Live clock interval in seconds
+    Private Const DP_TIMER_LATEST_SECONDS          As Long = 30                          'Bounded OnTime delivery window in seconds
 
     Private Const GWL_STYLE                        As Long = -16                         'Window style index
     Private Const MONITOR_DEFAULTTONEAREST         As Long = 2                           'Monitor nearest flag
@@ -256,6 +257,7 @@ Option Explicit
 
     Private Const WS_CAPTION                       As Long = &HC00000                    'Window caption style flag
     Private Const DP_DEMO_SHEET_NAME               As String = "DATE PICKER DEMO"        'Demo worksheet name
+    Private Const DP_WRITEBACK_ADDRESS_LIMIT        As Long = 25                          'Maximum structured addresses retained per outcome category and operation
     
     Private Const DP_WM_NCLBUTTONDOWN              As Long = &HA1                        'Non-client left-button down message
     Private Const DP_HTCAPTION                     As Long = 2                          'Title-bar hit-test code
@@ -275,6 +277,9 @@ Option Explicit
     Private Const DP_LEASE_MARKER_TAG              As String = "VBA_DATETIMEPICKER_RUNTIME_LEASE_OWNER"         'Identifies the lease marker control
     Private Const DP_LEASE_AMBIGUOUS               As String = "?"                       'Sentinel for a lease that cannot be read
     Public Const DP_GRID_ICON_NAME                 As String = "DP_GridIcon"             'Worksheet grid icon shape name
+    Private Const DP_GRID_ICON_ALT_BASE            As String = "DatePicker Grid Entry Point"   'Human-readable grid icon alternative text
+    Private Const DP_GRID_ICON_OWNER_TAG           As String = " | dp-owner-v1="               'Versioned ownership marker schema tag
+    Private Const DP_GRID_ICON_PENDING_SUFFIX      As String = "_Pending"                      'Temporary name held during icon creation
     Public Const DP_MSGBOX_TITLE                   As String = "Date / Time Picker"      'Message-box title
 
     Public Const DP_DEFAULT_FIRST_DAY_OF_WEEK      As Long = vbMonday                    'Default first day of week
@@ -404,6 +409,8 @@ Option Explicit
     Private mSettingsLoaded             As Boolean              'Settings loaded flag
     Private mDP_SettingsNamespace       As String               'Optional persistence namespace, empty for the legacy default
     Private mDP_RuntimeOwnerId          As String               'Ephemeral lease token, non-empty only while this project owns the lease
+    Private mDP_GridIconOwnerToken      As String               'Durable token stamped into created grid icons, never used for admission
+    Private mDP_GridIconRefusalKey      As String               'Diagnostic-only key of the last sheet where a foreign icon refused creation
     Private mDP_LeaseRefusalSilenced    As Boolean              'Test-only: suppress the modal refusal report so entry paths stay drivable
     Private mDP_LeaseRefusalCount       As Long                 'Test-only: refusal reports raised while silenced
     Private mDP_NextTickTime            As Date                 'Next OnTime tick
@@ -417,6 +424,40 @@ Option Explicit
     Private mDP_GridIconLastLeft            As Double           'Last grid-icon left position
     Private mDP_GridIconLastTop             As Double           'Last grid-icon top position
     Private mDP_TimerProcedureWorkbookName  As String           'Workbook name used for cached timer callback
+
+    Private mDP_TimerLatestTime         As Date                 'LatestTime of the current registration
+    Private mDP_TimerLastEarliest       As Date                 'EarliestTime of the last scheduling call
+    Private mDP_TimerLastLatest         As Date                 'LatestTime of the last scheduling call
+    Private mDP_TimerLastProcedure      As String               'Procedure of the last scheduling call
+    Private mDP_TimerLastSchedule       As Boolean              'Schedule flag of the last scheduling call
+    Private mDP_TimerLastErrNumber      As Long                 'Error number from the last scheduling call
+    Private mDP_TimerLastErrDescription As String               'Error description from the last scheduling call
+    Private mDP_TimerCallCount          As Long                 'Number of scheduling calls made
+    Private mDP_TimerFaultNumber        As Long                 'One-shot injected scheduling failure, 0 when disarmed
+
+    Private mDP_TimerUnresolved         As Boolean              'True while a failed cancellation leaves a registration outstanding
+    Private mDP_TimerUnresolvedEarliest As Date                 'EarliestTime of the unresolved registration
+    Private mDP_TimerUnresolvedLatest   As Date                 'LatestTime of the unresolved registration
+    Private mDP_TimerUnresolvedProcedure As String              'Procedure of the unresolved registration
+    Private mDP_TimerRefusalReported    As Boolean              'Diagnostic-only: restart refusal already reported
+
+
+    'Issue #50 lifecycle transaction / deterministic fault state
+    Private mDP_LifecycleFaultStep          As String           'One-shot lifecycle fault step, blank when disarmed
+    Private mDP_LifecycleFaultNumber        As Long             'One-shot lifecycle fault number
+    Private mDP_LifecycleLastTrace          As String           'Ordered cleanup trace from the last lifecycle transaction
+    Private mDP_LifecycleLastCleanupDetail  As String           'First cleanup failure from the last lifecycle transaction
+    Private mDP_LifecycleLastCriticalClean  As Boolean          'True when every critical cleanup step proved clean
+    Private mDP_LifecycleLastLeaseReleased  As Boolean          'True when the last transaction verified lease release
+    Private mDP_LifecycleLastPrimaryNumber  As Long             'Primary lifecycle failure number preserved across cleanup
+    Private mDP_LifecycleLastPrimaryStep    As String           'Primary lifecycle failure step preserved across cleanup
+    Private mDP_LifecycleLastPrimaryDescription As String       'Primary lifecycle failure description preserved across cleanup
+    Private mDP_LifecycleLastOperation      As String           'Lifecycle entry point represented by the current diagnostic state
+    Private mDP_LifecycleLastSucceeded      As Boolean          'True only when the lifecycle entry point completed its contract
+    Private mDP_LifecycleLastCleanupAttempted As Boolean        'True once the lifecycle cleanup transaction was entered
+    Private mDP_LifecycleLastCleanupFailureCount As Long        'Number of cleanup steps that actually failed
+    Private mDP_LifecycleLastLeaseWasAlreadyOwned As Boolean    'True when the provider lease pre-dated the lifecycle call
+    Private mDP_LifecycleLastLeaseAcquiredThisCall As Boolean   'True when the lifecycle call acquired the provider lease
 
 '------------------------------------------------------------------------------
 ' EMBEDDED GRID ICON
@@ -6592,19 +6633,19 @@ Public Function M_Lease_TryAcquire() As Boolean
 
 End Function
 
-Public Sub M_Lease_Release()
+Private Sub M_Lifecycle_ResetObservation()
 
 '
 '------------------------------------------------------------------------------
-'                          RELEASE PROVIDER LEASE
+'                        RESET LIFECYCLE OBSERVATION
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Gives up the runtime lease, but only when this project can prove it holds it
+'   Clears every field describing the previous lifecycle operation
 '
 ' WHY THIS EXISTS
-'   This is the more important half of the model. Refusing a second provider at
-'   startup protects nothing if that same provider can later release the owner's
-'   lease and dismantle its registrations
+'   The observation fields are module-level and outlive the call that wrote them.
+'   A later operation that failed before reaching a given step would otherwise be
+'   read through the previous operation's values, which is worse than having none
 '
 ' INPUTS
 '   None
@@ -6613,59 +6654,2057 @@ Public Sub M_Lease_Release()
 '   Nothing
 '
 ' BEHAVIOR
-'   Deletes the lease bar when its marker matches this project's token, and does
-'   nothing otherwise
+'   Zeroes the trace, the cleanup detail and count, the primary failure, the
+'   operation name, and every lease and success flag
 '
 ' ERROR POLICY
-'   Does not raise. A lease this project does not own is left alone silently
+'   Cannot raise. Assignment to module-level scalars only
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* observation fields
+'
+' NOTES
+'   Called at the top of DP_Start, DP_Stop and DP_RepairRuntime, before anything
+'   those routines do can fail. Every entry point must reset before it observes,
+'   or a refused call reports the last successful one
+'
+'   This clears observation only. It never touches the provider lease, the
+'   manager, the timer or any Excel state
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    mDP_LifecycleLastTrace = VBA.vbNullString
+    mDP_LifecycleLastCleanupDetail = VBA.vbNullString
+    mDP_LifecycleLastCriticalClean = False
+    mDP_LifecycleLastLeaseReleased = False
+    mDP_LifecycleLastPrimaryNumber = 0
+    mDP_LifecycleLastPrimaryStep = VBA.vbNullString
+    mDP_LifecycleLastPrimaryDescription = VBA.vbNullString
+
+    mDP_LifecycleLastOperation = VBA.vbNullString
+    mDP_LifecycleLastSucceeded = False
+    mDP_LifecycleLastCleanupAttempted = False
+    mDP_LifecycleLastCleanupFailureCount = 0
+    mDP_LifecycleLastLeaseWasAlreadyOwned = False
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
+End Sub
+
+Private Sub M_Lifecycle_SetPrimaryFailure( _
+    ByVal ErrorNumber As Long, _
+    ByVal StepName As String, _
+    ByVal ErrorDescription As String)
+
+'
+'------------------------------------------------------------------------------
+'                        RECORD THE PRIMARY FAILURE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records the failure that caused a lifecycle operation to stop
+'
+' WHY THIS EXISTS
+'   Cleanup runs after the primary failure and can fail in its own right. Keeping
+'   the primary cause in dedicated fields is what stops a cleanup failure from
+'   overwriting the reason the operation stopped
+'
+' INPUTS
+'   ErrorNumber
+'     Number of the primary failure
+'
+'   StepName
+'     Transaction step that produced it
+'
+'   ErrorDescription
+'     Description of the primary failure
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the three values in the primary-failure observation fields
+'
+' ERROR POLICY
+'   Cannot raise. Assignment to module-level scalars only
+'
+' DEPENDENCIES
+'   mDP_LifecycleLastPrimaryNumber
+'   mDP_LifecycleLastPrimaryStep
+'   mDP_LifecycleLastPrimaryDescription
+'
+' NOTES
+'   The caller captures Err before any cleanup runs and passes the captured
+'   values here. Reading the live Err object after cleanup would report whatever
+'   the last suppressed cleanup operation left behind
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    mDP_LifecycleLastPrimaryNumber = ErrorNumber
+    mDP_LifecycleLastPrimaryStep = StepName
+    mDP_LifecycleLastPrimaryDescription = ErrorDescription
+
+End Sub
+
+Private Function M_Lifecycle_TryConsumeFault( _
+    ByVal StepName As String, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       CONSUME AN INJECTED LIFECYCLE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a fault is armed for the named transaction step, and consumes
+'   it when it is
+'
+' WHY THIS EXISTS
+'   Startup and shutdown have to be proven to roll back from a failure at every
+'   boundary, and none of those boundaries can be made to fail on demand by any
+'   ordinary input. Without an injection seam the transaction logic would only
+'   ever execute during a real defect
+'
+' INPUTS
+'   StepName
+'     Boundary being entered, for example Cleanup.Timer or Lease.Delete
+'
+'   ErrorNumber
+'     Receives the armed error number when the fault fires
+'
+'   ErrorDescription
+'     Receives a description naming the step
+'
+' RETURNS
+'   True when a fault was armed for this step and has now been consumed
+'
+' BEHAVIOR
+'   Matches the armed step name exactly, hands back the armed number, and disarms
+'
+' ERROR POLICY
+'   Cannot raise. Comparison and assignment only
+'
+' DEPENDENCIES
+'   mDP_LifecycleFaultStep
+'   mDP_LifecycleFaultNumber
+'
+' NOTES
+'   One-shot by construction: the armed step and number are cleared as the fault
+'   is handed back, so an armed fault can never affect a second boundary or leak
+'   into a later suite
+'
+'   The comparison is binary, so a step name that differs only in case does not
+'   match. Callers pass literals that must equal the literals the tests arm
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+    M_Lifecycle_TryConsumeFault = False
+
+    If mDP_LifecycleFaultNumber = 0 Then Exit Function
+    If VBA.StrComp(mDP_LifecycleFaultStep, StepName, vbBinaryCompare) <> 0 Then Exit Function
+
+    ErrorNumber = mDP_LifecycleFaultNumber
+    ErrorDescription = "Injected lifecycle fault at " & StepName
+    mDP_LifecycleFaultStep = VBA.vbNullString
+    mDP_LifecycleFaultNumber = 0
+    M_Lifecycle_TryConsumeFault = True
+
+End Function
+
+Private Sub M_Lifecycle_RaiseIfFault(ByVal StepName As String)
+
+'
+'------------------------------------------------------------------------------
+'                        RAISE AN INJECTED LIFECYCLE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Raises an armed fault outward, for boundaries that report failure by raising
+'
+' WHY THIS EXISTS
+'   The cleanup helpers report failure through a Boolean and ByRef error fields,
+'   but the startup steps run under a live error handler and fail by raising.
+'   Both shapes need the same seam, so the seam is offered in both forms
+'
+' INPUTS
+'   StepName
+'     Boundary being entered
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Consumes a fault armed for the step and raises it. Returns silently when no
+'   fault is armed for that step
+'
+' ERROR POLICY
+'   Deliberately raises outward when a fault fires. The caller's own handler
+'   decides what that means for the transaction
+'
+' DEPENDENCIES
+'   M_Lifecycle_TryConsumeFault
+'
+' NOTES
+'   The raised Source is M_Lifecycle_TestFault rather than the calling routine,
+'   so an injected failure is never mistaken for a real one in a trace
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+
+    If M_Lifecycle_TryConsumeFault(StepName, ErrorNumber, ErrorDescription) Then
+        Err.Raise ErrorNumber, "M_Lifecycle_TestFault", ErrorDescription
+    End If
+
+End Sub
+
+Private Sub M_Lifecycle_RecordCleanupStep( _
+    ByVal StepName As String, _
+    ByVal Succeeded As Boolean, _
+    ByVal ErrorNumber As Long, _
+    ByVal ErrorDescription As String, _
+    Optional ByVal CountFailure As Boolean = True)
+
+'
+'------------------------------------------------------------------------------
+'                          RECORD ONE CLEANUP STEP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Appends one step outcome to the cleanup trace and accounts for its failure
+'
+' WHY THIS EXISTS
+'   Teardown attempts every step even after one fails, so the outcome of a
+'   shutdown is a sequence rather than a single verdict. Before this, a
+'   suppressed cleanup failure left nothing behind at all and the operation still
+'   reported success
+'
+' INPUTS
+'   StepName
+'     Cleanup boundary being recorded
+'
+'   Succeeded
+'     True when the step completed
+'
+'   ErrorNumber
+'     Number the step reported, or zero
+'
+'   ErrorDescription
+'     Description the step reported
+'
+'   CountFailure
+'     False to record the step in the trace without counting it as a failure
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Appends StepName=PASS or StepName=FAIL(number) to the trace, increments the
+'   failure count unless the caller opted out, and keeps the first failure detail
+'
+' ERROR POLICY
+'   Cannot raise. String building and assignment only
+'
+' DEPENDENCIES
+'   mDP_LifecycleLastTrace
+'   mDP_LifecycleLastCleanupDetail
+'   mDP_LifecycleLastCleanupFailureCount
+'
+' NOTES
+'   Only the first failure detail is kept. A later failure is visible in the
+'   trace but does not overwrite the detail, so the earliest cause stays readable
+'
+'   CountFailure exists for steps that are recorded for completeness but are not
+'   part of the critical set, so an optional step cannot make a clean teardown
+'   look incomplete
+'
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim StepText As String
+
+    If Succeeded Then
+        StepText = StepName & "=PASS"
+    Else
+        StepText = StepName & "=FAIL"
+        If ErrorNumber <> 0 Then StepText = StepText & "(" & VBA.CStr(ErrorNumber) & ")"
+    End If
+
+    If VBA.LenB(mDP_LifecycleLastTrace) = 0 Then
+        mDP_LifecycleLastTrace = StepText
+    Else
+        mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & " > " & StepText
+    End If
+
+    If Not Succeeded Then
+        If CountFailure Then
+            mDP_LifecycleLastCleanupFailureCount = _
+                mDP_LifecycleLastCleanupFailureCount + 1
+        End If
+        If VBA.LenB(mDP_LifecycleLastCleanupDetail) = 0 Then
+            mDP_LifecycleLastCleanupDetail = StepName
+            If ErrorNumber <> 0 Then
+                mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
+                    " | Error=" & VBA.CStr(ErrorNumber)
+            End If
+            If VBA.LenB(ErrorDescription) > 0 Then
+                mDP_LifecycleLastCleanupDetail = mDP_LifecycleLastCleanupDetail & _
+                    " | " & ErrorDescription
+            End If
+        End If
+    End If
+
+End Sub
+
+Public Sub M_Lifecycle_Test_ArmFault(ByVal StepName As String, ByVal ErrorNumber As Long)
+
+'
+'------------------------------------------------------------------------------
+'                            ARM A LIFECYCLE FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Arms a one-shot fault for one named transaction boundary
+'
+' WHY THIS EXISTS
+'   The regression matrix has to fail startup and shutdown at every boundary,
+'   and none of them can be made to fail by any ordinary input
+'
+' INPUTS
+'   StepName
+'     Boundary to fail, for example Cleanup.Timer or Start.AfterManager
+'
+'   ErrorNumber
+'     Error number the boundary reports; zero disarms
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Assigns module-level state only
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. It takes an
+'   argument, so it does not appear in the macro dialog, and #25 classifies it as
+'   internal rather than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    mDP_LifecycleFaultStep = VBA.Trim$(StepName)
+    mDP_LifecycleFaultNumber = ErrorNumber
+
+End Sub
+
+Public Sub M_Lifecycle_Test_Reset(ByVal ResetState As Boolean)
+
+'
+'------------------------------------------------------------------------------
+'                          RESET LIFECYCLE TEST STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Disarms any armed fault and clears the observation fields
+'
+' WHY THIS EXISTS
+'   A fault or an observation left behind would be read by the next suite as
+'   though it belonged to that suite's own operation
+'
+' INPUTS
+'   ResetState
+'     False makes the call a no-op, so a suite can reset conditionally without
+'     branching at the call site
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Assigns module-level state only
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. It takes an
+'   argument, so it does not appear in the macro dialog, and #25 classifies it as
+'   internal rather than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    If Not ResetState Then Exit Sub
+
+    mDP_LifecycleFaultStep = VBA.vbNullString
+    mDP_LifecycleFaultNumber = 0
+    M_Lifecycle_ResetObservation
+
+End Sub
+
+Public Function M_Lifecycle_Test_LastTrace() As String
+
+'
+'------------------------------------------------------------------------------
+'                               READ LAST TRACE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the step-by-step trace of the last operation
+'
+' WHY THIS EXISTS
+'   Every cleanup step appends PASS or FAIL(number) here, so a shutdown that
+'   failed halfway is readable as a sequence rather than a single verdict
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastTrace = mDP_LifecycleLastTrace
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupDetail() As String
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST CLEANUP DETAIL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the first cleanup failure detail of the last operation
+'
+' WHY THIS EXISTS
+'   The first failure is the actionable one. Later failures stay visible in the
+'   trace without displacing it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastCleanupDetail = mDP_LifecycleLastCleanupDetail
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCriticalClean() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST CRITICAL CLEAN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether every critical cleanup step succeeded
+'
+' WHY THIS EXISTS
+'   This is the conjunction that authorises releasing the provider lease, so a
+'   test has to be able to read it independently of the operation result
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastCriticalClean = mDP_LifecycleLastCriticalClean
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseReleased() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST LEASE RELEASED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the provider lease was actually released
+'
+' WHY THIS EXISTS
+'   Release is conditional on critical cleanliness. Attempting it and achieving
+'   it are different facts and are reported separately
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastLeaseReleased = mDP_LifecycleLastLeaseReleased
+
+End Function
+
+Public Function M_Lifecycle_Test_HasLocalOwnerToken() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                          READ HAS LOCAL OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether this project still holds its lease ownership token
+'
+' WHY THIS EXISTS
+'   The #50 defect was discarding this token while the lease survived. A test
+'   must be able to prove the token was retained when release failed
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_HasLocalOwnerToken = (VBA.LenB(mDP_RuntimeOwnerId) > 0)
+
+End Function
+
+Public Function M_Lifecycle_Test_LastPrimaryNumber() As Long
+
+'
+'------------------------------------------------------------------------------
+'                           READ LAST PRIMARY NUMBER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the error number that stopped the last operation
+'
+' WHY THIS EXISTS
+'   Cleanup runs after the primary failure and can fail in its own right. The
+'   primary cause is reported separately so cleanup cannot displace it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastPrimaryNumber = mDP_LifecycleLastPrimaryNumber
+
+End Function
+
+Public Function M_Lifecycle_Test_LastPrimaryStep() As String
+
+'
+'------------------------------------------------------------------------------
+'                            READ LAST PRIMARY STEP
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the transaction step that produced the primary failure
+'
+' WHY THIS EXISTS
+'   Knowing a startup failed is not enough to prove rollback covered the right
+'   steps; the boundary it failed at is what the matrix asserts against
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastPrimaryStep = mDP_LifecycleLastPrimaryStep
+
+End Function
+
+Public Function M_Lifecycle_Test_LastPrimaryDescription() As String
+
+'
+'------------------------------------------------------------------------------
+'                        READ LAST PRIMARY DESCRIPTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the description of the primary failure
+'
+' WHY THIS EXISTS
+'   Preserving the description across cleanup is the same contract #48 imposed
+'   on the write-back handlers
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastPrimaryDescription = mDP_LifecycleLastPrimaryDescription
+
+End Function
+
+Public Function M_Lifecycle_Test_LastOperation() As String
+
+'
+'------------------------------------------------------------------------------
+'                             READ LAST OPERATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports the name of the last lifecycle operation attempted
+'
+' WHY THIS EXISTS
+'   Start, stop and repair share the observation fields, so a test reading them
+'   must be able to confirm which operation wrote them
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastOperation = mDP_LifecycleLastOperation
+
+End Function
+
+Public Function M_Lifecycle_Test_LastSucceeded() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                             READ LAST SUCCEEDED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the last lifecycle operation succeeded
+'
+' WHY THIS EXISTS
+'   The operation result is deliberately distinct from critical cleanliness. A
+'   refused call fails without any cleanup having been attempted at all
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastSucceeded = mDP_LifecycleLastSucceeded
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupAttempted() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                         READ LAST CLEANUP ATTEMPTED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a cleanup transaction ran at all
+'
+' WHY THIS EXISTS
+'   A refused operation and a failed cleanup both report failure. Only this
+'   distinguishes them, and they need different fixes
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastCleanupAttempted = mDP_LifecycleLastCleanupAttempted
+
+End Function
+
+Public Function M_Lifecycle_Test_LastCleanupFailureCount() As Long
+
+'
+'------------------------------------------------------------------------------
+'                       READ LAST CLEANUP FAILURE COUNT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports how many cleanup steps failed
+'
+' WHY THIS EXISTS
+'   Teardown attempts every step, so the count is the difference between one
+'   bad boundary and a comprehensively failed shutdown
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastCleanupFailureCount = mDP_LifecycleLastCleanupFailureCount
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseWasAlreadyOwned() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                      READ LAST LEASE WAS ALREADY OWNED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the lease pre-existed the last operation
+'
+' WHY THIS EXISTS
+'   A repeated start must never release a lease it did not take. This is the
+'   fact that distinguishes a fresh start from a repeat
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastLeaseWasAlreadyOwned = mDP_LifecycleLastLeaseWasAlreadyOwned
+
+End Function
+
+Public Function M_Lifecycle_Test_LastLeaseAcquiredThisCall() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                      READ LAST LEASE ACQUIRED THIS CALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the last operation acquired the lease itself
+'
+' WHY THIS EXISTS
+'   Rollback releases only a lease this call acquired. Asserting that requires
+'   reading the classification the operation made, not inferring it
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The recorded value
+'
+' BEHAVIOR
+'   Reads one observation field. Free of side effects
+'
+' ERROR POLICY
+'   Cannot raise
+'
+' DEPENDENCIES
+'   The mDP_Lifecycle* fields
+'
+' NOTES
+'   Public only because the regression harness is a separate module. Functions do
+'   not appear in the macro dialog, and #25 classifies this as internal rather
+'   than supported API
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    M_Lifecycle_Test_LastLeaseAcquiredThisCall = mDP_LifecycleLastLeaseAcquiredThisCall
+
+End Function
+
+Private Function M_Lifecycle_TryReleaseManager( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                        RELEASE THE MANAGER, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Releases the global manager reference and proves it is gone
+'
+' WHY THIS EXISTS
+'   Setting a reference to Nothing is not evidence that it is Nothing. Every step
+'   in this transaction verifies its own outcome rather than assuming the
+'   assignment took, because the lease is released only once the critical steps
+'   are proven clean
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the reference survives or the release raises
+'
+' RETURNS
+'   True when the manager reference is Nothing afterwards
+'
+' BEHAVIOR
+'   Clears gDP_Manager and re-tests it
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   gDP_Manager
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Set gDP_Manager = Nothing
+    M_Lifecycle_TryReleaseManager = (gDP_Manager Is Nothing)
+    If Not M_Lifecycle_TryReleaseManager Then
+        ErrorNumber = vbObjectError + 2710
+        ErrorDescription = "DatePicker manager reference remained live after release"
+    End If
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryReleaseManager = False
+
+End Function
+
+Private Function M_Lifecycle_TryStopTimer( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                           STOP THE TIMER, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Stops the live clock and proves nothing is left pending
+'
+' WHY THIS EXISTS
+'   #27 made a failed cancellation observable: the registration is retained as
+'   unresolved rather than forgotten. Teardown must consume that state, because a
+'   retained callback can still fire after the runtime is gone
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the timer stays active or stays unresolved
+'
+' RETURNS
+'   True only when the timer is inactive and no registration is outstanding
+'
+' BEHAVIOR
+'   Calls M_Timer_Stop, then rejects both a still-running timer and an unresolved
+'   registration
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_Stop
+'   mDP_TimerIsRunning
+'   mDP_TimerUnresolved
+'
+' NOTES
+'   The two rejections are separate errors on purpose. A timer that is still
+'   running is a different defect from one that stopped but could not cancel
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    M_Timer_Stop
+    If mDP_TimerIsRunning Then
+        ErrorNumber = vbObjectError + 2711
+        ErrorDescription = "Timer remained logically active after stop"
+        Exit Function
+    End If
+    If mDP_TimerUnresolved Then
+        ErrorNumber = vbObjectError + 2712
+        ErrorDescription = "Timer cancellation is unresolved; the retained callback may still fire"
+        Exit Function
+    End If
+
+    M_Lifecycle_TryStopTimer = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryStopTimer = False
+
+End Function
+
+Private Function M_Lifecycle_TryClosePickerForm( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       CLOSE THE PICKER FORM, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Unloads the picker form, clears the initial-date bridge, and proves no form
+'   remains loaded
+'
+' WHY THIS EXISTS
+'   Unload can leave an instance behind when initialization raised, and that
+'   orphan is unreachable by name. Re-resolving after the unload is the only way
+'   to tell an unload that worked from one that only appeared to
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when a form is still loaded afterwards
+'
+' RETURNS
+'   True when no form resolves after the unload
+'
+' BEHAVIOR
+'   Hides and unloads any loaded form, clears the initial-date bridge state, then
+'   re-resolves to confirm
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_FormBridge_GetLoadedForm
+'   DP_FORM_NAME
+'   gDP_InitialDate
+'   gDP_HasInitialDate
+'
+' NOTES
+'   The bridge state is cleared between the unload and the verification, so a
+'   stale initial date cannot survive into the next runtime
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim LoadedForm As Object
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    If Not LoadedForm Is Nothing Then
+        LoadedForm.Visible = False
+        Unload LoadedForm
+    End If
+    Set LoadedForm = Nothing
+
+    gDP_InitialDate = 0
+    gDP_HasInitialDate = False
+
+    Set LoadedForm = M_FormBridge_GetLoadedForm(DP_FORM_NAME)
+    M_Lifecycle_TryClosePickerForm = (LoadedForm Is Nothing)
+    If Not M_Lifecycle_TryClosePickerForm Then
+        ErrorNumber = vbObjectError + 2713
+        ErrorDescription = "A DatePicker form remained loaded after unload"
+    End If
+    Set LoadedForm = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set LoadedForm = Nothing
+    Err.Clear
+    M_Lifecycle_TryClosePickerForm = False
+
+End Function
+
+Private Function M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
+    ByVal TargetWorkbook As Excel.Workbook, _
+    ByVal TargetShapeName As String, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'               DELETE OWNED SHAPES OF ONE NAME IN ONE WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Deletes every proven DatePicker-owned shape of a given name from one workbook
+'
+' WHY THIS EXISTS
+'   #53 established that the shape name selects candidates and never proves
+'   ownership. Teardown needs the same rule, so every candidate goes through the
+'   ownership predicate instead of being deleted by name
+'
+' INPUTS
+'   TargetWorkbook
+'     Workbook to clean; a missing workbook is a no-op success
+'
+'   TargetShapeName
+'     Canonical or pending grid-icon name; a blank name is a no-op success
+'
+'   ErrorNumber, ErrorDescription
+'     Receive the first deletion failure observed
+'
+' RETURNS
+'   True when every owned shape of that name was deleted
+'
+' BEHAVIOR
+'   Walks each worksheet backwards through the Shapes collection and, for each
+'   name match, deletes only when M_GridIcon_IsOwnedShape proves ownership
+'
+' ERROR POLICY
+'   Never raises outward. A deletion that fails is recorded and the walk
+'   continues
+'
+' DEPENDENCIES
+'   M_GridIcon_IsOwnedShape
+'
+' NOTES
+'   The index walk runs backwards because deleting a shape renumbers the
+'   collection. A forward walk would skip the shape after each deletion
+'
+'   A shape whose ownership cannot be proven is left completely untouched, which
+'   is the #53 contract: an unrelated user shape sharing the name survives
+'   teardown
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim CurWorksheet As Excel.Worksheet
+    Dim CurShape As Excel.Shape
+    Dim ShapeIndex As Long
+    Dim ShapeName As String
+    Dim DeleteErrNumber As Long
+    Dim DeleteErrDescription As String
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+    M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = True
+
+    If TargetWorkbook Is Nothing Then Exit Function
+    If VBA.LenB(TargetShapeName) = 0 Then Exit Function
+
+    For Each CurWorksheet In TargetWorkbook.Worksheets
+        For ShapeIndex = CurWorksheet.Shapes.Count To 1 Step -1
+            Set CurShape = CurWorksheet.Shapes(ShapeIndex)
+            ShapeName = VBA.CStr(CurShape.Name)
+            If VBA.StrComp(ShapeName, TargetShapeName, vbBinaryCompare) = 0 Then
+                If M_GridIcon_IsOwnedShape(CurShape) Then
+                    On Error Resume Next
+                    Err.Clear
+                    CurShape.Delete
+                    DeleteErrNumber = Err.Number
+                    DeleteErrDescription = Err.Description
+                    Err.Clear
+                    On Error GoTo Failed
+                    If DeleteErrNumber <> 0 Then
+                        If M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook Then
+                            ErrorNumber = DeleteErrNumber
+                            ErrorDescription = DeleteErrDescription
+                        End If
+                        M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = False
+                    End If
+                End If
+            End If
+            Set CurShape = Nothing
+        Next ShapeIndex
+    Next CurWorksheet
+
+    Set CurShape = Nothing
+    Set CurWorksheet = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set CurShape = Nothing
+    Set CurWorksheet = Nothing
+    Err.Clear
+    M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook = False
+
+End Function
+
+Private Function M_Lifecycle_TryPurgeGridIcons( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'               PURGE OWNED GRID ICONS FROM EVERY OPEN WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes every owned grid icon, canonical and pending, from all open workbooks
+'
+' WHY THIS EXISTS
+'   Teardown cannot claim a clean shutdown while an icon it owns is still on a
+'   worksheet, and the icon follows the selection, so the purge has to span
+'   workbooks rather than only the host
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the first failure observed across all workbooks
+'
+' RETURNS
+'   True only when every workbook was purged without a failure
+'
+' BEHAVIOR
+'   Walks every open workbook and deletes both grid-icon names through the
+'   ownership-gated helper, keeping the first failure and continuing
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook
+'   DP_GRID_ICON_NAME
+'   DP_GRID_ICON_PENDING_SUFFIX
+'
+' NOTES
+'   Continuing past the first failure is deliberate. A workbook that refuses
+'   deletion, such as a protected sheet, must not stop the rest being cleaned
+'
+'   The pending name is purged as well, so an icon left half-created by an
+'   interrupted create path is not stranded
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim CurWorkbook As Excel.Workbook
+    Dim LocalErrNumber As Long
+    Dim LocalErrDescription As String
+    Dim OverallSuccess As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+    OverallSuccess = True
+
+    For Each CurWorkbook In Excel.Application.Workbooks
+        LocalErrNumber = 0
+        LocalErrDescription = VBA.vbNullString
+        If Not M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
+            CurWorkbook, DP_GRID_ICON_NAME, LocalErrNumber, LocalErrDescription) Then
+            If OverallSuccess Then
+                ErrorNumber = LocalErrNumber
+                ErrorDescription = LocalErrDescription
+            End If
+            OverallSuccess = False
+        End If
+
+        LocalErrNumber = 0
+        LocalErrDescription = VBA.vbNullString
+        If Not M_Lifecycle_TryDeleteOwnedShapeNameAcrossWorkbook( _
+            CurWorkbook, DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX, _
+            LocalErrNumber, LocalErrDescription) Then
+            If OverallSuccess Then
+                ErrorNumber = LocalErrNumber
+                ErrorDescription = LocalErrDescription
+            End If
+            OverallSuccess = False
+        End If
+    Next CurWorkbook
+
+    If M_GridIcon_TrackedShapeIsLive() Then
+        On Error Resume Next
+        Err.Clear
+        gDP_GridIconShape.Delete
+        LocalErrNumber = Err.Number
+        LocalErrDescription = Err.Description
+        Err.Clear
+        On Error GoTo Failed
+        If LocalErrNumber <> 0 Then
+            If OverallSuccess Then
+                ErrorNumber = LocalErrNumber
+                ErrorDescription = LocalErrDescription
+            End If
+            OverallSuccess = False
+        End If
+    End If
+
+    If Not M_GridIcon_TrackedShapeIsLive() Then Set gDP_GridIconShape = Nothing
+    M_GridIcon_ClearRefusalKey
+    M_GridIcon_ClearLastTarget
+
+    If OverallSuccess Then
+        If M_GridIcon_TrackedShapeIsLive() Then
+            OverallSuccess = False
+            ErrorNumber = vbObjectError + 2714
+            ErrorDescription = "A tracked DatePicker grid icon remained live after purge"
+        End If
+    End If
+
+    M_Lifecycle_TryPurgeGridIcons = OverallSuccess
+    Set CurWorkbook = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set CurWorkbook = Nothing
+    Err.Clear
+    M_Lifecycle_TryPurgeGridIcons = False
+
+End Function
+
+Private Function M_Lifecycle_ContextMenuBarIsClean( _
+    ByVal CommandBarName As String, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                IS ONE COMMAND BAR FREE OF DATEPICKER CONTROLS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a named command bar still carries a DatePicker control
+'
+' WHY THIS EXISTS
+'   M_ContextMenu_Remove suppresses its own errors, so calling it proves nothing.
+'   The registration has to be read back, and it lives on two separate bars
+'
+' INPUTS
+'   CommandBarName
+'     Bar to inspect
+'
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the bar cannot be resolved or a control remains
+'
+' RETURNS
+'   True when the bar resolves and carries no tagged control
+'
+' BEHAVIOR
+'   Resolves the bar and scans its controls for the DatePicker tag
+'
+' ERROR POLICY
+'   Never raises outward. An unresolvable bar is a failure, not a clean result
+'
+' DEPENDENCIES
+'   DP_CONTEXT_MENU_TAG
+'
+' NOTES
+'   An unresolvable bar is deliberately not treated as clean. A bar that cannot
+'   be read might still hold a control, and this transaction fails closed
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim TargetCommandBar As CommandBar
+    Dim ControlItem As CommandBarControl
+    Dim ControlTag As String
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Set TargetCommandBar = Excel.Application.CommandBars(CommandBarName)
+    If TargetCommandBar Is Nothing Then
+        ErrorNumber = vbObjectError + 2715
+        ErrorDescription = "Command bar could not be resolved: " & CommandBarName
+        Exit Function
+    End If
+
+    For Each ControlItem In TargetCommandBar.Controls
+        ControlTag = VBA.CStr(ControlItem.Tag)
+        If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
+            ErrorNumber = vbObjectError + 2716
+            ErrorDescription = "DatePicker control remained on command bar: " & CommandBarName
+            Set ControlItem = Nothing
+            Set TargetCommandBar = Nothing
+            Exit Function
+        End If
+    Next ControlItem
+
+    M_Lifecycle_ContextMenuBarIsClean = True
+    Set ControlItem = Nothing
+    Set TargetCommandBar = Nothing
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set ControlItem = Nothing
+    Set TargetCommandBar = Nothing
+    Err.Clear
+    M_Lifecycle_ContextMenuBarIsClean = False
+
+End Function
+
+Private Function M_Lifecycle_TryRemoveContextMenu( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                REMOVE THE CONTEXT MENU, VERIFIED ON BOTH BARS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Removes the DatePicker context-menu entries and verifies both bars
+'
+' WHY THIS EXISTS
+'   The component registers on the cell bar and the table bar. Verifying only one
+'   would report a clean teardown while the other still carried an entry
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the first bar failure observed
+'
+' RETURNS
+'   True only when both bars verify clean
+'
+' BEHAVIOR
+'   Calls M_ContextMenu_Remove once, then checks the Cell and List Range Popup
+'   bars independently and reports the first failure
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_ContextMenu_Remove
+'   M_Lifecycle_ContextMenuBarIsClean
+'
+' NOTES
+'   Both bars are checked even when the first fails, so the trace records the
+'   full picture rather than stopping at the first bad bar
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim LocalErrNumber As Long
+    Dim LocalErrDescription As String
+    Dim CellClean As Boolean
+    Dim ListClean As Boolean
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    M_ContextMenu_Remove
+
+    CellClean = M_Lifecycle_ContextMenuBarIsClean( _
+        "Cell", LocalErrNumber, LocalErrDescription)
+    If Not CellClean Then
+        ErrorNumber = LocalErrNumber
+        ErrorDescription = LocalErrDescription
+    End If
+
+    LocalErrNumber = 0
+    LocalErrDescription = VBA.vbNullString
+    ListClean = M_Lifecycle_ContextMenuBarIsClean( _
+        "List Range Popup", LocalErrNumber, LocalErrDescription)
+    If Not ListClean And ErrorNumber = 0 Then
+        ErrorNumber = LocalErrNumber
+        ErrorDescription = LocalErrDescription
+    End If
+
+    M_Lifecycle_TryRemoveContextMenu = (CellClean And ListClean)
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRemoveContextMenu = False
+
+End Function
+
+Private Function M_Lifecycle_TryRemoveKeyboardShortcut( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                         REMOVE THE KEYBOARD SHORTCUT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Excel's default handling of the DatePicker shortcut key
+'
+' WHY THIS EXISTS
+'   The shortcut is an application-wide Application.OnKey binding and must not
+'   outlive the runtime that registered it
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the OnKey call raises
+'
+' RETURNS
+'   True when the OnKey call completed
+'
+' BEHAVIOR
+'   Calls Application.OnKey with the shortcut key and no procedure, which hands
+'   the key back to Excel
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DP_KEYBOARD_SHORTCUT_KEY
+'
+' NOTES
+'   This is the one cleanup step that cannot verify its own outcome. Excel
+'   exposes no getter for Application.OnKey, so success here means only that the
+'   call did not raise, not that the binding is gone. Every other step in this
+'   transaction reads its result back
+'
+'   That is the same limitation #42 recorded for the registration side, and it is
+'   why the keyboard shortcut is covered by manual validation rather than by a
+'   harness assertion
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Excel.Application.OnKey DP_KEYBOARD_SHORTCUT_KEY
+    M_Lifecycle_TryRemoveKeyboardShortcut = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRemoveKeyboardShortcut = False
+
+End Function
+
+Private Function M_Lifecycle_TryRestoreEnableEvents( _
+    ByVal DesiredValue As Boolean, _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                     RESTORE APPLICATION EVENTS, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores Application.EnableEvents to a caller-chosen value and proves it took
+'
+' WHY THIS EXISTS
+'   The component must leave the caller's event state as it found it. A business
+'   macro that deliberately suppressed events has to still have them suppressed
+'   when the DatePicker is done
+'
+' INPUTS
+'   DesiredValue
+'     State to restore, captured by the caller before the operation began
+'
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when the value does not read back
+'
+' RETURNS
+'   True when Application.EnableEvents reads back as DesiredValue
+'
+' BEHAVIOR
+'   Assigns the value and re-reads it
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   Excel.Application.EnableEvents
+'
+' NOTES
+'   DP_RepairRuntime is the documented exception to caller preservation: it
+'   forces events on deliberately, because a caller that left them off is the
+'   condition repair exists to fix. That decision belongs to the caller, which is
+'   why the desired value is a parameter here rather than a policy
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    Excel.Application.EnableEvents = DesiredValue
+    If Excel.Application.EnableEvents <> DesiredValue Then
+        ErrorNumber = vbObjectError + 2722
+        ErrorDescription = "Application.EnableEvents did not restore to the caller state"
+        Exit Function
+    End If
+
+    M_Lifecycle_TryRestoreEnableEvents = True
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Err.Clear
+    M_Lifecycle_TryRestoreEnableEvents = False
+
+End Function
+
+Private Function M_Lifecycle_TryReleaseLease( _
+    ByRef ErrorNumber As Long, _
+    ByRef ErrorDescription As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                     RELEASE THE PROVIDER LEASE, VERIFIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Releases the provider lease only when its deletion can be verified, and
+'   retains the local ownership token whenever it cannot
+'
+' WHY THIS EXISTS
+'   This is the defect #50 was filed for. Release cleared the local token whether
+'   or not the lease bar was actually deleted, so a failed teardown surrendered
+'   the proof of ownership while the lease survived. No project could then
+'   release it, and every guarded entry point refused
+'
+' INPUTS
+'   ErrorNumber, ErrorDescription
+'     Receive the failure when release cannot be verified
+'
+' RETURNS
+'   True only when the lease is verified free, was already free, or this project
+'   never held it
+'
+' BEHAVIOR
+'   Treats a missing local token and an already-free lease as released. Refuses
+'   when the current owner no longer matches the retained token. Otherwise
+'   deletes the bar and re-reads the owner, clearing the local token only once
+'   the lease reads as free
+'
+' ERROR POLICY
+'   Never raises outward
 '
 ' DEPENDENCIES
 '   M_Lease_ReadOwner
 '   M_Lease_GetBar
+'   mDP_RuntimeOwnerId
 '
 ' NOTES
-'   Three conditions each mean "do not touch it": no local token, a marker that
-'   differs, and an unverifiable lease. Only an exact match releases
+'   The ambiguous-owner refusal matters as much as the verification. A lease
+'   whose owner token has changed belongs to someone else, and deleting it would
+'   be the same class of defect as deleting an unowned grid-icon shape
 '
-'   A refused provider therefore cannot release the owner's lease through DP_Stop
-'   or DP_RepairRuntime, because it never held a token to match with
-'
+'   Every failure path leaves mDP_RuntimeOwnerId intact, so a later retry still
+'   has the proof it needs
 ' UPDATED
-'   2026-08-23
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim LeaseBar        As Object       'Lease command bar
+    Dim CurrentOwner As String
+    Dim LeaseBar As Object
+    Dim FaultErrNumber As Long
+    Dim FaultErrDescription As String
 
-'------------------------------------------------------------------------------
-' RELEASE ONLY WHAT THIS PROJECT OWNS
-'------------------------------------------------------------------------------
-    'Never let release raise into teardown
-        On Error Resume Next
-    'A project holding no token has nothing to release
-        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
-            Err.Clear
-            Exit Sub
-        End If
-    'The lease must still carry this project's token
-        If VBA.StrComp(M_Lease_ReadOwner(), mDP_RuntimeOwnerId, vbBinaryCompare) <> 0 Then
-            mDP_RuntimeOwnerId = VBA.vbNullString
-            Err.Clear
-            Exit Sub
-        End If
-    'Delete the lease this project owns
-        Set LeaseBar = M_Lease_GetBar()
-        If Not LeaseBar Is Nothing Then
-            LeaseBar.Delete
-        End If
-    'Clear the local token whether or not the delete succeeded
+    On Error GoTo Failed
+    ErrorNumber = 0
+    ErrorDescription = VBA.vbNullString
+
+    If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then
+        M_Lifecycle_TryReleaseLease = True
+        Exit Function
+    End If
+
+    CurrentOwner = M_Lease_ReadOwner()
+    If VBA.LenB(CurrentOwner) = 0 Then
         mDP_RuntimeOwnerId = VBA.vbNullString
-    'Release object references
-        Set LeaseBar = Nothing
-    'Clear any suppressed release error
-        Err.Clear
+        M_Lifecycle_TryReleaseLease = True
+        Exit Function
+    End If
+
+    If VBA.StrComp(CurrentOwner, mDP_RuntimeOwnerId, vbBinaryCompare) <> 0 Then
+        ErrorNumber = vbObjectError + 2717
+        ErrorDescription = "Provider lease owner is ambiguous or no longer matches the retained local token"
+        Exit Function
+    End If
+
+    If M_Lifecycle_TryConsumeFault("Lease.Delete", FaultErrNumber, FaultErrDescription) Then
+        ErrorNumber = FaultErrNumber
+        ErrorDescription = FaultErrDescription
+        Exit Function
+    End If
+
+    Set LeaseBar = M_Lease_GetBar()
+    If LeaseBar Is Nothing Then
+        CurrentOwner = M_Lease_ReadOwner()
+        If VBA.LenB(CurrentOwner) = 0 Then
+            mDP_RuntimeOwnerId = VBA.vbNullString
+            M_Lifecycle_TryReleaseLease = True
+        Else
+            ErrorNumber = vbObjectError + 2718
+            ErrorDescription = "Provider lease could not be resolved for verified deletion"
+        End If
+        Exit Function
+    End If
+
+    LeaseBar.Delete
+    Set LeaseBar = Nothing
+
+    CurrentOwner = M_Lease_ReadOwner()
+    If VBA.LenB(CurrentOwner) = 0 Then
+        mDP_RuntimeOwnerId = VBA.vbNullString
+        M_Lifecycle_TryReleaseLease = True
+    Else
+        ErrorNumber = vbObjectError + 2719
+        ErrorDescription = "Provider lease deletion did not produce a verified free lease"
+    End If
+    Exit Function
+
+Failed:
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    Set LeaseBar = Nothing
+    Err.Clear
+    M_Lifecycle_TryReleaseLease = False
+
+End Function
+
+Private Function M_Lifecycle_Cleanup( _
+    ByVal ReleaseLease As Boolean, _
+    ByVal EntryPoint As String, _
+    Optional ByVal RestoreApplicationEvents As Boolean = False, _
+    Optional ByVal DesiredEnableEvents As Boolean = True) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       THE SHUTDOWN CLEANUP TRANSACTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Runs every teardown boundary, records each outcome, and releases the provider
+'   lease only when the critical steps are proven clean
+'
+' WHY THIS EXISTS
+'   Teardown used to suppress its own errors and release the lease regardless, so
+'   a shutdown that failed halfway reported success and freed ownership while
+'   application-wide state survived. A new provider could then start on top of it
+'
+' INPUTS
+'   ReleaseLease
+'     True to attempt lease release once the critical steps are evaluated
+'
+'   EntryPoint
+'     Operation this cleanup belongs to, for diagnostics
+'
+'   RestoreApplicationEvents
+'     True to restore Application.EnableEvents as part of the transaction
+'
+'   DesiredEnableEvents
+'     Value to restore when RestoreApplicationEvents is True
+'
+' RETURNS
+'   True when every critical step succeeded and, where requested, the lease was
+'   verifiably released
+'
+' BEHAVIOR
+'   Resets the observation fields, then attempts manager, timer, form, grid,
+'   context-menu and keyboard cleanup in that order. Every step is attempted
+'   regardless of earlier failures and each outcome is appended to the trace.
+'   Critical cleanliness is the conjunction of the critical step results, and the
+'   lease is released only after that is known
+'
+' ERROR POLICY
+'   Never raises outward. Each step reports through its own return value, and the
+'   per-step fault seam is consulted before each one
+'
+' DEPENDENCIES
+'   M_Lifecycle_ResetObservation
+'   M_Lifecycle_TryConsumeFault
+'   M_Lifecycle_RecordCleanupStep
+'   the M_Lifecycle_Try* cleanup helpers
+'
+' NOTES
+'   Attempting every step even after one fails is the point. Stopping at the
+'   first failure would leave the remaining application-wide state registered
+'   with no owner able to remove it
+'
+'   Order matters. The timer is stopped before the form is unloaded so a pending
+'   tick cannot fire against a form that is going away, and the lease is last
+'   because it is the ownership that authorises all of it
+'
+'   The keyboard step contributes to critical cleanliness but cannot verify its
+'   own outcome; see M_Lifecycle_TryRemoveKeyboardShortcut
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim StepSucceeded As Boolean
+    Dim StepErrNumber As Long
+    Dim StepErrDescription As String
+    Dim CriticalClean As Boolean
+
+    mDP_LifecycleLastTrace = VBA.vbNullString
+    mDP_LifecycleLastCleanupDetail = VBA.vbNullString
+    mDP_LifecycleLastCriticalClean = False
+    mDP_LifecycleLastLeaseReleased = False
+    mDP_LifecycleLastCleanupAttempted = True
+    mDP_LifecycleLastCleanupFailureCount = 0
+    CriticalClean = True
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Manager", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryReleaseManager(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Manager", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Timer", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryStopTimer(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Timer", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Form", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryClosePickerForm(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Form", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Grid", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryPurgeGridIcons(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Grid", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.ContextMenu", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryRemoveContextMenu(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "ContextMenu", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    StepErrNumber = 0
+    StepErrDescription = VBA.vbNullString
+    If M_Lifecycle_TryConsumeFault("Cleanup.Keyboard", StepErrNumber, StepErrDescription) Then
+        StepSucceeded = False
+    Else
+        StepSucceeded = M_Lifecycle_TryRemoveKeyboardShortcut(StepErrNumber, StepErrDescription)
+    End If
+    M_Lifecycle_RecordCleanupStep "Keyboard", StepSucceeded, StepErrNumber, StepErrDescription
+    CriticalClean = CriticalClean And StepSucceeded
+
+    On Error Resume Next
+    Err.Clear
+    M_GetQualifiedMacroName_ClearCache
+    StepErrNumber = Err.Number
+    StepErrDescription = Err.Description
+    Err.Clear
+    On Error GoTo 0
+    StepSucceeded = (StepErrNumber = 0)
+    M_Lifecycle_RecordCleanupStep "CallbackCache", StepSucceeded, StepErrNumber, StepErrDescription
+
+    If RestoreApplicationEvents Then
+        StepErrNumber = 0
+        StepErrDescription = VBA.vbNullString
+        If M_Lifecycle_TryConsumeFault("Cleanup.EnableEvents", StepErrNumber, StepErrDescription) Then
+            StepSucceeded = False
+        Else
+            StepSucceeded = M_Lifecycle_TryRestoreEnableEvents( _
+                DesiredEnableEvents, StepErrNumber, StepErrDescription)
+        End If
+        M_Lifecycle_RecordCleanupStep "EnableEvents", StepSucceeded, StepErrNumber, StepErrDescription
+        CriticalClean = CriticalClean And StepSucceeded
+    End If
+
+    mDP_LifecycleLastCriticalClean = CriticalClean
+
+    If ReleaseLease Then
+        If CriticalClean Then
+            StepErrNumber = 0
+            StepErrDescription = VBA.vbNullString
+            If M_Lifecycle_TryConsumeFault("Cleanup.Lease", StepErrNumber, StepErrDescription) Then
+                StepSucceeded = False
+            Else
+                StepSucceeded = M_Lifecycle_TryReleaseLease(StepErrNumber, StepErrDescription)
+            End If
+            M_Lifecycle_RecordCleanupStep "Lease", StepSucceeded, StepErrNumber, StepErrDescription
+            mDP_LifecycleLastLeaseReleased = StepSucceeded
+        Else
+            M_Lifecycle_RecordCleanupStep "Lease", False, _
+                vbObjectError + 2720, "Lease retained because critical cleanup is incomplete", _
+                CountFailure:=False
+            mDP_LifecycleLastLeaseReleased = False
+        End If
+    Else
+        If VBA.LenB(mDP_LifecycleLastTrace) > 0 Then
+            mDP_LifecycleLastTrace = mDP_LifecycleLastTrace & " > Lease=RETAINED"
+        Else
+            mDP_LifecycleLastTrace = "Lease=RETAINED"
+        End If
+    End If
+
+    M_Lifecycle_Cleanup = CriticalClean
+    If ReleaseLease Then M_Lifecycle_Cleanup = (CriticalClean And mDP_LifecycleLastLeaseReleased)
+
+    If Not M_Lifecycle_Cleanup Then
+        Debug.Print EntryPoint & " | Incomplete cleanup | " & _
+            mDP_LifecycleLastTrace & " | " & mDP_LifecycleLastCleanupDetail
+    End If
+
+End Function
+
+Public Sub M_Lease_Release()
+
+'
+'------------------------------------------------------------------------------
+'                          RELEASE THE PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Supported wrapper that attempts to release the provider lease
+'
+' WHY THIS EXISTS
+'   The lease release is part of the shutdown transaction, but the operation is
+'   also reachable on its own. This keeps the supported name while delegating the
+'   verified release to the transaction helper
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_Lifecycle_TryReleaseLease and writes a diagnostic when the
+'   lease is retained rather than released
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Lifecycle_TryReleaseLease
+'
+' NOTES
+'   Retention is not failure. A lease that could not be verifiably deleted is
+'   deliberately kept, along with the local ownership token, so a later retry
+'   still has the proof it needs. Before #50 this cleared the token regardless,
+'   which stranded the lease beyond any project's reach
+'
+'   The outcome is observable through M_Lifecycle_Test_HasLocalOwnerToken rather
+'   than from this routine, which reports nothing to its caller
+' UPDATED
+'   2026-09-05
+'------------------------------------------------------------------------------
+
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+
+    If Not M_Lifecycle_TryReleaseLease(ErrorNumber, ErrorDescription) Then
+        Debug.Print "M_Lease_Release | Retained | Error=" & _
+            VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+    End If
 
 End Sub
 
@@ -6673,20 +8712,16 @@ Public Sub DP_Start()
 
 '
 '------------------------------------------------------------------------------
-'                           START DATEPICKER
+'                               START DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Starts the DatePicker manager and synchronizes the interactive Excel UI
-'   integration points
+'   Starts and synchronizes the DatePicker runtime as a transaction
 '
 ' WHY THIS EXISTS
-'   The manager is event-driven. After workbook open, VBA reset, code import, or
-'   add-in reload, the manager must be explicitly bootstrapped before Excel
-'   Application events can move or remove the in-grid icon
-'
-'   Startup must also synchronize right-click menu and keyboard shortcut
-'   integration so all configured DatePicker entry points are available in the
-'   current Excel session
+'   Startup registers application-wide state: a provider lease, Application
+'   event hooks, a context menu, a keyboard binding and a worksheet shape. A
+'   failure partway through used to leave some of that registered with nothing
+'   owning it, and a lease acquired by the failed attempt was surrendered anyway
 '
 ' INPUTS
 '   None
@@ -6695,122 +8730,128 @@ Public Sub DP_Start()
 '   Nothing
 '
 ' BEHAVIOR
-'   Ensures the manager is alive and hooked
-'   Synchronizes the Excel right-click menu according to settings
-'   Synchronizes the keyboard shortcut according to settings
-'   Evaluates the current ActiveCell so stale icons are cleaned and the correct
-'   in-grid icon state is shown
+'   Captures the caller's event state, classifies whether the lease was already
+'   owned, then admits, creates the manager, synchronizes the menu, the keyboard
+'   shortcut and the hidden grid icon, and refreshes the selection context.
+'   Restores the caller's event state on every path
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if startup fails
+'   Preserves the primary startup failure and re-raises it with the step that
+'   produced it. A fresh-start failure rolls back every DatePicker-owned resource
+'   and releases the lease only when critical cleanup proves complete. A repeated
+'   start never releases a lease that pre-existed the call
 '
 ' DEPENDENCIES
+'   M_Lease_EnsureAdmitted
 '   M_Picker_EnsureManager
 '   M_ContextMenu_Update
 '   M_KeyboardShortcut_Update
-'   gDP_Manager.Handle_SelectionChange
+'   M_GridIcon_PreCreateHidden
+'   M_Lifecycle_Cleanup
+'   M_Lifecycle_RaiseIfFault
 '
 ' NOTES
-'   Call this from Workbook_Open, Auto_Open, add-in startup, or manually after
-'   importing the project into a workbook
+'   The pre-owned and freshly-acquired cases are deliberately asymmetric. A
+'   failed fresh start rolls back, because nothing was working before it. A
+'   failed repeated start preserves the existing runtime and records
+'   PreOwnedRuntime=PRESERVED, because rolling back would dismantle a runtime
+'   that was already serving the user
 '
-'   M_ContextMenu_Update and M_KeyboardShortcut_Update are intentionally called
-'   here because those integrations are session/UI state, not only persisted
-'   settings state
+'   Refused admission exits through CleanExit rather than the error handler. A
+'   refusal is not a failure of this call; it is another provider owning the
+'   session, and the refusal is reported by the admission boundary
 '
+'   Every step is followed by a fault seam, so the regression matrix can fail
+'   startup at each boundary and assert what rollback did
 ' UPDATED
-'   2026-05-06
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME            As String = "DP_Start" 'Current procedure name
+    Const PROC_NAME As String = "DP_Start"
 
-    Dim HandlerStep            As String       'Current handler step for diagnostics
-    Dim ErrorNumber            As Long         'Captured error number
-    Dim ErrorDescription       As String       'Captured error description
+    Dim HandlerStep As String
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+    Dim ErrorSource As String
+    Dim CallerEnableEvents As Boolean
+    Dim HasCallerEnableEvents As Boolean
+    Dim PreOwned As Boolean
+    Dim AcquiredThisCall As Boolean
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-    'Initialize diagnostic step
-        HandlerStep = "Initialize"
+    On Error GoTo ErrorHandler
+    M_Lifecycle_ResetObservation
 
-'------------------------------------------------------------------------------
-' ACQUIRE PROVIDER LEASE
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Acquire provider lease"
-    'Claim the one-provider lease before touching anything application-wide. A
-    'second copy that registered first and discovered the conflict afterwards
-    'would already have displaced the owner's keyboard shortcut
-        If Not M_Lease_EnsureAdmitted(PROC_NAME) Then
-            Exit Sub
-        End If
+    mDP_LifecycleLastOperation = PROC_NAME
+    HandlerStep = "Capture caller event state"
+    CallerEnableEvents = Excel.Application.EnableEvents
+    HasCallerEnableEvents = True
 
-'------------------------------------------------------------------------------
-' ENSURE MANAGER
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Ensure manager"
-    'Ensure the DatePicker manager exists and Application events are hooked
-        M_Picker_EnsureManager
+    HandlerStep = "Classify existing provider lease"
+    PreOwned = M_Lease_IsOwner()
 
-'------------------------------------------------------------------------------
-' SYNCHRONIZE RIGHT-CLICK MENU
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Synchronize right-click menu"
-    'Synchronize the DatePicker right-click menu with current settings
-        M_ContextMenu_Update
+    mDP_LifecycleLastLeaseWasAlreadyOwned = PreOwned
+    HandlerStep = "Acquire provider lease"
+    If Not M_Lease_EnsureAdmitted(PROC_NAME) Then GoTo CleanExit
+    AcquiredThisCall = (Not PreOwned And M_Lease_IsOwner())
 
-'------------------------------------------------------------------------------
-' SYNCHRONIZE KEYBOARD SHORTCUT
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Synchronize keyboard shortcut"
-    'Synchronize the DatePicker keyboard shortcut with current settings
-        M_KeyboardShortcut_Update
+    mDP_LifecycleLastLeaseAcquiredThisCall = AcquiredThisCall
+    HandlerStep = "After provider admission"
+    M_Lifecycle_RaiseIfFault "Start.AfterAdmission"
 
-'------------------------------------------------------------------------------
-' PRE-CREATE GRID ICON
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Pre-create hidden grid icon"
-    'Pre-create the grid icon for fast selection-change reuse
-        M_GridIcon_PreCreateHidden
-        
-'------------------------------------------------------------------------------
-' REFRESH CURRENT UI
-'------------------------------------------------------------------------------
-    'Track the current handler step
-        HandlerStep = "Refresh current selection context"
-    'Force one initial current-context refresh
-        gDP_Manager.Handle_SelectionChange
+    HandlerStep = "Ensure manager"
+    M_Picker_EnsureManager
+    M_Lifecycle_RaiseIfFault "Start.AfterManager"
 
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
+    HandlerStep = "Synchronize right-click menu"
+    M_ContextMenu_Update
+    M_Lifecycle_RaiseIfFault "Start.AfterContextMenu"
 
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
+    HandlerStep = "Synchronize keyboard shortcut"
+    M_KeyboardShortcut_Update
+    M_Lifecycle_RaiseIfFault "Start.AfterKeyboard"
+
+    HandlerStep = "Pre-create hidden grid icon"
+    M_GridIcon_PreCreateHidden
+    M_Lifecycle_RaiseIfFault "Start.AfterGrid"
+
+    HandlerStep = "Refresh current selection context"
+    gDP_Manager.Handle_SelectionChange
+    M_Lifecycle_RaiseIfFault "Start.AfterRefresh"
+
+CleanExit:
+    HandlerStep = "Restore caller event state"
+    If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    mDP_LifecycleLastSucceeded = M_Lease_IsOwner()
+    Exit Sub
+
 ErrorHandler:
-    'Capture the original error number
-        ErrorNumber = Err.Number
-    'Capture the original error description
-        ErrorDescription = Err.Description
-    'Raise a descriptive startup error
-        Err.Raise ErrorNumber, _
-            PROC_NAME & " | Step=" & HandlerStep, _
-            "DatePicker startup failed: " & ErrorDescription
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    ErrorSource = Err.Source
+    M_Lifecycle_SetPrimaryFailure ErrorNumber, HandlerStep, ErrorDescription
+
+    mDP_LifecycleLastSucceeded = False
+    On Error Resume Next
+    If AcquiredThisCall Then
+        M_Lifecycle_Cleanup True, PROC_NAME & ".Rollback", _
+            HasCallerEnableEvents, CallerEnableEvents
+    ElseIf PreOwned Then
+        mDP_LifecycleLastTrace = "PreOwnedRuntime=PRESERVED"
+        mDP_LifecycleLastCriticalClean = True
+        mDP_LifecycleLastLeaseReleased = False
+    End If
+    If Not AcquiredThisCall Then
+        If HasCallerEnableEvents Then Excel.Application.EnableEvents = CallerEnableEvents
+    End If
+    Err.Clear
+    On Error GoTo 0
+
+    Err.Raise ErrorNumber, _
+        PROC_NAME & " | Step=" & HandlerStep & " | Source=" & ErrorSource, _
+        "DatePicker startup failed: " & ErrorDescription
 
 End Sub
+
 Public Sub DP_Show()
 
 '
@@ -7251,16 +9292,17 @@ Public Sub DP_RepairRuntime()
 
 '
 '------------------------------------------------------------------------------
-'                           REPAIR DATEPICKER RUNTIME
+'                          REPAIR DATEPICKER RUNTIME
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Repairs the interactive DatePicker runtime after interrupted macros, VBA
-'   reset, disabled Excel events, stale manager state, or stale grid icons
+'   Rebuilds the interactive runtime, but only after the previous owned runtime
+'   has been proven clean
 '
 ' WHY THIS EXISTS
-'   The DatePicker in-grid icon is event-driven. If Application.EnableEvents is
-'   False, Excel will not raise SheetSelectionChange and the icon cannot move,
-'   disappear, or refresh when the active cell changes
+'   Repair addresses the most common real-world failure: Application.EnableEvents
+'   left False by an unrelated macro, which silently kills all event routing.
+'   Rebuilding on top of state that could not be cleaned would produce a second
+'   set of registrations rather than a repair
 '
 ' INPUTS
 '   None
@@ -7269,113 +9311,99 @@ Public Sub DP_RepairRuntime()
 '   Nothing
 '
 ' BEHAVIOR
-'   Re-enables Excel events, purges stale grid icons, recreates the manager, and
-'   refreshes the current active-cell context
+'   Runs the cleanup transaction without releasing the lease, and rebuilds only
+'   when critical cleanup succeeded
 '
 ' ERROR POLICY
-'   Raises a descriptive runtime error if the repair cannot be completed
+'   Never releases the provider lease. Incomplete cleanup blocks the rebuild. A
+'   rebuild failure keeps the primary error and attempts another lease-retaining
+'   cleanup
 '
 ' DEPENDENCIES
-'   Application.EnableEvents
-'   M_GridIcon_PurgeAll
+'   M_Lifecycle_Cleanup
 '   M_Picker_EnsureManager
-'   gDP_Manager
 '
 ' NOTES
-'   This routine is intended for interactive repair, startup, testing, and demo
-'   scenarios
+'   Repair is the one documented exception to preserving the caller's event
+'   state: it leaves Application.EnableEvents True on purpose, because a caller
+'   that left them False is the condition being repaired
 '
-'   It intentionally forces Application.EnableEvents = True because the
-'   DatePicker cannot operate interactively while Excel events are disabled
-'
-'   Do not call this inside a business macro that deliberately suppresses Excel
-'   events unless that macro is ready for events to be re-enabled
-'
+'   The lease is never released here. Repair means the same provider continues to
+'   own the session, so surrendering ownership would turn a repair into an
+'   unannounced shutdown
 ' UPDATED
-'   2026-05-03
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME             As String = "DP_RepairRuntime"
+    Const PROC_NAME As String = "DP_RepairRuntime"
 
-    Dim ErrorNumber             As Long         'Captured error number
-    Dim ErrorDescription        As String       'Captured error description
+    Dim HandlerStep As String
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
+    Dim ErrorSource As String
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
+    On Error GoTo ErrorHandler
+    M_Lifecycle_ResetObservation
 
-'------------------------------------------------------------------------------
-' VERIFY PROVIDER OWNERSHIP
-'------------------------------------------------------------------------------
-    'Repair rebuilds application-wide registrations, so it is at least as
-    'destructive as teardown and needs the same guard
-        If Not M_Lease_IsOwner() Then
-            M_Lease_ReportRefusal "DP_RepairRuntime"
-            Exit Sub
-        End If
-
-'------------------------------------------------------------------------------
-' RE-ENABLE EXCEL EVENTS
-'------------------------------------------------------------------------------
-    'Re-enable Excel events required by the DatePicker manager
-        Application.EnableEvents = True
-
-'------------------------------------------------------------------------------
-' CLEAR STALE GRID ICONS
-'------------------------------------------------------------------------------
-    'Purge stale worksheet icon artifacts
-        M_GridIcon_PurgeAll
-
-'------------------------------------------------------------------------------
-' RECREATE MANAGER
-'------------------------------------------------------------------------------
-    'Release the current manager reference
-        Set gDP_Manager = Nothing
-    'Recreate and hook the DatePicker manager
-        M_Picker_EnsureManager
-
-'------------------------------------------------------------------------------
-' SYNCHRONIZE RIGHT-CLICK MENU
-'------------------------------------------------------------------------------
-    'Synchronize the DatePicker right-click menu with current settings
-        M_ContextMenu_Update
-
-'------------------------------------------------------------------------------
-' SYNCHRONIZE KEYBOARD SHORTCUT
-'------------------------------------------------------------------------------
-    'Synchronize the DatePicker keyboard shortcut with current settings
-        M_KeyboardShortcut_Update
-
-'------------------------------------------------------------------------------
-' REFRESH CURRENT CONTEXT
-'------------------------------------------------------------------------------
-    'Refresh the DatePicker UI for the current active-cell context
-        If Not gDP_Manager Is Nothing Then
-            gDP_Manager.Handle_SelectionChange
-        End If
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
+    mDP_LifecycleLastOperation = PROC_NAME
+    mDP_LifecycleLastLeaseWasAlreadyOwned = M_Lease_IsOwner()
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
+    HandlerStep = "Verify provider ownership"
+    If Not M_Lease_IsOwner() Then
+        M_Lease_ReportRefusal PROC_NAME
         Exit Sub
+    End If
 
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
+    HandlerStep = "Re-enable Excel events"
+    Excel.Application.EnableEvents = True
+
+    HandlerStep = "Clean existing runtime"
+    If Not M_Lifecycle_Cleanup(False, PROC_NAME & ".Prepare") Then
+        Err.Raise vbObjectError + 2721, PROC_NAME, _
+            "DatePicker runtime repair refused to rebuild over incomplete cleanup: " & _
+            mDP_LifecycleLastCleanupDetail
+    End If
+
+    HandlerStep = "Recreate manager"
+    M_Picker_EnsureManager
+    M_Lifecycle_RaiseIfFault "Repair.AfterManager"
+
+    HandlerStep = "Synchronize right-click menu"
+    M_ContextMenu_Update
+    M_Lifecycle_RaiseIfFault "Repair.AfterContextMenu"
+
+    HandlerStep = "Synchronize keyboard shortcut"
+    M_KeyboardShortcut_Update
+    M_Lifecycle_RaiseIfFault "Repair.AfterKeyboard"
+
+    HandlerStep = "Refresh current selection context"
+    If Not gDP_Manager Is Nothing Then gDP_Manager.Handle_SelectionChange
+    M_Lifecycle_RaiseIfFault "Repair.AfterRefresh"
+
+
+    mDP_LifecycleLastSucceeded = True
+    Exit Sub
+
 ErrorHandler:
-    'Capture the error number
-        ErrorNumber = Err.Number
-    'Capture the error description
-        ErrorDescription = Err.Description
-    'Raise a descriptive repair error
-        Err.Raise ErrorNumber, PROC_NAME, _
-            "DatePicker runtime repair failed: " & ErrorDescription
+    ErrorNumber = Err.Number
+    ErrorDescription = Err.Description
+    ErrorSource = Err.Source
+    M_Lifecycle_SetPrimaryFailure ErrorNumber, HandlerStep, ErrorDescription
+
+    mDP_LifecycleLastSucceeded = False
+    On Error Resume Next
+    If M_Lease_IsOwner() Then
+        If VBA.StrComp(HandlerStep, "Clean existing runtime", vbBinaryCompare) <> 0 Then
+            M_Lifecycle_Cleanup False, PROC_NAME & ".Rollback"
+        End If
+    End If
+    Excel.Application.EnableEvents = True
+    Err.Clear
+    On Error GoTo 0
+
+    Err.Raise ErrorNumber, _
+        PROC_NAME & " | Step=" & HandlerStep & " | Source=" & ErrorSource, _
+        "DatePicker runtime repair failed: " & ErrorDescription
 
 End Sub
 
@@ -7568,22 +9596,16 @@ Public Sub DP_Stop()
 
 '
 '------------------------------------------------------------------------------
-'                           STOP DATEPICKER
+'                               STOP DATEPICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Stops DatePicker session-level integrations and clears transient UI artifacts
+'   Tears down the DatePicker runtime as a transaction and releases the provider
+'   lease only when critical cleanup is proven clean
 '
 ' WHY THIS EXISTS
-'   The DatePicker uses application-wide and workbook-level transient surfaces:
-'     - Excel Application event manager
-'     - right-click command-bar entries
-'     - keyboard shortcut assignment
-'     - modeless UserForm
-'     - live-clock timer
-'     - worksheet grid icon shapes
-'
-'   Workbook close / add-in unload must remove those artifacts explicitly so
-'   nothing survives after the host project is closed
+'   Teardown used to suppress its own errors and release the lease regardless, so
+'   a shutdown that failed halfway reported success while application-wide state
+'   survived. A new provider could then start on top of it
 '
 ' INPUTS
 '   None
@@ -7592,98 +9614,57 @@ Public Sub DP_Stop()
 '   Nothing
 '
 ' BEHAVIOR
-'   Releases the global DatePicker manager, removes right-click menu entries,
-'   removes the keyboard shortcut, closes the DatePicker form, stops timer
-'   activity, and purges in-grid icon shapes from open workbooks
+'   Captures the caller's event state, refuses when this project does not own the
+'   lease, and otherwise runs the cleanup transaction with lease release enabled
 '
 ' ERROR POLICY
-'   Best-effort teardown
-'
-'   Suppresses cleanup errors because workbook shutdown must not be interrupted
-'   by missing forms, missing command bars, protected sheets, or stale shapes
+'   Never raises outward. The outcome is reported through the observation fields
 '
 ' DEPENDENCIES
-'   gDP_Manager
-'   M_ContextMenu_Remove
-'   M_KeyboardShortcut_Remove
-'   DP_Close
-'   M_Timer_Stop
-'   M_GridIcon_PurgeAll
+'   M_Lease_IsOwner
+'   M_Lease_ReportRefusal
+'   M_Lifecycle_Cleanup
 '
 ' NOTES
-'   Releasing gDP_Manager triggers cDatePickerManager.Class_Terminate when the
-'   manager exists
+'   Ownership is checked before anything is touched. A refused copy must not be
+'   able to dismantle the owner's registrations, which is the defect #37 closed
+'   for the open paths and this closes for teardown
 '
-'   M_ContextMenu_Remove is called explicitly because right-click menu ownership
-'   is not delegated to cDatePickerManager teardown
-'
-'   This routine is safe to call more than once
-'
+'   Retaining ownership when cleanup is incomplete is the point of the issue. A
+'   lease released over surviving shared state is worse than a lease held too
+'   long, because the next provider starts on top of it
 ' UPDATED
-'   2026-05-10
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress shutdown errors
-        On Error Resume Next
+    Dim CallerEnableEvents As Boolean
+    Dim HasCallerEnableEvents As Boolean
+    Dim OwnedOnEntry As Boolean
 
-'------------------------------------------------------------------------------
-' VERIFY PROVIDER OWNERSHIP
-'------------------------------------------------------------------------------
-    'A provider that does not own the lease must not tear down the owner's
-    'registrations. Refusing a second provider at startup protects nothing while
-    'its teardown remains destructive
-        If Not M_Lease_IsOwner() Then
-            M_Lease_ReportRefusal "DP_Stop"
-            Exit Sub
-        End If
+    On Error Resume Next
+    M_Lifecycle_ResetObservation
+    mDP_LifecycleLastOperation = "DP_Stop"
 
-'------------------------------------------------------------------------------
-' RELEASE MANAGER
-'------------------------------------------------------------------------------
-    'Release the Application event manager and trigger its teardown path
-        Set gDP_Manager = Nothing
+    CallerEnableEvents = Excel.Application.EnableEvents
+    HasCallerEnableEvents = (Err.Number = 0)
+    Err.Clear
 
-'------------------------------------------------------------------------------
-' REMOVE APPLICATION-WIDE ENTRY POINTS
-'------------------------------------------------------------------------------
-    'Remove DatePicker right-click command-bar entries
-        M_ContextMenu_Remove
-    'Remove the DatePicker keyboard shortcut assignment
-        M_KeyboardShortcut_Remove
+    OwnedOnEntry = M_Lease_IsOwner()
+    mDP_LifecycleLastLeaseWasAlreadyOwned = OwnedOnEntry
+    mDP_LifecycleLastLeaseAcquiredThisCall = False
 
-'------------------------------------------------------------------------------
-' CLEAR TRANSIENT UI
-'------------------------------------------------------------------------------
-    'Stop any active live-clock timer
-        M_Timer_Stop
-    'Close any loaded DatePicker form
-        DP_Close
-    'Purge all DatePicker grid icons from open workbooks
-        M_GridIcon_PurgeAll
+    If Not OwnedOnEntry Then
+        M_Lease_ReportRefusal "DP_Stop"
+        mDP_LifecycleLastSucceeded = False
+        GoTo CleanExit
+    End If
 
-'------------------------------------------------------------------------------
-' CLEAR CALLBACK CACHE
-'------------------------------------------------------------------------------
-    'Clear cached workbook-qualified callback names
-        M_GetQualifiedMacroName_ClearCache
+    mDP_LifecycleLastSucceeded = M_Lifecycle_Cleanup( _
+        True, "DP_Stop", HasCallerEnableEvents, CallerEnableEvents)
 
-'------------------------------------------------------------------------------
-' RELEASE PROVIDER LEASE
-'------------------------------------------------------------------------------
-    'Give up the lease last, so this provider still owns it while tearing its own
-    'registrations down
-        M_Lease_Release
-
-'------------------------------------------------------------------------------
-' EXIT
-'------------------------------------------------------------------------------
-    'Clear any suppressed teardown error
-        Err.Clear
-    'Restore normal error handling
-        On Error GoTo 0
+CleanExit:
+    Err.Clear
+    On Error GoTo 0
 
 End Sub
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
@@ -8750,51 +10731,47 @@ Private Sub M_WriteBack_AppendAddress( _
 '                          APPEND RESULT ADDRESS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Appends one cell address to a write-result address list
+'   Appends one real worksheet-qualified address to a structured write-result
+'   address list while enforcing the operation-level reporting budget
 '
 ' WHY THIS EXISTS
-'   A partial write has to report which cells were not written, but a failed
-'   write over a long table column would otherwise build an unbounded string
-'   inside the per-cell write loop
+'   A partial write has to identify cells that were not written, but an operation
+'   over a long or discontiguous target must not build unbounded diagnostic text
 '
 ' INPUTS
 '   AddressList
-'     Accumulated address list, modified in place
+'     Structured address list, modified in place
 '
 '   RecordedCount
-'     Number of addresses counted for this list so far, including this one
+'     Operation-level classified count for this category, including this item
 '
 '   AddressText
-'     Address to append
+'     Worksheet-qualified address to append
 '
 ' RETURNS
 '   Nothing
 '
 ' BEHAVIOR
-'   Appends the address until the reporting cap is reached, then appends a single
-'   ellipsis so a truncated list is still recognizable as truncated
+'   Retains at most DP_WRITEBACK_ADDRESS_LIMIT addresses for one outcome category
+'   across the complete write operation. A new area does not reset that budget.
+'   Structured fields contain addresses only: no ellipsis or human truncation
+'   sentinel is ever appended
 '
 ' ERROR POLICY
-'   Best-effort. Never raises, because it runs inside a suppressed write loop
+'   Best-effort. Never raises, because it runs inside the per-cell write loop
 '
 ' DEPENDENCIES
-'   None
+'   DP_WRITEBACK_ADDRESS_LIMIT
 '
 ' NOTES
-'   Addresses are worksheet-qualified by the caller, in the form SheetName!A1, so
-'   a reported address is unambiguous and stable enough to assert against
-'
-'   The cap bounds the reported string, not the counters. WrittenCount,
-'   LockedSkippedCount and FailedCount stay exact however long the list gets
+'   The caller supplies worksheet-qualified addresses in SheetName!A1 form.
+'   Non-address diagnostics such as "(no cell)" are deliberately excluded from
+'   structured address fields. Exact category totals remain uncapped elsewhere;
+'   M_WriteBack_DescribeShortfall reports the exact omitted count to humans
 '
 ' UPDATED
-'   2026-08-22
+'   2026-09-17
 '------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const ADDRESS_LIMIT As Long = 25            'Maximum addresses reported
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -8803,16 +10780,22 @@ Private Sub M_WriteBack_AppendAddress( _
         On Error Resume Next
 
 '------------------------------------------------------------------------------
-' APPEND OR TRUNCATE
+' ENFORCE OPERATION-LEVEL ADDRESS BUDGET
 '------------------------------------------------------------------------------
-    'Mark truncation once past the reporting cap
-        If RecordedCount > ADDRESS_LIMIT Then
-            If VBA.Right$(AddressList, 3) <> "..." Then
-                AddressList = AddressList & ", ..."
-            End If
-            Exit Sub
-        End If
-    'Start the list or extend it
+    'Once this category has consumed its operation-level budget, retain only the
+    'exact classification count and leave the structured address list unchanged
+        If RecordedCount > DP_WRITEBACK_ADDRESS_LIMIT Then Exit Sub
+
+'------------------------------------------------------------------------------
+' REQUIRE A STRUCTURED WORKSHEET ADDRESS
+'------------------------------------------------------------------------------
+    'Structured address fields must contain only worksheet-qualified addresses
+        If VBA.InStr(1, AddressText, "!", vbBinaryCompare) <= 1 Then Exit Sub
+
+'------------------------------------------------------------------------------
+' APPEND ADDRESS
+'------------------------------------------------------------------------------
+    'Start the list or extend it with the real address only
         If VBA.LenB(AddressList) = 0 Then
             AddressList = AddressText
         Else
@@ -8820,6 +10803,49 @@ Private Sub M_WriteBack_AppendAddress( _
         End If
 
 End Sub
+
+Private Function M_WriteBack_CountRetainedAddresses( _
+    ByVal AddressList As String) As Double
+
+'
+'------------------------------------------------------------------------------
+'                    COUNT RETAINED WRITE ADDRESSES
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Counts the structured worksheet addresses actually retained in one result
+'   field so human omission reporting can be derived from observed output
+'
+' INPUTS
+'   AddressList
+'     Comma-space-delimited structured address field built by AppendAddress
+'
+' RETURNS
+'   Number of retained address entries; zero for a blank or unreadable list
+'
+' ERROR POLICY
+'   Best-effort. Returns zero on an unexpected parsing failure
+'
+' NOTES
+'   This counts the representation emitted by M_WriteBack_AppendAddress. It does
+'   not consult the classification total or the cap, so omitted count remains
+'   exactly: classified count minus addresses actually retained
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+    Dim AddressParts As Variant
+
+    On Error GoTo SafeExit
+    If VBA.LenB(VBA.Trim$(AddressList)) = 0 Then Exit Function
+    AddressParts = VBA.Split(AddressList, ", ")
+    M_WriteBack_CountRetainedAddresses = _
+        UBound(AddressParts) - LBound(AddressParts) + 1
+
+SafeExit:
+    Err.Clear
+
+End Function
 
 Public Sub M_WriteBack_Test_SetFaultInjection( _
     ByVal FailInAreaOrdinal As Long, _
@@ -9116,43 +11142,42 @@ Public Function M_WriteBack_DescribeShortfall( _
 '   Builds one human-readable description of the cells a write-back did not write
 '
 ' WHY THIS EXISTS
-'   The skipped and failed cells are reported in more than one place. One
-'   formatter keeps those messages consistent and gives later write policies a
-'   single place to extend rather than a second reporting mechanism
+'   Structured result fields stay machine-readable and bounded. Human reporting
+'   adds the exact number of classified cells whose addresses were omitted by the
+'   operation-level cap without embedding a sentinel in the structured fields
 '
 ' INPUTS
 '   Result
 '     Completed DP_WriteResult to describe
 '
 ' RETURNS
-'   Description of the skipped and failed cells
-'
-'   An empty string when every attempted cell was written
+'   Description of skipped and failed cells; empty when there is no shortfall
 '
 ' BEHAVIOR
-'   Describes the protected locked cells and the suppressed failures, each with
-'   the addresses recorded for them
+'   Describes protected locked cells, preserved formulas and failures using the
+'   exact uncapped category totals plus the retained structured addresses. When a
+'   category exceeds DP_WRITEBACK_ADDRESS_LIMIT, reports the exact excess count
+'   as human text derived from total minus the addresses actually retained
 '
 ' ERROR POLICY
 '   Best-effort. Never raises, because it is called while reporting an outcome
 '
 ' DEPENDENCIES
-'   None
+'   DP_WRITEBACK_ADDRESS_LIMIT
 '
 ' NOTES
-'   Addresses are worksheet-qualified, in the form SheetName!A1
-'
-'   Address lists are capped by M_WriteBack_AppendAddress, so a long list ends
-'   with an ellipsis while the counts stay exact
+'   Structured address fields contain only worksheet-qualified addresses. Human
+'   omission text is derived here and is never stored back into DP_WriteResult
 '
 ' UPDATED
-'   2026-08-23
+'   2026-09-17
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim Description     As String       'Accumulated description
+    Dim OmittedCount    As Double       'Exact category count omitted by the cap
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -9169,6 +11194,12 @@ Public Function M_WriteBack_DescribeShortfall( _
         If Result.LockedSkippedCount > 0 Then
             Description = VBA.CStr(Result.LockedSkippedCount) & " protected locked: " & _
                 Result.LockedSkippedAddresses
+            OmittedCount = Result.LockedSkippedCount - _
+                M_WriteBack_CountRetainedAddresses(Result.LockedSkippedAddresses)
+            If OmittedCount > 0 Then
+                Description = Description & " (" & VBA.CStr(OmittedCount) & _
+          " additional classified cells omitted from address list)"
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -9176,11 +11207,15 @@ Public Function M_WriteBack_DescribeShortfall( _
 '------------------------------------------------------------------------------
     'Describe the formula cells policy left in place
         If Result.FormulaSkippedCount > 0 Then
-            If VBA.LenB(Description) > 0 Then
-                Description = Description & VBA.vbCrLf
-            End If
+            If VBA.LenB(Description) > 0 Then Description = Description & VBA.vbCrLf
             Description = Description & VBA.CStr(Result.FormulaSkippedCount) & _
                 " formula cells preserved: " & Result.FormulaSkippedAddresses
+            OmittedCount = Result.FormulaSkippedCount - _
+                M_WriteBack_CountRetainedAddresses(Result.FormulaSkippedAddresses)
+            If OmittedCount > 0 Then
+                Description = Description & " (" & VBA.CStr(OmittedCount) & _
+          " additional classified cells omitted from address list)"
+            End If
         End If
 
 '------------------------------------------------------------------------------
@@ -9188,24 +11223,24 @@ Public Function M_WriteBack_DescribeShortfall( _
 '------------------------------------------------------------------------------
     'Describe the cells that failed for another reason
         If Result.FailedCount > 0 Then
-            If VBA.LenB(Description) > 0 Then
-                Description = Description & VBA.vbCrLf
-            End If
+            If VBA.LenB(Description) > 0 Then Description = Description & VBA.vbCrLf
             Description = Description & VBA.CStr(Result.FailedCount) & " failed: " & _
                 Result.FailedAddresses
+            OmittedCount = Result.FailedCount - _
+                M_WriteBack_CountRetainedAddresses(Result.FailedAddresses)
+            If OmittedCount > 0 Then
+                Description = Description & " (" & VBA.CStr(OmittedCount) & _
+          " additional classified cells omitted from address list)"
+            End If
         End If
 
 '------------------------------------------------------------------------------
 ' DESCRIBE AN UNEXPECTED TECHNICAL FAILURE
 '------------------------------------------------------------------------------
-    'Describe an unexpected error that stopped the operation. This is not a
-    'classified cell outcome: the cells the operation never reached are absent
-    'from every count above, so without this line the message would describe a
-    'smaller operation than the one the user asked for
+    'Describe an unexpected error that stopped the operation. Cells the operation
+    'never reached are absent from every classified count above
         If Result.TechnicalFailureOccurred Then
-            If VBA.LenB(Description) > 0 Then
-                Description = Description & VBA.vbCrLf
-            End If
+            If VBA.LenB(Description) > 0 Then Description = Description & VBA.vbCrLf
             Description = Description & _
                 "The operation stopped early after an unexpected error at step """ & _
                 Result.TechnicalFailureStep & """. Any remaining cells were not attempted."
@@ -10011,6 +12046,9 @@ Public Sub M_WriteBack_PopulateRange( _
     Dim BulkAllowed     As Boolean          'True when the fast path may be used
     Dim AreaOrdinal     As Long             'Position of this area in the operation
     Dim HandlerStep     As String           'Current handler step for diagnostics
+    Dim PriorLockedSkippedCount As Double   'Operation locked count before this area
+    Dim PriorFormulaSkippedCount As Double  'Operation formula count before this area
+    Dim PriorFailedCount As Double          'Operation failure count before this area
 
     Dim SavedErrNumber      As Long         'Captured original error number
     Dim SavedErrDescription As String       'Captured original error description
@@ -10022,6 +12060,15 @@ Public Sub M_WriteBack_PopulateRange( _
         On Error GoTo ErrorHandler
     'Initialize diagnostic step
         HandlerStep = "Initialize"
+    'Seed category counters from the operation result before this area starts.
+    'The per-cell classifier can then keep using AreaResult while its RecordedCount
+    'is operation-global, so a new target area cannot restart the 25-address budget.
+        PriorLockedSkippedCount = Result.LockedSkippedCount
+        PriorFormulaSkippedCount = Result.FormulaSkippedCount
+        PriorFailedCount = Result.FailedCount
+        AreaResult.LockedSkippedCount = PriorLockedSkippedCount
+        AreaResult.FormulaSkippedCount = PriorFormulaSkippedCount
+        AreaResult.FailedCount = PriorFailedCount
 
 '------------------------------------------------------------------------------
 ' RECORD AREA POSITION
@@ -10172,9 +12219,9 @@ Public Sub M_WriteBack_PopulateRange( _
             'operation or discarding what the other areas observed
                 Debug.Print PROC_NAME & _
                     " | Zero-write area | Attempted=" & VBA.CStr(AreaResult.AttemptedCount) & _
-                    "; LockedSkipped=" & VBA.CStr(AreaResult.LockedSkippedCount) & _
-                    "; FormulaSkipped=" & VBA.CStr(AreaResult.FormulaSkippedCount) & _
-                    "; Failed=" & VBA.CStr(AreaResult.FailedCount)
+                    "; LockedSkipped=" & VBA.CStr(AreaResult.LockedSkippedCount - PriorLockedSkippedCount) & _
+                    "; FormulaSkipped=" & VBA.CStr(AreaResult.FormulaSkippedCount - PriorFormulaSkippedCount) & _
+                    "; Failed=" & VBA.CStr(AreaResult.FailedCount - PriorFailedCount)
         End If
 
 '------------------------------------------------------------------------------
@@ -10186,9 +12233,9 @@ AccumulateResult:
     'Add this range to the running totals
         Result.AttemptedCount = Result.AttemptedCount + AreaResult.AttemptedCount
         Result.WrittenCount = Result.WrittenCount + AreaResult.WrittenCount
-        Result.LockedSkippedCount = Result.LockedSkippedCount + AreaResult.LockedSkippedCount
-        Result.FormulaSkippedCount = Result.FormulaSkippedCount + AreaResult.FormulaSkippedCount
-        Result.FailedCount = Result.FailedCount + AreaResult.FailedCount
+        Result.LockedSkippedCount = AreaResult.LockedSkippedCount
+        Result.FormulaSkippedCount = AreaResult.FormulaSkippedCount
+        Result.FailedCount = AreaResult.FailedCount
         Result.AreasCount = Result.AreasCount + AreaResult.AreasCount
     'Join the skipped locked addresses
         If VBA.LenB(AreaResult.LockedSkippedAddresses) > 0 Then
@@ -11522,6 +13569,869 @@ ErrorHandler:
 End Function
 
 
+Private Function M_Timer_ApplySchedule( _
+    ByVal EarliestTime As Date, _
+    ByVal LatestTime As Date, _
+    ByVal ProcedureName As String, _
+    ByVal ScheduleFlag As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                        APPLY A TIMER SCHEDULING CALL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The single point through which every Application.OnTime call is made, and the
+'   recorder of what was asked for
+'
+' WHY THIS EXISTS
+'   Cancellation needs the exact EarliestTime and Procedure that were scheduled,
+'   and nothing could previously observe either. Routing all three call sites
+'   through one routine records the identity of every registration and gives the
+'   regression a deterministic way to make scheduling or cancellation fail
+'   without waiting for wall-clock time
+'
+' INPUTS
+'   EarliestTime
+'     Registration time, and for a cancellation the time to match
+'
+'   LatestTime
+'     Bounded delivery deadline; ignored for a cancellation
+'
+'   ProcedureName
+'     Workbook-qualified callback name
+'
+'   ScheduleFlag
+'     True to schedule, False to cancel
+'
+' RETURNS
+'   True when the call was accepted
+'
+' BEHAVIOR
+'   Records the requested registration, consumes a one-shot injected fault when
+'   armed, otherwise calls Application.OnTime and records the outcome
+'
+' ERROR POLICY
+'   Never raises outward. Callers read the recorded error and decide
+'
+' DEPENDENCIES
+'   Application.OnTime
+'
+' NOTES
+'   LatestTime is passed only when scheduling. Application.OnTime matches a
+'   cancellation on EarliestTime and Procedure alone
+'
+'   The injected fault is one-shot and is consumed whether or not it is observed,
+'   so an armed fault can never leak into a later test
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FaultNumber     As Long         'One-shot injected failure being consumed
+
+'------------------------------------------------------------------------------
+' RECORD THE REQUEST
+'------------------------------------------------------------------------------
+    'Never let a scheduling call raise into its caller
+        On Error Resume Next
+    'Record what this call asked for, before it is attempted
+        mDP_TimerLastEarliest = EarliestTime
+        mDP_TimerLastLatest = LatestTime
+        mDP_TimerLastProcedure = ProcedureName
+        mDP_TimerLastSchedule = ScheduleFlag
+        mDP_TimerLastErrNumber = 0
+        mDP_TimerLastErrDescription = VBA.vbNullString
+        mDP_TimerCallCount = mDP_TimerCallCount + 1
+    'Assume the call fails until it is accepted
+        M_Timer_ApplySchedule = False
+
+'------------------------------------------------------------------------------
+' CONSUME AN INJECTED FAULT
+'------------------------------------------------------------------------------
+    'Consume a one-shot injected failure instead of calling Excel
+        If mDP_TimerFaultNumber <> 0 Then
+            FaultNumber = mDP_TimerFaultNumber
+            mDP_TimerFaultNumber = 0
+            mDP_TimerLastErrNumber = FaultNumber
+            mDP_TimerLastErrDescription = "Injected timer scheduling failure"
+            Err.Clear
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' CALL EXCEL
+'------------------------------------------------------------------------------
+    'Schedule with a bounded delivery window, or cancel by matching identity
+        Err.Clear
+        If ScheduleFlag Then
+            Excel.Application.OnTime _
+                EarliestTime:=EarliestTime, _
+                Procedure:=ProcedureName, _
+                LatestTime:=LatestTime, _
+                Schedule:=True
+        Else
+            Excel.Application.OnTime _
+                EarliestTime:=EarliestTime, _
+                Procedure:=ProcedureName, _
+                Schedule:=False
+        End If
+    'Record the outcome
+        If Err.Number = 0 Then
+            M_Timer_ApplySchedule = True
+        Else
+            mDP_TimerLastErrNumber = Err.Number
+            mDP_TimerLastErrDescription = Err.Description
+        End If
+    'Clear any suppressed scheduling error
+        Err.Clear
+
+End Function
+
+Private Sub M_Timer_RetainUnresolved( _
+    ByVal EarliestTime As Date, _
+    ByVal LatestTime As Date, _
+    ByVal ProcedureName As String)
+
+'
+'------------------------------------------------------------------------------
+'                      RETAIN AN UNRESOLVED REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Records the exact registration a failed cancellation left outstanding
+'
+' WHY THIS EXISTS
+'   A Boolean running flag cannot distinguish generations. If an old callback
+'   arrives after a restart, the flag is True again and the callback cannot know
+'   which generation invoked it. Retaining the exact registration lets a restart
+'   be refused until the old one is provably gone
+'
+' INPUTS
+'   EarliestTime, LatestTime, ProcedureName
+'     Identity of the registration that could not be cancelled
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Stores the registration and marks it unresolved
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   This is deliberately distinct from a healthy current registration. An
+'   unresolved registration must never be treated as a running timer
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RETAIN THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Never let bookkeeping raise into a caller
+        On Error Resume Next
+    'Store the exact identity the cancellation failed on
+        mDP_TimerUnresolvedEarliest = EarliestTime
+        mDP_TimerUnresolvedLatest = LatestTime
+        mDP_TimerUnresolvedProcedure = ProcedureName
+        mDP_TimerUnresolved = True
+    'Clear any suppressed bookkeeping error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Timer_ResolveUnresolved()
+
+'
+'------------------------------------------------------------------------------
+'                     RESOLVE AN UNRESOLVED REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Drains the outstanding registration once it can no longer fire
+'
+' WHY THIS EXISTS
+'   The restart barrier has to lift. Draining is centralized so the three valid
+'   drains cannot diverge
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Clears the retained registration and the refusal diagnostic flag
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Called by all three drains: a stale callback arriving, a successful retry
+'   cancellation, and expiry of the retained LatestTime
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DRAIN THE REGISTRATION
+'------------------------------------------------------------------------------
+    'Never let bookkeeping raise into a caller
+        On Error Resume Next
+    'Forget the retained registration
+        mDP_TimerUnresolved = False
+        mDP_TimerUnresolvedEarliest = 0
+        mDP_TimerUnresolvedLatest = 0
+        mDP_TimerUnresolvedProcedure = VBA.vbNullString
+    'Allow a later refusal to report again
+        mDP_TimerRefusalReported = False
+    'Clear any suppressed bookkeeping error
+        Err.Clear
+
+End Sub
+
+Private Function M_Timer_TryDrainUnresolved() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       TRY TO DRAIN THE REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a fresh registration may be scheduled
+'
+' WHY THIS EXISTS
+'   Two of the three drains can be attempted on demand: retrying the cancellation
+'   with the retained identity, and observing that the retained LatestTime has
+'   passed. The third, a stale callback arriving, drains itself
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True when nothing is outstanding and scheduling may proceed
+'
+' BEHAVIOR
+'   Returns True when no registration is outstanding. Otherwise retries the
+'   cancellation using the exact retained identity, and failing that checks
+'   whether the retained LatestTime has passed
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_ApplySchedule
+'   M_Timer_ResolveUnresolved
+'
+' NOTES
+'   Expiry is sound only because every tick is scheduled with an explicit
+'   LatestTime. With LatestTime omitted, Excel may run a callback well after its
+'   EarliestTime, so elapsed time alone would prove nothing
+'
+'   The retry runs on every attempt. Only the refusal diagnostic is
+'   de-duplicated; suppressing the retry would strand the barrier
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ATTEMPT THE DRAINS
+'------------------------------------------------------------------------------
+    'Never let a drain attempt raise into a caller
+        On Error Resume Next
+    'Nothing outstanding means scheduling may proceed
+        If Not mDP_TimerUnresolved Then
+            M_Timer_TryDrainUnresolved = True
+            Err.Clear
+            Exit Function
+        End If
+    'Retry the cancellation against the exact retained identity
+        If VBA.LenB(mDP_TimerUnresolvedProcedure) > 0 Then
+            If M_Timer_ApplySchedule(mDP_TimerUnresolvedEarliest, 0, _
+                mDP_TimerUnresolvedProcedure, False) Then
+                M_Timer_ResolveUnresolved
+                M_Timer_TryDrainUnresolved = True
+                Err.Clear
+                Exit Function
+            End If
+        End If
+    'Treat the registration as expired once its bounded window has passed
+        If mDP_TimerUnresolvedLatest <> 0 Then
+            If VBA.Now > mDP_TimerUnresolvedLatest Then
+                M_Timer_ResolveUnresolved
+                M_Timer_TryDrainUnresolved = True
+                Err.Clear
+                Exit Function
+            End If
+        End If
+    'Refuse a fresh registration while the old one may still fire
+        M_Timer_TryDrainUnresolved = False
+    'Clear any suppressed drain error
+        Err.Clear
+
+End Function
+
+Private Sub M_Timer_ReportRestartRefusal(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                        REPORT A RESTART REFUSAL
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes a diagnostic once while restarts are refused
+'
+' WHY THIS EXISTS
+'   A refusal can repeat on every clock-mode change and every form activation.
+'   Silence would leave a static clock with no explanation
+'
+' INPUTS
+'   EntryPoint
+'     Name of the refusing routine
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Prints only when a refusal has not already been reported since the last drain
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerRefusalReported
+'
+' NOTES
+'   Diagnostic only. It never suppresses the cancellation retry and never affects
+'   whether a registration is outstanding
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT THE REFUSAL
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise into a caller
+        On Error Resume Next
+    'Report only once per outstanding registration
+        If mDP_TimerRefusalReported Then
+            Err.Clear
+            Exit Sub
+        End If
+    'Remember that this refusal was reported
+        mDP_TimerRefusalReported = True
+    'Write the refusal diagnostic
+        Debug.Print EntryPoint & _
+            " | Refused | A previous timer registration could not be cancelled" & _
+            " and may still fire; the live clock stays inactive until it drains"
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_EnsureHealthy(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                        ENSURE THE LIVE CLOCK IS HEALTHY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The only cross-module entry point to the timer health check
+'
+' WHY THIS EXISTS
+'   UF_DatePicker must be able to repair a dropped clock registration when the
+'   form is reactivated, and M_Timer_CheckHealth is Private
+'
+'   The form previously reached it through M_Timer_ApplyClockMode. That does not
+'   work. ApplyClockMode calls M_Timer_Stop unconditionally before anything else,
+'   which clears the running flag, so the health check inside M_Timer_Start then
+'   exits immediately and the recovery path was unreachable
+'
+'   In the case the call exists for it was worse than useless. With the
+'   registration already dropped, that Stop attempted to cancel a registration
+'   Excel no longer held; the cancellation failed, the unresolved barrier was
+'   retained, and the following start was refused, leaving the clock dead until
+'   the retained LatestTime expired
+'
+' INPUTS
+'   EntryPoint
+'     Name of the routine asking for the check, for diagnostics
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_Timer_CheckHealth and does nothing else
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_CheckHealth
+'
+' NOTES
+'   This routine must never stop the timer, load settings, reapply the clock
+'   mode, resolve the form or refresh the UI
+'
+'   A healthy registration produces no scheduling call at all. An expired current
+'   registration may produce exactly one replacement. A registration retained by
+'   a failed cancellation stays governed by the barrier and its drains
+'
+'   Public only because the form is a separate module. It takes an argument, so
+'   it does not appear in the macro dialog, and #25 classifies it as internal
+'   rather than supported API
+'
+' UPDATED
+'   2026-09-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DELEGATE
+'------------------------------------------------------------------------------
+    'Never let the bridge raise into a caller
+        On Error Resume Next
+    'Run the health check and nothing else
+        M_Timer_CheckHealth EntryPoint
+    'Clear any suppressed error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Timer_CheckHealth(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                          CHECK TIMER HEALTH
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Repairs a live clock whose registration was dropped by Excel
+'
+' WHY THIS EXISTS
+'   Every tick is scheduled with an explicit LatestTime, so a tick that cannot
+'   run inside its window is dropped rather than delayed. Because each tick
+'   schedules the next one, one dropped tick ends the chain: M_Timer_Tick never
+'   runs, nothing reschedules, and the running flag stays True while no
+'   registration exists
+'
+'   Nothing independent can observe that absence. This is opportunistic
+'   self-healing driven by the next DatePicker interaction, not a watchdog
+'
+' INPUTS
+'   EntryPoint
+'     Name of the routine asking for the check, for diagnostics
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   When the timer is logically active, holds a current registration that is not
+'   an unresolved one, and the retained LatestTime has passed, clears the stale
+'   state and schedules exactly one fresh registration
+'
+' ERROR POLICY
+'   Never raises outward. A failed recovery leaves the timer honestly inactive
+'
+' DEPENDENCIES
+'   M_Timer_ApplySchedule
+'   M_Timer_GetProcedureName
+'
+' NOTES
+'   A healthy registration still inside its delivery window produces no
+'   scheduling call at all
+'
+'   An unresolved registration left by a failed cancellation is explicitly not
+'   healed here. That case is a barrier, not a dropped tick, and is drained by
+'   M_Timer_TryDrainUnresolved
+'
+' UPDATED
+'   2026-09-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim NextEarliest    As Date         'Registration time of the replacement tick
+    Dim NextLatest      As Date         'Bounded delivery deadline of the replacement tick
+
+'------------------------------------------------------------------------------
+' DECIDE WHETHER RECOVERY IS DUE
+'------------------------------------------------------------------------------
+    'Never let a health check raise into a caller
+        On Error Resume Next
+    'A logically inactive timer has nothing to repair
+        If Not mDP_TimerIsRunning Then GoTo ExitProcedure
+    'An unresolved registration is a barrier, not a dropped tick
+        If mDP_TimerUnresolved Then GoTo ExitProcedure
+    'A registration with no bounded window cannot be proven expired
+        If mDP_TimerLatestTime = 0 Then GoTo ExitProcedure
+    'A registration still inside its delivery window is healthy
+        If VBA.Now <= mDP_TimerLatestTime Then GoTo ExitProcedure
+
+'------------------------------------------------------------------------------
+' REPLACE THE EXPIRED REGISTRATION
+'------------------------------------------------------------------------------
+    'Clear the stale active-registration state before rescheduling
+        mDP_TimerIsRunning = False
+        mDP_NextTickTime = 0
+        mDP_TimerLatestTime = 0
+    'Rebuild the qualified callback name
+        mDP_TimerProcedureName = M_Timer_GetProcedureName
+        Err.Clear
+    'Calculate exactly one replacement registration
+        NextEarliest = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+        NextLatest = NextEarliest + VBA.TimeSerial(0, 0, DP_TIMER_LATEST_SECONDS)
+    'Arm the replacement only when the schedule call is accepted
+        If M_Timer_ApplySchedule(NextEarliest, NextLatest, mDP_TimerProcedureName, True) Then
+            mDP_TimerIsRunning = True
+            mDP_NextTickTime = NextEarliest
+            mDP_TimerLatestTime = NextLatest
+        Else
+            Debug.Print EntryPoint & " | M_Timer_CheckHealth" & _
+                " | Step=RescheduleDroppedTick" & _
+                " | Error=" & VBA.CStr(mDP_TimerLastErrNumber) & _
+                " | " & mDP_TimerLastErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed health-check error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_Test_ArmScheduleFault(ByVal ErrorNumber As Long)
+
+'
+'------------------------------------------------------------------------------
+'                      ARM A TIMER SCHEDULING FAULT
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Makes the next scheduling or cancellation call fail deterministically
+'
+' WHY THIS EXISTS
+'   Cancellation failure, restart refusal and dropped-tick recovery cannot be
+'   exercised by waiting. The regression must be able to make one call fail
+'
+' INPUTS
+'   ErrorNumber
+'     Error number the next call reports; zero disarms
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Arms a one-shot fault consumed by the next M_Timer_ApplySchedule call
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerFaultNumber
+'
+' NOTES
+'   Public only because the regression harness is a separate module. It takes an
+'   argument, so it does not appear in the macro dialog. Classifying and hiding
+'   production test seams belongs to #25
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' ARM THE FAULT
+'------------------------------------------------------------------------------
+    'Never let arming raise into a caller
+        On Error Resume Next
+    'Store the one-shot fault
+        mDP_TimerFaultNumber = ErrorNumber
+    'Clear any suppressed arming error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_Test_LastRegistration( _
+    ByRef EarliestTime As Date, _
+    ByRef LatestTime As Date, _
+    ByRef ProcedureName As String, _
+    ByRef ScheduleFlag As Boolean, _
+    ByRef ErrorNumber As Long, _
+    ByRef CallCount As Long)
+
+'
+'------------------------------------------------------------------------------
+'                      READ THE LAST TIMER REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports exactly what the last scheduling call asked Excel for
+'
+' WHY THIS EXISTS
+'   The issue requires proof that start records one exact scheduled time and
+'   qualified callback, and that stop cancels using the same values. Nothing
+'   could observe either before
+'
+' INPUTS
+'   EarliestTime, LatestTime, ProcedureName, ScheduleFlag, ErrorNumber, CallCount
+'     Receive the recorded registration and the running call count
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Copies the recorded values out
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Reading is free of side effects. It never drains, arms or reschedules
+'   anything
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' COPY THE RECORDED VALUES
+'------------------------------------------------------------------------------
+    'Never let a read raise into a caller
+        On Error Resume Next
+    'Copy the recorded registration
+        EarliestTime = mDP_TimerLastEarliest
+        LatestTime = mDP_TimerLastLatest
+        ProcedureName = mDP_TimerLastProcedure
+        ScheduleFlag = mDP_TimerLastSchedule
+        ErrorNumber = mDP_TimerLastErrNumber
+        CallCount = mDP_TimerCallCount
+    'Clear any suppressed read error
+        Err.Clear
+
+End Sub
+
+Public Function M_Timer_Test_IsUnresolved() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                   REPORT AN UNRESOLVED TIMER REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a failed cancellation left a registration outstanding
+'
+' WHY THIS EXISTS
+'   A cancellation failure previously reached only Debug.Print, so the state that
+'   refuses a restart was unobservable. Whether that state should also make
+'   shutdown incomplete and retain the lease is #50's contract, not this one
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True while a registration is outstanding
+'
+' BEHAVIOR
+'   Reports the retained state without attempting any drain
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerUnresolved
+'
+' NOTES
+'   Deliberately does not retry the cancellation, so a test can observe the
+'   barrier before deciding to drain it
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT THE STATE
+'------------------------------------------------------------------------------
+    'Never let a read raise into a caller
+        On Error Resume Next
+    'Report whether a registration is outstanding
+        M_Timer_Test_IsUnresolved = mDP_TimerUnresolved
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Public Function M_Timer_Test_IsRunning() As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       REPORT THE LOGICAL TIMER STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether the timer is logically active
+'
+' WHY THIS EXISTS
+'   Several cases turn on the timer being honestly inactive after a failure, and
+'   the running flag is private
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   True while the timer is logically active
+'
+' BEHAVIOR
+'   Reports the flag without running the health check
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerIsRunning
+'
+' NOTES
+'   Deliberately does not call M_Timer_CheckHealth, so a test can observe a
+'   dropped registration before recovery is triggered
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT THE STATE
+'------------------------------------------------------------------------------
+    'Never let a read raise into a caller
+        On Error Resume Next
+    'Report the logical timer state
+        M_Timer_Test_IsRunning = mDP_TimerIsRunning
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Public Sub M_Timer_Test_ExpireRegistration()
+
+'
+'------------------------------------------------------------------------------
+'                    EXPIRE THE RETAINED REGISTRATION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Backdates the retained delivery deadlines so expiry can be tested
+'
+' WHY THIS EXISTS
+'   The bounded window is thirty seconds. Both the expiry drain and dropped-tick
+'   recovery depend on it having passed, and a regression cannot wait
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Moves the current and unresolved LatestTime values into the past
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_TimerLatestTime
+'   mDP_TimerUnresolvedLatest
+'
+' NOTES
+'   Backdates only the deadlines. It never cancels, schedules or drains anything,
+'   so what the production code then does is the thing under test
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' BACKDATE THE DEADLINES
+'------------------------------------------------------------------------------
+    'Never let a test seam raise into a caller
+        On Error Resume Next
+    'Backdate the current registration deadline when one exists
+        If mDP_TimerLatestTime <> 0 Then
+            mDP_TimerLatestTime = VBA.Now - VBA.TimeSerial(0, 1, 0)
+        End If
+    'Backdate the unresolved registration deadline when one exists
+        If mDP_TimerUnresolvedLatest <> 0 Then
+            mDP_TimerUnresolvedLatest = VBA.Now - VBA.TimeSerial(0, 1, 0)
+        End If
+    'Clear any suppressed test-seam error
+        Err.Clear
+
+End Sub
+
+Public Sub M_Timer_Test_Reset()
+
+'
+'------------------------------------------------------------------------------
+'                        RESET TIMER TEST STATE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the recorder, the injected fault and the barrier to a known state
+'
+' WHY THIS EXISTS
+'   Timer cases must not leak an armed fault, a recorded registration or an
+'   outstanding barrier into the suites that follow
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Disarms the fault, clears the recorder and drains any retained registration
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_Timer_ResolveUnresolved
+'
+' NOTES
+'   This clears bookkeeping only. It does not cancel a live registration, so a
+'   suite must still stop the timer through the supported path
+'
+' UPDATED
+'   2026-08-30
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESET THE STATE
+'------------------------------------------------------------------------------
+    'Never let a reset raise into a caller
+        On Error Resume Next
+    'Disarm any injected fault
+        mDP_TimerFaultNumber = 0
+    'Clear the recorded registration
+        mDP_TimerLastEarliest = 0
+        mDP_TimerLastLatest = 0
+        mDP_TimerLastProcedure = VBA.vbNullString
+        mDP_TimerLastSchedule = False
+        mDP_TimerLastErrNumber = 0
+        mDP_TimerLastErrDescription = VBA.vbNullString
+        mDP_TimerCallCount = 0
+    'Drain any retained registration
+        M_Timer_ResolveUnresolved
+    'Clear any suppressed reset error
+        Err.Clear
+
+End Sub
+
 Public Sub M_Timer_ApplyClockMode()
 
 '
@@ -11726,7 +14636,7 @@ Public Sub M_Timer_Start()
 '   reliably when multiple workbooks or add-ins are open
 '
 ' UPDATED
-'   2026-05-06
+'   2026-09-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -11736,6 +14646,8 @@ Public Sub M_Timer_Start()
 
     Dim ErrorNumber             As Long          'Captured error number
     Dim ErrorDescription        As String        'Captured error description
+    Dim NextEarliest            As Date          'Registration time of the next tick
+    Dim NextLatest              As Date          'Bounded delivery deadline of the next tick
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -11744,37 +14656,60 @@ Public Sub M_Timer_Start()
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
+' HEAL A DROPPED REGISTRATION
+'------------------------------------------------------------------------------
+    'Repair a chain Excel dropped before deciding the timer is already running.
+    'This runs before the guard below because a dropped registration leaves the
+    'running flag True with nothing scheduled
+        M_Timer_CheckHealth PROC_NAME
+
+'------------------------------------------------------------------------------
 ' EXIT IF ALREADY RUNNING
 '------------------------------------------------------------------------------
     'Exit if the timer is already running
         If mDP_TimerIsRunning Then Exit Sub
 
 '------------------------------------------------------------------------------
+' DRAIN AN UNRESOLVED REGISTRATION
+'------------------------------------------------------------------------------
+    'Refuse a fresh registration while an uncancelled one may still fire. The
+    'retry runs on every attempt; only the diagnostic is de-duplicated
+        If Not M_Timer_TryDrainUnresolved() Then
+            M_Timer_ReportRestartRefusal PROC_NAME
+            Exit Sub
+        End If
+
+'------------------------------------------------------------------------------
 ' RESOLVE TIMER PROCEDURE
 '------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
         mDP_TimerProcedureName = M_Timer_GetProcedureName
-        
-'------------------------------------------------------------------------------
-' MARK TIMER RUNNING
-'------------------------------------------------------------------------------
-    'Mark the timer as running before scheduling the OnTime callback
-        mDP_TimerIsRunning = True
 
 '------------------------------------------------------------------------------
 ' CALCULATE NEXT TICK
 '------------------------------------------------------------------------------
-    'Calculate the next timer tick
-        mDP_NextTickTime = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+    'Calculate the next tick and its bounded delivery deadline
+        NextEarliest = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+        NextLatest = NextEarliest + VBA.TimeSerial(0, 0, DP_TIMER_LATEST_SECONDS)
 
 '------------------------------------------------------------------------------
 ' SCHEDULE NEXT TICK
 '------------------------------------------------------------------------------
-    'Schedule the next timer tick
-        Application.OnTime _
-            EarliestTime:=mDP_NextTickTime, _
-            Procedure:=mDP_TimerProcedureName, _
-            Schedule:=True
+    'Schedule the next timer tick and raise when Excel refuses it
+        If Not M_Timer_ApplySchedule(NextEarliest, NextLatest, _
+            mDP_TimerProcedureName, True) Then
+            Err.Raise mDP_TimerLastErrNumber, PROC_NAME, mDP_TimerLastErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' ARM THE TIMER
+'------------------------------------------------------------------------------
+    'Establish the armed state only after the schedule call was accepted, so a
+    'refused schedule can never leave a false running state behind
+        mDP_TimerIsRunning = True
+        mDP_NextTickTime = NextEarliest
+        mDP_TimerLatestTime = NextLatest
+        mDP_TimerRefusalReported = False
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -11794,6 +14729,8 @@ ErrorHandler:
         mDP_TimerIsRunning = False
     'Clear next tick time after scheduling failure
         mDP_NextTickTime = 0
+    'Clear the delivery deadline after scheduling failure
+        mDP_TimerLatestTime = 0
     'Re-raise the original error to the caller
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
@@ -11818,9 +14755,15 @@ Public Sub M_Timer_Stop()
 '   Nothing
 '
 ' BEHAVIOR
-'   Rebuilds the qualified timer procedure name when needed, attempts to cancel
-'   the next scheduled timer tick when a timer is active, and always clears the
-'   internal timer state
+'   Rebuilds the qualified timer procedure name when needed and attempts to
+'   cancel the next scheduled timer tick when a timer is active
+'
+'   A successful cancellation resolves the registration and leaves nothing
+'   outstanding. A failed cancellation retains the exact registration identity
+'   as unresolved, because that registration may still fire
+'
+'   The logical timer state is cleared either way, so an outstanding
+'   registration is never mistaken for a running timer
 '
 ' ERROR POLICY
 '   Best-effort cleanup. Cancellation errors are suppressed because OnTime
@@ -11838,10 +14781,17 @@ Public Sub M_Timer_Stop()
 ' NOTES
 '   This routine intentionally does not raise outward
 '
-'   Timer state is cleared even when the OnTime cancellation attempt fails
+'   Clearing the logical state is not the same as discarding the registration.
+'   Before #27 a failed cancellation reached only Debug.Print while the state
+'   claimed clean teardown, so a registration that could still fire was simply
+'   forgotten. It is now retained through M_Timer_RetainUnresolved and refuses
+'   a restart until one of its drains lifts the barrier
+'
+'   Whether an unresolved registration should also make shutdown incomplete and
+'   retain the provider lease is #50's contract, not this routine's
 '
 ' UPDATED
-'   2026-05-06
+'   2026-09-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -11882,12 +14832,15 @@ Public Sub M_Timer_Stop()
         If mDP_TimerIsRunning Then
             If mDP_NextTickTime <> 0 Then
                 If VBA.Len(mDP_TimerProcedureName) > 0 Then
-                    Application.OnTime _
-                        EarliestTime:=mDP_NextTickTime, _
-                        Procedure:=mDP_TimerProcedureName, _
-                        Schedule:=False
-                    CancelErrNumber = Err.Number
-                    CancelErrDescription = Err.Description
+                    If M_Timer_ApplySchedule(mDP_NextTickTime, 0, _
+                        mDP_TimerProcedureName, False) Then
+                        M_Timer_ResolveUnresolved
+                    Else
+                        CancelErrNumber = mDP_TimerLastErrNumber
+                        CancelErrDescription = mDP_TimerLastErrDescription
+                        M_Timer_RetainUnresolved mDP_NextTickTime, _
+                            mDP_TimerLatestTime, mDP_TimerProcedureName
+                    End If
                     Err.Clear
                 End If
             End If
@@ -11900,6 +14853,9 @@ Public Sub M_Timer_Stop()
         mDP_TimerIsRunning = False
     'Clear next tick time
         mDP_NextTickTime = 0
+    'Clear the delivery deadline. A registration that could not be cancelled is
+    'retained separately as unresolved, never as a running timer
+        mDP_TimerLatestTime = 0
     'Keep the cached timer procedure name for the next timer start
 
 '------------------------------------------------------------------------------
@@ -11996,6 +14952,8 @@ Public Sub M_Timer_Tick()
     Const PROC_NAME            As String = "M_Timer_Tick" 'Current procedure name
 
     Dim LoadedForm             As Object       'Loaded DatePicker form instance
+    Dim NextEarliest           As Date         'Registration time of the next tick
+    Dim NextLatest             As Date         'Bounded delivery deadline of the next tick
     Dim ErrorNumber            As Long         'Captured error number
     Dim ErrorDescription       As String       'Captured error description
     Dim StopErrNumber          As Long         'Captured timer-stop error number
@@ -12010,8 +14968,12 @@ Public Sub M_Timer_Tick()
 '------------------------------------------------------------------------------
 ' EXIT IF TIMER IS NOT RUNNING
 '------------------------------------------------------------------------------
-    'Exit if the timer is no longer running
-        If Not mDP_TimerIsRunning Then Exit Sub
+    'A callback arriving while the timer is inactive is the stale one a failed
+    'cancellation left outstanding. Drain it, do no work and do not reschedule
+        If Not mDP_TimerIsRunning Then
+            M_Timer_ResolveUnresolved
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' RESOLVE LOADED FORM
@@ -12039,21 +15001,27 @@ Public Sub M_Timer_Tick()
 '------------------------------------------------------------------------------
     'Build the workbook-qualified timer procedure name
         mDP_TimerProcedureName = M_Timer_GetProcedureName
-        
+
 '------------------------------------------------------------------------------
 ' CALCULATE NEXT TICK
 '------------------------------------------------------------------------------
-    'Calculate the next timer tick
-        mDP_NextTickTime = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+    'Calculate the next tick and its bounded delivery deadline
+        NextEarliest = VBA.Now + VBA.TimeSerial(0, 0, DP_TIMER_SECONDS)
+        NextLatest = NextEarliest + VBA.TimeSerial(0, 0, DP_TIMER_LATEST_SECONDS)
 
 '------------------------------------------------------------------------------
 ' SCHEDULE NEXT TICK
 '------------------------------------------------------------------------------
-    'Schedule the next timer tick
-        Excel.Application.OnTime _
-            EarliestTime:=mDP_NextTickTime, _
-            Procedure:=mDP_TimerProcedureName, _
-            Schedule:=True
+    'Keep the chain alive only while Excel accepts the next registration
+        If M_Timer_ApplySchedule(NextEarliest, NextLatest, _
+            mDP_TimerProcedureName, True) Then
+            mDP_NextTickTime = NextEarliest
+            mDP_TimerLatestTime = NextLatest
+        Else
+            mDP_TimerIsRunning = False
+            mDP_NextTickTime = 0
+            mDP_TimerLatestTime = 0
+        End If
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -14788,6 +17756,625 @@ SafeExit:
 
 End Function
 
+Private Function M_GridIcon_SessionOwnerToken() As String
+
+'
+'==============================================================================
+'                        GRID ICON SESSION OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns the token stamped into grid icons created by this session
+'
+' WHY THIS EXISTS
+'   mDP_RuntimeOwnerId is ephemeral and is empty whenever this project does not
+'   hold the provider lease. An icon stamped with an empty token would be born
+'   unowned, and fail-closed cleanup would then protect it from its own creator
+'   permanently. This token is therefore never empty
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   A token valid under the v1 owner-token grammar
+'
+' BEHAVIOR
+'   Seeds once from the live lease token when one is held, otherwise mints one
+'   through the same generator the lease uses, and reuses it for the session
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_RuntimeOwnerId
+'   mDP_GridIconOwnerToken
+'   M_Lease_NewOwnerId
+'
+' NOTES
+'   This is a stamping identity only. It is never consulted for admission and
+'   never compared against the lease. #14 will compare stored tokens against the
+'   live provider; nothing here should be read as ownership arbitration
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' RESOLVE THE SESSION TOKEN
+'------------------------------------------------------------------------------
+    'Never let token resolution raise into a caller
+        On Error Resume Next
+    'Reuse the token already minted for this session
+        If VBA.LenB(mDP_GridIconOwnerToken) > 0 Then
+            M_GridIcon_SessionOwnerToken = mDP_GridIconOwnerToken
+            Err.Clear
+            Exit Function
+        End If
+    'Prefer the live lease token when this project holds the lease
+        If VBA.LenB(mDP_RuntimeOwnerId) > 0 Then
+            mDP_GridIconOwnerToken = mDP_RuntimeOwnerId
+        Else
+    'Mint a token through the same generator the lease uses
+            mDP_GridIconOwnerToken = M_Lease_NewOwnerId()
+        End If
+    'Return the resolved token
+        M_GridIcon_SessionOwnerToken = mDP_GridIconOwnerToken
+    'Clear any suppressed resolution error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_BuildOwnerMarker() As String
+
+'
+'==============================================================================
+'                        GRID ICON BUILD OWNER MARKER
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds the AlternativeText value written into every DatePicker grid icon
+'
+' WHY THIS EXISTS
+'   The marker is the only durable, shape-scoped ownership evidence. Building it
+'   in one place keeps the written form and the parsed form from drifting
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   The complete marker string
+'
+' BEHAVIOR
+'   Concatenates the human-readable base, the versioned schema tag and the
+'   session owner token
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_ALT_BASE
+'   DP_GRID_ICON_OWNER_TAG
+'   M_GridIcon_SessionOwnerToken
+'
+' NOTES
+'   The human phrase stays at the front so assistive technology announces
+'   something meaningful before the machine token. Formalizing or relocating the
+'   accessible representation belongs to #29
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' BUILD THE MARKER
+'------------------------------------------------------------------------------
+    'Never let marker construction raise into a caller
+        On Error Resume Next
+    'Compose the versioned marker
+        M_GridIcon_BuildOwnerMarker = DP_GRID_ICON_ALT_BASE & _
+            DP_GRID_ICON_OWNER_TAG & _
+            M_GridIcon_SessionOwnerToken()
+    'Clear any suppressed construction error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_IsValidOwnerToken(ByVal TokenText As String) As Boolean
+
+'
+'==============================================================================
+'                      GRID ICON IS VALID OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Reports whether a token satisfies the v1 owner-token grammar
+'
+' WHY THIS EXISTS
+'   A bare prefix must not confer ownership. Requiring the token to parse stops
+'   hand-typed or truncated alternative text from manufacturing ownership
+'
+' INPUTS
+'   TokenText
+'     Candidate token extracted from a marker
+'
+' RETURNS
+'   True only when the token matches the v1 grammar exactly
+'
+' BEHAVIOR
+'   Validates yyyymmddhhnnss-nnnnnnnn-HEX, which is the form produced by
+'   M_Lease_NewOwnerId
+'
+' ERROR POLICY
+'   Never raises outward. Any failure reports False
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   The grammar is bound to schema v1. A future schema adds its own validator
+'   rather than loosening this one, so shapes already marked keep their meaning
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CharIndex       As Long         'Character position being validated
+    Dim CurrentChar     As String       'Character being validated
+    Dim HexPart         As String       'Trailing hexadecimal component
+
+'------------------------------------------------------------------------------
+' VALIDATE THE TOKEN
+'------------------------------------------------------------------------------
+    'Never let validation raise into a caller
+        On Error Resume Next
+    'Assume the token is invalid until every rule passes
+        M_GridIcon_IsValidOwnerToken = False
+    'Reject a token shorter than the minimum v1 form
+        If VBA.Len(TokenText) < 25 Then GoTo ExitProcedure
+    'Reject a token longer than the maximum v1 form
+        If VBA.Len(TokenText) > 32 Then GoTo ExitProcedure
+    'Require the separators in their fixed positions
+        If VBA.Mid$(TokenText, 15, 1) <> "-" Then GoTo ExitProcedure
+        If VBA.Mid$(TokenText, 24, 1) <> "-" Then GoTo ExitProcedure
+    'Require 14 leading timestamp digits
+        For CharIndex = 1 To 14
+            CurrentChar = VBA.Mid$(TokenText, CharIndex, 1)
+            If CurrentChar < "0" Or CurrentChar > "9" Then GoTo ExitProcedure
+        Next CharIndex
+    'Require 8 fractional-second digits
+        For CharIndex = 16 To 23
+            CurrentChar = VBA.Mid$(TokenText, CharIndex, 1)
+            If CurrentChar < "0" Or CurrentChar > "9" Then GoTo ExitProcedure
+        Next CharIndex
+    'Isolate the trailing hexadecimal component
+        HexPart = VBA.Mid$(TokenText, 25)
+    'Require a non-empty hexadecimal component
+        If VBA.LenB(HexPart) = 0 Then GoTo ExitProcedure
+    'Require every hexadecimal character to be an uppercase hex digit
+        For CharIndex = 1 To VBA.Len(HexPart)
+            CurrentChar = VBA.Mid$(HexPart, CharIndex, 1)
+            If Not ((CurrentChar >= "0" And CurrentChar <= "9") Or _
+                    (CurrentChar >= "A" And CurrentChar <= "F")) Then
+                GoTo ExitProcedure
+            End If
+        Next CharIndex
+    'Report a token that satisfies every rule
+        M_GridIcon_IsValidOwnerToken = True
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed validation error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_ReadOwnerToken(ByVal TargetShape As Excel.Shape) As String
+
+'
+'==============================================================================
+'                        GRID ICON READ OWNER TOKEN
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Extracts the owner token from a shape carrying a v1 ownership marker
+'
+' WHY THIS EXISTS
+'   #14 must compare stored tokens against the live provider. Extraction is kept
+'   beside the predicate so no other routine parses AlternativeText
+'
+' INPUTS
+'   TargetShape
+'     Shape to inspect
+'
+' RETURNS
+'   The token when the shape carries a valid v1 marker, otherwise an empty string
+'
+' BEHAVIOR
+'   Reads AlternativeText, verifies the base and schema tag, and returns the
+'   remainder only when it parses under the v1 grammar
+'
+' ERROR POLICY
+'   Never raises outward. Any failure returns an empty string
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_ALT_BASE
+'   DP_GRID_ICON_OWNER_TAG
+'   M_GridIcon_IsValidOwnerToken
+'
+' NOTES
+'   A legacy v0 icon carries the base string with no tag. It is owned but has no
+'   token, so this function returns an empty string for it. An empty result
+'   therefore means "no token", never "not owned"
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim MarkerText      As String       'Alternative text read from the shape
+    Dim MarkerPrefix    As String       'Expected base and schema tag
+    Dim TokenText       As String       'Extracted candidate token
+
+'------------------------------------------------------------------------------
+' READ THE TOKEN
+'------------------------------------------------------------------------------
+    'Never let a marker read raise into a caller
+        On Error Resume Next
+    'Start with no token
+        M_GridIcon_ReadOwnerToken = VBA.vbNullString
+    'Exit when no shape was supplied
+        If TargetShape Is Nothing Then GoTo ExitProcedure
+    'Read the marker, treating an unreadable shape as unmarked
+        Err.Clear
+        MarkerText = TargetShape.AlternativeText
+        If Err.Number <> 0 Then GoTo ExitProcedure
+    'Build the expected marker prefix
+        MarkerPrefix = DP_GRID_ICON_ALT_BASE & DP_GRID_ICON_OWNER_TAG
+    'Exit when the marker does not open with the expected prefix
+        If VBA.Len(MarkerText) <= VBA.Len(MarkerPrefix) Then GoTo ExitProcedure
+        If VBA.StrComp(VBA.Left$(MarkerText, VBA.Len(MarkerPrefix)), _
+            MarkerPrefix, vbBinaryCompare) <> 0 Then GoTo ExitProcedure
+    'Isolate the candidate token
+        TokenText = VBA.Mid$(MarkerText, VBA.Len(MarkerPrefix) + 1)
+    'Return the token only when it parses
+        If M_GridIcon_IsValidOwnerToken(TokenText) Then
+            M_GridIcon_ReadOwnerToken = TokenText
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed read error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_IsOwnedShape(ByVal TargetShape As Excel.Shape) As Boolean
+
+'
+'==============================================================================
+'                          GRID ICON IS OWNED SHAPE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The single authority on whether a shape is a DatePicker-owned grid icon
+'
+' WHY THIS EXISTS
+'   Before this predicate the component treated the shape name alone as proof of
+'   ownership. It would adopt any same-named shape, move it, resize it, bind it
+'   to DP_Click, overwrite its alternative text and later delete it. Overwriting
+'   the alternative text manufactured the very evidence the deletion relied on,
+'   so ownership could be self-granted. Interpretation must live in exactly one
+'   place or that drift returns
+'
+' INPUTS
+'   TargetShape
+'     Shape to inspect
+'
+' RETURNS
+'   True only when ownership is proven
+'
+' BEHAVIOR
+'   Requires the canonical or pending grid-icon name, then a marker that is
+'   either a valid v1 marker or the legacy v0 alternative text
+'
+' ERROR POLICY
+'   Never raises outward. Any failure to read reports False, so an unreadable
+'   shape is treated as foreign and is never modified or deleted
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_NAME
+'   DP_GRID_ICON_PENDING_SUFFIX
+'   DP_GRID_ICON_ALT_BASE
+'   M_GridIcon_ReadOwnerToken
+'
+' NOTES
+'   Legacy v0 icons carry the bare base string with no schema tag. They predate
+'   #53 and are recognized as product-owned so the component does not abandon
+'   icons it created before the marker existed
+'
+'   Ownership here is product-level by design for v1.2.2, which is what allows a
+'   stale icon left by a crashed provider to be reclaimed. #14 narrows the
+'   predicate to token equality without changing the carrier
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim ShapeName       As String       'Name read from the shape
+    Dim MarkerText      As String       'Alternative text read from the shape
+
+'------------------------------------------------------------------------------
+' VERIFY OWNERSHIP
+'------------------------------------------------------------------------------
+    'Never let an ownership probe raise into a caller
+        On Error Resume Next
+    'Fail closed until ownership is proven
+        M_GridIcon_IsOwnedShape = False
+    'Exit when no shape was supplied
+        If TargetShape Is Nothing Then GoTo ExitProcedure
+    'Read the shape name, treating an unreadable shape as foreign
+        Err.Clear
+        ShapeName = TargetShape.Name
+        If Err.Number <> 0 Then GoTo ExitProcedure
+    'Require the canonical or pending grid-icon name
+        If VBA.StrComp(ShapeName, DP_GRID_ICON_NAME, vbBinaryCompare) <> 0 Then
+            If VBA.StrComp(ShapeName, _
+                DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX, _
+                vbBinaryCompare) <> 0 Then
+                GoTo ExitProcedure
+            End If
+        End If
+    'Accept a shape carrying a valid v1 owner token
+        If VBA.LenB(M_GridIcon_ReadOwnerToken(TargetShape)) > 0 Then
+            M_GridIcon_IsOwnedShape = True
+            GoTo ExitProcedure
+        End If
+    'Read the marker again to test the legacy v0 form
+        Err.Clear
+        MarkerText = TargetShape.AlternativeText
+        If Err.Number <> 0 Then GoTo ExitProcedure
+    'Accept the legacy v0 marker, which carries no token
+        If VBA.StrComp(MarkerText, DP_GRID_ICON_ALT_BASE, vbBinaryCompare) = 0 Then
+            M_GridIcon_IsOwnedShape = True
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed probe error
+        Err.Clear
+
+End Function
+
+Private Function M_GridIcon_ResolveOwnedShape( _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByRef ForeignShapePresent As Boolean) As Excel.Shape
+
+'
+'==============================================================================
+'                        GRID ICON RESOLVE OWNED SHAPE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Resolves the canonical grid icon on a worksheet, reporting separately when a
+'   same-named shape exists but is not owned
+'
+' WHY THIS EXISTS
+'   Callers need three answers, not two: an owned icon to reuse, no shape at all,
+'   or a foreign shape that must be left completely alone. Collapsing the last
+'   two would let creation overwrite a user shape
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet to inspect
+'
+'   ForeignShapePresent
+'     Set True when a same-named shape exists and ownership is not proven
+'
+' RETURNS
+'   The owned shape, or Nothing
+'
+' BEHAVIOR
+'   Looks the shape up by canonical name and routes it through the ownership
+'   predicate without touching it
+'
+' ERROR POLICY
+'   Never raises outward. A lookup failure reports no shape and no collision
+'
+' DEPENDENCIES
+'   DP_GRID_ICON_NAME
+'   M_GridIcon_IsOwnedShape
+'
+' NOTES
+'   This routine reads only. It must never modify the shape it inspects, because
+'   the foreign case is decided by what it finds
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim CandidateShape  As Excel.Shape  'Same-named shape found on the worksheet
+
+'------------------------------------------------------------------------------
+' RESOLVE THE SHAPE
+'------------------------------------------------------------------------------
+    'Never let resolution raise into a caller
+        On Error Resume Next
+    'Report no collision until one is found
+        ForeignShapePresent = False
+    'Exit when no worksheet was supplied
+        If TargetSheet Is Nothing Then GoTo ExitProcedure
+    'Look the canonical shape up without touching it
+        Err.Clear
+        Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+    'Exit when no same-named shape exists
+        If Err.Number <> 0 Or CandidateShape Is Nothing Then
+            Err.Clear
+            Set CandidateShape = Nothing
+            GoTo ExitProcedure
+        End If
+    'Return an owned icon, or report a foreign collision
+        If M_GridIcon_IsOwnedShape(CandidateShape) Then
+            Set M_GridIcon_ResolveOwnedShape = CandidateShape
+        Else
+            ForeignShapePresent = True
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Release the local reference without releasing the returned shape
+        Set CandidateShape = Nothing
+    'Clear any suppressed resolution error
+        Err.Clear
+
+End Function
+
+Private Sub M_GridIcon_ReportForeignShape( _
+    ByVal TargetSheet As Excel.Worksheet, _
+    ByVal EntryPoint As String)
+
+'
+'==============================================================================
+'                       GRID ICON REPORT FOREIGN SHAPE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Writes a diagnostic once per worksheet when a foreign same-named shape
+'   refuses grid-icon creation
+'
+' WHY THIS EXISTS
+'   Should_ShowGridIcon fires on every eligible selection, so an unsuppressed
+'   refusal would print on every cell move. Silence would be worse: the user
+'   would see no icon and no reason
+'
+' INPUTS
+'   TargetSheet
+'     Worksheet carrying the foreign shape
+'
+'   EntryPoint
+'     Name of the refusing routine
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Builds a workbook-plus-worksheet identity key and prints only when that key
+'   differs from the last reported one
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_GridIconRefusalKey
+'
+' NOTES
+'   This state is diagnostic only. It never affects the ownership decision and
+'   never suppresses re-evaluation: every eligible selection still consults the
+'   predicate against current reality. Only repeated printing is suppressed
+'
+'   The key uses the worksheet CodeName as well as its visible name, because a
+'   visible name can be renamed and can collide across workbooks
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim RefusalKey      As String       'Workbook and worksheet identity key
+
+'------------------------------------------------------------------------------
+' REPORT THE REFUSAL
+'------------------------------------------------------------------------------
+    'Never let a diagnostic raise into a caller
+        On Error Resume Next
+    'Exit when no worksheet was supplied
+        If TargetSheet Is Nothing Then GoTo ExitProcedure
+    'Build the worksheet identity key
+        RefusalKey = TargetSheet.Parent.Name & "||" & _
+            TargetSheet.CodeName & "||" & TargetSheet.Name
+    'Exit when this worksheet was already reported
+        If VBA.StrComp(RefusalKey, mDP_GridIconRefusalKey, vbBinaryCompare) = 0 Then
+            GoTo ExitProcedure
+        End If
+    'Remember the reported worksheet
+        mDP_GridIconRefusalKey = RefusalKey
+    'Write the refusal diagnostic
+        Debug.Print EntryPoint & _
+            " | Refused | A shape named " & DP_GRID_ICON_NAME & _
+            " exists on " & TargetSheet.Name & _
+            " without DatePicker ownership; it was left untouched"
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+ExitProcedure:
+    'Clear any suppressed diagnostic error
+        Err.Clear
+
+End Sub
+
+Private Sub M_GridIcon_ClearRefusalKey()
+
+'
+'==============================================================================
+'                        GRID ICON CLEAR REFUSAL KEY
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Clears the diagnostic refusal key so a later collision reports again
+'
+' WHY THIS EXISTS
+'   A refusal that has been resolved should not stay silent forever. Clearing on
+'   success and on teardown keeps the diagnostic useful without making it stateful
+'   in any way that matters
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Empties the stored key
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   mDP_GridIconRefusalKey
+'
+' NOTES
+'   Called when an owned icon is created or adopted, and during teardown. It is
+'   never consulted for ownership
+'
+' UPDATED
+'   2026-08-27
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' CLEAR THE KEY
+'------------------------------------------------------------------------------
+    'Never let a diagnostic reset raise into a caller
+        On Error Resume Next
+    'Forget the last reported worksheet
+        mDP_GridIconRefusalKey = VBA.vbNullString
+    'Clear any suppressed reset error
+        Err.Clear
+
+End Sub
+
 Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 
 '
@@ -14864,7 +18451,7 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '   shapes may have changed z-order since the last selection event
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -14873,13 +18460,14 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
     Const PROC_NAME             As String = "M_GridIcon_ShowOrMove"
     Const ICON_SIZE             As Double = 24#                     'Grid icon size in points
     Const ICON_GAP              As Double = 5#                      'Gap between target cell and icon
-    Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point" 'Grid icon alternative text
 
     Dim TargetSheet             As Excel.Worksheet   'Worksheet receiving the icon
     Dim AnchorCell              As Excel.Range       'Resolved anchor cell
     Dim AnchorKey               As String            'Stable same-target cache key
     
     Dim CandidateShape          As Excel.Shape       'Existing reusable icon candidate
+    Dim ForeignIconPresent      As Boolean           'True when a same-named shape is not DatePicker-owned
+    Dim OwnerMarker             As String            'Ownership marker written into DatePicker icons
     Dim IconLeft                As Double            'Icon left position
     Dim IconTop                 As Double            'Icon top position
     Dim HasReusableIcon         As Boolean           'True when an existing shape can be moved
@@ -14906,6 +18494,16 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Ensure settings loaded"
     'Load settings before reading the grid-icon feature flag
         M_Settings_EnsureLoaded
+
+'------------------------------------------------------------------------------
+' BUILD OWNERSHIP MARKER
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Build ownership marker"
+    'Build the marker before any shape is inspected or normalized. Normalizing
+    'an adopted icon writes this value, so an empty marker here would strip the
+    'ownership evidence off an icon this component legitimately owns
+        OwnerMarker = M_GridIcon_BuildOwnerMarker()
 
 '------------------------------------------------------------------------------
 ' FEATURE GATE
@@ -15061,12 +18659,15 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve same-sheet icon"
-    'Try to reuse a same-named shape on the target worksheet
+    'Try to reuse a same-named shape on the target worksheet, but only when it
+    'is proven DatePicker-owned. A same-named foreign shape must not be moved,
+    'resized, rebound, re-marked or deleted
         If CandidateShape Is Nothing Then
             'Suppress missing-shape lookup errors
                 On Error Resume Next
-            'Resolve a same-named shape from the target worksheet
-                Set CandidateShape = TargetSheet.Shapes(DP_GRID_ICON_NAME)
+            'Resolve an owned same-sheet icon, reporting a foreign collision
+                Set CandidateShape = M_GridIcon_ResolveOwnedShape( _
+                    TargetSheet, ForeignIconPresent)
             'Resolve whether a reusable same-sheet icon was found
                 HasReusableIcon = Not (CandidateShape Is Nothing)
             'Clear lookup failures
@@ -15077,6 +18678,17 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
                 End If
             'Restore fail-safe error handling
                 On Error GoTo FailSafe
+        End If
+
+'------------------------------------------------------------------------------
+' REFUSE A FOREIGN SAME-NAME COLLISION
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Refuse foreign icon collision"
+    'Leave a foreign same-named shape completely untouched and show no icon
+        If ForeignIconPresent Then
+            M_GridIcon_ReportForeignShape TargetSheet, PROC_NAME
+            GoTo CleanExit
         End If
 
 '------------------------------------------------------------------------------
@@ -15092,13 +18704,15 @@ Public Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)
                 If .Width <> ICON_SIZE Then .Width = ICON_SIZE
                 If .Height <> ICON_SIZE Then .Height = ICON_SIZE
                 If .Placement <> xlMove Then .Placement = xlMove
-                If .AlternativeText <> ICON_ALT_TEXT Then .AlternativeText = ICON_ALT_TEXT
+                If .AlternativeText <> OwnerMarker Then .AlternativeText = OwnerMarker
                 If .OnAction <> CallbackMacroName Then .OnAction = CallbackMacroName
                 If .Visible <> msoTrue Then .Visible = msoTrue
                 .ZOrder msoBringToFront
             End With
             'Store the reusable icon reference
                 Set gDP_GridIconShape = CandidateShape
+            'Forget any earlier refusal now that an owned icon is in place
+                M_GridIcon_ClearRefusalKey
             'Remember the successfully positioned target
                 M_GridIcon_RememberTarget AnchorKey, IconLeft, IconTop
             'Exit after moving the icon
@@ -15324,7 +18938,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '   This routine is the cold creation / recreation path
 '
 ' UPDATED
-'   2026-05-08
+'   2026-08-30
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -15333,11 +18947,14 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     Const PROC_NAME             As String = "M_GridIcon_Create"
     Const ICON_SIZE             As Double = 24#
     Const ICON_GAP              As Double = 5#
-    Const ICON_ALT_TEXT         As String = "DatePicker Grid Entry Point"
 
     Dim AnchorCell              As Excel.Range      'Resolved anchor cell
     Dim TargetSheet             As Excel.Worksheet  'Worksheet receiving the icon
     Dim NewIconShape            As Excel.Shape      'New temporary icon shape
+    Dim ExistingIconShape       As Excel.Shape      'Owned icon already holding the canonical name
+    Dim PendingShape            As Excel.Shape      'Stale pending icon left by an interrupted run
+    Dim ForeignIconPresent      As Boolean          'True when a same-named shape is not DatePicker-owned
+    Dim OwnerMarker             As String           'Ownership marker written into DatePicker icons
     Dim IconLeft                As Double           'Icon left position
     Dim IconTop                 As Double           'Icon top position
     Dim IconFilePath            As String           'Resolved embedded icon file path
@@ -15450,7 +19067,10 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
     'Vertically center the icon against the anchor cell
         IconTop = AnchorCell.Top + ((AnchorCell.Height - ICON_SIZE) / 2)
     'Build the temporary shape name
-        TempShapeName = DP_GRID_ICON_NAME & "_Pending"
+        TempShapeName = DP_GRID_ICON_NAME & DP_GRID_ICON_PENDING_SUFFIX
+    'Build the ownership marker before any shape is created, so an icon that
+    'survives an interrupted create path is already recognizable to cleanup
+        OwnerMarker = M_GridIcon_BuildOwnerMarker()
 
 '------------------------------------------------------------------------------
 ' RESOLVE EMBEDDED ICON FILE
@@ -15493,8 +19113,20 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         HandlerStep = "Remove stale temporary shape"
     'Suppress stale temporary-shape cleanup errors
         On Error Resume Next
-    'Delete a stale temporary icon from a previous interrupted run
-        TargetSheet.Shapes(TempShapeName).Delete
+    'Resolve a stale temporary icon left by a previous interrupted run without
+    'touching it. The pending name is internal, but this shape comes back from
+    'Excel rather than from this transaction, so it is proven like any other
+        Set PendingShape = Nothing
+        Set PendingShape = TargetSheet.Shapes(TempShapeName)
+        Err.Clear
+    'Delete it only when DatePicker ownership is proven
+        If Not PendingShape Is Nothing Then
+            If M_GridIcon_IsOwnedShape(PendingShape) Then
+                PendingShape.Delete
+            End If
+        End If
+    'Release the resolved reference
+        Set PendingShape = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
     'Restore fail-safe error handling
@@ -15522,7 +19154,7 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         With NewIconShape
             .Name = TempShapeName
             .Placement = xlMove
-            .AlternativeText = ICON_ALT_TEXT
+            .AlternativeText = OwnerMarker
             .OnAction = M_GetQualifiedMacroName("DP_Click")
             .LockAspectRatio = msoTrue
             .Fill.Visible = msoTrue
@@ -15621,6 +19253,22 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Replace old icon"
+    'Resolve whether the canonical name is already taken, and by whom, before
+    'anything is deleted or promoted
+        Set ExistingIconShape = M_GridIcon_ResolveOwnedShape( _
+            TargetSheet, ForeignIconPresent)
+    'Abandon this creation when a foreign shape holds the canonical name. The
+    'pending shape is discarded rather than promoted over the user's shape
+        If ForeignIconPresent Then
+            M_GridIcon_ReportForeignShape TargetSheet, PROC_NAME
+            On Error Resume Next
+            NewIconShape.Delete
+            Err.Clear
+            Set NewIconShape = Nothing
+            Set ExistingIconShape = Nothing
+            On Error GoTo FailSafe
+            GoTo CleanExit
+        End If
     'Mark that stable icon replacement has started
         StableReplaceStarted = True
     'Suppress old-icon cleanup errors
@@ -15629,8 +19277,12 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         If M_GridIcon_TrackedShapeIsLive() Then
             gDP_GridIconShape.Delete
         End If
-    'Delete any same-named icon on the target sheet
-        TargetSheet.Shapes(DP_GRID_ICON_NAME).Delete
+    'Delete the same-named icon only when it is proven DatePicker-owned
+        If Not ExistingIconShape Is Nothing Then
+            ExistingIconShape.Delete
+        End If
+    'Release the resolved reference
+        Set ExistingIconShape = Nothing
     'Clear any suppressed old-icon cleanup error
         Err.Clear
     'Restore fail-safe error handling
@@ -15641,6 +19293,8 @@ Private Sub M_GridIcon_Create(Optional ByVal TargetCell As Excel.Range)
         Set gDP_GridIconShape = NewIconShape
     'Mark the new icon as safely promoted
         StableIconPromoted = True
+    'Forget any earlier refusal now that an owned icon is in place
+        M_GridIcon_ClearRefusalKey
     'Remember the successfully promoted icon target
         M_GridIcon_RememberTarget _
             M_GridIcon_BuildAnchorKey(AnchorCell), _
@@ -15898,7 +19552,7 @@ Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
 '   signal
 '
 ' UPDATED
-'   2026-08-23
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -15923,6 +19577,14 @@ Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
         ProbeName = gDP_GridIconShape.Name
     'Drop a reference to a shape that no longer exists
         If Err.Number <> 0 Then
+            Err.Clear
+            Set gDP_GridIconShape = Nothing
+            Exit Function
+        End If
+    'Drop a reference to a shape this component cannot prove it owns. A live
+    'reference with a matching name is not ownership, and downstream callers
+    'delete through this result
+        If Not M_GridIcon_IsOwnedShape(gDP_GridIconShape) Then
             Err.Clear
             Set gDP_GridIconShape = Nothing
             Exit Function
@@ -15987,7 +19649,7 @@ Public Sub M_GridIcon_Remove()
 '   print, teardown, or regression reset
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-27
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -15998,6 +19660,7 @@ Public Sub M_GridIcon_Remove()
     Dim ActiveSheetObject           As Object       'Current active sheet object
     Dim ActiveWorksheet             As Worksheet    'Current active worksheet
     Dim FallbackShape               As Shape        'Same-named active-sheet fallback shape
+    Dim FallbackShapeIsForeign      As Boolean      'True when the same-named shape is not DatePicker-owned
 
     Dim TrackedErrNumber            As Long         'Tracked-shape deletion error number
     Dim TrackedErrDescription       As String       'Tracked-shape deletion error description
@@ -16053,9 +19716,11 @@ Public Sub M_GridIcon_Remove()
 '------------------------------------------------------------------------------
 ' RESOLVE ACTIVE-SHEET FALLBACK SHAPE
 '------------------------------------------------------------------------------
-    'Resolve a same-named icon from the active worksheet when available
+    'Resolve a same-named icon from the active worksheet, but only when it is
+    'proven DatePicker-owned. A foreign same-named shape is left untouched
         If Not ActiveWorksheet Is Nothing Then
-            Set FallbackShape = ActiveWorksheet.Shapes(DP_GRID_ICON_NAME)
+            Set FallbackShape = M_GridIcon_ResolveOwnedShape( _
+                ActiveWorksheet, FallbackShapeIsForeign)
             Err.Clear
         End If
 
@@ -17280,87 +20945,25 @@ Public Sub M_GridIcon_PurgeAll()
 '                         PURGE ALL GRID ICONS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Removes DatePicker in-grid icon shapes from all open workbooks
-'
-' WHY THIS EXISTS
-'   Hard cleanup boundaries should remove stale DatePicker icons even when the
-'   tracked shape reference has been lost after VBA reset, workbook activation,
-'   add-in reload, or unexpected UI interruption
-'
-'   This routine provides a broader cleanup pass than the normal single-icon
-'   removal path
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Suppresses cleanup errors
-'   Deletes the tracked grid icon shape when available
-'   Clears the tracked grid icon shape reference
-'   Scans all open workbooks
-'   Deletes shapes named DP_GRID_ICON_NAME from each open workbook
-'   Restores normal error handling before exit
+'   Removes DatePicker-owned canonical and pending grid-icon Shapes from every
+'   open workbook while leaving foreign same-named Shapes untouched
 '
 ' ERROR POLICY
-'   Best-effort cleanup
-'   Suppresses workbook, worksheet, protection, and shape-deletion errors
-'   Does not raise custom errors
-'
-' DEPENDENCIES
-'   gDP_GridIconShape
-'   DP_GRID_ICON_NAME
-'   M_GridIcon_DeleteNamedShapeAcrossWorkbook
-'   Application.Workbooks
-'   Excel Workbook / Worksheet / Shape object model
-'
-' NOTES
-'   This routine is intentionally heavier than M_GridIcon_Remove
-'   Do not call this routine from high-frequency selection-change paths
+'   Best-effort public wrapper. Transactional lifecycle callers use the internal
+'   Boolean result so protected or otherwise undeletable owned Shapes remain an
+'   explicit incomplete-cleanup condition
 '
 ' UPDATED
-'   2026-05-06
+'   2026-09-05
 '------------------------------------------------------------------------------
 
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Dim CurWorkbook            As Workbook     'Workbook being scanned
+    Dim ErrorNumber As Long
+    Dim ErrorDescription As String
 
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Suppress cleanup errors
-        On Error Resume Next
-
-'------------------------------------------------------------------------------
-' DELETE TRACKED SHAPE
-'------------------------------------------------------------------------------
-    'Delete the tracked grid icon shape when it still exists
-        If M_GridIcon_TrackedShapeIsLive() Then
-            gDP_GridIconShape.Delete
-        End If
-    'Clear the tracked shape reference
-        Set gDP_GridIconShape = Nothing
-    'Clear the cached last target
-        M_GridIcon_ClearLastTarget
-
-'------------------------------------------------------------------------------
-' PURGE OPEN WORKBOOKS
-'------------------------------------------------------------------------------
-    'Loop through all open workbooks
-        For Each CurWorkbook In Application.Workbooks
-            'Delete same-named grid icon shapes from this workbook
-                M_GridIcon_DeleteNamedShapeAcrossWorkbook CurWorkbook, DP_GRID_ICON_NAME
-        Next CurWorkbook
-
-'------------------------------------------------------------------------------
-' RESTORE ERROR HANDLING
-'------------------------------------------------------------------------------
-    'Restore normal error handling
-        On Error GoTo 0
+    If Not M_Lifecycle_TryPurgeGridIcons(ErrorNumber, ErrorDescription) Then
+        Debug.Print "M_GridIcon_PurgeAll | Incomplete | Error=" & _
+            VBA.CStr(ErrorNumber) & " | " & ErrorDescription
+    End If
 
 End Sub
 
@@ -17373,7 +20976,7 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '                    DELETE NAMED SHAPE ACROSS WORKBOOK
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Deletes same-named DatePicker in-grid icon shapes from every worksheet in a
+'   Deletes proven DatePicker-owned in-grid icon shapes from every worksheet in a
 '   target workbook
 '
 ' WHY THIS EXISTS
@@ -17401,7 +21004,8 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '   Exits when no workbook is supplied
 '   Exits when the target shape name is blank
 '   Loops through every worksheet in the workbook
-'   Attempts to delete the same-named shape from each worksheet
+'   Resolves the same-named shape without modifying it
+'   Deletes it only when DatePicker ownership is proven
 '   Restores normal error handling before exit
 '
 ' ERROR POLICY
@@ -17413,20 +21017,25 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '   Excel Workbook / Worksheet / Shape object model
 '
 ' NOTES
-'   This routine intentionally deletes by shape name only
-'   This routine intentionally does not validate whether the named shape belongs
-'   to the DatePicker beyond the supplied shape name
+'   The shape name selects candidates; it never proves ownership. Every
+'   candidate is routed through M_GridIcon_IsOwnedShape before deletion, and a
+'   shape whose ownership cannot be proven is left completely untouched
+'
+'   Before #53 this routine deleted by name alone, so an unrelated shape in an
+'   unrelated workbook was destroyed silently under the suppression below
+'
 '   This routine intentionally does not trim TargetShapeName
 '   Keep this helper aligned with M_GridIcon_PurgeAll
 '
 ' UPDATED
-'   2026-05-06
+'   2026-08-30
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim CurWorksheet           As Worksheet    'Worksheet being scanned
+    Dim CurShape               As Excel.Shape  'Same-named shape found on the worksheet
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -17448,8 +21057,18 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '------------------------------------------------------------------------------
     'Loop through all worksheets in the target workbook
         For Each CurWorksheet In TargetWorkbook.Worksheets
-            'Delete the named shape when found
-                CurWorksheet.Shapes(TargetShapeName).Delete
+            'Resolve the same-named shape without touching it
+                Set CurShape = Nothing
+                Set CurShape = CurWorksheet.Shapes(TargetShapeName)
+                Err.Clear
+            'Delete it only when DatePicker ownership is proven. An unrelated
+            'shape that merely shares the name is never deleted
+                If Not CurShape Is Nothing Then
+                    If M_GridIcon_IsOwnedShape(CurShape) Then
+                        CurShape.Delete
+                        Err.Clear
+                    End If
+                End If
         Next CurWorksheet
 
 '------------------------------------------------------------------------------
@@ -17457,6 +21076,7 @@ Private Sub M_GridIcon_DeleteNamedShapeAcrossWorkbook( _
 '------------------------------------------------------------------------------
 ExitProcedure:
     'Release local object references
+        Set CurShape = Nothing
         Set CurWorksheet = Nothing
     'Clear any suppressed cleanup error
         Err.Clear
@@ -18870,6 +22490,78 @@ ErrorHandler:
 End Sub
 
 
+Public Function M_DemoSheet_ResolveShowOnToggle( _
+    ByVal ExistedBefore As Boolean, _
+    ByVal VisibleBefore As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                     RESOLVE THE DEMO SHEET TOGGLE ACTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether the Ribbon demo command should show the demo sheet or hide it
+'
+' WHY THIS EXISTS
+'   Ribbon_Demo read the sheet's visibility after ensuring it existed. Ensuring it
+'   builds it visible on first use, so the very first click built the demo sheet
+'   and immediately hid it again, and the command appeared to do nothing
+'
+'   The decision depends on state that exists only before the sheet is ensured,
+'   so it cannot be read from the sheet afterwards. Isolating it here gives the
+'   regression a deterministic target without pulling the demo builder into the
+'   harness
+'
+' INPUTS
+'   ExistedBefore
+'     True when the demo sheet already existed before this command ran
+'
+'   VisibleBefore
+'     True when that pre-existing sheet was visible. Ignored when ExistedBefore
+'     is False
+'
+' RETURNS
+'   True to show and activate the sheet, False to hide it
+'
+' BEHAVIOR
+'   A sheet that did not exist has just been built and is always shown. A sheet
+'   that existed toggles on the visibility it had before the command ran
+'
+' ERROR POLICY
+'   Cannot raise. Boolean logic only
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   xlSheetHidden and xlSheetVeryHidden are the same pre-existing state for this
+'   decision. The caller collapses both to VisibleBefore = False, so a demo sheet
+'   hidden either way is shown by the next click
+'
+'   Ribbon_Demo is the only production consumer. The regression asserts through
+'   this routine rather than restating the condition, so a change here cannot
+'   pass a test that no longer describes the callback
+'
+'   Public only because the regression harness is a separate module. It takes
+'   arguments, so it does not appear in the macro dialog, and #25 classifies it
+'   as internal rather than supported API
+'
+' UPDATED
+'   2026-09-17
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' RESOLVE THE ACTION
+'------------------------------------------------------------------------------
+    'A sheet this command just built is always shown, never hidden
+        If Not ExistedBefore Then
+            M_DemoSheet_ResolveShowOnToggle = True
+            Exit Function
+        End If
+    'A pre-existing sheet toggles on the visibility it had beforehand
+        M_DemoSheet_ResolveShowOnToggle = Not VisibleBefore
+
+End Function
+
 Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 
 '
@@ -18903,6 +22595,7 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   DP_DemoSheet_ResolveHostWorkbook
 '   DP_Demo_EnsureDemoSheet
 '   DP_DEMO_SHEET_NAME
+'   M_DemoSheet_ResolveShowOnToggle
 '   DP_DemoSheet_Show
 '   DP_DemoSheet_HideVeryHidden
 '   Ribbon_ReportError
@@ -18930,6 +22623,9 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 
     Dim HostBook    As Excel.Workbook        'Workbook that holds the demo sheet
     Dim DemoSheet   As Excel.Worksheet       'DatePicker demo worksheet
+    Dim ExistingSheet As Excel.Worksheet     'Demo sheet as it stood before this command
+    Dim ExistedBefore As Boolean             'True when the demo sheet already existed
+    Dim VisibleBefore As Boolean             'True when that pre-existing sheet was visible
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -18953,21 +22649,35 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '------------------------------------------------------------------------------
 ' RESOLVE DEMO SHEET
 '------------------------------------------------------------------------------
+    'Record whether the demo sheet already existed, and whether it was visible,
+    'before anything can create it. Ensuring the sheet builds it visible, so a
+    'visibility read taken afterwards cannot distinguish a sheet this command
+    'just built from one the user had already opened
+        On Error Resume Next
+        Set ExistingSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo ErrorHandler
+        ExistedBefore = Not (ExistingSheet Is Nothing)
+    'Collapse xlSheetHidden and xlSheetVeryHidden to one hidden state
+        If ExistedBefore Then
+            VisibleBefore = (ExistingSheet.Visible = xlSheetVisible)
+        End If
+        Set ExistingSheet = Nothing
     'Build the demo sheet on first use, then return it
         Set DemoSheet = DP_Demo_EnsureDemoSheet(HostBook)
 
 '------------------------------------------------------------------------------
 ' TOGGLE DEMO SHEET
 '------------------------------------------------------------------------------
-    'Hide the demo sheet when it is already visible
-        With DemoSheet
-            If .Visible = xlSheetVisible Then
-                DP_DemoSheet_HideVeryHidden
-            Else
-                .Visible = xlSheetVisible
-                .Activate
-            End If
-        End With
+    'Apply the action resolved from the state captured before the sheet was
+    'ensured, so a sheet this command just built is shown rather than hidden
+        If M_DemoSheet_ResolveShowOnToggle(ExistedBefore, VisibleBefore) Then
+            DemoSheet.Visible = xlSheetVisible
+            DemoSheet.Activate
+        Else
+            DP_DemoSheet_HideVeryHidden
+        End If
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
