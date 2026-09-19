@@ -206,8 +206,11 @@ Use only the categories needed by a release.
   `INSTALLATION.md`, `CONTRIBUTING.md`, `RELEASING.md`, the pull-request and
   issue templates, and the new `docs/RELEASE_CERTIFICATION_TEMPLATE.md`
   ([#54](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/54)). The
-  project Wiki is maintained outside this repository and is reconciled
-  separately.
+  project Wiki is maintained outside this repository and was reconciled
+  separately against repository documentation baseline
+  `029d3d4a2fd33413009852b69c2602e03602a621`. Its page-level
+  `Reviewed commit` records the behavior/documentation review point, not the
+  later #63 certified/tag-target SHA.
 
 - Documented the real compile dependency of the current product: `M_DatePicker`
   reaches `DP_Demo_EnsureDemoSheet` in `demo/M_DP_DEMO.bas`, which in turn calls
