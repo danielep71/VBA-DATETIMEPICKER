@@ -9,7 +9,12 @@
 This maintainer guide turns a reviewed commit into a traceable VBA DateTimePicker release. Source identity, validation, packaging, provenance, and publication must describe the same candidate.
 
 > [!IMPORTANT]
-> The release candidate must preserve the documented import order and keep `UF_DatePicker.frm` together with its adjacent `UF_DatePicker.frx` companion.
+> The release candidate must preserve **both** classes of package source:
+> VBE/VBA inputs (including `UF_DatePicker.frm` with its adjacent
+> `UF_DatePicker.frx` companion) and Open XML package inputs. The Ribbon is not
+> created by VBE import or VBA compilation: `src/ribbon/customUI14.xml` and
+> every relationship/custom image resource it references must be injected into
+> the Office package separately.
 
 ## 🧭 Release profile
 
@@ -74,7 +79,11 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 - Every planned item is merged or explicitly deferred.
 - Compatibility and migration consequences are understood.
 - Security-sensitive work has completed private handling where necessary.
-- The working tree and exported VBA sources are reproducible.
+- The working tree, exported VBA sources, and non-VBE package inputs are reproducible.
+- When the Ribbon is shipped, a clean checkout contains `src/ribbon/customUI14.xml`
+  plus every relationship/custom image resource required to package it; source
+  completeness for the current custom images is tracked by
+  [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
 - Maintainers and required reviewers are available.
 
 Test both embedded-source and add-in consumption if both are advertised for the release.
@@ -137,7 +146,24 @@ Move relevant entries from **Unreleased** into a dated `[MAJOR.MINOR.PATCH] - YY
 ## 5. Run static gates
 
 - Validate exported VBA headers and file pairs.
-- Confirm the form `.frm`/`.frx` pair and Ribbon XML are complete.
+- Treat VBE/VBA source and Open XML package source as separate completeness gates:
+
+  ```text
+  VBE/VBA source
+    .bas / .cls / .frm + required .frx companions
+
+  Open XML package source
+    src/ribbon/customUI14.xml
+    Ribbon relationships/package metadata as applicable
+    every custom image/resource referenced by RibbonX
+  ```
+
+- When the Ribbon is shipped, parse/review `customUI14.xml` and prove that every
+  custom `image` dependency has a tracked source resource and an explicit
+  package mapping. Missing Ribbon XML, relationships, or referenced custom
+  resources are a **blocking package-source failure**.
+- Do not treat **Debug → Compile VBAProject** as proof of Ribbon/package
+  completeness. VBE compilation cannot see Open XML Ribbon parts.
 - Check 32-bit and 64-bit declarations and scan for credentials or generated noise.
 
 Capture commands, tool versions, timestamps, and complete results. Rerun affected gates after any change.
@@ -174,14 +200,29 @@ Planned outputs:
 
 For each artifact:
 
-1. Start from a clean build location.
+1. Start from a clean checkout/build location.
 2. Use only candidate-controlled inputs.
-3. Preserve required form and resource companions.
-4. Compile before saving.
-5. Exclude developer-only tests unless the artifact promises them.
-6. Reopen and run the packaged smoke or regression test.
-7. Record filename, size, and SHA-256.
-8. Never edit the artifact after hashing.
+3. Import the required VBE/VBA source, preserving `.frm`/`.frx` companions.
+4. Inject required Open XML package parts separately. For the Ribbon this means
+   `customUI14.xml`, its relationships/package metadata, and every referenced
+   custom image/resource.
+5. Fail the build if a required Ribbon part or referenced custom resource cannot
+   be resolved from the candidate-controlled inputs.
+6. Compile the VBA project before saving; remember that compilation validates
+   VBA, **not** Open XML package completeness.
+7. Exclude developer-only tests unless the artifact promises them.
+8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
+   group/controls are present, all intended custom images render, and each
+   enabled Ribbon action dispatches correctly.
+9. Run the packaged smoke or regression test.
+10. Record filename, size, and SHA-256.
+11. Never edit the artifact after hashing.
+
+The repository-side Ribbon resource completeness gap discovered during v1.2.2
+certification is tracked by
+[#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90). Closing #90
+must make this procedure executable from a clean checkout; this guide must not
+encode private/local resource locations as a workaround.
 
 ```powershell
 Get-FileHash -Algorithm SHA256 .\dist\<artifact>
@@ -268,7 +309,8 @@ Upload the already-hashed artifacts. Do not rebuild between tagging and upload.
 | Assets download and hashes match | ☐ |
 | Installation links and examples work | ☐ |
 | Packaged artifact opens and passes its smoke test | ☐ |
-| Source archive contains expected release files | ☐ |
+| Packaged Ribbon is present; intended custom images render and callbacks dispatch | ☐ |
+| Source archive contains expected VBA **and Open XML/Ribbon resource inputs** | ☐ |
 | Default branch is ready for the next Unreleased cycle | ☐ |
 
 Do not announce broad availability until these checks pass.

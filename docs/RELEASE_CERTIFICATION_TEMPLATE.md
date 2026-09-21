@@ -97,6 +97,9 @@ Record what was redone in **Deviations**.
 | Encoding: source files are ASCII | <!-- PASS / FAIL --> |
 | Line endings match `.gitattributes` | <!-- PASS / FAIL --> |
 | No test-only or temporary instrumentation in the candidate | <!-- PASS / FAIL --> |
+| VBE/VBA source companions complete (`.frm` + required `.frx`) | <!-- PASS / FAIL --> |
+| Ribbon/Open XML package-input inventory complete | <!-- PASS / FAIL / N/A --> |
+| Every RibbonX custom image/resource resolves to tracked candidate source | <!-- PASS / FAIL / N/A --> |
 | Working tree clean at the reviewed SHA | <!-- PASS / FAIL --> |
 
 Commands run and their output:
@@ -143,6 +146,25 @@ TST_DP_RunAll_WithUISmoke
 Suite topology:    <!-- ## standard / ## with UI smoke -->
 ```
 
+### Packaged Ribbon / Open XML verification
+
+VBE compilation is not evidence that RibbonX was packaged. Record the actual
+packaged result:
+
+| Check | Result |
+| --- | --- |
+| Expected Ribbon group/controls are present | <!-- PASS / FAIL / N/A --> |
+| `customUI14.xml` is present in the Office package when advertised | <!-- PASS / FAIL / N/A --> |
+| Required Ribbon relationships/package metadata resolve | <!-- PASS / FAIL / N/A --> |
+| Every intended custom Ribbon image renders | <!-- PASS / FAIL / N/A --> |
+| Each enabled Ribbon callback dispatches correctly | <!-- PASS / FAIL / N/A --> |
+
+Candidate-controlled Ribbon inputs used:
+
+```text
+<!-- paths to customUI14.xml, relationships/mapping and custom image resources -->
+```
+
 If the harness is not present in the package, say so here and record how the
 package was exercised instead:
 
@@ -170,6 +192,7 @@ Record what you exercised and what happened. "Worked" is not a result.
 | Formula preservation | <!-- --> |
 | Protected sheet / array-formula refusal | <!-- --> |
 | Each enabled entry path (keyboard, context menu, grid icon, Ribbon) | <!-- --> |
+| Packaged Ribbon visuals/resources (not merely callback execution) | <!-- --> |
 | Second-provider refusal | <!-- --> |
 | `DP_Stop` leaves no registration behind | <!-- --> |
 
@@ -190,6 +213,16 @@ or a real file:
 | Demo workbook | <!-- --> | <!-- --> | <!-- --> |
 
 Built from SHA: <!-- must equal the reviewed source SHA above -->
+
+Package-input inventory:
+
+```text
+VBE/VBA source:
+<!-- .bas/.cls/.frm + required .frx -->
+
+Open XML/Ribbon source:
+<!-- customUI14.xml, relationship/mapping inputs, custom images/resources; N/A only if no Ribbon ships -->
+```
 
 ```text
 certutil -hashfile "<filename>" SHA256
@@ -234,7 +267,7 @@ what was uploaded.
 | Asset filenames match exactly what was hashed | <!-- --> |
 | Each asset downloads, and its SHA-256 matches the published digest | <!-- --> |
 | Packaged artifact opens from the downloaded copy and passes its smoke test | <!-- --> |
-| Source archive contains the expected release files | <!-- --> |
+| Source archive contains expected VBA and Open XML/Ribbon source inputs | <!-- --> |
 | Installation links and examples in the release notes resolve | <!-- --> |
 | Default branch is ready for the next Unreleased cycle | <!-- --> |
 
