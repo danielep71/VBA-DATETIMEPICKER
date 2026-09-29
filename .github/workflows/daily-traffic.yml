@@ -3,8 +3,8 @@
 #
 #   Reads the GitHub traffic API for this repository and appends a daily
 #   snapshot to CSV files on the orphan `traffic-history` branch. It also
-#   writes data/badges/clones.json and data/badges/visitors.json there, the
-#   shields.io endpoints behind the README clones and visitors badges.
+#   writes data/badges/clones.json, visitors.json and visits.json there, the
+#   shields.io endpoints behind the README clones, visitors and visits badges.
 #
 #   Data retention
 #     GitHub retains traffic data for 14 days only. This workflow exists to
@@ -356,6 +356,8 @@ jobs:
           #   visitors unique visitors over GitHub's rolling 14-day window,
           #            from today's snapshot (daily uniques cannot be summed
           #            into a unique count)
+          #   visits   cumulative daily unique visitors since tracking began;
+          #            a visitor counts once per day they visit
           def compact_count(value):
               if value >= 1000000:
                   return f"{value / 1000000:.1f}M".replace(".0M", "M")
@@ -383,7 +385,13 @@ jobs:
               for row in read_csv("data/traffic_daily.csv")
           )
 
+          total_visits = sum(
+              to_int(row.get("unique_views", 0))
+              for row in read_csv("data/traffic_daily.csv")
+          )
+
           write_badge("clones", "clones", total_clones)
+          write_badge("visits", "visits", total_visits)
           write_badge(
               "visitors",
               "visitors (14d)",
