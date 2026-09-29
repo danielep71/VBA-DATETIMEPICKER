@@ -18,6 +18,7 @@
 
 [![Release](https://img.shields.io/github/v/release/danielep71/VBA-DATETIMEPICKER?style=flat-square&label=release&color=217346)](https://github.com/danielep71/VBA-DATETIMEPICKER/releases)
 [![Downloads](https://img.shields.io/github/downloads/danielep71/VBA-DATETIMEPICKER/total?style=flat-square&label=downloads&color=217346)](https://github.com/danielep71/VBA-DATETIMEPICKER/releases)
+[![Clones](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fdanielep71%2FVBA-DATETIMEPICKER%2Ftraffic-history%2Fdata%2Fbadges%2Fclones.json&style=flat-square)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER?style=flat-square&color=d73a49)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues)
 [![Stars](https://img.shields.io/github/stars/danielep71/VBA-DATETIMEPICKER?style=flat-square&color=bf8700)](https://github.com/danielep71/VBA-DATETIMEPICKER/stargazers)
 
