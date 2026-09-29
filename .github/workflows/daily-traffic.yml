@@ -2,7 +2,9 @@
 # Daily traffic export
 #
 #   Reads the GitHub traffic API for this repository and appends a daily
-#   snapshot to CSV files on the orphan `traffic-history` branch.
+#   snapshot to CSV files on the orphan `traffic-history` branch. It also
+#   writes data/badges/clones.json there, the shields.io endpoint behind the
+#   README clones badge.
 #
 #   Data retention
 #     GitHub retains traffic data for 14 days only. This workflow exists to
@@ -347,6 +349,34 @@ jobs:
               daily_fields,
               ["date"]
           )
+
+          # README clones badge: shields.io endpoint JSON with the total clone
+          # count recorded in the daily history since tracking began.
+          def compact_count(value):
+              if value >= 1000000:
+                  return f"{value / 1000000:.1f}M".replace(".0M", "M")
+              if value >= 1000:
+                  return f"{value / 1000:.1f}k".replace(".0k", "k")
+              return str(value)
+
+          total_clones = sum(
+              to_int(row.get("clones", 0))
+              for row in read_csv("data/traffic_daily.csv")
+          )
+
+          os.makedirs("data/badges", exist_ok=True)
+
+          with open("data/badges/clones.json", "w", encoding="utf-8") as f:
+              json.dump(
+                  {
+                      "schemaVersion": 1,
+                      "label": "clones",
+                      "message": compact_count(total_clones),
+                      "color": "217346"
+                  },
+                  f
+              )
+              f.write("\n")
 
           referrer_fields = [
               "snapshot_date",
