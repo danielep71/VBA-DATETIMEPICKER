@@ -2,7 +2,9 @@
 # Daily traffic export
 #
 #   Reads the GitHub traffic API for this repository and appends a daily
-#   snapshot to CSV files on the orphan `traffic-history` branch.
+#   snapshot to CSV files on the orphan `traffic-history` branch. It also
+#   writes data/badges/clones.json, visitors.json and visits.json there, the
+#   shields.io endpoints behind the README clones, visitors and visits badges.
 #
 #   Data retention
 #     GitHub retains traffic data for 14 days only. This workflow exists to
@@ -346,6 +348,54 @@ jobs:
               list(daily.values()),
               daily_fields,
               ["date"]
+          )
+
+          # README badges: shields.io endpoint JSON files.
+          #   clones   total clones recorded in the daily history since
+          #            tracking began
+          #   visitors unique visitors over GitHub's rolling 14-day window,
+          #            from today's snapshot (daily uniques cannot be summed
+          #            into a unique count)
+          #   visits   cumulative daily unique visitors since tracking began;
+          #            a visitor counts once per day they visit
+          def compact_count(value):
+              if value >= 1000000:
+                  return f"{value / 1000000:.1f}M".replace(".0M", "M")
+              if value >= 1000:
+                  return f"{value / 1000:.1f}k".replace(".0k", "k")
+              return str(value)
+
+          def write_badge(name, label, value):
+              os.makedirs("data/badges", exist_ok=True)
+
+              with open(f"data/badges/{name}.json", "w", encoding="utf-8") as f:
+                  json.dump(
+                      {
+                          "schemaVersion": 1,
+                          "label": label,
+                          "message": compact_count(value),
+                          "color": "217346"
+                      },
+                      f
+                  )
+                  f.write("\n")
+
+          total_clones = sum(
+              to_int(row.get("clones", 0))
+              for row in read_csv("data/traffic_daily.csv")
+          )
+
+          total_visits = sum(
+              to_int(row.get("unique_views", 0))
+              for row in read_csv("data/traffic_daily.csv")
+          )
+
+          write_badge("clones", "clones", total_clones)
+          write_badge("visits", "visits", total_visits)
+          write_badge(
+              "visitors",
+              "visitors (14d)",
+              to_int(traffic_row["unique_views_14d"])
           )
 
           referrer_fields = [
