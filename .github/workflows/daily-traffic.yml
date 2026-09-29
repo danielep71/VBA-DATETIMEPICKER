@@ -3,8 +3,8 @@
 #
 #   Reads the GitHub traffic API for this repository and appends a daily
 #   snapshot to CSV files on the orphan `traffic-history` branch. It also
-#   writes data/badges/clones.json there, the shields.io endpoint behind the
-#   README clones badge.
+#   writes data/badges/clones.json and data/badges/visitors.json there, the
+#   shields.io endpoints behind the README clones and visitors badges.
 #
 #   Data retention
 #     GitHub retains traffic data for 14 days only. This workflow exists to
@@ -350,8 +350,12 @@ jobs:
               ["date"]
           )
 
-          # README clones badge: shields.io endpoint JSON with the total clone
-          # count recorded in the daily history since tracking began.
+          # README badges: shields.io endpoint JSON files.
+          #   clones   total clones recorded in the daily history since
+          #            tracking began
+          #   visitors unique visitors over GitHub's rolling 14-day window,
+          #            from today's snapshot (daily uniques cannot be summed
+          #            into a unique count)
           def compact_count(value):
               if value >= 1000000:
                   return f"{value / 1000000:.1f}M".replace(".0M", "M")
@@ -359,24 +363,32 @@ jobs:
                   return f"{value / 1000:.1f}k".replace(".0k", "k")
               return str(value)
 
+          def write_badge(name, label, value):
+              os.makedirs("data/badges", exist_ok=True)
+
+              with open(f"data/badges/{name}.json", "w", encoding="utf-8") as f:
+                  json.dump(
+                      {
+                          "schemaVersion": 1,
+                          "label": label,
+                          "message": compact_count(value),
+                          "color": "217346"
+                      },
+                      f
+                  )
+                  f.write("\n")
+
           total_clones = sum(
               to_int(row.get("clones", 0))
               for row in read_csv("data/traffic_daily.csv")
           )
 
-          os.makedirs("data/badges", exist_ok=True)
-
-          with open("data/badges/clones.json", "w", encoding="utf-8") as f:
-              json.dump(
-                  {
-                      "schemaVersion": 1,
-                      "label": "clones",
-                      "message": compact_count(total_clones),
-                      "color": "217346"
-                  },
-                  f
-              )
-              f.write("\n")
+          write_badge("clones", "clones", total_clones)
+          write_badge(
+              "visitors",
+              "visitors (14d)",
+              to_int(traffic_row["unique_views_14d"])
+          )
 
           referrer_fields = [
               "snapshot_date",
