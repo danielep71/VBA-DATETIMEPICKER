@@ -189,3 +189,7 @@ snapshot_date,rank,referrer,count,uniques
 2026-09-29,1,github.com,23,6
 2026-09-29,2,Google,11,8
 2026-09-29,3,chatgpt.com,3,2
+2026-09-30,1,github.com,33,6
+2026-09-30,2,Google,13,10
+2026-09-30,3,Bing,1,1
+2026-09-30,4,chatgpt.com,1,1
