@@ -131,7 +131,7 @@ It is especially useful when:
 | Excel Tables | Explicit whole-column fill | `DP_FillTableColumn` with scope confirmation |
 | Formula safety | Preserve formulas by default | Formula skips are reported, not silently overwritten |
 | Partial writes | Structured result | `DP_WriteResult` reports attempted, written, skipped, failed and technical-failure detail for every cell that produced an outcome |
-| Right-click | Cell context-menu entry | Independently configurable |
+| Right-click | Cell and Table context-menu entry, in every worksheet view | Independently configurable |
 | In-grid icon | Contextual worksheet Shape | Independently configurable |
 | Keyboard | `Ctrl + Shift + D` | Registered only when explicitly enabled |
 | Ribbon | RibbonX callbacks | Optional `customUI14.xml` integration |
@@ -719,6 +719,21 @@ DP_RepairRuntime
 and dismantle the current owner's runtime.
 
 Ownership is checked before destructive lifecycle operations.
+
+A non-owner `DP_Stop` touches nothing. It shows the refusal message only when
+there is something to act on: this copy holds an ownership token the lease no
+longer matches, or the lease cannot be read. A copy that never started, or one
+running beside another copy that owns the lease, returns quietly and writes one
+line to the Immediate Window. `DP_Stop` usually runs from `Workbook_BeforeClose`,
+so the refusal no longer appears at every Excel exit for a copy that never
+started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+
+The Ribbon **Reset** command reports success only from the recorded outcome of
+the operation it ran, never from the fact that the call returned
+([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)). When no provider holds the lease, Reset starts the runtime with
+`DP_Start` instead of refusing a repair, so it also recovers a copy whose
+`Workbook_Open` did not start it. It never takes over a lease another provider
+holds.
 
 Through `v1.2.0` this guard was reachable around: a refused copy could not call `DP_Stop` or `DP_RepairRuntime`, but it could register shared state through an unguarded entry path and remove the owner's during its own teardown.
 
@@ -1453,11 +1468,14 @@ Protected sheets can prevent the icon from appearing even when the target cell i
 
 The project is designed and documented for Excel desktop on Windows. Optional borderless styling and mouse/window helpers use Windows APIs.
 
-### Ribbon Reset can report success after a refused repair
+### An add-in opened from an alternate startup folder may not start
 
-When the current copy does not own the provider lease, `DP_RepairRuntime` refuses
-and shows the refusal message, but `Ribbon_Reset` then also shows a success
-message. The fix is planned for `v1.2.3` ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)).
+When the `.xlam` is opened from Excel's **At startup, open all files in** folder
+instead of being installed through **File → Options → Add-ins**, the runtime has
+been observed not to start: no right-click entry until it is started by hand. The
+cause is under investigation in [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113). Install the add-in through the
+Add-ins dialog, or start the runtime with the Ribbon **Reset** command or
+`DP_Start`.
 
 ### Accessibility / DPI
 
@@ -1481,7 +1499,7 @@ No CI runs the regression pack — the only workflow in the repository is reposi
 | Runtime state appears damaged | `DP_RepairRuntime` |
 | Stranded provider lease after VBA reset | Restart Excel; or `DP_ForceReleaseProviderLease` only when no other provider is alive |
 | Grid icon remains | `M_GridIcon_PurgeAll` |
-| Right-click entry missing | Check settings, then `M_ContextMenu_Update` |
+| Right-click entry missing | Check settings, then `M_ContextMenu_Update`; if the runtime never started, Ribbon **Reset** or `DP_Start` |
 | Keyboard shortcut missing | Check setting, then `M_KeyboardShortcut_Update` |
 | Formula was expected to change but stayed intact | Formula protection is default; use an explicit overwrite-enabled advanced call only when intended |
 | Whole Table column expected but one cell changed | Use `DP_FillTableColumn` |

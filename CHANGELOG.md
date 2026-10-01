@@ -135,6 +135,12 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- The Ribbon **Reset** command starts the runtime with `DP_Start` when no
+  provider holds the lease, instead of refusing a repair. A copy whose
+  `Workbook_Open` did not start the runtime can now be recovered in one click.
+  Reset never takes over a lease another provider holds. This mitigates, but
+  does not resolve, the startup-folder issue
+  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113).
 - The release procedure and certification template now treat RibbonX as an
   Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
   relationships/package metadata and every custom image it references must come
@@ -143,6 +149,34 @@ Use only the categories needed by a release.
   **Debug → Compile VBAProject** cannot see Open XML parts
   ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). The repository does not yet track the three custom Ribbon
   images; that remains [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
+
+### Fixed
+
+- The right-click entry now appears in **Page Layout** view. Excel has more
+  than one command bar named `Cell`, and registration by name reached only the
+  first (Normal view). Registration, removal and teardown verification now
+  cover every bar named `Cell` or `List Range Popup`
+  ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)).
+- `DP_Stop` no longer shows "Another copy of the DatePicker is already active"
+  when the copy never started. A non-owner stop still touches nothing; it reports
+  the refusal only when this copy holds an ownership token the lease no longer
+  matches, or the lease cannot be read. Otherwise it returns quietly and writes
+  one Immediate Window line ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+- The Ribbon **Reset** command no longer reports "repair completed
+  successfully" after a refused repair. It reads the recorded lifecycle outcome
+  of the operation it ran instead of inferring success from a normal return
+  ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)).
+
+### Compatibility
+
+- No supported API name, signature or default changed.
+- New technically public routines `M_Ribbon_ResetShouldStart` and
+  `M_Ribbon_LifecycleSucceeded` exist only for the regression harness; they are
+  not supported API. The harness gains the `ContextMenuCoverage`,
+  `StopWithoutOwnership` and `RibbonReset` suites.
+- Code that relied on `DP_Stop` showing the refusal for a copy that never
+  started will no longer see it. `M_Lifecycle_Test_LastSucceeded` is still
+  `False` after such a stop.
 
 ---
 

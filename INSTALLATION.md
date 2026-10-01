@@ -182,6 +182,13 @@ from source you imported.
 4. Use **Browse…** to select the file, then tick it in the list and confirm.
 5. Close and reopen Excel so the add-in loads in a clean session.
 
+> [!NOTE]
+> Install through the Add-ins dialog rather than opening the `.xlam` from an
+> **At startup, open all files in** folder. Loaded that way, the runtime has been
+> observed not to start, so the right-click entry is missing
+> ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). If it
+> happens, the Ribbon **Reset** command or `DP_Start` starts it.
+
 ### Validate
 
 1. Confirm the **DateTime Picker** Ribbon group appears.

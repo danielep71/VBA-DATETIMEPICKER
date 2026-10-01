@@ -1025,10 +1025,14 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "GridIcon"
     'Run manager public API and target gating checks
         TST_DP_RunSuiteSafe "Manager"
+    'Run right-click registration coverage across same-named context menus
+        TST_DP_RunSuiteSafe "ContextMenuCoverage"
     'Run DP_Start and DP_Stop lifecycle round-trip checks
         TST_DP_RunSuiteSafe "LifecyclePair"
     'Run the one-provider lease suite
         TST_DP_RunSuiteSafe "ProviderLease"
+    'Run DP_Stop reporting checks for a copy that holds no ownership
+        TST_DP_RunSuiteSafe "StopWithoutOwnership"
     'Run entry-path admission checks under owned and foreign leases
         TST_DP_RunSuiteSafe "RuntimeAdmission"
     'Run DP_RepairRuntime behavior checks
@@ -1043,6 +1047,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "SelectDate"
     'Run Ribbon demo-sheet toggle decision checks
         TST_DP_RunSuiteSafe "RibbonDemo"
+    'Run the Ribbon Reset outcome checks
+        TST_DP_RunSuiteSafe "RibbonReset"
     'Run demo builder fast-mode transaction checks
         TST_DP_RunSuiteSafe "DemoFastMode"
 
@@ -1118,7 +1124,7 @@ CleanExit:
     'began with no entries ends holding two.
     '
     'It is invisible in an embedded workbook, where Workbook_Open has already
-    'started the runtime and the pre-run count is the same two. It shows up in an
+    'started the runtime and the pre-run count is the same. It shows up in an
     '.xlam that was loaded without starting the runtime: the pre-run count is
     'zero, and restoring a setting the session never applied registers a menu the
     'user did not have.
@@ -1371,8 +1377,14 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "RUNTIMEADMISSION"
                 TST_DP_RunSuite_RuntimeAdmission
+
+            Case "STOPWITHOUTOWNERSHIP"
+                TST_DP_RunSuite_StopWithoutOwnership
             Case "LIFECYCLEPAIR"
                 TST_DP_RunSuite_LifecyclePair
+
+            Case "CONTEXTMENUCOVERAGE"
+                TST_DP_RunSuite_ContextMenuCoverage
 
             Case "REPAIRRUNTIME"
                 TST_DP_RunSuite_RepairRuntime
@@ -1391,6 +1403,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "RIBBONDEMO"
                 TST_DP_RunSuite_RibbonDemo
+
+            Case "RIBBONRESET"
+                TST_DP_RunSuite_RibbonReset
 
             Case "DEMOFASTMODE"
                 TST_DP_RunSuite_DemoFastMode
@@ -5225,6 +5240,162 @@ SuiteFail:
 End Sub
 
 
+Private Sub TST_DP_RunSuite_ContextMenuCoverage()
+
+'
+'==============================================================================
+'                        CONTEXT MENU COVERAGE SUITE
+'==============================================================================
+' PURPOSE
+'   Validates that the right-click entry is registered on, and removed from,
+'   every Excel command bar that carries a supported name
+'
+' WHY THIS EXISTS
+'   Excel has more than one command bar named "Cell": one for Normal view and
+'   one for Page Layout view. Registration by name reached only the first, so the
+'   entry was missing in Page Layout view (#114). Counting the total would not
+'   catch that, because one bar per name still gives a plausible total
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Enables the right-click setting, registers twice, and asserts exactly one
+'   DatePicker entry on every "Cell" and "List Range Popup" bar. Then removes
+'   the entries and asserts none remain on any of those bars. Restores the
+'   setting and its registration afterwards
+'
+' ERROR POLICY
+'   Records suite-level failures and continues. Always restores the right-click
+'   setting and re-synchronizes the menu
+'
+' DEPENDENCIES
+'   M_Settings_SetShowRightClick
+'   M_ContextMenu_Update
+'   M_ContextMenu_Remove
+'   TST_DP_IsContextMenuBarForTest
+'   TST_DP_CountMenuTagOnBarForTest
+'
+' NOTES
+'   The suite asserts per bar rather than per name, so a host with a single
+'   "Cell" bar still passes, and a host with three fails only if one of them is
+'   missed
+'
+' UPDATED
+'   2026-10-01
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const MENU_TAG          As String = "VBA_DATETIMEPICKER"    'Legacy context-menu tag
+
+    Dim SavedShowRightClick As Boolean      'Right-click setting before the suite
+    Dim Bar                 As Object       'Current command bar
+    Dim CellBarCount        As Long         'Bars named "Cell"
+    Dim TargetBarCount      As Long         'Bars carrying a supported name
+    Dim CoveredOnce         As Long         'Bars carrying exactly one entry after registration
+    Dim CoveredAgain        As Long         'Bars carrying exactly one entry after re-registration
+    Dim CleanAfterRemove    As Long         'Bars carrying no entry after removal
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "ContextMenuCoverage"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Capture the setting so the suite leaves it as it found it
+        SavedShowRightClick = M_Settings_GetShowRightClick()
+
+'------------------------------------------------------------------------------
+' REGISTER, THEN REGISTER AGAIN
+'------------------------------------------------------------------------------
+    'Enable the right-click entry and register it
+        M_Settings_SetShowRightClick True
+        M_ContextMenu_Update
+    'Count bars carrying exactly one entry
+        For Each Bar In Excel.Application.CommandBars
+            If TST_DP_IsContextMenuBarForTest(Bar) Then
+                TargetBarCount = TargetBarCount + 1
+                If VBA.StrComp(Bar.Name, "Cell", vbTextCompare) = 0 Then
+                    CellBarCount = CellBarCount + 1
+                End If
+                If TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG) = 1 Then
+                    CoveredOnce = CoveredOnce + 1
+                End If
+            End If
+        Next Bar
+    'Registering again must not add a second entry anywhere
+        M_ContextMenu_Update
+        For Each Bar In Excel.Application.CommandBars
+            If TST_DP_IsContextMenuBarForTest(Bar) Then
+                If TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG) = 1 Then
+                    CoveredAgain = CoveredAgain + 1
+                End If
+            End If
+        Next Bar
+
+'------------------------------------------------------------------------------
+' REMOVE
+'------------------------------------------------------------------------------
+    'Remove the entries and count bars left clean
+        M_ContextMenu_Remove
+        For Each Bar In Excel.Application.CommandBars
+            If TST_DP_IsContextMenuBarForTest(Bar) Then
+                If TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG) = 0 Then
+                    CleanAfterRemove = CleanAfterRemove + 1
+                End If
+            End If
+        Next Bar
+        Set Bar = Nothing
+
+'------------------------------------------------------------------------------
+' ASSERT
+'------------------------------------------------------------------------------
+    'The host exposes at least one cell context menu to register on
+        TST_DP_AssertTrue "At least one Cell command bar exists", _
+            (CellBarCount >= 1)
+    'Every supported bar carries exactly one entry, not only the first by name
+        TST_DP_AssertEqualsLong "Every Cell / List Range Popup bar carries one entry", _
+            TargetBarCount, CoveredOnce
+    'Re-registration is idempotent on every bar
+        TST_DP_AssertEqualsLong "Re-registration adds no duplicate on any bar", _
+            TargetBarCount, CoveredAgain
+    'Removal reaches every bar, including the Page Layout Cell bar
+        TST_DP_AssertEqualsLong "Removal leaves no entry on any bar", _
+            TargetBarCount, CleanAfterRemove
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Restore the setting and the registration it implies
+        On Error Resume Next
+        M_Settings_SetShowRightClick SavedShowRightClick
+        M_ContextMenu_Update
+        Set Bar = Nothing
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "ContextMenuCoverage suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore the setting regardless
+        Resume SuiteExit
+
+End Sub
+
 Private Sub TST_DP_RunSuite_LifecyclePair()
 
 '
@@ -5516,6 +5687,181 @@ SuiteFail:
         Resume SuiteExit
 
 End Sub
+
+Private Sub TST_DP_RunSuite_StopWithoutOwnership()
+
+'
+'==============================================================================
+'                       STOP WITHOUT OWNERSHIP SUITE
+'==============================================================================
+' PURPOSE
+'   Validates when DP_Stop reports a refusal for a project that does not own
+'   the provider lease, and that it touches nothing in every such case
+'
+' WHY THIS EXISTS
+'   DP_Stop runs from Workbook_BeforeClose. A copy that never started used to
+'   show "Another copy of the DatePicker is already active" at every Excel exit,
+'   although no other copy existed (#115)
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives DP_Stop through four non-owner states and asserts the refusal count,
+'   the observed outcome and the lease left behind:
+'     - no token, no lease              quiet
+'     - no token, another owner's lease quiet, owner's lease intact
+'     - token, lease gone               reported
+'     - no token, unreadable lease      reported, lease intact
+'
+' ERROR POLICY
+'   Records suite-level failures and continues. Always restores refusal
+'   reporting and leaves the run owning the lease
+'
+' DEPENDENCIES
+'   DP_Stop
+'   M_Lease_TryAcquire
+'   M_Lease_Test_ClearOwnerToken
+'   M_Lease_Test_SilenceRefusalReport
+'   M_Lease_Test_RefusalReportCount
+'   M_Lifecycle_Test_LastOperation
+'   M_Lifecycle_Test_LastSucceeded
+'
+' NOTES
+'   The unreadable lease is a lease bar with no marker control, which is what
+'   M_Lease_ReadOwner classifies as ambiguous
+'
+' UPDATED
+'   2026-10-01
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const LEASE_BAR         As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"
+
+    Dim RefusalsBefore      As Long         'Refusal count before a stop
+    Dim OwnerToken          As String       'Lease token planted as the foreign owner
+    Dim AmbiguousBar        As Object       'Lease bar created without a marker
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "StopWithoutOwnership"
+    'Silence the modal so a reported refusal is counted instead of shown
+        M_Lease_Test_SilenceRefusalReport True
+
+'------------------------------------------------------------------------------
+' NO TOKEN, NO LEASE: A COPY THAT NEVER STARTED
+'------------------------------------------------------------------------------
+        TST_DP_ForceClearLeaseForTest
+        M_Lease_Test_ClearOwnerToken
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        DP_Stop
+        TST_DP_AssertEqualsLong "Never-started stop reports no refusal", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
+        TST_DP_AssertEqualsString "Never-started stop is observable", _
+            "DP_Stop", M_Lifecycle_Test_LastOperation()
+        TST_DP_AssertFalse "Never-started stop is not recorded as a success", _
+            M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertEqualsString "Never-started stop creates no lease", _
+            VBA.vbNullString, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' NO TOKEN, ANOTHER PROVIDER'S LEASE
+'------------------------------------------------------------------------------
+        TST_DP_AssertTrue "Foreign-lease setup acquires a free lease", _
+            M_Lease_TryAcquire()
+        OwnerToken = TST_DP_ReadLeaseOwnerForTest()
+        M_Lease_Test_ClearOwnerToken
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        DP_Stop
+        TST_DP_AssertEqualsLong "Stop under another owner's lease reports no refusal", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
+        TST_DP_AssertEqualsString "Stop under another owner's lease leaves it intact", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' TOKEN HELD, LEASE GONE
+'------------------------------------------------------------------------------
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertTrue "Lost-lease setup acquires a free lease", _
+            M_Lease_TryAcquire()
+        TST_DP_ForceClearLeaseForTest
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        DP_Stop
+        TST_DP_AssertTrue "Stop with a token but no lease reports a refusal", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse "Stop with a token but no lease is not a success", _
+            M_Lifecycle_Test_LastSucceeded()
+
+'------------------------------------------------------------------------------
+' NO TOKEN, UNREADABLE LEASE
+'------------------------------------------------------------------------------
+        M_Lease_Test_ClearOwnerToken
+        TST_DP_ForceClearLeaseForTest
+        Set AmbiguousBar = Excel.Application.CommandBars.Add( _
+            Name:=LEASE_BAR, Temporary:=True)
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        DP_Stop
+        TST_DP_AssertTrue "Stop under an unreadable lease reports a refusal", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue "Stop under an unreadable lease leaves the bar in place", _
+            TST_DP_LeaseBarExistsForTest()
+        Set AmbiguousBar = Nothing
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Restore reporting so a genuine conflict is never hidden from the operator
+        M_Lease_Test_SilenceRefusalReport False
+    'Leave the run owning the lease, as it did before this suite
+        Set AmbiguousBar = Nothing
+        TST_DP_ForceClearLeaseForTest
+        M_Lease_Test_ClearOwnerToken
+        M_Lease_TryAcquire
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "Stop without ownership suite", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore reporting and lease state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_LeaseBarExistsForTest() As Boolean
+
+'
+'==============================================================================
+'                          LEASE BAR EXISTS FOR TEST
+'==============================================================================
+'   Reports whether a provider lease bar exists, whatever it carries.
+'==============================================================================
+
+    Const LEASE_BAR     As String = "__VBA_DATETIMEPICKER_RUNTIME_PROVIDER_LEASE__"
+
+    Dim LeaseBar        As Object       'Resolved lease command bar
+
+    On Error Resume Next
+    TST_DP_LeaseBarExistsForTest = False
+    Set LeaseBar = Excel.Application.CommandBars(LEASE_BAR)
+    TST_DP_LeaseBarExistsForTest = Not (LeaseBar Is Nothing)
+    Set LeaseBar = Nothing
+    Err.Clear
+
+End Function
 
 Private Sub TST_DP_RunSuite_RuntimeAdmission()
 
@@ -7647,6 +7993,156 @@ SuiteFail:
         TST_DP_RecordFail "RibbonDemo suite failed", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
         Err.Clear
+
+End Sub
+
+Private Sub TST_DP_RunSuite_RibbonReset()
+
+'
+'==============================================================================
+'                            RIBBON RESET SUITE
+'==============================================================================
+' PURPOSE
+'   Validates the decisions the Ribbon Reset command makes: whether to start or
+'   repair, and whether the operation it ran may be reported as a success
+'
+' WHY THIS EXISTS
+'   Ribbon_Reset reported "repair completed successfully" straight after the
+'   provider-refusal message, because DP_RepairRuntime returns normally when it
+'   refuses (#89). Reset also could not recover a copy that never started,
+'   because repair refuses a project that does not own the lease (#113)
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Drives M_Ribbon_ResetShouldStart across its four input states and
+'   M_Ribbon_LifecycleSucceeded across matching, mismatched and failed records.
+'   Then runs a refused and a completed DP_RepairRuntime and asserts the real
+'   observation each leaves is judged correctly
+'
+' ERROR POLICY
+'   Records suite-level failures and continues. Always restores refusal
+'   reporting and leaves the run owning the lease
+'
+' DEPENDENCIES
+'   M_Ribbon_ResetShouldStart
+'   M_Ribbon_LifecycleSucceeded
+'   DP_RepairRuntime
+'   M_Lifecycle_Test_LastOperation
+'   M_Lifecycle_Test_LastSucceeded
+'
+' NOTES
+'   Ribbon_Reset itself is not called, because a successful reset shows a modal
+'   confirmation. The assertions go through the same two routines the callback
+'   calls, so the suite cannot keep passing after the callback stops agreeing
+'   with them. Verifying the rendered messages belongs to manual validation
+'
+' UPDATED
+'   2026-10-01
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim OwnerToken          As String       'Lease token planted as the foreign owner
+    Dim EventsBefore        As Boolean      'Excel event state before the suite
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    On Error GoTo SuiteFail
+    mTST_DP_CurrentSuite = "RibbonReset"
+    'Record the event state: DP_RepairRuntime deliberately leaves events on
+        EventsBefore = Excel.Application.EnableEvents
+    'Silence the modal so a refused repair stays drivable
+        M_Lease_Test_SilenceRefusalReport True
+
+'------------------------------------------------------------------------------
+' START OR REPAIR
+'------------------------------------------------------------------------------
+    'Only a free lease that this project does not own is started
+        TST_DP_AssertTrue "Reset starts when no provider holds the lease", _
+            M_Ribbon_ResetShouldStart(False, True)
+        TST_DP_AssertFalse "Reset repairs when this project owns the lease", _
+            M_Ribbon_ResetShouldStart(True, False)
+        TST_DP_AssertFalse "Reset never starts over another provider's lease", _
+            M_Ribbon_ResetShouldStart(False, False)
+        TST_DP_AssertFalse "Reset repairs in the owned-and-free edge state", _
+            M_Ribbon_ResetShouldStart(True, True)
+
+'------------------------------------------------------------------------------
+' SUCCESS IS READ FROM THE RECORD, NOT INFERRED
+'------------------------------------------------------------------------------
+        TST_DP_AssertTrue "A recorded successful repair is a success", _
+            M_Ribbon_LifecycleSucceeded("DP_RepairRuntime", "DP_RepairRuntime", True)
+        TST_DP_AssertFalse "A recorded unsuccessful repair is not a success", _
+            M_Ribbon_LifecycleSucceeded("DP_RepairRuntime", "DP_RepairRuntime", False)
+        TST_DP_AssertFalse "Another operation's success flag is not trusted", _
+            M_Ribbon_LifecycleSucceeded("DP_RepairRuntime", "DP_Start", True)
+        TST_DP_AssertTrue "A recorded successful start is a success", _
+            M_Ribbon_LifecycleSucceeded("DP_Start", "DP_Start", True)
+
+'------------------------------------------------------------------------------
+' A REFUSED REPAIR IS NOT A SUCCESS
+'------------------------------------------------------------------------------
+    'Plant a foreign lease: the state in which repair refuses without raising
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertTrue "Refusal setup acquires a free lease", _
+            M_Lease_TryAcquire()
+        OwnerToken = TST_DP_ReadLeaseOwnerForTest()
+        M_Lease_Test_ClearOwnerToken
+        TST_DP_AssertFalse "Reset under a foreign lease repairs rather than starts", _
+            M_Ribbon_ResetShouldStart(M_Lease_IsOwner(), _
+                (VBA.LenB(TST_DP_ReadLeaseOwnerForTest()) = 0))
+        DP_RepairRuntime
+        TST_DP_AssertFalse "A refused repair is not reported as a success", _
+            M_Ribbon_LifecycleSucceeded("DP_RepairRuntime", _
+                M_Lifecycle_Test_LastOperation(), M_Lifecycle_Test_LastSucceeded())
+        TST_DP_AssertEqualsString "A refused repair leaves the owner's lease", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' A COMPLETED REPAIR IS A SUCCESS
+'------------------------------------------------------------------------------
+    'Reclaim the lease, then repair as the owner
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertTrue "Completed-repair setup acquires a free lease", _
+            M_Lease_TryAcquire()
+        DP_RepairRuntime
+        TST_DP_AssertTrue "A completed repair is reported as a success", _
+            M_Ribbon_LifecycleSucceeded("DP_RepairRuntime", _
+                M_Lifecycle_Test_LastOperation(), M_Lifecycle_Test_LastSucceeded())
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Restore reporting so a genuine conflict is never hidden from the operator
+        M_Lease_Test_SilenceRefusalReport False
+    'Leave the run owning the lease, as it did before this suite
+        If Not M_Lease_IsOwner() Then
+            TST_DP_ForceClearLeaseForTest
+            M_Lease_TryAcquire
+        End If
+    'Put back the event state the suite found, for the suites that follow
+        Excel.Application.EnableEvents = EventsBefore
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "RibbonReset suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore reporting and lease state regardless
+        Resume SuiteExit
 
 End Sub
 
@@ -12458,6 +12954,10 @@ Private Function TST_DP_ContextMenuControlCount() As Long
 '==============================================================================
 '   Counts the DatePicker's own controls left on the Excel context menus.
 '
+'   Every bar named "Cell" or "List Range Popup" is counted, not only the first
+'   one a name lookup returns: Excel has a separate "Cell" bar for Page Layout
+'   view, and an entry left there is just as much a leak (#114).
+'
 '   The tag is duplicated here rather than read from M_DatePicker, where it is a
 '   Private constant. It is documented as a stable legacy identifier that cannot
 '   be renamed for backward compatibility, so duplicating it is safe in a way
@@ -12468,13 +12968,8 @@ Private Function TST_DP_ContextMenuControlCount() As Long
 ' DECLARE
 '------------------------------------------------------------------------------
     Const MENU_TAG          As String = "VBA_DATETIMEPICKER"    'Legacy context-menu tag
-    Const CELL_BAR          As String = "Cell"                  'Standard cell context menu
-    Const LIST_RANGE_BAR    As String = "List Range Popup"      'Table context menu
 
-    Dim BarNames            As Variant      'Command bars the DatePicker registers on
-    Dim BarIndex            As Long         'Current command bar index
     Dim Bar                 As Object       'Current command bar
-    Dim Ctl                 As Object       'Current command bar control
     Dim FoundCount          As Long         'DatePicker controls found
 
 '------------------------------------------------------------------------------
@@ -12484,26 +12979,16 @@ Private Function TST_DP_ContextMenuControlCount() As Long
         On Error Resume Next
     'Set safe default result
         TST_DP_ContextMenuControlCount = 0
-    'List the bars the DatePicker registers on
-        BarNames = VBA.Array(CELL_BAR, LIST_RANGE_BAR)
 
 '------------------------------------------------------------------------------
 ' COUNT TAGGED CONTROLS
 '------------------------------------------------------------------------------
-    'Walk each command bar the DatePicker touches
-        For BarIndex = LBound(BarNames) To UBound(BarNames)
-            'Resolve the command bar, skipping one that does not exist
-                Set Bar = Nothing
-                Set Bar = Excel.Application.CommandBars(BarNames(BarIndex))
-            'Count the controls carrying the DatePicker tag
-                If Not Bar Is Nothing Then
-                    For Each Ctl In Bar.Controls
-                        If VBA.StrComp(Ctl.Tag, MENU_TAG, vbTextCompare) = 0 Then
-                            FoundCount = FoundCount + 1
-                        End If
-                    Next Ctl
-                End If
-        Next BarIndex
+    'Walk every command bar the DatePicker registers on
+        For Each Bar In Excel.Application.CommandBars
+            If TST_DP_IsContextMenuBarForTest(Bar) Then
+                FoundCount = FoundCount + TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG)
+            End If
+        Next Bar
 
 '------------------------------------------------------------------------------
 ' RETURN COUNT
@@ -12511,10 +12996,64 @@ Private Function TST_DP_ContextMenuControlCount() As Long
     'Report what was found
         TST_DP_ContextMenuControlCount = FoundCount
     'Release object references
-        Set Ctl = Nothing
         Set Bar = Nothing
     'Clear any suppressed probe error
         Err.Clear
+
+End Function
+
+Private Function TST_DP_IsContextMenuBarForTest(ByVal Bar As Object) As Boolean
+
+'
+'==============================================================================
+'                     IS A DATEPICKER CONTEXT MENU BAR
+'==============================================================================
+'   Reports whether a command bar carries one of the names the DatePicker
+'   registers on. An unreadable name is not a match.
+'==============================================================================
+
+    Dim BarName             As String       'Name read from the bar
+
+    On Error Resume Next
+    TST_DP_IsContextMenuBarForTest = False
+    BarName = VBA.vbNullString
+    BarName = Bar.Name
+    If VBA.StrComp(BarName, "Cell", vbTextCompare) = 0 Then
+        TST_DP_IsContextMenuBarForTest = True
+    ElseIf VBA.StrComp(BarName, "List Range Popup", vbTextCompare) = 0 Then
+        TST_DP_IsContextMenuBarForTest = True
+    End If
+    Err.Clear
+
+End Function
+
+Private Function TST_DP_CountMenuTagOnBarForTest( _
+    ByVal Bar As Object, _
+    ByVal MenuTag As String) As Long
+
+'
+'==============================================================================
+'                       COUNT TAGGED CONTROLS ON ONE BAR
+'==============================================================================
+'   Counts the controls on one command bar that carry the given tag. An
+'   unreadable control is not counted.
+'==============================================================================
+
+    Dim Ctl                 As Object       'Current command bar control
+    Dim CtlTag              As String       'Tag read from the control
+    Dim FoundCount          As Long         'Tagged controls found
+
+    On Error Resume Next
+    For Each Ctl In Bar.Controls
+        CtlTag = VBA.vbNullString
+        CtlTag = VBA.CStr(Ctl.Tag)
+        If VBA.StrComp(CtlTag, MenuTag, vbTextCompare) = 0 Then
+            FoundCount = FoundCount + 1
+        End If
+    Next Ctl
+    TST_DP_CountMenuTagOnBarForTest = FoundCount
+    Set Ctl = Nothing
+    Err.Clear
 
 End Function
 
