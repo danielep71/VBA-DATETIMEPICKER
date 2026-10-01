@@ -97,11 +97,24 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
+No changes yet.
+
+---
+
+## [1.2.2] - 2026-10-01
+
+> 🩹 **Patch** · lifecycle and diagnostic stabilization release · no supported API break
+
+Certification of this release — exact commit, both-host regression, manual
+matrices and asset hashes — is recorded in
+[#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63). The annotated
+`v1.2.2` tag targets that certified commit.
+
 ### Added
 
 - Added a standardized installation and maintainer release documentation set with project-specific deployment, certification, provenance, recovery, and post-publication controls.
 
-- Added a root `VERSION` marker, now at `1.2.2` for the release candidate.
+- Added a root `VERSION` marker, now at `1.2.2`.
 
 - Grid-icon shapes now carry a durable ownership marker in `AlternativeText`.
   The shape name selects candidates and never proves ownership. Two markers are
@@ -1250,7 +1263,8 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.0...v1.1.1

@@ -10,7 +10,7 @@
 
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
-[![Source](https://img.shields.io/badge/Source-v1.2.2_Candidate-6f42c1?style=for-the-badge)](#release-status)
+[![Source](https://img.shields.io/badge/Source-v1.2.2-6f42c1?style=for-the-badge)](#release-status)
 [![Tests](https://img.shields.io/badge/Regression-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge)](LICENSE)
 
@@ -1171,7 +1171,7 @@ It does not blindly retry `Worksheets.Add`.
 State=PASS; Run=879; Passed=879; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the `v1.2.2` candidate. With the UI smoke suite the figure is `882`. The candidate runs 28 standard suites, 29 with UI smoke.
+This is the latest recorded **standard regression pack** for the `v1.2.2` source. With the UI smoke suite the figure is `882`. The source runs 28 standard suites, 29 with UI smoke.
 
 These are development-host figures, taken on the embedded macro-enabled workbook. Packaged `.xlam` evidence for `v1.2.2` is produced by certification ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)) and is not claimed here. `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
 
@@ -1277,9 +1277,9 @@ No third-party DLL, package manager, COM component or external runtime is requir
 
 ---
 
-## 🔒 Candidate contracts — `v1.2.2`
+## 🔒 Contracts added in `v1.2.2`
 
-These are the behavioral contracts the `v1.2.2` candidate adds. They are
+These are the behavioral contracts `v1.2.2` adds. They are
 development-host verified; packaged `.xlam` evidence belongs to
 [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
 
@@ -1507,6 +1507,26 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 
 # 🧭 Release status
 
+## v1.2.2 — lifecycle and diagnostic stabilization
+
+`v1.2.2` is a patch release. It makes startup, shutdown, repair and lease
+release transactional ([#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50)),
+caps diagnostic addresses per write operation
+([#51](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/51)), makes demo
+fast mode exception-safe ([#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52)),
+proves grid-icon ownership before touching a shape
+([#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53)), makes live-clock
+scheduling observable and recoverable
+([#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27)), and shows the
+demo sheet on the first Ribbon click
+([#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64)). No supported
+API name, signature or default changed; the one technically public signature
+change, `M_Picker_EnsureManager`, is recorded under Compatibility in
+[CHANGELOG.md](CHANGELOG.md).
+
+The certification record is
+[#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+
 ## v1.2.1 — integrity hotfix
 
 `v1.2.1` corrects defects in behavior `v1.2.0` already claimed. It contains no
@@ -1622,7 +1642,7 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Source status:** `v1.2.2` candidate, on the `v1.2.1` integrity-hotfix baseline. Latest published release remains `v1.2.1`; certification and tagging of the `v1.2.2` candidate are owned by [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) and have not yet been performed.
+**Source status:** `v1.2.2`, the lifecycle and diagnostic stabilization patch on the `v1.2.1` integrity-hotfix baseline. Its certification record — exact commit, both-host regression, manual matrices and asset hashes — is [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), and the annotated `v1.2.2` tag targets the certified commit. Until that tag exists, the latest published release is `v1.2.1`.
 
 **Reviewed executable implementation baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). The `v1.2.2` behavioral claims on this page were reviewed against that implementation commit; subsequent release-line commits through the documentation reconciliation do not change `src/`, `test/` or `demo/`. This SHA is retained as the implementation-review baseline, **not** as the final release identity. Under [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), the resulting `main` commit is certified and the annotated `v1.2.2` tag targets that exact certified commit.
 
