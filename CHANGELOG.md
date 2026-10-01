@@ -133,17 +133,6 @@ Use only the categories needed by a release.
 
 ### Changed
 
-- **`M_Picker_EnsureManager` is parameterless again.** The optional
-  `ByRef EventsDisabledByCaller As Boolean` output parameter added in `1.1.1`
-  is removed, so the routine is once more an Excel macro entry point reachable
-  from Alt+F8 and assigned controls. Behavior is unchanged: it still preserves
-  the caller's `Application.EnableEvents` state, but no longer reports it.
-  A VBA caller that passed the argument no longer compiles; read
-  `Not Application.EnableEvents` before the call instead. The routine is an
-  advanced maintenance helper rather than supported API, and its exposure is
-  classified under
-  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
-
 - Standardized the pull-request review contract around exact-candidate evidence, compatibility, risk and recovery, security and provenance, and project-specific validation gates.
 
 - Standardized changelog governance and added an explicit Unreleased staging
@@ -256,7 +245,9 @@ Use only the categories needed by a release.
   [#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5). It was filed
   under *Verified — no action required*, but was closed as completed with
   targeted wiki notices. The `1.1.1` entry now lists it with the fixed findings,
-  attributes the notices to it, and carries a dated correction note.
+  attributes the notices to it, and carries a dated correction note. Two counts
+  in the same entry were also corrected: the `ApplicationState` suite has eleven
+  assertions, not nine, and the wiki had 23 files, not 21.
 
 - Corrected the `1.2.1` description of
   [#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47) coverage.
@@ -264,6 +255,27 @@ Use only the categories needed by a release.
   is verified by source inspection, not by a second injected fault. The
   published `1.2.1` entry describing injected coverage of both is superseded by
   this note rather than rewritten.
+
+### Compatibility
+
+- **`M_Picker_EnsureManager` is parameterless again.** The optional
+  `ByRef EventsDisabledByCaller As Boolean` output parameter added in `1.1.1`
+  is removed, so the routine is once more an Excel macro entry point reachable
+  from Alt+F8 and assigned controls. Behavior is unchanged: it still preserves
+  the caller's `Application.EnableEvents` state, but no longer reports it.
+  A VBA caller that passed the argument no longer compiles; read
+  `Not Application.EnableEvents` before the call instead. The routine is an
+  advanced maintenance helper rather than supported API, and its exposure is
+  classified under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+
+- No other technically public signature changed since `1.2.1`. Public
+  additions are `M_Timer_EnsureHealthy` (see Added), the
+  `M_DemoSheet_ResolveShowOnToggle` decision helper, and internal test seams
+  (`M_Lifecycle_Test_*`, `M_Timer_Test_*`, `DEMO_FastMode_Test_ArmFault`,
+  `DEMO_FastMode_ResolveFailure`). These are not supported API and may change
+  without notice; their classification is
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
 
 ---
 
@@ -992,11 +1004,12 @@ omission.
 
 - Added `TST_DP_RunSuite_ApplicationState` to the regression harness, wired into
   both `TST_DP_RunAllInternal` and the `TST_DP_RunSuiteSafe` dispatcher so it
-  runs unconditionally rather than behind the UI-smoke flag. Nine assertions:
+  runs unconditionally rather than behind the UI-smoke flag. Eleven assertions:
   bootstrap, `DP_Start`, `DP_Show` and `DP_Preload` each preserve a disabled
   event state; `EventsDisabledByCaller` reports it; the manager still hooks and
-  `Is_Hooked` stays `True` while events are suppressed; write-back restores both
-  the disabled and the enabled case; and `DP_RepairRuntime` still force-enables.
+  `Is_Hooked` stays `True` while events are suppressed; write-back writes the
+  target cell with events disabled and restores both the disabled and the
+  enabled case; and `DP_RepairRuntime` still force-enables.
 
 - Added a **Known limitations** section to `README.md` covering the two P1
   defects that ship open in this release, and the operating conditions under
@@ -1058,7 +1071,7 @@ omission.
   names, reference no BMP payload, call the current startup procedures including
   the `v1.1.0` additions `DP_Preload` and `DP_Hide`, document
   `Application.OnTime` rather than `SetTimer`, and match the three callbacks in
-  `customUI14.xml`. The wiki is 21 files, not the eight reported, and
+  `customUI14.xml`. The wiki is 23 files, not the eight reported, and
   `UPDATE_NOTES` records it as updated *for* `v1.1.0`. The defects that did
   exist were the `EnableEvents` description and the file-path drift above, so
   the proposed archive of the whole wiki was withdrawn.
