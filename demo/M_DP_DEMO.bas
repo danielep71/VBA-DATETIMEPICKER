@@ -73,7 +73,7 @@ Option Explicit
 
     '-------------------------------SHEET--------------------------------------
     Private Const DEMO_SHEET_NAME               As String = "DATE PICKER DEMO"  'Demo worksheet name
-    Private Const DEMO_TITLE                    As String = "DATETIME PICKER"   'Title band caption
+    Private Const DEMO_TITLE                    As String = "Date / Time Picker" 'Title band caption (#88)
     Private Const DEMO_SUBTITLE                 As String = "Demo"              'Subtitle band caption
 
     '-------------------------------LAYOUT-------------------------------------

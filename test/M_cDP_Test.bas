@@ -5300,6 +5300,7 @@ Private Sub TST_DP_RunSuite_ContextMenuCoverage()
     Dim CoveredOnce         As Long         'Bars carrying exactly one entry after registration
     Dim CoveredAgain        As Long         'Bars carrying exactly one entry after re-registration
     Dim CleanAfterRemove    As Long         'Bars carrying no entry after removal
+    Dim CaptionMatches      As Long         'Bars whose entry shows the canonical caption
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -5326,6 +5327,9 @@ Private Sub TST_DP_RunSuite_ContextMenuCoverage()
                 End If
                 If TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG) = 1 Then
                     CoveredOnce = CoveredOnce + 1
+                End If
+                If TST_DP_MenuCaptionOnBarForTest(Bar, MENU_TAG) = DP_MSGBOX_TITLE Then
+                    CaptionMatches = CaptionMatches + 1
                 End If
             End If
         Next Bar
@@ -5362,6 +5366,9 @@ Private Sub TST_DP_RunSuite_ContextMenuCoverage()
     'Every supported bar carries exactly one entry, not only the first by name
         TST_DP_AssertEqualsLong "Every Cell / List Range Popup bar carries one entry", _
             TargetBarCount, CoveredOnce
+    'Every entry shows the canonical caption, the same as the message boxes (#88)
+        TST_DP_AssertEqualsLong "Every right-click entry shows the canonical caption", _
+            TargetBarCount, CaptionMatches
     'Re-registration is idempotent on every bar
         TST_DP_AssertEqualsLong "Re-registration adds no duplicate on any bar", _
             TargetBarCount, CoveredAgain
@@ -9104,6 +9111,10 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '------------------------------------------------------------------------------
     'Load the picker form without showing it
         DP_Preload
+    'The runtime title is the canonical caption, and the window must still be
+    'found by it, because native-window lookup goes through the caption (#88)
+        TST_DP_AssertEqualsString "Picker form caption is the canonical caption", _
+            DP_MSGBOX_TITLE, UF_DatePicker.Caption
     'Resolve the native window the transaction will operate on
         FormHandle = M_Window_GetUserFormHwnd(UF_DatePicker)
     'Assert the precondition. A missing handle is a setup failure, never a pass
@@ -13023,6 +13034,36 @@ Private Function TST_DP_IsContextMenuBarForTest(ByVal Bar As Object) As Boolean
     ElseIf VBA.StrComp(BarName, "List Range Popup", vbTextCompare) = 0 Then
         TST_DP_IsContextMenuBarForTest = True
     End If
+    Err.Clear
+
+End Function
+
+Private Function TST_DP_MenuCaptionOnBarForTest( _
+    ByVal Bar As Object, _
+    ByVal MenuTag As String) As String
+
+'
+'==============================================================================
+'                     READ THE TAGGED CONTROL'S CAPTION
+'==============================================================================
+'   Returns the caption of the first control on one command bar that carries
+'   the given tag, or an empty string when there is none or it cannot be read.
+'==============================================================================
+
+    Dim Ctl                 As Object       'Current command bar control
+    Dim CtlTag              As String       'Tag read from the control
+
+    On Error Resume Next
+    TST_DP_MenuCaptionOnBarForTest = VBA.vbNullString
+    For Each Ctl In Bar.Controls
+        CtlTag = VBA.vbNullString
+        CtlTag = VBA.CStr(Ctl.Tag)
+        If VBA.StrComp(CtlTag, MenuTag, vbTextCompare) = 0 Then
+            TST_DP_MenuCaptionOnBarForTest = VBA.CStr(Ctl.Caption)
+            Exit For
+        End If
+    Next Ctl
+    Set Ctl = Nothing
     Err.Clear
 
 End Function

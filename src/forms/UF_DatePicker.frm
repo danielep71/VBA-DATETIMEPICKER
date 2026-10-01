@@ -1,6 +1,6 @@
 VERSION 5.00
 Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} UF_DatePicker 
-   Caption         =   "DATETIME PICKER"
+   Caption         =   "Date / Time Picker"
    ClientHeight    =   5655
    ClientLeft      =   120
    ClientTop       =   465
@@ -147,7 +147,7 @@ Option Explicit
 '------------------------------------------------------------------------------
 
     '--------------------------------FORM--------------------------------------
-    Private Const DP_FORM_CAPTION                       As String = "DATETIME PICKER"    'UserForm caption
+    Private Const DP_FORM_CAPTION                       As String = "Date / Time Picker" 'UserForm caption; matches DP_MSGBOX_TITLE (#88)
     Private Const DP_FORM_WIDTH                         As Single = 223                  'Borderless UserForm width
     Private Const DP_FORM_HEIGHT                        As Single = 269                  'Normal borderless UserForm height
     Private Const DP_FORM_HEIGHT_COMPACT                As Single = 210                  'Compact borderless UserForm height

@@ -167,9 +167,23 @@ Use only the categories needed by a release.
   of the operation it ran instead of inferring success from a normal return
   ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)).
 
+- The component now shows one name everywhere: **Date / Time Picker**. The
+  Ribbon group (`DateTime Picker`), the right-click entry (`Date Picker`), the
+  picker window title (`DATETIME PICKER`) and the demo sheet's title band now
+  match the message boxes, README and Wiki ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). The regression pack asserts
+  the runtime window title and every right-click entry's caption against
+  `DP_MSGBOX_TITLE`, and still resolves the picker's native window by its new
+  title.
+
 ### Compatibility
 
 - No supported API name, signature or default changed.
+- Display captions only ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). Code that looked for the picker window by
+  its old title `DATETIME PICKER` must use `Date / Time Picker`. Identifiers
+  are unchanged: `VBA_DATETIMEPICKER` (settings and context-menu tag), the
+  provider-lease names, Ribbon control ids and callbacks, and the demo
+  worksheet name `DATE PICKER DEMO`. A demo sheet built by an earlier version
+  keeps its old title band until it is rebuilt.
 - New technically public routines `M_Ribbon_ResetShouldStart` and
   `M_Ribbon_LifecycleSucceeded` exist only for the regression harness; they are
   not supported API. The harness gains the `ContextMenuCoverage`,

@@ -234,7 +234,7 @@ Option Explicit
     Private Const DP_KEYBOARD_SHORTCUT_KEY         As String = "^+d"                     'Ctrl + Shift + D
 
     Private Const DP_CONTEXT_MENU_TAG              As String = "VBA_DATETIMEPICKER"      'Legacy context-menu tag
-    Private Const DP_CONTEXT_MENU_CAPTION          As String = "Date Picker"             'Context-menu caption
+    Private Const DP_CONTEXT_MENU_CAPTION          As String = "Date / Time Picker"      'Context-menu caption; matches DP_MSGBOX_TITLE (#88)
     Private Const DP_CONTEXT_MENU_FACEID           As Long = 1992                        'Context-menu icon FaceId
     Private Const DP_CONTEXT_MENU_BEFORE           As Long = 1                           'Context-menu insertion position
 

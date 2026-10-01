@@ -3,7 +3,7 @@
     <tabs>
       <tab idMso="TabHome">
         <group id="grpDateTimePicker"
-               label="DateTime Picker">
+               label="Date / Time Picker">
           <splitButton id="spbDateTimePicker" size="large">
             <button id="btnShowPicker"
                     label="Show Picker"
