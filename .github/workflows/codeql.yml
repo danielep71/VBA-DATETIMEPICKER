@@ -1,0 +1,118 @@
+name: CodeQL security analysis
+run-name: CodeQL — ${{ github.ref_name }} @ ${{ github.sha }}
+
+# Private runs require confirmed eligibility and ENABLE_PRIVATE_CODEQL=true.
+# This analyzes maintained Python and JavaScript source; it does not execute
+# Excel or certify a release candidate.
+
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+    branches:
+      - main
+      - "release/**"
+  schedule:
+    - cron: "17 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eligibility:
+    name: Check CodeQL eligibility
+    if: github.event.repository.private == false || vars.ENABLE_PRIVATE_CODEQL == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Record eligible analysis
+        run: echo 'CodeQL is enabled for this repository visibility and eligibility policy.'
+
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    needs: eligibility
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - javascript-typescript
+
+    steps:
+      - name: Check out the exact SHA under analysis
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Analyze maintained source
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: "/language:${{ matrix.language }}"
+
+
+  analyze-pr:
+    name: Analyze PR ${{ matrix.language }} (read-only)
+    needs: eligibility
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - python
+          - javascript-typescript
+
+    steps:
+      - name: Check out the pull-request merge commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Analyze pull-request source without privileged publication
+        id: analyze
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: "/language:${{ matrix.language }}-pr"
+          upload: never
+          upload-database: false
+          output: codeql-pr-results
+
+      - name: Retain pull-request CodeQL SARIF
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-pr-${{ matrix.language }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: codeql-pr-results
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9

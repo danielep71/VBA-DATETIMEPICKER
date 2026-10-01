@@ -13,3 +13,7 @@ updates:
     labels:
       - "ci"
       - "tests"
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
