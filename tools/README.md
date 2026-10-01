@@ -43,6 +43,7 @@ are `DATETIMEPICKER.vX.Y.Z.xlam` and `DATETIMEPICKER-demo-vX.Y.Z.xlsm`.
 On a clean checkout of the candidate, run the static command in CI mode and:
 
 ```sh
+git fetch origin main --tags
 python tools/check.py --ci
 python tools/check_release.py --evidence test-results/release-evidence.json \
   --assets-dir release-assets --static-report test-results/static-checks.json
@@ -57,7 +58,8 @@ without executing candidate code. It makes no repository changes. If that
 artifact has expired, use the local commands with retained evidence; the hosted
 workflow fails rather than substituting another commit's report.
 
-The validator rejects stale candidate IDs, missing hosts, failed compile,
+The validator requires the candidate to be reachable from fetched `origin/main`
+and records the main SHA used for that check. It rejects stale candidate IDs, missing hosts, failed compile,
 incomplete/failed regressions, cleanup failures, changed bytes and unaccepted
 manual gaps. `NOT RUN` needs a named `accepted_by` and a description; output is
 `pass_with_limitations`, with the gaps retained individually. A reported `FAIL`

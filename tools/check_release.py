@@ -41,6 +41,10 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
     require(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha), "Full candidate SHA required")
     resolved = git_text(root, "rev-parse", "--verify", f"{sha}^{{commit}}", check=True).stdout.strip()
     require(resolved == sha, "Candidate must identify a commit")
+    main = git_text(root, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}", check=True).stdout.strip()
+    ancestry = git_text(root, "merge-base", "--is-ancestor", sha, main)
+    require(ancestry.returncode == 0,
+            "Candidate must be reachable from fetched origin/main; run git fetch origin main")
     version = git_text(root, "show", f"{sha}:VERSION", check=True).stdout.strip()
     require(re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version), "Invalid candidate VERSION")
     require(record.get("version") == version and record.get("tag") == f"v{version}", "Version/tag mismatch")
@@ -108,6 +112,7 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
                     f"{name}: gap has not been explicitly accepted")
             limitations.append({"check": name, "detail": item["detail"], "accepted_by": item["accepted_by"]})
     return {"schema_version": 1, "candidate_sha": sha, "tag": record["tag"],
+            "verified_main_sha": main,
             "status": "pass_with_limitations" if limitations else "pass",
             "accepted_limitations": limitations, "tag_verified": require_tag,
             "scope": "Record consistency and local hashes; Excel assertions are maintainer-supplied."}

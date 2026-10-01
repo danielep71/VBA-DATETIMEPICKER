@@ -52,6 +52,7 @@ class ReleaseTests(unittest.TestCase):
         self.git("add", ".")
         self.git("commit", "-qm", "fixture")
         self.sha = self.git("rev-parse", "HEAD").strip()
+        self.git("update-ref", "refs/remotes/origin/main", self.sha)
         self.git("tag", "-a", "v1.2.3", "-m", "fixture")
         self.record = {"schema_version": 1, "candidate_sha": self.sha,
                        "version": "1.2.3", "tag": "v1.2.3", "assets": [],
@@ -126,6 +127,17 @@ class ReleaseTests(unittest.TestCase):
         self.git("tag", "-d", "v1.2.3")
         self.git("tag", "v1.2.3")
         with self.assertRaisesRegex(ValueError, "Annotated"):
+            self.validate()
+
+    def test_unmerged_candidate_fails_even_when_tagged(self):
+        self.git("commit", "--allow-empty", "-qm", "unmerged candidate")
+        unmerged = self.git("rev-parse", "HEAD").strip()
+        self.git("tag", "-fa", "v1.2.3", "-m", "unmerged candidate")
+        self.record["candidate_sha"] = unmerged
+        self.static["candidate_sha"] = unmerged
+        for asset in self.record["assets"]:
+            asset["candidate_sha"] = unmerged
+        with self.assertRaisesRegex(ValueError, "reachable from fetched origin/main"):
             self.validate()
 
 
