@@ -121,9 +121,9 @@ Use only the categories needed by a release.
   certification evidence in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
   This documentation-only follow-up does not change the published tag or assets.
 
-- Recorded the closure of `v1.2.2` certification ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), 2026-10-01) in the
-  README release status and the `[1.2.2]` notes. Certification closed with
-  explicitly accepted deviations: the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. The wording that said this evidence
+- Recorded the administrative closure of the `v1.2.2` certification issue ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), 2026-10-01) in the
+  README release status and the `[1.2.2]` notes. Issue #63 was administratively closed with
+  explicitly accepted deviations; full certification remains incomplete: the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. The wording that said this evidence
   was still to be reconciled is replaced; the published tag and assets are
   unchanged.
 
@@ -139,8 +139,8 @@ Use only the categories needed by a release.
 publishes both assets, hashes and reported both-host regression results.
 Downloaded asset hashes match the published values. The earlier wording
 overstated completion. Neither publication nor matching hashes substitutes for
-the certification gates. **Certification closed 2026-10-01 (updated
-annotation):** by maintainer decision, with explicitly accepted deviations —
+the certification gates. **Certification issue administratively closed 2026-10-01 (updated
+annotation):** by maintainer decision, with explicitly accepted deviations. This is not a full certification under `RELEASING.md`; the following mandatory evidence remains incomplete —
 the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. See [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
 
 ### Added
@@ -244,9 +244,9 @@ the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/i
   `src/`, `test/` or `demo/`. This SHA is the implementation-review
   baseline, not the final release identity. **2026-10-01 correction:** the tag
   target is `4d5b0419154c48b580c504f69629ea64efefa6d1`; the empty executable
-  diff establishes review continuity only. Exact-release certification closed
+  diff establishes review continuity only. The exact-release certification issue was administratively closed
   in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) with explicitly accepted deviations; the manual matrices not run are
-  listed in the post-publication note above.
+  listed in the post-publication note above and full certification remains incomplete.
 
 - Reconciled the candidate documentation set against the executable source
   baseline above: `README.md`, `CHANGELOG.md`, `VERSION`, `dist/README.md`,
@@ -257,7 +257,7 @@ the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/i
   separately against repository documentation baseline
   `029d3d4a2fd33413009852b69c2602e03602a621`. Its page-level
   `Reviewed commit` records the behavior/documentation review point, not the
-  later #63 certified/tag-target SHA.
+  later #63 tag-target / release SHA.
 
 - Documented the real compile dependency of the current product: `M_DatePicker`
   reaches `DP_Demo_EnsureDemoSheet` in `demo/M_DP_DEMO.bas`, which in turn calls
