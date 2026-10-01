@@ -97,6 +97,13 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
+### Maintenance
+
+- Aligned core issue labels with the Excel VBA repository template, preserved
+  DateTimePicker labels, and added automatic label sync and drift detection.
+  Standardized traffic workflow permissions, runner and action pin; enabled
+  weekly GitHub Actions dependency updates.
+
 ### Documentation
 
 - Corrected the README add-in installation example to the published `v1.2.2`
