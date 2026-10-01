@@ -225,7 +225,7 @@ function localPlan(desiredLabels, liveLabels, { prune = true } = {}) {
 }
 
 function canonicalRows(stdout) {
-  const countMatch = stdout.match(/- Planned changes: \\*\\*(\\d+)\\*\\*/);
+  const countMatch = stdout.match(/- Planned changes: \*\*(\d+)\*\*/);
   if (!countMatch) throw new Error("Canonical plan summary has no planned-change count");
   const planMatch = stdout.match(/<!-- canonical-label-plan ([^ ]*) -->/);
   if (!planMatch) throw new Error("Canonical plan summary has no structured plan payload");
@@ -479,7 +479,7 @@ async function runSelfTest(manifestPath, policyPath) {
   const delimiterSummary = [
     "- Planned changes: **2**",
     `<!-- canonical-label-plan ${encodeURIComponent(JSON.stringify(delimiterRows))} -->`
-  ].join("\\n");
+  ].join("\n");
   assert.deepEqual(
     canonicalRows(delimiterSummary),
     { count: 2, rows: delimiterRows },
