@@ -133,17 +133,6 @@ Use only the categories needed by a release.
 
 ### Changed
 
-- **`M_Picker_EnsureManager` is parameterless again.** The optional
-  `ByRef EventsDisabledByCaller As Boolean` output parameter added in `1.1.1`
-  is removed, so the routine is once more an Excel macro entry point reachable
-  from Alt+F8 and assigned controls. Behavior is unchanged: it still preserves
-  the caller's `Application.EnableEvents` state, but no longer reports it.
-  A VBA caller that passed the argument no longer compiles; read
-  `Not Application.EnableEvents` before the call instead. The routine is an
-  advanced maintenance helper rather than supported API, and its exposure is
-  classified under
-  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
-
 - Standardized the pull-request review contract around exact-candidate evidence, compatibility, risk and recovery, security and provenance, and project-specific validation gates.
 
 - Standardized changelog governance and added an explicit Unreleased staging
@@ -264,6 +253,27 @@ Use only the categories needed by a release.
   is verified by source inspection, not by a second injected fault. The
   published `1.2.1` entry describing injected coverage of both is superseded by
   this note rather than rewritten.
+
+### Compatibility
+
+- **`M_Picker_EnsureManager` is parameterless again.** The optional
+  `ByRef EventsDisabledByCaller As Boolean` output parameter added in `1.1.1`
+  is removed, so the routine is once more an Excel macro entry point reachable
+  from Alt+F8 and assigned controls. Behavior is unchanged: it still preserves
+  the caller's `Application.EnableEvents` state, but no longer reports it.
+  A VBA caller that passed the argument no longer compiles; read
+  `Not Application.EnableEvents` before the call instead. The routine is an
+  advanced maintenance helper rather than supported API, and its exposure is
+  classified under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+
+- No other technically public signature changed since `1.2.1`. Public
+  additions are `M_Timer_EnsureHealthy` (see Added), the
+  `M_DemoSheet_ResolveShowOnToggle` decision helper, and internal test seams
+  (`M_Lifecycle_Test_*`, `M_Timer_Test_*`, `DEMO_FastMode_Test_ArmFault`,
+  `DEMO_FastMode_ResolveFailure`). These are not supported API and may change
+  without notice; their classification is
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
 
 ---
 
