@@ -97,7 +97,13 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
-No changes yet.
+### Documentation
+
+- Corrected the README add-in installation example to the published `v1.2.2`
+  filename and reconciled release status after PR #111. Distinguished verified
+  publication/hash facts from reported runtime results and the outstanding
+  certification evidence in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+  This documentation-only follow-up does not change the published tag or assets.
 
 ---
 
@@ -105,10 +111,14 @@ No changes yet.
 
 > 🩹 **Patch** · lifecycle and diagnostic stabilization release · no supported API break
 
-Certification of this release — exact commit, both-host regression, manual
-matrices and asset hashes — is recorded in
-[#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63). The annotated
-`v1.2.2` tag targets that certified commit.
+**2026-10-01 post-publication correction:** the annotated `v1.2.2` tag targets
+`4d5b0419154c48b580c504f69629ea64efefa6d1`, and the
+[GitHub Release](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2)
+publishes both assets, hashes and reported both-host regression results.
+Downloaded asset hashes match the published values. The earlier wording
+overstated completion: full certification evidence and mandatory manual matrices
+remain to be reconciled in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+Neither publication nor matching hashes substitutes for those gates.
 
 ### Added
 
@@ -209,10 +219,10 @@ matrices and asset hashes — is recorded in
   describes behavior present at that implementation commit. Subsequent
   release-line commits through the documentation reconciliation do not change
   `src/`, `test/` or `demo/`. This SHA is the implementation-review
-  baseline, not the final release identity: after the release line is integrated
-  to `main`, [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)
-  certifies the resulting `main` commit and the annotated `v1.2.2` tag targets
-  that exact certified commit.
+  baseline, not the final release identity. **2026-10-01 correction:** the tag
+  target is `4d5b0419154c48b580c504f69629ea64efefa6d1`; the empty executable
+  diff establishes review continuity only. The remaining exact-release
+  evidence is tracked in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
 
 - Reconciled the candidate documentation set against the executable source
   baseline above: `README.md`, `CHANGELOG.md`, `VERSION`, `dist/README.md`,

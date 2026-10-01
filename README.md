@@ -321,10 +321,10 @@ DP_Demo_CreateDemoSheet
 
 Download the add-in asset from
 [GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases). At
-`v1.2.1` it is:
+`v1.2.2` it is:
 
 ```text
-DATETIMEPICKER.v1.2.1.xlam
+DATETIMEPICKER.v1.2.2.xlam
 ```
 
 Take the exact name from the Release page and check its SHA-256 against the one
@@ -1173,7 +1173,7 @@ State=PASS; Run=879; Passed=879; Failed=0; CleanupFailures=0
 
 This is the latest recorded **standard regression pack** for the `v1.2.2` source. With the UI smoke suite the figure is `882`. The source runs 28 standard suites, 29 with UI smoke.
 
-These are development-host figures, taken on the embedded macro-enabled workbook. Packaged `.xlam` evidence for `v1.2.2` is produced by certification ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63)) and is not claimed here. `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
+These are historical development-host figures at `d99fefa`, taken on the embedded macro-enabled workbook. The [published v1.2.2 Release](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2) separately reports 879/882 PASS results for both generated hosts at `4d5b041`; those reported results do not complete the mandatory certification evidence tracked in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63). Historical development runs are not transferred to the release SHA. `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
 
 > [!IMPORTANT]
 > Tests manipulate real Excel state: worksheets, settings, application flags,
@@ -1524,7 +1524,7 @@ API name, signature or default changed; the one technically public signature
 change, `M_Picker_EnsureManager`, is recorded under Compatibility in
 [CHANGELOG.md](CHANGELOG.md).
 
-The certification record is
+The published results and remaining certification evidence are tracked in
 [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
 
 ## v1.2.1 — integrity hotfix
@@ -1642,9 +1642,9 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Source status:** `v1.2.2`, the lifecycle and diagnostic stabilization patch on the `v1.2.1` integrity-hotfix baseline. Its certification record — exact commit, both-host regression, manual matrices and asset hashes — is [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), and the annotated `v1.2.2` tag targets the certified commit. Until that tag exists, the latest published release is `v1.2.1`.
+**Published release:** [v1.2.2](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2), published on 2026-10-01. Its annotated tag targets [`4d5b0419154c48b580c504f69629ea64efefa6d1`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/4d5b0419154c48b580c504f69629ea64efefa6d1). Both downloaded asset hashes match the Release's SHA-256 values. The Release reports both-host regression results, but complete certification evidence and mandatory manual matrices remain to be reconciled in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63); publication and matching hashes do not establish completion of every gate.
 
-**Reviewed executable implementation baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). The `v1.2.2` behavioral claims on this page were reviewed against that implementation commit; subsequent release-line commits through the documentation reconciliation do not change `src/`, `test/` or `demo/`. This SHA is retained as the implementation-review baseline, **not** as the final release identity. Under [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), the resulting `main` commit is certified and the annotated `v1.2.2` tag targets that exact certified commit.
+**Reviewed executable implementation baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). The `v1.2.2` behavioral claims on this page were reviewed against that implementation commit; the endpoint comparison to the published tag has no `src/`, `test/` or `demo/` changes. This proves source-review continuity, not fresh package execution. This post-release documentation correction does not change the published tag or artifacts, or certify a later `main` SHA.
 
 The project is suitable for controlled Excel/VBA environments when the documented ownership, settings and application-wide shortcut boundaries are respected.
 
