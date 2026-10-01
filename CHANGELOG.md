@@ -112,6 +112,12 @@ Use only the categories needed by a release.
   certification evidence in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
   This documentation-only follow-up does not change the published tag or assets.
 
+- Recorded the closure of `v1.2.2` certification ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), 2026-10-01) in the
+  README release status and the `[1.2.2]` notes. Certification closed with
+  explicitly accepted deviations: the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. The wording that said this evidence
+  was still to be reconciled is replaced; the published tag and assets are
+  unchanged.
+
 ---
 
 ## [1.2.2] - 2026-10-01
@@ -123,9 +129,10 @@ Use only the categories needed by a release.
 [GitHub Release](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2)
 publishes both assets, hashes and reported both-host regression results.
 Downloaded asset hashes match the published values. The earlier wording
-overstated completion: full certification evidence and mandatory manual matrices
-remain to be reconciled in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
-Neither publication nor matching hashes substitutes for those gates.
+overstated completion. Neither publication nor matching hashes substitutes for
+the certification gates. **Certification closed 2026-10-01 (updated
+annotation):** by maintainer decision, with explicitly accepted deviations —
+the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. See [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
 
 ### Added
 
@@ -228,8 +235,9 @@ Neither publication nor matching hashes substitutes for those gates.
   `src/`, `test/` or `demo/`. This SHA is the implementation-review
   baseline, not the final release identity. **2026-10-01 correction:** the tag
   target is `4d5b0419154c48b580c504f69629ea64efefa6d1`; the empty executable
-  diff establishes review continuity only. The remaining exact-release
-  evidence is tracked in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
+  diff establishes review continuity only. Exact-release certification closed
+  in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) with explicitly accepted deviations; the manual matrices not run are
+  listed in the post-publication note above.
 
 - Reconciled the candidate documentation set against the executable source
   baseline above: `README.md`, `CHANGELOG.md`, `VERSION`, `dist/README.md`,
