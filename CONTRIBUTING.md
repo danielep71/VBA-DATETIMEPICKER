@@ -445,3 +445,9 @@ security matters, use the private channel in [SECURITY.md](SECURITY.md).
 
 > Make the contract explicit, keep the diff focused, and leave evidence another
 > person can reproduce.
+
+## Portable checks
+
+Before submitting changes, run `python tools/check.py` from the repository root.
+See [tools/README.md](tools/README.md) for requirements, report locations and
+release evidence commands. Static checks do not replace Excel regression runs.

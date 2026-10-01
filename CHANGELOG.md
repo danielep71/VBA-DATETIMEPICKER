@@ -99,6 +99,11 @@ Use only the categories needed by a release.
 
 ### Maintenance
 
+- Added portable source and release-evidence tooling adapted from the Excel VBA
+  template, with CI reports, workflow validation and CodeQL for the tooling.
+  One local command checks the repository; release records preserve accepted
+  manual limitations separately from passed tests.
+
 - Aligned core issue labels with the Excel VBA repository template, preserved
   DateTimePicker labels, and added automatic label sync and drift detection.
   Standardized traffic workflow permissions, runner and action pin; enabled
