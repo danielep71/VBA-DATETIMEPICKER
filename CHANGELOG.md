@@ -99,6 +99,10 @@ Use only the categories needed by a release.
 
 ### Maintenance
 
+- Fixed label drift checks for valid label names containing pipes or backticks
+  by comparing structured canonical plans instead of parsing Markdown reports
+  (PR #116 follow-up). Added clean, drift and failure regression fixtures.
+
 - Added portable source and release-evidence tooling adapted from the Excel VBA
   template, with CI reports, workflow validation and CodeQL for the tooling.
   One local command checks the repository; release records preserve accepted
