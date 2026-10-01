@@ -1,0 +1,80 @@
+name: Verify published release evidence
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full certified candidate SHA (must contain the validation tooling)
+        required: true
+        type: string
+      evidence_json:
+        description: Completed release-evidence.json contents, including both hosts and disclosed gaps
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Validate candidate input
+        env:
+          CANDIDATE: ${{ inputs.candidate_sha }}
+        shell: bash
+        run: '[[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Validate committed candidate source
+        run: python tools/check.py --ci
+      - name: Save evidence and resolve download identity
+        env:
+          EVIDENCE_JSON: ${{ inputs.evidence_json }}
+          CANDIDATE: ${{ inputs.candidate_sha }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          record = json.loads(os.environ["EVIDENCE_JSON"])
+          if record.get("candidate_sha") != os.environ["CANDIDATE"]:
+              raise SystemExit("Evidence candidate mismatch")
+          tag = record.get("tag", "")
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+              raise SystemExit("Invalid release tag")
+          Path(os.environ["RUNNER_TEMP"], "release-evidence.json").write_text(json.dumps(record))
+          with open(os.environ["GITHUB_ENV"], "a") as handle:
+              handle.write(f"RELEASE_TAG={tag}\n")
+          PY
+      - name: Download published packages (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "DATETIMEPICKER.${RELEASE_TAG}.xlam" \
+            --pattern "DATETIMEPICKER-demo-${RELEASE_TAG}.xlsm" \
+            --dir "$RUNNER_TEMP/release-assets"
+      - name: Verify evidence, annotated tag and downloaded hashes
+        shell: bash
+        run: |
+          python tools/check_release.py \
+            --evidence "$RUNNER_TEMP/release-evidence.json" \
+            --assets-dir "$RUNNER_TEMP/release-assets" \
+            --static-report test-results/static-checks.json --require-tag
+      - name: Retain verification reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-check-${{ inputs.candidate_sha }}
+          path: |
+            test-results/
+            ${{ runner.temp }}/release-evidence.json
+          if-no-files-found: error
+          retention-days: 30

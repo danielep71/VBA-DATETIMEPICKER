@@ -136,6 +136,20 @@ Move relevant entries from **Unreleased** into a dated `[MAJOR.MINOR.PATCH] - YY
 
 ## 5. Run static gates
 
+Run the local/CI tooling described in [tools/README.md](tools/README.md):
+
+```sh
+python tools/check.py --ci
+```
+
+Use one `release-evidence.json` for the candidate's package hashes, both-host
+Excel results and disclosed manual gaps. `tools/check_release.py --prepare`
+creates an untested record; validation never substitutes for Excel testing.
+See the tooling guide for the preparation, validation and published-package
+verification commands. This applies to future candidates containing the tools;
+closed v1.2.2 evidence is not reopened.
+
+
 - Validate exported VBA headers and file pairs.
 - Confirm the form `.frm`/`.frx` pair and Ribbon XML are complete.
 - Check 32-bit and 64-bit declarations and scan for credentials or generated noise.

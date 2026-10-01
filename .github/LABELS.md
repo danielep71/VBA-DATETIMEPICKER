@@ -28,5 +28,6 @@ node .github/scripts/labels-sync.mjs --policy .github/labels-policy.json --mode 
 ```
 
 `labels-live.json` is a downloaded GitHub labels API array, including all pages.
-Full-template build, release, wiki and portfolio workflows are not adopted:
-they depend on tooling and contracts that this repository does not implement.
+DateTimePicker source and release verification are documented in
+[tools/README.md](../tools/README.md). Full-template provisioning, wiki and
+portfolio workflows are not adopted.
