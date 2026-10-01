@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Full certified candidate SHA (must contain the validation tooling)
+        description: Full certified candidate SHA with a successful static-checks push run
         required: true
         type: string
       evidence_json:
@@ -12,6 +12,7 @@ on:
         type: string
 permissions:
   contents: read
+  actions: read
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -24,14 +25,37 @@ jobs:
         run: '[[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.candidate_sha }}
+          ref: main
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
-      - name: Validate committed candidate source
-        run: python tools/check.py --ci
+      - name: Retrieve exact-candidate static evidence without executing candidate code
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ inputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/static-checks.yml/runs" \
+            -f head_sha="$CANDIDATE" -f event=push -f status=success -f per_page=100 \
+            > "$RUNNER_TEMP/static-runs.json"
+          run_id="$(python - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          runs = json.loads(Path(os.environ["RUNNER_TEMP"], "static-runs.json").read_text())["workflow_runs"]
+          matches = [r for r in runs if r["head_sha"] == os.environ["CANDIDATE"]
+                     and r["event"] == "push" and r["conclusion"] == "success"
+                     and r["head_branch"] == "main"
+                     and r["path"] == ".github/workflows/static-checks.yml"]
+          if not matches:
+              raise SystemExit("No successful exact-candidate static workflow run")
+          print(int(matches[0]["id"]))
+          PYCODE
+          )"
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+            --name "static-checks-$CANDIDATE" --dir "$RUNNER_TEMP/static-evidence"
       - name: Save evidence and resolve download identity
         env:
           EVIDENCE_JSON: ${{ inputs.evidence_json }}
@@ -67,7 +91,7 @@ jobs:
           python tools/check_release.py \
             --evidence "$RUNNER_TEMP/release-evidence.json" \
             --assets-dir "$RUNNER_TEMP/release-assets" \
-            --static-report test-results/static-checks.json --require-tag
+            --static-report "$RUNNER_TEMP/static-evidence/static-checks.json" --require-tag
       - name: Retain verification reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,5 +100,6 @@ jobs:
           path: |
             test-results/
             ${{ runner.temp }}/release-evidence.json
+            ${{ runner.temp }}/static-evidence/static-checks.json
           if-no-files-found: error
           retention-days: 30

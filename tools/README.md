@@ -51,7 +51,11 @@ python tools/check_release.py --evidence test-results/release-evidence.json \
 After tagging, add `--require-tag` to verify the annotated tag and its target.
 After publication, the **Verify published release evidence** manual workflow
 accepts the candidate SHA and completed JSON, downloads the two published
-packages and validates their hashes. It makes no repository changes.
+packages and validates their hashes. It uses trusted `main` tooling and reads
+the successful exact-candidate static workflow artifact (30-day retention),
+without executing candidate code. It makes no repository changes. If that
+artifact has expired, use the local commands with retained evidence; the hosted
+workflow fails rather than substituting another commit's report.
 
 The validator rejects stale candidate IDs, missing hosts, failed compile,
 incomplete/failed regressions, cleanup failures, changed bytes and unaccepted
