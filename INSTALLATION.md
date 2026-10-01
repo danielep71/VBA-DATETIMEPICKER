@@ -77,7 +77,7 @@ required to compile or to test the project as it currently stands:
 
 | Source | Purpose |
 |---|---|
-| `src/ribbon/customUI14.xml` | Optional RibbonX package metadata; not a VBE module |
+| `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder |
 | `test/M_cDP_Test.bas` | Regression harness |
 | `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |

@@ -134,7 +134,7 @@ It is especially useful when:
 | Right-click | Cell and Table context-menu entry, in every worksheet view | Independently configurable |
 | In-grid icon | Contextual worksheet Shape | Independently configurable |
 | Keyboard | `Ctrl + Shift + D` | Registered only when explicitly enabled |
-| Ribbon | RibbonX callbacks | Optional `customUI14.xml` integration |
+| Ribbon | RibbonX callbacks | Optional `customUI.xml` integration |
 | Settings | Registry-backed | Legacy global scope or explicit deployment namespace |
 | Runtime ownership | One current-version provider | Second current-version provider is refused on every entry path, before shared registration |
 | WinAPI | Optional styling and positioning | 32-/64-bit aware; styling transaction is observable and recoverable |
@@ -171,12 +171,17 @@ demo/M_DEMO_BUILDER.bas
 The two `demo/` modules are currently required for `M_DatePicker` to compile;
 see [INSTALLATION.md](INSTALLATION.md) and [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86).
 
-If you use the Ribbon, also package the RibbonX part and the three custom images
-it references (`DP_GridIcon_64`, `reset`, `demo`), which the repository does not
-yet track ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)):
+If you use the Ribbon, also copy `src/ribbon/` into the package's `customUI/`
+folder unchanged: the RibbonX part, its relationship part and the three custom
+images it references ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). [RELEASING.md](RELEASING.md) lists the exact
+mapping:
 
 ```text
-src/ribbon/customUI14.xml
+src/ribbon/customUI.xml
+src/ribbon/_rels/customUI.xml.rels
+src/ribbon/images/DP_GridIcon_64.png
+src/ribbon/images/reset.png
+src/ribbon/images/demo.png
 ```
 
 Then compile:
@@ -886,7 +891,7 @@ Ribbon_Demo
 Ribbon layout belongs in:
 
 ```text
-src/ribbon/customUI14.xml
+src/ribbon/customUI.xml
 ```
 
 Callbacks should stay thin and delegate to the normal DatePicker API.
@@ -1002,7 +1007,7 @@ flowchart TD
 | `cDatePickerManager.cls` | Application-level Excel events, selection refresh, workbook/worksheet lifecycle orchestration |
 | `UF_DatePicker.frm/.frx` | Modeless picker UI, calendar rendering, settings overlay, keyboard interaction, footer actions |
 | `cDatePickerLabelHook.cls` | `WithEvents` routing for runtime-created MSForms labels |
-| `customUI14.xml` | Optional RibbonX layout |
+| `customUI.xml` | Optional RibbonX layout, with its relationship part and images |
 | `M_cDP_Test.bas` | Regression harness |
 | `M_DEMO_BUILDER.bas` / `M_DP_DEMO.bas` | Source-built demo workbook/worksheet |
 
@@ -1270,7 +1275,9 @@ VBA-DATETIMEPICKER/
 │  ├─ modules/
 │  │  └─ M_DatePicker.bas
 │  └─ ribbon/
-│     └─ customUI14.xml
+│     ├─ customUI.xml
+│     ├─ _rels/customUI.xml.rels
+│     └─ images/ (DP_GridIcon_64, reset, demo)
 ├─ test/
 │  └─ M_cDP_Test.bas
 ├─ CHANGELOG.md

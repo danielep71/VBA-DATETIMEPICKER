@@ -154,7 +154,7 @@ packaged result:
 | Check | Result |
 | --- | --- |
 | Expected Ribbon group/controls are present | <!-- PASS / FAIL / N/A --> |
-| `customUI14.xml` is present in the Office package when advertised | <!-- PASS / FAIL / N/A --> |
+| `customUI/customUI.xml` is present in the Office package when advertised | <!-- PASS / FAIL / N/A --> |
 | Required Ribbon relationships/package metadata resolve | <!-- PASS / FAIL / N/A --> |
 | Every intended custom Ribbon image renders | <!-- PASS / FAIL / N/A --> |
 | Each enabled Ribbon callback dispatches correctly | <!-- PASS / FAIL / N/A --> |
@@ -162,7 +162,7 @@ packaged result:
 Candidate-controlled Ribbon inputs used:
 
 ```text
-<!-- paths to customUI14.xml, relationships/mapping and custom image resources -->
+<!-- src/ribbon/customUI.xml, _rels/customUI.xml.rels, images/*.png -->
 ```
 
 If the harness is not present in the package, say so here and record how the
@@ -221,7 +221,7 @@ VBE/VBA source:
 <!-- .bas/.cls/.frm + required .frx -->
 
 Open XML/Ribbon source:
-<!-- customUI14.xml, relationship/mapping inputs, custom images/resources; N/A only if no Ribbon ships -->
+<!-- customUI.xml, _rels/customUI.xml.rels, images/*.png; N/A only if no Ribbon ships -->
 ```
 
 ```text

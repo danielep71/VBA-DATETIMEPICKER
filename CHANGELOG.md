@@ -175,9 +175,31 @@ Use only the categories needed by a release.
   `DP_MSGBOX_TITLE`, and still resolves the picker's native window by its new
   title.
 
+- The repository now holds the complete Ribbon source, recovered from the
+  published `v1.2.2` add-in ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). `src/ribbon/` mirrors the package's
+  `customUI/` folder: `customUI.xml`, `_rels/customUI.xml.rels` (image id to
+  file mapping) and `images/` with `DP_GridIcon_64.png`, `reset.png` and
+  `demo.png`. Before this, the repository tracked only an Office 2010
+  `customUI14.xml` that no release had shipped, and none of the images or the
+  mapping. `.gitattributes` checks the Ribbon parts out with CRLF, so a checkout
+  reproduces the shipped bytes; the relationship part is stored with LF in
+  Git's index, as the repository's text policy requires (this corrects the
+  "byte for byte" wording of the commit that added it).
+- New `.github/scripts/check-ribbon-resources.py` and the **Check Ribbon
+  resources** workflow fail a pull request or release push when the Ribbon XML
+  references a custom image with no tracked file or mapping, or when a part's
+  namespace does not match its file name. It fails on the `v1.2.2` tree and
+  passes now.
+
 ### Compatibility
 
 - No supported API name, signature or default changed.
+- `src/ribbon/customUI14.xml` (Office 2010 format) is replaced by
+  `src/ribbon/customUI.xml` (Office 2007 format, `2006/01`), the part every
+  release has actually shipped ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). Nothing the Ribbon uses needs the 2010
+  format. Build scripts or notes that copied `customUI14.xml` must copy
+  `src/ribbon/` into the package's `customUI/` folder instead; RELEASING.md
+  lists the mapping.
 - Display captions only ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). Code that looked for the picker window by
   its old title `DATETIME PICKER` must use `Date / Time Picker`. Identifiers
   are unchanged: `VBA_DATETIMEPICKER` (settings and context-menu tag), the

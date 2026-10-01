@@ -193,6 +193,16 @@ CITATION.cff    text eol=lf
 
 
 #------------------------------------------------------------------------------
+# RIBBONX PACKAGE PARTS
+#------------------------------------------------------------------------------
+# src/ribbon/ mirrors the customUI/ folder inside the Office package. Office
+# writes these parts with CRLF, so a checkout reproduces the shipped bytes.
+# Placed after the documentation rules so it overrides *.xml eol=lf.
+src/ribbon/*.xml        text eol=crlf
+src/ribbon/_rels/*.rels text eol=crlf
+
+
+#------------------------------------------------------------------------------
 # GITHUB LANGUAGE REPORTING
 #------------------------------------------------------------------------------
 # These directories contain project documentation visuals, not vendored code.
