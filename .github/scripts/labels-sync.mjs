@@ -397,6 +397,15 @@ function renderSummary({
     action,
     changes.filter(change => change.action === action).length
   ]));
+  const canonicalPlan = changes.map(change => ({
+    action: change.action,
+    name: change.name,
+    detail: change.action === "update"
+      ? change.fields.join(", ")
+      : change.action === "delete"
+        ? "outside selected manifest"
+        : "missing live label"
+  }));
   const lines = [
     "# Repository label synchronization",
     "",
@@ -409,7 +418,8 @@ function renderSummary({
     `- Domain overlays: **${domains.length > 0 ? domains.join(", ") : "none"}**`,
     `- Prune: **${manifest?.prune ? "enabled" : "disabled"}**`,
     `- Planned changes: **${changes.length}**`,
-    `- Create / update / delete: **${counts.create} / ${counts.update} / ${counts.delete}**`
+    `- Create / update / delete: **${counts.create} / ${counts.update} / ${counts.delete}**`,
+    `<!-- canonical-label-plan ${encodeURIComponent(JSON.stringify(canonicalPlan))} -->`
   ];
   if (verified !== null) lines.push(`- Post-run exact match: **${verified ? "yes" : "no"}**`);
   lines.push(
