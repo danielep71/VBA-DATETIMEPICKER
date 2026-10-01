@@ -9,11 +9,11 @@ excluded via `.gitignore`.
 
 To get the add-in, download the latest release asset from the
 [Releases page](https://github.com/danielep71/VBA-DATETIMEPICKER/releases). The
-demo workbook is published there too. At `v1.2.1` the assets are:
+demo workbook is published there too. At `v1.2.2` the assets are:
 
 ```text
-DATETIMEPICKER.v1.2.1.xlam
-DATETIMEPICKER-demo-v1.2.1.xlsm
+DATETIMEPICKER.v1.2.2.xlam
+DATETIMEPICKER-demo-v1.2.2.xlsm
 ```
 
 Take the exact names from the Release page rather than assuming them. Each
