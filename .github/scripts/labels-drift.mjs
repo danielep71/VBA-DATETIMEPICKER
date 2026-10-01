@@ -7,13 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
+import { planChanges, resolveDesired, resolvePolicySelection, validateManifest } from "./labels-sync.mjs";
 
 const execFileAsync = promisify(execFile);
 const TOOL_NAME = "Repository label drift";
 const API_VERSION = "2022-11-28";
 const DEFAULT_MANIFEST = ".github/labels.json";
 const DEFAULT_POLICY = ".github/repository-profile.json";
-const RECONCILER = ".github/scripts/labels-sync.mjs";
 const LABELS_PER_PAGE = 100;
 const MAX_LABEL_PAGES = 100;
 const MAX_RATE_LIMIT_RETRIES = 2;
@@ -152,41 +152,6 @@ async function listLiveLabels(repository, token) {
   throw new Error(`GitHub label pagination exceeded ${MAX_LABEL_PAGES} pages`);
 }
 
-async function runReconciler(arguments_) {
-  try {
-    const { stdout } = await execFileAsync(process.execPath, [RECONCILER, ...arguments_], {
-      encoding: "utf8",
-      env: { ...process.env, GITHUB_STEP_SUMMARY: "" },
-      maxBuffer: 1024 * 1024
-    });
-    return stdout;
-  } catch (error) {
-    const detail = String(error.stderr || error.stdout || error.message || error).trim();
-    throw new Error(`Canonical label reconciler rejected the contract: ${detail}`);
-  }
-}
-
-async function validateCanonicalContract(manifestPath, policyPath) {
-  await runReconciler([
-    "--manifest", manifestPath,
-    "--policy", policyPath,
-    "--mode", "validate"
-  ]);
-}
-
-function selectionFromValidatedPolicy(policy) {
-  return policy.mode === "template"
-    ? { profile: null, domains: [] }
-    : { profile: policy.profile, domains: [...policy.label_domains] };
-}
-
-function desiredFromValidatedContract(manifest, selection) {
-  const labels = [...manifest.core];
-  if (selection.profile !== null) labels.push(...manifest.overlays.profile[selection.profile]);
-  for (const domain of selection.domains) labels.push(...manifest.overlays.domain[domain]);
-  return labels.sort((left, right) => compareNames(left.name, right.name));
-}
-
 function localPlan(desiredLabels, liveLabels, { prune = true } = {}) {
   const desired = new Map(desiredLabels.map(label => [label.name.toLowerCase(), label]));
   const live = new Map(liveLabels.map(label => {
@@ -224,48 +189,11 @@ function localPlan(desiredLabels, liveLabels, { prune = true } = {}) {
   ));
 }
 
-function canonicalRows(stdout) {
-  const countMatch = stdout.match(/- Planned changes: \*\*(\d+)\*\*/);
-  if (!countMatch) throw new Error("Canonical plan summary has no planned-change count");
-  const rows = [];
-  for (const line of stdout.split("\n")) {
-    const match = line.match(/^\| (update|create|delete) \| `([^`]*)` \| ([^|]*) \|$/);
-    if (match) {
-      rows.push({ action: match[1], name: match[2], detail: match[3].trim() });
-    }
-  }
-  return { count: Number(countMatch[1]), rows };
-}
-
-function localRows(changes) {
-  return changes.map(change => ({
-    action: change.action,
-    name: change.name,
-    detail: change.action === "update"
-      ? change.fields.join(", ")
-      : change.action === "delete"
-        ? "outside selected manifest"
-        : "missing live label"
-  }));
-}
-
 async function verifyAgainstCanonicalPlan(manifestPath, policyPath, liveLabels, changes) {
-  const directory = await mkdtemp(join(tmpdir(), "label-drift-"));
-  const livePath = join(directory, "live.json");
-  try {
-    await writeFile(livePath, `${JSON.stringify(liveLabels, null, 2)}\n`, "utf8");
-    const stdout = await runReconciler([
-      "--manifest", manifestPath,
-      "--policy", policyPath,
-      "--mode", "plan",
-      "--live", livePath
-    ]);
-    const canonical = canonicalRows(stdout);
-    assert.equal(canonical.count, changes.length, "canonical/local difference counts disagree");
-    assert.deepEqual(canonical.rows, localRows(changes), "canonical/local change plans disagree");
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  const { manifest, desiredLabels } = await prepareContract(manifestPath, policyPath);
+  const canonical = planChanges(desiredLabels, liveLabels, { prune: manifest.prune });
+  // Compare full structured changes; Markdown is only a human-readable report.
+  assert.deepEqual(canonical, changes, "canonical/local change plans disagree");
 }
 
 function changeEvidence(change, observedByName) {
@@ -374,11 +302,9 @@ async function publishSummary(summary) {
 }
 
 async function prepareContract(manifestPath, policyPath) {
-  await validateCanonicalContract(manifestPath, policyPath);
-  const manifest = await loadJson(manifestPath);
-  const policy = await loadJson(policyPath);
-  const selection = selectionFromValidatedPolicy(policy);
-  const desiredLabels = desiredFromValidatedContract(manifest, selection);
+  const manifest = validateManifest(await loadJson(manifestPath));
+  const selection = resolvePolicySelection(await loadJson(policyPath), manifest);
+  const desiredLabels = resolveDesired(manifest, selection);
   return { manifest, selection, desiredLabels };
 }
 
@@ -387,6 +313,110 @@ async function checkedReport(parameters) {
   const changes = localPlan(report.desired, report.observed, { prune: report.prune });
   await verifyAgainstCanonicalPlan(report.manifest, report.policy, report.observed, changes);
   return report;
+}
+
+async function testDelimitedLabels() {
+  const directory = await mkdtemp(join(tmpdir(), "label-drift-fixtures-"));
+  const manifestPath = join(directory, "manifest.json");
+  const policyPath = join(directory, "policy.json");
+  const livePath = join(directory, "live.json");
+  const outputPath = join(directory, "report.json");
+  const summaryPath = join(directory, "report.md");
+  const runCli = async expectedCode => {
+    await rm(outputPath, { force: true });
+    await rm(summaryPath, { force: true });
+    let code = 0;
+    let stderr = "";
+    try {
+      await execFileAsync(process.execPath, [
+        ".github/scripts/labels-drift.mjs", "--manifest", manifestPath,
+        "--policy", policyPath, "--live", livePath,
+        "--output", outputPath, "--summary", summaryPath
+      ], { env: { ...process.env, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "" } });
+    } catch (error) {
+      code = error.code;
+      stderr = error.stderr;
+    }
+    assert.equal(code, expectedCode, stderr);
+    if (expectedCode === 2) {
+      await assert.rejects(readFile(outputPath), { code: "ENOENT" });
+      return stderr;
+    }
+    assert.equal(stderr, "");
+    const report = await loadJson(outputPath);
+    assert.equal(report.canonical_plan_verified, true);
+    assert.equal(await readFile(summaryPath, "utf8"), markdownReport(report));
+    return report;
+  };
+  try {
+    await writeFile(policyPath, JSON.stringify({ mode: "template", profile: null, label_domains: [] }));
+    for (const delimiter of ["|", "`", "`|\\"]) {
+      const desired = ["create", "update"].map(prefix => ({
+        name: `${prefix}${delimiter}label`, color: "123ABC", description: `Literal ${delimiter} description`
+      }));
+      const manifest = {
+        schema_version: 1, prune: true, core: desired,
+        overlays: { profile: { application: [], library: [], "ui-component": [] }, domain: {} }
+      };
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      await writeFile(livePath, JSON.stringify(desired));
+      const clean = await runCli(0);
+      assert.equal(clean.status, "pass");
+      assert.deepEqual(clean.differences, []);
+      assert.deepEqual(clean.desired, desired);
+
+      const live = [
+        { ...desired[1], name: desired[1].name.toUpperCase(), color: "000000", description: "changed" },
+        { name: `obsolete${delimiter}label`, color: "ABCDEF", description: "extra" }
+      ];
+      await writeFile(livePath, JSON.stringify(live));
+      const drift = await runCli(1);
+      assert.equal(drift.status, "drift");
+      assert.deepEqual(drift.differences.map(item => [item.action, item.name, item.fields]), [
+        ["update", desired[1].name, ["name", "color", "description"]],
+        ["create", desired[0].name, []],
+        ["delete", live[1].name, []]
+      ]);
+      assert.deepEqual(drift.desired, desired);
+      assert.deepEqual(drift, await runCli(1), "delimiter evidence must be deterministic");
+      assert.deepEqual(await loadJson(livePath), live, "CLI must not mutate live fixtures");
+
+      const changes = localPlan(desired, live);
+      await assert.rejects(
+        verifyAgainstCanonicalPlan(manifestPath, policyPath, live, changes.slice(1)),
+        /canonical\/local change plans disagree/
+      );
+      const wrongTarget = structuredClone(changes);
+      wrongTarget[0].target.description = "wrong target";
+      await assert.rejects(
+        verifyAgainstCanonicalPlan(manifestPath, policyPath, live, wrongTarget),
+        /canonical\/local change plans disagree/
+      );
+
+      manifest.prune = false;
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const noPrune = await runCli(1);
+      assert.deepEqual(noPrune.differences.map(item => item.action), ["update", "create"]);
+
+      // Delimiters remain legal, but invalid manifests must still fail closed.
+      manifest.core[0].color = "invalid";
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      assert.match(await runCli(2), /uppercase hexadecimal/);
+    }
+
+    // Even reconcile arguments and a token must not run the CLI on import.
+    const { stdout, stderr } = await execFileAsync(process.execPath, [
+      "--input-type=module", "--eval",
+      'process.argv = [process.execPath, "import-fixture.mjs", "--mode", "reconcile"]; '
+      + 'globalThis.fetch = () => { throw new Error("unexpected API call"); }; '
+      + 'await import("./.github/scripts/labels-sync.mjs");'
+    ], { env: { ...process.env, GITHUB_TOKEN: "fixture", GITHUB_STEP_SUMMARY: summaryPath } });
+    assert.equal(stdout, "", "import must not publish a CLI summary");
+    assert.equal(stderr, "");
+    await assert.rejects(readFile(summaryPath), { code: "ENOENT" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 async function runSelfTest(manifestPath, policyPath) {
@@ -461,8 +491,10 @@ async function runSelfTest(manifestPath, policyPath) {
   assert.match(markdownReport(driftFirst), /simulated out-of-band change/);
   assert.match(markdownReport(driftFirst), new RegExp(missing.name));
 
+  await testDelimitedLabels();
+
   process.stdout.write(
-    "SELF-TEST PASS: retry delays and deterministic no-drift and create/update/delete drift fixtures are read-only and match the canonical reconciler.\n"
+    "SELF-TEST PASS: delimiter CLI/negative/import fixtures, retry delays and deterministic no-drift and create/update/delete drift fixtures are read-only and match the canonical reconciler.\n"
   );
 }
 

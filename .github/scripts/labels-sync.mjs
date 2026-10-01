@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { appendFile, readFile } from "node:fs/promises";
 import process from "node:process";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const EXPECTED_SCHEMA_VERSION = 1;
 const DEFAULT_MANIFEST = ".github/labels.json";
@@ -647,21 +649,24 @@ async function main() {
   if (!verified) throw new Error(`Post-run verification found ${remaining.length} remaining difference(s)`);
 }
 
-main().catch(async error => {
-  const message = error instanceof Error ? error.message : String(error);
-  try {
-    await publishSummary(renderSummary({
-      mode: "failed",
-      manifest: null,
-      manifestPath: null,
-      policyPath: null,
-      desiredLabels: [],
-      profile: null,
-      domains: [],
-      error: message
-    }));
-  } finally {
-    process.stderr.write(`${message}\n`);
-    process.exitCode = 1;
-  }
-});
+// Importing the structured planning API must never execute the CLI or mutate labels.
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch(async error => {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await publishSummary(renderSummary({
+        mode: "failed",
+        manifest: null,
+        manifestPath: null,
+        policyPath: null,
+        desiredLabels: [],
+        profile: null,
+        domains: [],
+        error: message
+      }));
+    } finally {
+      process.stderr.write(`${message}\n`);
+      process.exitCode = 1;
+    }
+  });
+}
