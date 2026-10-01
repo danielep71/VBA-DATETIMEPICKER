@@ -133,6 +133,17 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- **`M_Picker_EnsureManager` is parameterless again.** The optional
+  `ByRef EventsDisabledByCaller As Boolean` output parameter added in `1.1.1`
+  is removed, so the routine is once more an Excel macro entry point reachable
+  from Alt+F8 and assigned controls. Behavior is unchanged: it still preserves
+  the caller's `Application.EnableEvents` state, but no longer reports it.
+  A VBA caller that passed the argument no longer compiles; read
+  `Not Application.EnableEvents` before the call instead. The routine is an
+  advanced maintenance helper rather than supported API, and its exposure is
+  classified under
+  [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25).
+
 - Standardized the pull-request review contract around exact-candidate evidence, compatibility, risk and recovery, security and provenance, and project-specific validation gates.
 
 - Standardized changelog governance and added an explicit Unreleased staging
@@ -240,6 +251,12 @@ Use only the categories needed by a release.
   describing capture of number, source and description and re-raising "the
   original" is too easily read as source preservation, and is superseded by this
   note rather than rewritten.
+
+- Corrected the `1.1.1` classification of
+  [#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5). It was filed
+  under *Verified — no action required*, but was closed as completed with
+  targeted wiki notices. The `1.1.1` entry now lists it with the fixed findings,
+  attributes the notices to it, and carries a dated correction note.
 
 - Corrected the `1.2.1` description of
   [#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47) coverage.
@@ -877,8 +894,9 @@ had quietly diverged; five WinAPI call sites reading an error slot through a
 path the language does not guarantee. Each one worked in the common case and
 failed in the case nobody had reached yet, and none of them announced anything.
 
-Two defects the assessment reported did **not** reproduce and were closed on
-evidence rather than remediation. Two more were found while fixing the ones that
+One defect the assessment reported did **not** reproduce and was closed on
+evidence rather than remediation. A second reproduced only in narrowed form and
+was remediated at that scope. Two more were found while fixing the ones that
 did.
 
 The two most serious findings — the table write-scope default and the absence of
@@ -894,14 +912,20 @@ omission.
 | [#2](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/2) | 🔴 `M_Picker_EnsureManager` re-enabled Excel events underneath the caller |
 | [#3](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/3) | 🟠 Two caption-based window lookups had diverged |
 | [#4](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/4) | 🟡 WinAPI error capture did not use `Err.LastDllError` |
+| [#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5) | 🔴 Wiki obsolescence claim narrowed on verification; the real `v1.1.1` deltas received targeted notices |
 | [#6](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/6) | 🟡 README named files that do not exist |
 | [#7](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/7) | 🟡 README claims exceeded what the release demonstrates |
 | [#8](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/8) | 🟠 Governance documents contradicted the tracked binary policy |
 | [#11](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/11) | 🟡 Traffic workflow used a movable action tag and an unscoped token |
 | [#1](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/1) | ✅ Did not reproduce — `.gitattributes` adoption was already complete |
-| [#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5) | ✅ Did not reproduce — the wiki was written for `v1.1.0`, not before it |
 
 🔴 P1 · 🟠 P2 · 🟡 P3 · ✅ verified, no action required.
+
+> **Correction (2026-10-01):** this entry originally filed
+> [#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5) under
+> *Verified — no action required*. #5 was closed as completed: its broad claim
+> did not reproduce, but it delivered the targeted wiki notices recorded under
+> Documentation. The classification was corrected; no shipped behavior changed.
 
 ---
 
@@ -1025,11 +1049,23 @@ omission.
   covering the `EnableEvents` change and the corrected file paths. A full
   rewrite against `v1.1.1` is deferred; until it lands, `README.md` and the
   tagged source are authoritative where they disagree.
-  ([#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17))
+  ([#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5); full rewrite
+  [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17))
+
+  The finding behind these notices was narrowed on verification. The report
+  described every page as documenting a superseded architecture, and named five
+  specific contradictions. None reproduced: the pages list the current component
+  names, reference no BMP payload, call the current startup procedures including
+  the `v1.1.0` additions `DP_Preload` and `DP_Hide`, document
+  `Application.OnTime` rather than `SetTimer`, and match the three callbacks in
+  `customUI14.xml`. The wiki is 21 files, not the eight reported, and
+  `UPDATE_NOTES` records it as updated *for* `v1.1.0`. The defects that did
+  exist were the `EnableEvents` description and the file-path drift above, so
+  the proposed archive of the whole wiki was withdrawn.
 
 ### ✅ Verified — no action required
 
-Two reported defects did not reproduce. Both are recorded rather than dropped: a
+Two reported claims did not reproduce. Both are recorded rather than dropped: a
 release that silently omits findings which turned out to be wrong is less
 trustworthy than one that says what was checked.
 
@@ -1040,19 +1076,6 @@ trustworthy than one that says what was checked.
   `UF_DatePicker.frx` resolves to `binary` / `merge: binary` and is excluded from
   normalization — which it must be, since a normalized `.frx` corrupts the form.
   ([#1](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/1))
-
-- **The wiki was written for `v1.1.0`, not before it.** The report described
-  every page as documenting a superseded architecture, and named five specific
-  contradictions. Four did not reproduce: the pages list the current component
-  names, reference no BMP payload, call the current startup procedures including
-  the `v1.1.0` additions `DP_Preload` and `DP_Hide`, and document
-  `Application.OnTime` rather than `SetTimer`. The fifth — Ribbon toggles absent
-  from the shipped XML — also did not reproduce; `customUI14.xml` exposes exactly
-  the three callbacks the wiki documents.
-
-  The wiki is 21 files, not the eight reported, and `UPDATE_NOTES` records it as
-  updated *for* `v1.1.0`.
-  ([#5](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/5))
 
 - **The governance documents referenced wiki pages that all exist.** The report
   listed `Public-API`, `Installation-and-Import`, `UserForm-UI-Layer`,
