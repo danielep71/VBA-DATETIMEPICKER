@@ -1,0 +1,77 @@
+name: Sync issue labels
+
+# Pull requests validate without write permission. Only a trusted push to main
+# or an explicit manual dispatch can reconcile the live repository taxonomy.
+# The script validates and self-tests before the first API mutation, then
+# verifies an exact post-run match.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "release/**"
+    paths:
+      - .github/labels.json
+      - .github/labels-policy.json
+      - .github/scripts/labels-sync.mjs
+      - .github/workflows/labels-sync.yml
+  push:
+    branches:
+      - main
+    paths:
+      - .github/labels.json
+      - .github/labels-policy.json
+      - .github/scripts/labels-sync.mjs
+      - .github/workflows/labels-sync.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labels-sync-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate label manifest
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the exact SHA under review
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Exercise validation, overlays, and reconciliation paths
+        run: node .github/scripts/labels-sync.mjs --policy .github/labels-policy.json --self-test
+
+      - name: Validate the canonical manifest
+        run: node .github/scripts/labels-sync.mjs --policy .github/labels-policy.json --mode validate
+
+  reconcile:
+    name: Reconcile live labels
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Check out the exact SHA to apply
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Exercise validation, overlays, and reconciliation paths
+        run: node .github/scripts/labels-sync.mjs --policy .github/labels-policy.json --self-test
+
+      - name: Reconcile and verify the versioned label selection
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/labels-sync.mjs --policy .github/labels-policy.json --mode reconcile --repository "${GITHUB_REPOSITORY}"
