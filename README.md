@@ -164,9 +164,16 @@ src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
 src/forms/UF_DatePicker.frm
 src/forms/UF_DatePicker.frx
+demo/M_DP_DEMO.bas
+demo/M_DEMO_BUILDER.bas
 ```
 
-If you use the Ribbon, also package:
+The two `demo/` modules are currently required for `M_DatePicker` to compile;
+see [INSTALLATION.md](INSTALLATION.md) and [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86).
+
+If you use the Ribbon, also package the RibbonX part and the three custom images
+it references (`DP_GridIcon_64`, `reset`, `demo`), which the repository does not
+yet track ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)):
 
 ```text
 src/ribbon/customUI14.xml
@@ -419,12 +426,12 @@ Public Type DP_WriteResult
     ColumnName              As String
     AreasCount              As Long
 
+    EventsDisabledByCaller  As Boolean
+
     TechnicalFailureOccurred    As Boolean
     TechnicalFailureStep        As String
     TechnicalFailureNumber      As Long
     TechnicalFailureDescription As String
-
-    EventsDisabledByCaller  As Boolean
 End Type
 ```
 
@@ -742,10 +749,10 @@ DP_ForceReleaseProviderLease
 ### Mixed-version boundary
 
 ```text
-v1.2.1 + v1.2.1
+v1.2.1 or later + v1.2.1 or later
     → second current-version provider refused on every entry path
 
-v1.2.1 + v1.2.0
+v1.2.1 or later + v1.2.0
     → v1.2.0 admits the lease only at DP_Start
     → not protected on any other entry path
 
@@ -1235,6 +1242,8 @@ VBA-DATETIMEPICKER/
 │  └─ M_DP_DEMO.bas
 ├─ dist/
 │  └─ README.md
+├─ docs/
+│  └─ RELEASE_CERTIFICATION_TEMPLATE.md
 ├─ images/
 ├─ src/
 │  ├─ classes/
@@ -1255,7 +1264,9 @@ VBA-DATETIMEPICKER/
 ├─ INSTALLATION.md
 ├─ LICENSE
 ├─ README.md
-└─ SECURITY.md
+├─ RELEASING.md
+├─ SECURITY.md
+└─ VERSION
 ```
 
 The repository intentionally keeps source reviewable. Generated demo binaries belong in Releases rather than as opaque versioned workbook changes.
@@ -1333,7 +1344,7 @@ succeeding, or the retained `LatestTime` passing.
 
 The bounded window means a tick that misses it is dropped rather than delayed,
 which ends the chain. Recovery is opportunistic, not a watchdog: the next
-DatePicker interaction reaches the health check through
+activation of the picker form reaches the health check through
 `M_Timer_EnsureHealthy(EntryPoint)`, the single health-only bridge, which
 replaces an expired registration exactly once and does nothing else — it never
 stops the timer, reapplies the clock mode or touches the form. A healthy
@@ -1395,7 +1406,7 @@ policy recorded under
 
 ### One current-version provider at a time
 
-`v1.2.1` deliberately supports:
+`v1.2.2` deliberately supports:
 
 ```text
 one active DatePicker provider per Excel process
@@ -1441,6 +1452,12 @@ Protected sheets can prevent the icon from appearing even when the target cell i
 
 The project is designed and documented for Excel desktop on Windows. Optional borderless styling and mouse/window helpers use Windows APIs.
 
+### Ribbon Reset can report success after a refused repair
+
+When the current copy does not own the provider lease, `DP_RepairRuntime` refuses
+and shows the refusal message, but `Ribbon_Reset` then also shows a success
+message. The fix is planned for `v1.2.3` ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)).
+
 ### Accessibility / DPI
 
 High-DPI, high-contrast and accessibility behavior should be validated in the target deployment environment; they are not yet treated as fully certified across all Office/display configurations. Tracked as [#29](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/29).
@@ -1451,7 +1468,7 @@ No CI runs the regression pack — the only workflow in the repository is reposi
 
 ### Certification environment
 
-`v1.2.1` certification ran on a developer workstation with other add-ins loaded in the same Excel process, not in a clean VM. Recorded rather than implied.
+`v1.2.1` certification and the `v1.2.2` release runs were performed on a developer workstation with other add-ins loaded in the same Excel process, not in a clean VM. The `v1.2.2` runs used Excel for Microsoft 365 Version 2608 (Build 16.0.20326.20072, 64-bit) on Windows 11 Enterprise 25H2 (build 26200.9457); no 32-bit run is recorded. Recorded rather than implied.
 
 ---
 
@@ -1473,20 +1490,18 @@ No CI runs the regression pack — the only workflow in the repository is reposi
 
 ## 📚 Documentation
 
-The project Wiki was rewritten and reviewed for `v1.2.0`, and amended in `v1.2.1` for the corrections under [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17).
+The project Wiki was rewritten and reviewed for `v1.2.0`, amended in `v1.2.1` for the corrections under [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17), and reconciled for `v1.2.2`.
 
-The pages corrected in `v1.2.1` are stamped:
-
-```text
-Applies to:      v1.2.1
-Reviewed commit: 7d55cc7
-```
-
-The remaining pages keep the `v1.2.0` review baseline, which is still accurate for them:
+Every page is stamped:
 
 ```text
-6435c9170f1707a6269f2e307d158a0faf0cae21
+Applies to:      v1.2.2
+Reviewed commit: 029d3d4
 ```
+
+That is the behavior/documentation review point
+([`029d3d4`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/029d3d4a2fd33413009852b69c2602e03602a621)),
+not the `v1.2.2` tag target.
 
 The Wiki covers installation, API, manager/events, settings, testing/demo guidance, WinAPI behavior, Ribbon integration and deployment details.
 

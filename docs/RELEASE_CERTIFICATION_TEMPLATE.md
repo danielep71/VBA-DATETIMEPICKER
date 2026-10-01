@@ -135,7 +135,7 @@ Suite topology:    <!-- ## standard / ## with UI smoke -->
 embedded results above.
 
 ```text
-Package filename:  <!-- exact name as it will be published -->
+Package filename:  <!-- exact name as it will be published; GitHub replaces spaces with dots on upload, so also record the local build name if it differs -->
 
 TST_DP_RunAll
 <!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
@@ -264,7 +264,7 @@ what was uploaded.
 | `git rev-parse vX.Y.Z^{commit}` matches the recorded tag target SHA | <!-- --> |
 | Release points at that tag | <!-- --> |
 | `VERSION` and the dated changelog section match the tag | <!-- --> |
-| Asset filenames match exactly what was hashed | <!-- --> |
+| Asset filenames match what was hashed (any GitHub space-to-dot rename recorded) | <!-- --> |
 | Each asset downloads, and its SHA-256 matches the published digest | <!-- --> |
 | Packaged artifact opens from the downloaded copy and passes its smoke test | <!-- --> |
 | Source archive contains expected VBA and Open XML/Ribbon source inputs | <!-- --> |

@@ -105,6 +105,32 @@ Use only the categories needed by a release.
   certification evidence in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
   This documentation-only follow-up does not change the published tag or assets.
 
+- Reconciled the repository documentation with the published `v1.2.2` state.
+  README: the Quick start lists the two `demo/` modules `M_DatePicker` needs to
+  compile ([#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86)) and the three custom Ribbon images the RibbonX part
+  references ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)); the `DP_WriteResult` field order matches the
+  source; the repository tree lists `docs/`, `RELEASING.md` and `VERSION`; the
+  Wiki stamps read `v1.2.2` / `029d3d4`; the open `Ribbon_Reset` limitation
+  ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)) is listed. INSTALLATION names the **DateTime Picker** Ribbon
+  group, quotes the real provider-refusal message and the Windows unblock
+  wording. SECURITY describes `main` as the latest release and `release/*` as
+  development code. The bug-report template lists the `TechnicalFailure*`
+  fields of `DP_WriteResult`. The certification template records GitHub's
+  space-to-dot asset rename. The `1.2.2` Validation note saying the
+  `src/` → `demo/` compile dependency "predates `v1.2.0`" is corrected: it was
+  introduced during the `v1.2.0` cycle and is absent at `v1.1.1`.
+
+### Changed
+
+- The release procedure and certification template now treat RibbonX as an
+  Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
+  relationships/package metadata and every custom image it references must come
+  from the candidate; a missing part or resource blocks the build; and the
+  packaged Ribbon's images and callbacks must be verified directly, because
+  **Debug → Compile VBAProject** cannot see Open XML parts
+  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). The repository does not yet track the three custom Ribbon
+  images; that remains [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
+
 ---
 
 ## [1.2.2] - 2026-10-01
@@ -237,8 +263,9 @@ Neither publication nor matching hashes substitutes for those gates.
 
 - Documented the real compile dependency of the current product: `M_DatePicker`
   reaches `DP_Demo_EnsureDemoSheet` in `demo/M_DP_DEMO.bas`, which in turn calls
-  `demo/M_DEMO_BUILDER.bas`, so `src/` does not compile on its own. This predates
-  `v1.2.0` and is recorded as current fact rather than intended architecture;
+  `demo/M_DEMO_BUILDER.bas`, so `src/` does not compile on its own. This was
+  introduced during the `v1.2.0` cycle (corrected 2026-10-01; it is absent at
+  `v1.1.1`) and is recorded as current fact rather than intended architecture;
   removing it is tracked as
   [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86) under
   [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24). The separate

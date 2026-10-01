@@ -16,8 +16,9 @@ DATETIMEPICKER.v1.2.2.xlam
 DATETIMEPICKER-demo-v1.2.2.xlsm
 ```
 
-Take the exact names from the Release page rather than assuming them. Each
-release lists a SHA-256 for its assets — verify it before enabling macros.
+Take the exact names from the Release page rather than assuming them. From
+`v1.2.0` onward each release lists a SHA-256 for its assets — verify it before
+enabling macros.
 
 Installing, enabling, validating and removing a published `.xlam` is described in
 [`../INSTALLATION.md`](../INSTALLATION.md).

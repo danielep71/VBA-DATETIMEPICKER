@@ -74,7 +74,7 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 
 ## ✅ Readiness review
 
-- `M_DatePicker`, both classes, and the UserForm pair match `INSTALLATION.md`.
+- `M_DatePicker`, both classes, the UserForm pair, and the two `demo/` modules they need to compile ([#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86)) match `INSTALLATION.md`.
 - Only one provider implementation is active per Excel process.
 - Every planned item is merged or explicitly deferred.
 - Compatibility and migration consequences are understood.
@@ -218,8 +218,8 @@ For each artifact:
 10. Record filename, size, and SHA-256.
 11. Never edit the artifact after hashing.
 
-The repository-side Ribbon resource completeness gap discovered during v1.2.2
-certification is tracked by
+The repository-side Ribbon resource completeness gap found during v1.2.2
+pre-certification review is tracked by
 [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90). Closing #90
 must make this procedure executable from a clean checkout; this guide must not
 encode private/local resource locations as a workaround.
