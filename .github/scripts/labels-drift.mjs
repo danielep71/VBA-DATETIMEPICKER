@@ -225,13 +225,24 @@ function localPlan(desiredLabels, liveLabels, { prune = true } = {}) {
 }
 
 function canonicalRows(stdout) {
-  const countMatch = stdout.match(/- Planned changes: \*\*(\d+)\*\*/);
+  const countMatch = stdout.match(/- Planned changes: \\*\\*(\\d+)\\*\\*/);
   if (!countMatch) throw new Error("Canonical plan summary has no planned-change count");
-  const rows = [];
-  for (const line of stdout.split("\n")) {
-    const match = line.match(/^\| (update|create|delete) \| `([^`]*)` \| ([^|]*) \|$/);
-    if (match) {
-      rows.push({ action: match[1], name: match[2], detail: match[3].trim() });
+  const planMatch = stdout.match(/<!-- canonical-label-plan ([^ ]*) -->/);
+  if (!planMatch) throw new Error("Canonical plan summary has no structured plan payload");
+
+  let rows;
+  try {
+    rows = JSON.parse(decodeURIComponent(planMatch[1]));
+  } catch (error) {
+    throw new Error(`Canonical plan payload is invalid: ${error.message}`);
+  }
+  if (!Array.isArray(rows)) throw new Error("Canonical plan payload must be an array");
+  for (const row of rows) {
+    if (!row || typeof row !== "object"
+        || !["update", "create", "delete"].includes(row.action)
+        || typeof row.name !== "string"
+        || typeof row.detail !== "string") {
+      throw new Error("Canonical plan payload contains an invalid row");
     }
   }
   return { count: Number(countMatch[1]), rows };
@@ -461,8 +472,22 @@ async function runSelfTest(manifestPath, policyPath) {
   assert.match(markdownReport(driftFirst), /simulated out-of-band change/);
   assert.match(markdownReport(driftFirst), new RegExp(missing.name));
 
+  const delimiterRows = [
+    { action: "update", name: "tick\`pipe|label", detail: "color, description" },
+    { action: "create", name: "pipe|only", detail: "missing live label" }
+  ];
+  const delimiterSummary = [
+    "- Planned changes: **2**",
+    `<!-- canonical-label-plan ${encodeURIComponent(JSON.stringify(delimiterRows))} -->`
+  ].join("\\n");
+  assert.deepEqual(
+    canonicalRows(delimiterSummary),
+    { count: 2, rows: delimiterRows },
+    "structured canonical plan must preserve backticks and pipes in label names"
+  );
+
   process.stdout.write(
-    "SELF-TEST PASS: retry delays and deterministic no-drift and create/update/delete drift fixtures are read-only and match the canonical reconciler.\n"
+    "SELF-TEST PASS: retry delays, delimiter-safe canonical-plan parsing, and deterministic no-drift and create/update/delete drift fixtures are read-only and match the canonical reconciler.\n"
   );
 }
 
