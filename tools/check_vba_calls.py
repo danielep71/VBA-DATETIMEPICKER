@@ -984,12 +984,32 @@ class Analyzer:
 
     def check_addressof(self, token: Tok, module: Module, proc: Proc | None, line: int) -> None:
         kind, entity = self.resolve_name(token.text, module, proc)
-        status = "resolved" if kind == "member" and entity[1].kind == "proc" else "unknown"
-        if kind == "external" and self.project.is_project_name(token.text):
-            self.report("VBA-CALL-030", module, proc, line, token.text, f"AddressOf target {token.text!r} is not declared.",
+        target = token.text
+        status = "unknown"
+        if kind == "self" or (kind == "member" and entity[1].kind == "proc"):
+            status = "resolved"
+        elif kind == "member":
+            status = "not-a-procedure"
+            self.report("VBA-CALL-030", module, proc, line, target,
+                        f"AddressOf target {target!r} is a {entity[1].kind} of {entity[0].name}, not a procedure.",
                         channel="AddressOf")
+        elif kind == "private":
+            status = "private"
+            self.report("VBA-CALL-003", module, proc, line, target,
+                        f"AddressOf target {target!r} is Private in {', '.join(m.name for m, _ in entity)}.",
+                        channel="AddressOf",
+                        candidates=[{"module": m.name, "path": m.path, "line": mem.line} for m, mem in entity])
+        elif kind == "ambiguous":
+            status = "ambiguous"
+            self.report("VBA-CALL-004", module, proc, line, target,
+                        f"AddressOf target {target!r} is public in {', '.join(m.name for m, _ in entity)}.",
+                        channel="AddressOf",
+                        candidates=[{"module": m.name, "path": m.path, "line": mem.line} for m, mem in entity])
+        elif kind == "external" and self.project.is_project_name(target):
             status = "missing"
-        self.entry_points.append({"channel": "AddressOf", "module": module.name, "line": line, "target": token.text, "status": status})
+            self.report("VBA-CALL-030", module, proc, line, target, f"AddressOf target {target!r} is not declared.",
+                        channel="AddressOf")
+        self.entry_points.append({"channel": "AddressOf", "module": module.name, "line": line, "target": target, "status": status})
 
     def statement(self, tokens: list[Tok], module: Module, proc: Proc, line: int, with_stack: list[Module | None]) -> None:
         receiver = with_stack[-1] if with_stack else None
@@ -1210,6 +1230,24 @@ def merge_environments(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(merged.values(), key=lambda f: (f["severity"], f.get("path") or "", f.get("line") or 0, f["code"]))
 
 
+def check_ribbon_callbacks(run: dict[str, Any], callbacks: list[str], ribbon: str) -> None:
+    """Resolve Ribbon callbacks in one environment's project; merge_environments combines the results."""
+    project = run["project"]
+    for callback in callbacks:
+        found = [m for m in project.standard_modules()
+                 if (member := m.members.get(callback.casefold())) is not None and member.kind == "proc"
+                 and member.visibility != "private"]
+        run["entry_points"].append({"channel": "Ribbon callback", "module": found[0].name if found else None,
+                                    "line": None, "target": callback, "status": "resolved" if found else "missing"})
+        if not found:
+            item = finding("VBA-CALL-030", None, None, None, callback,
+                           f"Ribbon callback {callback!r} is not a public procedure of a standard module.",
+                           path=ribbon, channel="Ribbon")
+            if not project.complete:
+                item.update(severity="unknown", resolution="coverage-incomplete")
+            run["findings"].append(item)
+
+
 def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: set[str] | None = None,
                     ribbon_files: dict[str, bytes] | None = None) -> dict[str, Any]:
     patterns = manifest.get("project_name_patterns", [])
@@ -1231,6 +1269,11 @@ def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: se
         missing = [p for p in config.get("modules", []) if p not in files]
         complete = not missing
         runs = [analyze_configuration(name, sources, patterns, macro_functions, env, complete) for env in ENVIRONMENTS]
+        ribbon = config.get("ribbon")
+        if ribbon and ribbon_files is not None and ribbon in ribbon_files:
+            callbacks = ribbon_callbacks(ribbon_files[ribbon])
+            for run in runs:
+                check_ribbon_callbacks(run, callbacks, ribbon)
         findings = merge_environments(runs)
         for path in missing:
             findings.append(finding("VBA-CALL-091", None, None, None, path, f"{path} is missing from configuration {name}.",
@@ -1240,20 +1283,6 @@ def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: se
                 if item["severity"] == "error":
                     item["severity"] = "warning"
                     item["resolution"] = "non-gating configuration" + (f" ({config['tracking']})" if config.get("tracking") else "")
-        ribbon = config.get("ribbon")
-        if ribbon and ribbon_files is not None and ribbon in ribbon_files:
-            project = runs[-1]["project"]
-            for callback in ribbon_callbacks(ribbon_files[ribbon]):
-                found = [m for m in project.standard_modules()
-                         if (member := m.members.get(callback.casefold())) is not None and member.kind == "proc"
-                         and member.visibility != "private"]
-                runs[-1]["entry_points"].append({"channel": "Ribbon callback", "module": found[0].name if found else None,
-                                                 "line": None, "target": callback,
-                                                 "status": "resolved" if found else "missing"})
-                if not found:
-                    findings.append(finding("VBA-CALL-030", None, None, None, callback,
-                                            f"Ribbon callback {callback!r} is not a public procedure of a standard module.",
-                                            path=ribbon, channel="Ribbon"))
         failures = [f for f in findings if f["severity"] == "failure"]
         last = runs[-1]
         results[name] = {

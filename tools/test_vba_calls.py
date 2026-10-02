@@ -210,6 +210,38 @@ class DynamicTests(unittest.TestCase):
         self.assertEqual(codes(report), ["VBA-CALL-030"])
 
 
+    def test_addressof_targets(self):
+        files = {"b.bas": mod("M_B", "Private Function DP_Proc(ByVal h As Long) As Long\nEnd Function\n"
+                                     "Public DP_Value As Long\n")}
+        good = analyze({**files, "a.bas": mod("M_A", "Private Function DP_Own(ByVal h As Long) As Long\nEnd Function\n"
+                                                      "Public Sub DP_Run()\n    x = AddressOf DP_Own\nEnd Sub\n")})
+        self.assertEqual(codes(good), [])
+        private = analyze({**files, "a.bas": mod("M_A", "Public Sub DP_Run()\n    x = AddressOf DP_Proc\nEnd Sub\n")})
+        self.assertEqual(codes(private), ["VBA-CALL-003"])
+        value = analyze({**files, "a.bas": mod("M_A", "Public Sub DP_Run()\n    x = AddressOf DP_Value\nEnd Sub\n")})
+        self.assertEqual(codes(value), ["VBA-CALL-030"])
+        missing = analyze({**files, "a.bas": mod("M_A", "Public Sub DP_Run()\n    x = AddressOf DP_Gone\nEnd Sub\n")})
+        self.assertEqual(codes(missing), ["VBA-CALL-030"])
+
+    def test_ribbon_callback_is_checked_in_every_environment(self):
+        report = analyze({"a.bas": mod("M_A", "#If Win64 Then\nPublic Sub DP_Only64()\nEnd Sub\n#End If\n"
+                                              "Public Sub DP_Always()\nEnd Sub\n")},
+                         ribbon=b'<customUI><button onAction="DP_Only64"/><button onAction="DP_Always"/></customUI>')
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(codes(report), [])
+        dependent = [f for f in report["configurations"]["fixture"]["findings"] if f["code"] == "VBA-CALL-030"]
+        self.assertEqual(len(dependent), 1)
+        self.assertEqual(dependent[0]["target"], "DP_Only64")
+        self.assertTrue(dependent[0]["configuration_dependent"])
+        self.assertEqual(sorted(dependent[0]["environments"]), ["vba6-win32", "vba7-win32"])
+
+    def test_ribbon_callback_in_non_gating_configuration_is_a_warning(self):
+        report = analyze({"a.bas": mod("M_A", "Public Sub DP_Run()\nEnd Sub\n")}, gating=False,
+                         ribbon=b'<customUI><button onAction="DP_Gone"/></customUI>')
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(codes(report, "warning"), ["VBA-CALL-030"])
+
+
 class ConfigurationTests(unittest.TestCase):
     def test_alternative_declarations_are_not_duplicates(self):
         report = analyze({"a.bas": mod("M_A", "#If VBA7 Then\nPublic Sub DP_X(ByVal p As LongPtr)\n#Else\n"
