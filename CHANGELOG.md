@@ -97,22 +97,17 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
----
-
-## [1.2.3] - 2026-10-02
-
-> 🩹 **Patch** · user-facing consistency and Ribbon source patch · no supported API break
-
-Release certification for the exact tagged commit is recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
-The date must match the tag date; change it here if certification lands later.
+> Planned for `v1.2.3` (user-facing consistency and Ribbon source patch), not
+> yet released. Work continues on `release/v1.2.3`; release certification will be
+> recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 ### Added
 
 - New `.github/scripts/check-ribbon-resources.py` and the **Check Ribbon
   resources** workflow fail a pull request or release push when the Ribbon XML
-  references a custom image with no tracked file or mapping, or when a part's
-  namespace does not match its file name. It fails on the `v1.2.2` tree and
-  passes now.
+  references a custom image with no mapping, when a mapping targets a file
+  outside `src/ribbon/` or one Git does not track, or when a part's namespace
+  does not match its file name. It fails on the `v1.2.2` tree and passes now.
 
 - Added portable source and release-evidence tooling adapted from the Excel VBA
   template, with CI reports, workflow validation and CodeQL for the tooling.
@@ -120,8 +115,6 @@ The date must match the tag date; change it here if certification lands later.
   manual limitations separately from passed tests.
 
 ### Changed
-
-- `VERSION` is `1.2.3`.
 
 - RELEASING §9 now writes the annotated tag message from a template: certified
   SHA, verbatim runner totals for both hosts, fixed issues, a mandatory
@@ -231,7 +224,7 @@ The date must match the tag date; change it here if certification lands later.
   window; right-click entry in Page Layout view; no message when closing a copy
   that never started; Reset when running and when never started. This is
   development evidence; release certification of the exact tagged commit and
-  both packaged hosts is recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+  both packaged hosts will be recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 ### Compatibility
 
@@ -263,7 +256,7 @@ The date must match the tag date; change it here if certification lands later.
 ### Known limitations
 
 - An add-in opened from Excel's **At startup, open all files in** folder may not
-  start its runtime ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113), moved to `v1.3.0`). Install through the Add-ins
+  start its runtime ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). Install through the Add-ins
   dialog, or start it with the Ribbon **Reset** command or `DP_Start`.
 
 - The `v1.2.2` manual matrices accepted as disclosed limitations in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) are
@@ -1440,8 +1433,7 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.3...HEAD
-[1.2.3]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...v1.2.3
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...HEAD
 [1.2.2]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0
