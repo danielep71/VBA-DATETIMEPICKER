@@ -187,6 +187,10 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- SECURITY now states that `main` can carry merged, unreleased work and that only
+  the latest tagged release is the supported source; it previously said `main`
+  always matches the latest tagged release.
+
 - Corrected the README add-in installation example to the published `v1.2.2`
   filename and reconciled release status after PR #111. Distinguished verified
   publication/hash facts from reported runtime results and the outstanding
