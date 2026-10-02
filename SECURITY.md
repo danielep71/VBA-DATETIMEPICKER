@@ -59,14 +59,16 @@ The component coordinates shared Excel resources but is not an access-control me
 |---|---|
 | **Latest tagged functional release** | ✅ Supported |
 | **Release candidate before publication** | ⚠️ Testing and best-effort remediation |
-| **main** | ✅ Matches the latest tagged release |
+| **main** | ⚠️ Latest release plus any merged, unreleased work; best effort until tagged |
 | **Unreleased `release/*` branches** | ⚠️ Development code; best effort |
 | **Older tagged releases** | ❌ Normally unsupported; upgrade first |
 | **Modified copies, unofficial forks, or mirrors** | ❌ Unsupported unless the issue reproduces in official supported source |
 
-Security fixes are developed on a `release/*` branch and reach **main** with the
-new tagged release that contains them. Older releases are not normally patched in place unless the maintainer
-states otherwise.
+Security fixes are developed on a `release/*` branch and are supported once they
+ship in a tagged release. **main** can carry merged work that is not yet released;
+the `[Unreleased]` section of `CHANGELOG.md` and the README status say when it
+does. Only the latest tagged release is the supported source. Older releases are
+not normally patched in place unless the maintainer states otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such
 as “latest” or “yesterday's main” are insufficient because branches change.

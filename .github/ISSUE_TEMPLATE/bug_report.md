@@ -77,7 +77,7 @@ main
 Identify the exact source you tested.
 
 ```text
-Release tag:         <e.g. v1.2.3 / N/A>
+Release tag:         <e.g. v1.2.2 / N/A>
 Commit SHA:          <full 40-character SHA if known>
 Branch:              <main / release/x.y.z / other / N/A>
 Source obtained from:<official repository / GitHub Release / other>
