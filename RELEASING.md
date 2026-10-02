@@ -282,16 +282,46 @@ SHA, package-test the rebuilt files, and re-hash them before tagging.
 
 Tag only the certified commit on `main`.
 
+The tag message is the release's permanent, offline record: it travels with every
+clone, while Release pages and issues can be edited later. Write it from the
+evidence record into a file outside the repository, using this template:
+
+```text
+vX.Y.Z - <short release title>
+
+Certified at <full 40-character SHA>.
+Embedded .xlsm: standard <passed>/<run>, UI smoke <passed>/<run>, Failed=0, CleanupFailures=0.
+Packaged .xlam: standard <passed>/<run>, UI smoke <passed>/<run>, Failed=0, CleanupFailures=0.
+Fixes #<n>, #<n>.
+Deviations: none.
+Evidence: #<certification issue>.
+```
+
+- Use the plain hyphen in the first line, as `v1.2.1` does.
+- Copy the totals verbatim from the runner summary lines; never round, infer or
+  reuse a previous release's figures.
+- `Deviations:` is mandatory. Write `none`, or list each gate that was not run
+  (for example `#50 manual matrix not run`). A deviation accepted after tagging
+  belongs in the certification issue and the changelog, because the tag cannot
+  be changed.
+- Keep the file free of credentials, local paths and machine names.
+
 ```bash
 git switch main
 git pull --ff-only
 git rev-parse HEAD
-git tag -a vX.Y.Z -m "VBA DateTimePicker X.Y.Z"
+git tag -a vX.Y.Z -F ../tag-message-vX.Y.Z.txt
 git show --no-patch --decorate vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-Before pushing, confirm the tag equals `VERSION`, targets the certified commit, and has a matching dated changelog section. Never delete and recreate a public tag to hide a mistake.
+Create the tag from the command line. Creating it from the GitHub Release form
+produces a lightweight tag with no message and no tagger.
+
+Before pushing, confirm the tag equals `VERSION`, targets the certified commit,
+is annotated (`git cat-file -t vX.Y.Z` prints `tag`), shows the intended message,
+and has a matching dated changelog section. Never delete and recreate a public
+tag to hide a mistake.
 
 <a id="evidence-record"></a>
 ## 🧾 Evidence record

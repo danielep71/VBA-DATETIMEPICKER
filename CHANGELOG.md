@@ -144,6 +144,11 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- RELEASING §9 now writes the annotated tag message from a template: certified
+  SHA, verbatim runner totals for both hosts, fixed issues, a mandatory
+  `Deviations:` line and the evidence issue. The previous one-line message left
+  the `v1.2.2` tag with a title only. It also records that the GitHub Release
+  form creates a lightweight tag.
 - The Ribbon **Reset** command starts the runtime with `DP_Start` when no
   provider holds the lease, instead of refusing a repair. A copy whose
   `Workbook_Open` did not start the runtime can now be recovered in one click.
