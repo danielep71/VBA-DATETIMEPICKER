@@ -47,6 +47,20 @@ jobs:
           args=(--ci)
           if [[ -n "$PR_BASE" ]]; then args+=(--base "$PR_BASE"); fi
           python tools/check.py "${args[@]}"
+      - name: Report VBA call resolution (advisory, non-blocking)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          python tools/check_vba_calls.py --root . \
+            --output test-results/check_vba_calls.json \
+            --summary test-results/check_vba_calls.md
+          status=$?
+          if [[ -f test-results/check_vba_calls.md ]]; then
+            cat test-results/check_vba_calls.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
       - name: Show summary
         if: always()
         shell: bash

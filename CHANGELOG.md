@@ -103,6 +103,16 @@ Use only the categories needed by a release.
 
 ### Added
 
+- Advisory project-wide VBA call checker, `tools/check_vba_calls.py`, with its
+  configuration manifest `tools/vba-projects.json` and fixtures
+  (`tools/test_vba_calls.py`). It resolves direct, module-qualified and typed
+  class calls, private access, ambiguity between standard modules, argument
+  counts and named arguments, property accessors and literal dynamic targets,
+  per VBA project configuration and conditional-compilation environment.
+  Unresolvable cases are reported as unknown. It is a diagnostic aid for the
+  module split (#24), not a release gate: `check.py` does not run it and the
+  static workflow reports it without blocking.
+
 - New `.github/scripts/check-ribbon-resources.py` and the **Check Ribbon
   resources** workflow fail a pull request or release push when the Ribbon XML
   references a custom image with no mapping, when a mapping targets a file

@@ -19,6 +19,66 @@ The static workflow also runs checksum-pinned actionlint. CodeQL analyzes the
 Python and JavaScript tooling, not VBA. PR analysis is read-only. None of these
 checks compiles VBA, executes Excel or proves 32-bit runtime compatibility.
 
+## Project-wide VBA call resolution (advisory)
+
+```sh
+python tools/check_vba_calls.py --root . --output test-results/check_vba_calls.json \
+  --summary test-results/check_vba_calls.md
+```
+
+A diagnostic check, **not a release gate**: `check.py` does not run it, and the
+static workflow runs it in a non-blocking step whose summary is added to the job
+page. Its fixtures (`test_vba_calls.py`) do run inside `tool-tests`. It exists to
+catch broken calls while the large modules are split (#24).
+
+**What is analyzed.** `tools/vba-projects.json` declares each real VBA project
+separately, never merged: `packaged-hosts` (both release packages),
+`embedded-minimum` (the smallest compilable import in INSTALLATION.md) and
+`production-core` (production source alone; non-gating, measuring the #86
+boundary). Every configuration is analyzed in each environment of
+`check_vba_conditionals.py`, so alternative `#If` declarations are never
+combined. A finding present in only some environments is reported as
+`configuration_dependent` and never as a definite defect.
+
+**What it checks**, for targets it can resolve with certainty:
+
+| Code | Finding |
+| --- | --- |
+| `VBA-CALL-001` | unqualified call to a project-named procedure that no module declares |
+| `VBA-CALL-002` | `Module.Member` or a typed class receiver naming an undeclared member |
+| `VBA-CALL-003` | Private member used from another module |
+| `VBA-CALL-004` | unqualified name public in two standard modules (VBA "Ambiguous name") |
+| `VBA-CALL-010`–`016` | too few/many arguments, omitted required, unknown, repeated or ParamArray named arguments, positional after named |
+| `VBA-CALL-017` | property use needing an accessor (Get/Let/Set) that is not declared |
+| `VBA-CALL-020` | conflicting declarations of one name in a module (Get/Let/Set of one property are one family, not a conflict) |
+| `VBA-CALL-030` / `031` | literal `Application.Run`, `OnTime`, `OnKey`, `OnAction`, `CallByName`, `AddressOf`, macro-name or Ribbon target that is missing / only Private |
+| `VBA-CALL-040` | advisory: same public name in more than one standard module |
+| `VBA-CALL-090` / `091` | analysis failure / incomplete coverage |
+
+Resolution follows VBA order: procedure locals and parameters, then the current
+module, then public members of standard modules (`Option Private Module` keeps
+them visible inside the project), then module names. An unresolved name is a
+defect only when it matches `project_name_patterns` in the manifest; anything
+else may be VBA, Excel, Office or MSForms and is counted as unknown.
+
+**Severities.** `error` is a definite defect in a gating configuration; `warning`
+is advisory or comes from a non-gating configuration; `unknown` could not be
+established; `failure` means the analysis itself is incomplete. The status is
+`fail` with any error, `incomplete` when a module failed to parse, a conditional
+is indeterminate or coverage is incomplete, and `pass` only otherwise. An empty
+list is never a clean verdict after a failure: call checks are skipped for that
+configuration and the status stays `incomplete`.
+
+**Deliberately unsupported**, counted as unknown: argument type compatibility;
+receivers typed `Object`, `Variant` or a library type; chains after a member
+whose type is not a project class; UserForm controls and built-in members;
+unused-procedure detection (callbacks and event handlers are classified as
+external entry points instead); callback and event signatures; document modules,
+which are not exported; and project `#Const` symbols.
+
+When a module is added, renamed or moved, update `tools/vba-projects.json` in the
+same change; an unlisted or missing module makes the report `incomplete`.
+
 ## Prepare and check one release record
 
 After building the two packages from the exact candidate, prepare one record:
