@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "description": "VBA project configurations analyzed by check_vba_calls.py. Each configuration is one VBA project that can exist in a real host; modules from different configurations are never combined.",
+  "project_name_patterns": [
+    "^M_",
+    "^TST_",
+    "^UF_",
+    "^DEMO_",
+    "^DP_",
+    "^Ribbon_"
+  ],
+  "macro_name_functions": [
+    "M_GetQualifiedMacroName"
+  ],
+  "untracked_components": "Document modules (ThisWorkbook, worksheet modules) live only inside the Office packages and are not exported. Their procedures are not globally callable, so they cannot satisfy an unqualified call; calls made from them are not analyzed.",
+  "configurations": {
+    "packaged-hosts": {
+      "description": "Components of both release packages: DATETIMEPICKER.vX.Y.Z.xlam and the demo .xlsm (production, demo builder and regression harness).",
+      "gating": true,
+      "modules": [
+        "src/modules/M_DatePicker.bas",
+        "src/classes/cDatePickerManager.cls",
+        "src/classes/cDatePickerLabelHook.cls",
+        "src/forms/UF_DatePicker.frm",
+        "demo/M_DP_DEMO.bas",
+        "demo/M_DEMO_BUILDER.bas",
+        "test/M_cDP_Test.bas"
+      ],
+      "ribbon": "src/ribbon/customUI.xml"
+    },
+    "embedded-minimum": {
+      "description": "Smallest compilable embedded import documented in INSTALLATION.md: production source plus both demo modules, without the regression harness.",
+      "gating": true,
+      "modules": [
+        "src/modules/M_DatePicker.bas",
+        "src/classes/cDatePickerManager.cls",
+        "src/classes/cDatePickerLabelHook.cls",
+        "src/forms/UF_DatePicker.frm",
+        "demo/M_DP_DEMO.bas",
+        "demo/M_DEMO_BUILDER.bas"
+      ]
+    },
+    "production-core": {
+      "description": "Production source alone. Documented as not compiling until #86 removes the dependency on demo modules; analyzed to measure that boundary, never gating.",
+      "gating": false,
+      "tracking": "#86",
+      "modules": [
+        "src/modules/M_DatePicker.bas",
+        "src/classes/cDatePickerManager.cls",
+        "src/classes/cDatePickerLabelHook.cls",
+        "src/forms/UF_DatePicker.frm"
+      ]
+    }
+  }
+}
