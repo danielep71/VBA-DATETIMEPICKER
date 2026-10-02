@@ -15,7 +15,8 @@ root, the check fails when:
   format, 2006/01; customUI14.xml is the Office 2010 format, 2009/07);
 - it references a custom image (image="...") with no image relationship of
   that Id in its _rels/<part>.rels file;
-- an image relationship points at a file that is not tracked;
+- an image relationship points outside the ribbon root, or at a file Git does
+  not track (an untracked local file would not reach a clean checkout);
 - the relationship file contains an image relationship nothing references.
 
 Built-in Office icons (imageMso="...") need no resource and are ignored.
@@ -27,6 +28,7 @@ Usage:
 
 import argparse
 import os
+import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -41,9 +43,26 @@ IMAGE_REL_TYPE = (
 )
 
 
-def check(root):
-    """Return a list of error strings for the ribbon source under root."""
+def tracked_files(root):
+    """Return the set of Git-tracked paths under root, relative to root."""
+    result = subprocess.run(
+        ["git", "-C", root, "ls-files", "-z", "--", "."],
+        capture_output=True, check=True)
+    return {os.path.normpath(p) for p in result.stdout.decode("utf-8").split("\0") if p}
+
+
+def check(root, tracked=None):
+    """Return a list of error strings for the ribbon source under root.
+
+    tracked is the set of Git-tracked paths relative to root; when omitted it is
+    read from Git, so only files a clean checkout would contain count.
+    """
     errors = []
+    if tracked is None:
+        try:
+            tracked = tracked_files(root)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            return [f"cannot list Git-tracked files under {root}: {exc}"]
     parts = [name for name in PART_NAMESPACES if os.path.isfile(os.path.join(root, name))]
     if not parts:
         return ["no Ribbon part (customUI.xml or customUI14.xml) under " + root]
@@ -96,8 +115,13 @@ def check(root):
                 )
 
         for image_id, target in sorted(targets.items()):
-            target_path = os.path.normpath(os.path.join(root, target))
-            if not os.path.isfile(target_path):
+            relative = os.path.normpath(target)
+            if os.path.isabs(target) or relative == ".." or relative.startswith(".." + os.sep):
+                errors.append(
+                    f"_rels/{part}.rels: Id=\"{image_id}\" targets {target}, "
+                    f"which is outside {root}"
+                )
+            elif relative not in tracked:
                 errors.append(
                     f"_rels/{part}.rels: Id=\"{image_id}\" targets {target}, "
                     f"which is not tracked under {root}"
@@ -141,6 +165,13 @@ def self_test():
     case("missing image file fails",
          lambda r: (valid(r), os.remove(os.path.join(r, "images", "icon.png"))),
          "not tracked")
+    case("untracked image file fails",
+         lambda r: (valid(r), _write(os.path.join(r, ".untracked"), "images/icon.png")),
+         "not tracked")
+    case("target outside the ribbon root fails",
+         lambda r: (valid(r), _write(os.path.join(r, "_rels", "customUI.xml.rels"),
+                    rels.replace('Target="images/icon.png"', 'Target="../../README.md"'))),
+         "outside")
     case("missing relationship file fails",
          lambda r: (valid(r), os.remove(os.path.join(r, "_rels", "customUI.xml.rels"))),
          "is missing")
@@ -158,7 +189,18 @@ def self_test():
     for name, build, expect in cases:
         with tempfile.TemporaryDirectory() as root:
             build(root)
-            errors = check(root)
+            # Every file written counts as tracked, except the image a case marks
+            # as untracked by writing its path into ".untracked"
+            tracked = set()
+            for folder, _, files in os.walk(root):
+                for filename in files:
+                    tracked.add(os.path.normpath(
+                        os.path.relpath(os.path.join(folder, filename), root)))
+            marker = os.path.join(root, ".untracked")
+            if os.path.isfile(marker):
+                with open(marker, encoding="utf-8") as handle:
+                    tracked.discard(os.path.normpath(handle.read().strip()))
+            errors = check(root, tracked)
         if expect is None:
             ok = not errors
         else:
