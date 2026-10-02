@@ -13,7 +13,7 @@ from check_vba_conditionals import strip_vba
 REQUIRED = {
     "src/modules/M_DatePicker.bas", "src/classes/cDatePickerManager.cls",
     "src/classes/cDatePickerLabelHook.cls", "src/forms/UF_DatePicker.frm",
-    "src/forms/UF_DatePicker.frx", "src/ribbon/customUI14.xml",
+    "src/forms/UF_DatePicker.frx", "src/ribbon/customUI.xml",
     "test/M_cDP_Test.bas", "demo/M_DEMO_BUILDER.bas", "demo/M_DP_DEMO.bas",
 }
 
@@ -70,7 +70,7 @@ def run_check(root: Path) -> dict:
                     findings.append(f"{path}: missing or unsafe form resource {filename}")
                 elif (root / companion).stat().st_size <= int(offset, 16):
                     findings.append(f"{path}: resource offset is outside {filename}")
-    ribbon = root / "src/ribbon/customUI14.xml"
+    ribbon = root / "src/ribbon/customUI.xml"
     if ribbon.is_file():
         try:
             for callback in ribbon_callbacks(ribbon.read_bytes()):

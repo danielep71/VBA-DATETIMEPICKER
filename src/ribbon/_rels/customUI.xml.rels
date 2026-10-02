@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="reset" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="images/reset.png"/><Relationship Id="demo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="images/demo.png"/><Relationship Id="DP_GridIcon_64" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="images/DP_GridIcon_64.png"/></Relationships>

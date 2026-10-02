@@ -59,15 +59,13 @@ The component coordinates shared Excel resources but is not an access-control me
 |---|---|
 | **Latest tagged functional release** | ✅ Supported |
 | **Release candidate before publication** | ⚠️ Testing and best-effort remediation |
-| **main** | ⚠️ Development code; best effort |
+| **main** | ✅ Matches the latest tagged release |
+| **Unreleased `release/*` branches** | ⚠️ Development code; best effort |
 | **Older tagged releases** | ❌ Normally unsupported; upgrade first |
 | **Modified copies, unofficial forks, or mirrors** | ❌ Unsupported unless the issue reproduces in official supported source |
 
-If the project has not yet published a functional release, development code is
-pre-release and no production version is security-supported.
-
-Security fixes normally land on **main** and are included in a new tagged
-release. Older releases are not normally patched in place unless the maintainer
+Security fixes are developed on a `release/*` branch and reach **main** with the
+new tagged release that contains them. Older releases are not normally patched in place unless the maintainer
 states otherwise.
 
 Reports must identify an exact release tag or full commit SHA. Descriptions such

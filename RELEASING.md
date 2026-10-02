@@ -9,7 +9,12 @@
 This maintainer guide turns a reviewed commit into a traceable VBA DateTimePicker release. Source identity, validation, packaging, provenance, and publication must describe the same candidate.
 
 > [!IMPORTANT]
-> The release candidate must preserve the documented import order and keep `UF_DatePicker.frm` together with its adjacent `UF_DatePicker.frx` companion.
+> The release candidate must preserve **both** classes of package source:
+> VBE/VBA inputs (including `UF_DatePicker.frm` with its adjacent
+> `UF_DatePicker.frx` companion) and Open XML package inputs. The Ribbon is not
+> created by VBE import or VBA compilation: `src/ribbon/customUI.xml`, its
+> relationship part and every custom image it references must be injected into
+> the Office package separately.
 
 ## 🧭 Release profile
 
@@ -69,12 +74,15 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 
 ## ✅ Readiness review
 
-- `M_DatePicker`, both classes, and the UserForm pair match `INSTALLATION.md`.
+- `M_DatePicker`, both classes, the UserForm pair, and the two `demo/` modules they need to compile ([#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86)) match `INSTALLATION.md`.
 - Only one provider implementation is active per Excel process.
 - Every planned item is merged or explicitly deferred.
 - Compatibility and migration consequences are understood.
 - Security-sensitive work has completed private handling where necessary.
-- The working tree and exported VBA sources are reproducible.
+- The working tree, exported VBA sources, and non-VBE package inputs are reproducible.
+- When the Ribbon is shipped, a clean checkout contains `src/ribbon/customUI.xml`
+  plus every relationship part and custom image required to package it, and
+  `.github/scripts/check-ribbon-resources.py` passes ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)).
 - Maintainers and required reviewers are available.
 
 Test both embedded-source and add-in consumption if both are advertised for the release.
@@ -151,7 +159,27 @@ closed v1.2.2 evidence is not reopened.
 
 
 - Validate exported VBA headers and file pairs.
-- Confirm the form `.frm`/`.frx` pair and Ribbon XML are complete.
+- Treat VBE/VBA source and Open XML package source as separate completeness gates:
+
+  ```text
+  VBE/VBA source
+    .bas / .cls / .frm + required .frx companions
+
+  Open XML package source (src/ribbon/ mirrors the package's customUI/ folder)
+    src/ribbon/customUI.xml               Office 2007 Ribbon format (2006/01)
+    src/ribbon/_rels/customUI.xml.rels    image id -> package file mapping
+    src/ribbon/images/*.png               every custom image the XML references
+  ```
+
+- When the Ribbon is shipped, run
+  `python3 .github/scripts/check-ribbon-resources.py`. It proves that every
+  custom `image` dependency has a tracked file and an explicit package mapping,
+  and that the part's namespace matches its file name. The **Check Ribbon
+  resources** workflow runs it on every pull request and release-branch push
+  that touches `src/ribbon/`. Missing Ribbon XML, relationships, or referenced
+  custom resources are a **blocking package-source failure**.
+- Do not treat **Debug → Compile VBAProject** as proof of Ribbon/package
+  completeness. VBE compilation cannot see Open XML Ribbon parts.
 - Check 32-bit and 64-bit declarations and scan for credentials or generated noise.
 
 Capture commands, tool versions, timestamps, and complete results. Rerun affected gates after any change.
@@ -188,14 +216,40 @@ Planned outputs:
 
 For each artifact:
 
-1. Start from a clean build location.
+1. Start from a clean checkout/build location.
 2. Use only candidate-controlled inputs.
-3. Preserve required form and resource companions.
-4. Compile before saving.
-5. Exclude developer-only tests unless the artifact promises them.
-6. Reopen and run the packaged smoke or regression test.
-7. Record filename, size, and SHA-256.
-8. Never edit the artifact after hashing.
+3. Import the required VBE/VBA source, preserving `.frm`/`.frx` companions.
+4. Inject required Open XML package parts separately. For the Ribbon, copy
+   `src/ribbon/` into the package's `customUI/` folder unchanged:
+
+   ```text
+   src/ribbon/customUI.xml                  -> customUI/customUI.xml
+   src/ribbon/_rels/customUI.xml.rels       -> customUI/_rels/customUI.xml.rels
+   src/ribbon/images/DP_GridIcon_64.png     -> customUI/images/DP_GridIcon_64.png
+   src/ribbon/images/reset.png              -> customUI/images/reset.png
+   src/ribbon/images/demo.png               -> customUI/images/demo.png
+   ```
+
+   The package's root relationship must use the Office 2007 extensibility type
+   (`http://schemas.microsoft.com/office/2006/relationships/ui/extensibility`)
+   for `customUI/customUI.xml`. Office RibbonX Editor does this when the part is
+   added as an "Office 2007 Custom UI Part".
+5. Fail the build if a required Ribbon part or referenced custom resource cannot
+   be resolved from the candidate-controlled inputs.
+6. Compile the VBA project before saving; remember that compilation validates
+   VBA, **not** Open XML package completeness.
+7. Exclude developer-only tests unless the artifact promises them.
+8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
+   group/controls are present, all intended custom images render, and each
+   enabled Ribbon action dispatches correctly.
+9. Run the packaged smoke or regression test.
+10. Record filename, size, and SHA-256.
+11. Never edit the artifact after hashing.
+
+The Ribbon source above was recovered from the published `v1.2.2` add-in
+([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). Before that, the repository tracked an Office 2010 `customUI14.xml`
+that no release had shipped, and none of the images or the relationship part.
+This guide must not encode private/local resource locations as a workaround.
 
 ```powershell
 Get-FileHash -Algorithm SHA256 .\dist\<artifact>
@@ -228,16 +282,46 @@ SHA, package-test the rebuilt files, and re-hash them before tagging.
 
 Tag only the certified commit on `main`.
 
+The tag message is the release's permanent, offline record: it travels with every
+clone, while Release pages and issues can be edited later. Write it from the
+evidence record into a file outside the repository, using this template:
+
+```text
+vX.Y.Z - <short release title>
+
+Certified at <full 40-character SHA>.
+Embedded .xlsm: standard <passed>/<run>, UI smoke <passed>/<run>, Failed=0, CleanupFailures=0.
+Packaged .xlam: standard <passed>/<run>, UI smoke <passed>/<run>, Failed=0, CleanupFailures=0.
+Fixes #<n>, #<n>.
+Deviations: none.
+Evidence: #<certification issue>.
+```
+
+- Use the plain hyphen in the first line, as `v1.2.1` does.
+- Copy the totals verbatim from the runner summary lines; never round, infer or
+  reuse a previous release's figures.
+- `Deviations:` is mandatory. Write `none`, or list each gate that was not run
+  (for example `#50 manual matrix not run`). A deviation accepted after tagging
+  belongs in the certification issue and the changelog, because the tag cannot
+  be changed.
+- Keep the file free of credentials, local paths and machine names.
+
 ```bash
 git switch main
 git pull --ff-only
 git rev-parse HEAD
-git tag -a vX.Y.Z -m "VBA DateTimePicker X.Y.Z"
+git tag -a vX.Y.Z -F ../tag-message-vX.Y.Z.txt
 git show --no-patch --decorate vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-Before pushing, confirm the tag equals `VERSION`, targets the certified commit, and has a matching dated changelog section. Never delete and recreate a public tag to hide a mistake.
+Create the tag from the command line. Creating it from the GitHub Release form
+produces a lightweight tag with no message and no tagger.
+
+Before pushing, confirm the tag equals `VERSION`, targets the certified commit,
+is annotated (`git cat-file -t vX.Y.Z` prints `tag`), shows the intended message,
+and has a matching dated changelog section. Never delete and recreate a public
+tag to hide a mistake.
 
 <a id="evidence-record"></a>
 ## 🧾 Evidence record
@@ -282,7 +366,8 @@ Upload the already-hashed artifacts. Do not rebuild between tagging and upload.
 | Assets download and hashes match | ☐ |
 | Installation links and examples work | ☐ |
 | Packaged artifact opens and passes its smoke test | ☐ |
-| Source archive contains expected release files | ☐ |
+| Packaged Ribbon is present; intended custom images render and callbacks dispatch | ☐ |
+| Source archive contains expected VBA **and Open XML/Ribbon resource inputs** | ☐ |
 | Default branch is ready for the next Unreleased cycle | ☐ |
 
 Do not announce broad availability until these checks pass.

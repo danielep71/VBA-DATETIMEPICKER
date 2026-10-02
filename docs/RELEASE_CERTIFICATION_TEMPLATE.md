@@ -97,6 +97,9 @@ Record what was redone in **Deviations**.
 | Encoding: source files are ASCII | <!-- PASS / FAIL --> |
 | Line endings match `.gitattributes` | <!-- PASS / FAIL --> |
 | No test-only or temporary instrumentation in the candidate | <!-- PASS / FAIL --> |
+| VBE/VBA source companions complete (`.frm` + required `.frx`) | <!-- PASS / FAIL --> |
+| Ribbon/Open XML package-input inventory complete | <!-- PASS / FAIL / N/A --> |
+| Every RibbonX custom image/resource resolves to tracked candidate source | <!-- PASS / FAIL / N/A --> |
 | Working tree clean at the reviewed SHA | <!-- PASS / FAIL --> |
 
 Commands run and their output:
@@ -132,7 +135,7 @@ Suite topology:    <!-- ## standard / ## with UI smoke -->
 embedded results above.
 
 ```text
-Package filename:  <!-- exact name as it will be published -->
+Package filename:  <!-- exact name as it will be published; GitHub replaces spaces with dots on upload, so also record the local build name if it differs -->
 
 TST_DP_RunAll
 <!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
@@ -141,6 +144,25 @@ TST_DP_RunAll_WithUISmoke
 <!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
 
 Suite topology:    <!-- ## standard / ## with UI smoke -->
+```
+
+### Packaged Ribbon / Open XML verification
+
+VBE compilation is not evidence that RibbonX was packaged. Record the actual
+packaged result:
+
+| Check | Result |
+| --- | --- |
+| Expected Ribbon group/controls are present | <!-- PASS / FAIL / N/A --> |
+| `customUI/customUI.xml` is present in the Office package when advertised | <!-- PASS / FAIL / N/A --> |
+| Required Ribbon relationships/package metadata resolve | <!-- PASS / FAIL / N/A --> |
+| Every intended custom Ribbon image renders | <!-- PASS / FAIL / N/A --> |
+| Each enabled Ribbon callback dispatches correctly | <!-- PASS / FAIL / N/A --> |
+
+Candidate-controlled Ribbon inputs used:
+
+```text
+<!-- src/ribbon/customUI.xml, _rels/customUI.xml.rels, images/*.png -->
 ```
 
 If the harness is not present in the package, say so here and record how the
@@ -170,6 +192,7 @@ Record what you exercised and what happened. "Worked" is not a result.
 | Formula preservation | <!-- --> |
 | Protected sheet / array-formula refusal | <!-- --> |
 | Each enabled entry path (keyboard, context menu, grid icon, Ribbon) | <!-- --> |
+| Packaged Ribbon visuals/resources (not merely callback execution) | <!-- --> |
 | Second-provider refusal | <!-- --> |
 | `DP_Stop` leaves no registration behind | <!-- --> |
 
@@ -190,6 +213,16 @@ or a real file:
 | Demo workbook | <!-- --> | <!-- --> | <!-- --> |
 
 Built from SHA: <!-- must equal the reviewed source SHA above -->
+
+Package-input inventory:
+
+```text
+VBE/VBA source:
+<!-- .bas/.cls/.frm + required .frx -->
+
+Open XML/Ribbon source:
+<!-- customUI.xml, _rels/customUI.xml.rels, images/*.png; N/A only if no Ribbon ships -->
+```
 
 ```text
 certutil -hashfile "<filename>" SHA256
@@ -231,10 +264,10 @@ what was uploaded.
 | `git rev-parse vX.Y.Z^{commit}` matches the recorded tag target SHA | <!-- --> |
 | Release points at that tag | <!-- --> |
 | `VERSION` and the dated changelog section match the tag | <!-- --> |
-| Asset filenames match exactly what was hashed | <!-- --> |
+| Asset filenames match what was hashed (any GitHub space-to-dot rename recorded) | <!-- --> |
 | Each asset downloads, and its SHA-256 matches the published digest | <!-- --> |
 | Packaged artifact opens from the downloaded copy and passes its smoke test | <!-- --> |
-| Source archive contains the expected release files | <!-- --> |
+| Source archive contains expected VBA and Open XML/Ribbon source inputs | <!-- --> |
 | Installation links and examples in the release notes resolve | <!-- --> |
 | Default branch is ready for the next Unreleased cycle | <!-- --> |
 

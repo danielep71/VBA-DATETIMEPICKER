@@ -77,7 +77,7 @@ required to compile or to test the project as it currently stands:
 
 | Source | Purpose |
 |---|---|
-| `src/ribbon/customUI14.xml` | Optional RibbonX package metadata; not a VBE module |
+| `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder |
 | `test/M_cDP_Test.bas` | Regression harness |
 | `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
@@ -103,8 +103,8 @@ required to compile or to test the project as it currently stands:
 > `tDEMOFastModeState`. The harness makes no reference to `M_DP_DEMO`.
 >
 > This is recorded as current fact, not as intended architecture. Production
-> source depending on demonstration source is a boundary problem: it predates
-> `v1.2.0` and is not introduced by any `v1.2.2` change. Decoupling the harness
+> source depending on demonstration source is a boundary problem: it was introduced in
+> `v1.2.0`, not by any `v1.2.2` change. Decoupling the harness
 > from the demo builder is tracked as
 > [#35](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/35); the
 > production-to-demo dependency is tracked as
@@ -173,7 +173,8 @@ from source you imported.
 ### Install and enable
 
 1. Right-click the downloaded file, open **Properties**, and unblock it if
-   Windows marked it as coming from the internet.
+   Windows marked it as having come from another computer (**General** tab,
+   **Unblock** checkbox).
 2. Copy it to your add-ins location, or to any trusted location your policy
    allows.
 3. In Excel choose **File → Options → Add-ins**, set **Manage** to
@@ -181,14 +182,22 @@ from source you imported.
 4. Use **Browse…** to select the file, then tick it in the list and confirm.
 5. Close and reopen Excel so the add-in loads in a clean session.
 
+> [!NOTE]
+> Install through the Add-ins dialog rather than opening the `.xlam` from an
+> **At startup, open all files in** folder. Loaded that way, the runtime has been
+> observed not to start, so the right-click entry is missing
+> ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). If it
+> happens, the Ribbon **Reset** command or `DP_Start` starts it.
+
 ### Validate
 
-1. Confirm the DatePicker Ribbon group appears.
+1. Confirm the **Date / Time Picker** Ribbon group appears.
 2. Select a date-formatted cell and confirm the entry path you expect —
    grid icon, context menu, keyboard shortcut or Ribbon — opens the picker.
 3. Write a date back and confirm the target cell receives it.
-4. Confirm no second provider is already active: a refusal message naming the
-   provider lease means another copy owns the Excel process.
+4. Confirm no second provider is already active: a refusal message saying that
+   another copy of the DatePicker is already active, or that its ownership could
+   not be verified, means another copy owns the Excel process.
 
 Do not assume anything about what a published `.xlam` contains. Package contents
 are release-specific and are determined by that release's build and

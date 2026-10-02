@@ -77,7 +77,7 @@ main
 Identify the exact source you tested.
 
 ```text
-Release tag:         <e.g. v1.2.1 / N/A>
+Release tag:         <e.g. v1.2.3 / N/A>
 Commit SHA:          <full 40-character SHA if known>
 Branch:              <main / release/x.y.z / other / N/A>
 Source obtained from:<official repository / GitHub Release / other>
@@ -448,6 +448,10 @@ TableName:
 ColumnName:
 AreasCount:
 EventsDisabledByCaller:
+TechnicalFailureOccurred:
+TechnicalFailureStep:
+TechnicalFailureNumber:
+TechnicalFailureDescription:
 ```
 
 Completed result should conceptually balance as:
@@ -460,7 +464,9 @@ AttemptedCount =
     FailedCount
 ```
 
-If it does not, paste the exact values rather than correcting them manually.
+A result with `TechnicalFailureOccurred = True` does not obey that identity; the
+`TechnicalFailure` fields carry the cause. If any result does not balance, paste
+the exact values rather than correcting them manually.
 
 </details>
 

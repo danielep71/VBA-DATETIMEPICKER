@@ -234,7 +234,7 @@ Option Explicit
     Private Const DP_KEYBOARD_SHORTCUT_KEY         As String = "^+d"                     'Ctrl + Shift + D
 
     Private Const DP_CONTEXT_MENU_TAG              As String = "VBA_DATETIMEPICKER"      'Legacy context-menu tag
-    Private Const DP_CONTEXT_MENU_CAPTION          As String = "Date Picker"             'Context-menu caption
+    Private Const DP_CONTEXT_MENU_CAPTION          As String = "Date / Time Picker"      'Context-menu caption; matches DP_MSGBOX_TITLE (#88)
     Private Const DP_CONTEXT_MENU_FACEID           As Long = 1992                        'Context-menu icon FaceId
     Private Const DP_CONTEXT_MENU_BEFORE           As Long = 1                           'Context-menu insertion position
 
@@ -8054,42 +8054,47 @@ Private Function M_Lifecycle_ContextMenuBarIsClean( _
 
 '
 '------------------------------------------------------------------------------
-'                IS ONE COMMAND BAR FREE OF DATEPICKER CONTROLS
+'             ARE ALL SAME-NAMED COMMAND BARS FREE OF DATEPICKER CONTROLS
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Reports whether a named command bar still carries a DatePicker control
+'   Reports whether any command bar with the given name still carries a
+'   DatePicker control
 '
 ' WHY THIS EXISTS
 '   M_ContextMenu_Remove suppresses its own errors, so calling it proves nothing.
-'   The registration has to be read back, and it lives on two separate bars
+'   The registration has to be read back, and it lives on several bars: Excel
+'   has more than one bar named "Cell" (#114)
 '
 ' INPUTS
 '   CommandBarName
-'     Bar to inspect
+'     Name of the bars to inspect
 '
 '   ErrorNumber, ErrorDescription
-'     Receive the failure when the bar cannot be resolved or a control remains
+'     Receive the failure when no bar resolves or a control remains
 '
 ' RETURNS
-'   True when the bar resolves and carries no tagged control
+'   True when at least one bar resolves and none carries a tagged control
 '
 ' BEHAVIOR
-'   Resolves the bar and scans its controls for the DatePicker tag
+'   Resolves every bar with the name and scans each one's controls for the
+'   DatePicker tag
 '
 ' ERROR POLICY
 '   Never raises outward. An unresolvable bar is a failure, not a clean result
 '
 ' DEPENDENCIES
+'   M_ContextMenu_GetCommandBars
 '   DP_CONTEXT_MENU_TAG
 '
 ' NOTES
 '   An unresolvable bar is deliberately not treated as clean. A bar that cannot
 '   be read might still hold a control, and this transaction fails closed
 ' UPDATED
-'   2026-09-05
+'   2026-10-01
 '------------------------------------------------------------------------------
 
-    Dim TargetCommandBar As CommandBar
+    Dim TargetBars As Collection
+    Dim TargetCommandBar As Variant
     Dim ControlItem As CommandBarControl
     Dim ControlTag As String
 
@@ -8097,27 +8102,33 @@ Private Function M_Lifecycle_ContextMenuBarIsClean( _
     ErrorNumber = 0
     ErrorDescription = VBA.vbNullString
 
-    Set TargetCommandBar = Excel.Application.CommandBars(CommandBarName)
-    If TargetCommandBar Is Nothing Then
+    Set TargetBars = M_ContextMenu_GetCommandBars(CommandBarName)
+    If TargetBars.Count = 0 Then
         ErrorNumber = vbObjectError + 2715
         ErrorDescription = "Command bar could not be resolved: " & CommandBarName
+        Set TargetBars = Nothing
         Exit Function
     End If
 
-    For Each ControlItem In TargetCommandBar.Controls
-        ControlTag = VBA.CStr(ControlItem.Tag)
-        If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
-            ErrorNumber = vbObjectError + 2716
-            ErrorDescription = "DatePicker control remained on command bar: " & CommandBarName
-            Set ControlItem = Nothing
-            Set TargetCommandBar = Nothing
-            Exit Function
-        End If
-    Next ControlItem
+    For Each TargetCommandBar In TargetBars
+        For Each ControlItem In TargetCommandBar.Controls
+            ControlTag = VBA.CStr(ControlItem.Tag)
+            If VBA.StrComp(ControlTag, DP_CONTEXT_MENU_TAG, vbBinaryCompare) = 0 Then
+                ErrorNumber = vbObjectError + 2716
+                ErrorDescription = "DatePicker control remained on command bar: " & _
+                    CommandBarName & " (index " & VBA.CStr(TargetCommandBar.Index) & ")"
+                Set ControlItem = Nothing
+                Set TargetCommandBar = Nothing
+                Set TargetBars = Nothing
+                Exit Function
+            End If
+        Next ControlItem
+    Next TargetCommandBar
 
     M_Lifecycle_ContextMenuBarIsClean = True
     Set ControlItem = Nothing
     Set TargetCommandBar = Nothing
+    Set TargetBars = Nothing
     Exit Function
 
 Failed:
@@ -8125,6 +8136,7 @@ Failed:
     ErrorDescription = Err.Description
     Set ControlItem = Nothing
     Set TargetCommandBar = Nothing
+    Set TargetBars = Nothing
     Err.Clear
     M_Lifecycle_ContextMenuBarIsClean = False
 
@@ -9614,15 +9626,20 @@ Public Sub DP_Stop()
 '   Nothing
 '
 ' BEHAVIOR
-'   Captures the caller's event state, refuses when this project does not own the
-'   lease, and otherwise runs the cleanup transaction with lease release enabled
+'   Captures the caller's event state and runs the cleanup transaction with lease
+'   release enabled when this project owns the lease. When it does not, it
+'   touches nothing and records an unsuccessful stop. It reports a refusal only
+'   when there is something the operator can act on; a copy that never started
+'   returns quietly
 '
 ' ERROR POLICY
 '   Never raises outward. The outcome is reported through the observation fields
 '
 ' DEPENDENCIES
 '   M_Lease_IsOwner
+'   M_Lease_ReadOwner
 '   M_Lease_ReportRefusal
+'   M_Lifecycle_StopNeedsRefusalReport
 '   M_Lifecycle_Cleanup
 '
 ' NOTES
@@ -9633,8 +9650,14 @@ Public Sub DP_Stop()
 '   Retaining ownership when cleanup is incomplete is the point of the issue. A
 '   lease released over surviving shared state is worse than a lease held too
 '   long, because the next provider starts on top of it
+'
+'   DP_Stop usually runs from Workbook_BeforeClose, at shutdown. A copy that
+'   never started (for example an add-in whose Workbook_Open did not run) used
+'   to show the "another copy is already active" message on every exit, although
+'   no other copy existed (#115). Which cases still report is decided by
+'   M_Lifecycle_StopNeedsRefusalReport
 ' UPDATED
-'   2026-09-05
+'   2026-10-01
 '------------------------------------------------------------------------------
 
     Dim CallerEnableEvents As Boolean
@@ -9654,7 +9677,13 @@ Public Sub DP_Stop()
     mDP_LifecycleLastLeaseAcquiredThisCall = False
 
     If Not OwnedOnEntry Then
-        M_Lease_ReportRefusal "DP_Stop"
+        If M_Lifecycle_StopNeedsRefusalReport( _
+            (VBA.LenB(mDP_RuntimeOwnerId) > 0), M_Lease_ReadOwner()) Then
+            M_Lease_ReportRefusal "DP_Stop"
+        Else
+            Debug.Print "DP_Stop | Skipped | This copy holds no runtime ownership, " & _
+                "so there is nothing for it to stop"
+        End If
         mDP_LifecycleLastSucceeded = False
         GoTo CleanExit
     End If
@@ -9667,6 +9696,75 @@ CleanExit:
     On Error GoTo 0
 
 End Sub
+
+Private Function M_Lifecycle_StopNeedsRefusalReport( _
+    ByVal HasLocalOwnerToken As Boolean, _
+    ByVal LeaseOwner As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                 DECIDE WHETHER A NON-OWNER STOP REPORTS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether DP_Stop, called by a project that does not own the lease,
+'   shows the provider-refusal message
+'
+' WHY THIS EXISTS
+'   A non-owner stop never touches anything, whatever this returns. The only
+'   question is whether the operator needs to hear about it. Reporting every
+'   non-owner stop showed "another copy is already active" at every Excel exit
+'   for a copy that had simply never started (#115)
+'
+' INPUTS
+'   HasLocalOwnerToken
+'     True when this project still holds an ownership token
+'
+'   LeaseOwner
+'     The value M_Lease_ReadOwner returned: empty for no lease, a token for a
+'     readable lease, or DP_LEASE_AMBIGUOUS
+'
+' RETURNS
+'   True to report the refusal, False to return quietly
+'
+' BEHAVIOR
+'   Quiet when this project holds no token and the lease is either absent or
+'   readably held by another provider: this copy never ran, so it has nothing to
+'   stop and nothing it could have broken
+'
+'   Reports when this project holds a token it can no longer match to the lease,
+'   or when the lease cannot be read. Both mean registrations may exist that no
+'   one can prove it owns, which DP_ForceReleaseProviderLease exists to resolve
+'
+' ERROR POLICY
+'   Cannot raise. String comparison and Boolean logic only
+'
+' DEPENDENCIES
+'   DP_LEASE_AMBIGUOUS
+'
+' NOTES
+'   A VBA project reset also clears the token. That case is quiet here as well,
+'   because at shutdown there is nothing useful the operator can do; Excel
+'   discards the temporary lease and menu entries when it closes. The caller
+'   still writes a line to the Immediate Window
+'
+' UPDATED
+'   2026-10-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECIDE
+'------------------------------------------------------------------------------
+    'A token this project cannot match is an ownership question worth reporting
+        If HasLocalOwnerToken Then
+            M_Lifecycle_StopNeedsRefusalReport = True
+            Exit Function
+        End If
+    'An unreadable lease is unverifiable, never quietly ignored
+        M_Lifecycle_StopNeedsRefusalReport = _
+            (VBA.StrComp(LeaseOwner, DP_LEASE_AMBIGUOUS, vbBinaryCompare) = 0)
+
+End Function
+
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 
 '
@@ -16445,17 +16543,18 @@ Private Sub M_ContextMenu_Add()
 '   Nothing
 '
 ' BEHAVIOR
-'   Adds the DatePicker right-click entry to the standard cell context menu
-'   Adds the DatePicker right-click entry to the table / list range context menu
+'   Adds the DatePicker right-click entry to every standard cell context menu
+'   Adds the DatePicker right-click entry to every table / list range context
+'   menu
 '   Delegates duplicate-control prevention to M_ContextMenu_AddToCommandBar
-'   Delegates safe command-bar lookup to M_ContextMenu_GetCommandBar
+'   Delegates command-bar resolution to M_ContextMenu_GetCommandBars
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if right-click menu synchronization fails
 '   Preserves the original error number and description
 '
 ' DEPENDENCIES
-'   M_ContextMenu_GetCommandBar
+'   M_ContextMenu_GetCommandBars
 '   M_ContextMenu_AddToCommandBar
 '   Application.CommandBars
 '
@@ -16466,8 +16565,16 @@ Private Sub M_ContextMenu_Add()
 '
 '   This routine owns only the list of supported right-click command bars
 '
+'   Excel has more than one command bar named "Cell": one serves Normal view and
+'   another Page Layout view. Looking a bar up by name returns only the first, so
+'   the entry used to be missing in Page Layout view (#114)
+'
+'   The first bar of each name keeps the raising contract it always had. Later
+'   bars are best-effort: a failure there is logged rather than raised, so the
+'   extra coverage can never make a start fail that used to succeed
+'
 ' UPDATED
-'   2026-05-06
+'   2026-10-01
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -16480,6 +16587,8 @@ Private Sub M_ContextMenu_Add()
     Dim HandlerStep                    As String                        'Current handler step for diagnostics
     Dim ErrorNumber                    As Long                          'Captured error number
     Dim ErrorDescription               As String                        'Captured error description
+    Dim TargetBar                      As Variant                       'Current command bar
+    Dim BarOrdinal                     As Long                          'Position of the bar among same-named bars
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -16490,24 +16599,42 @@ Private Sub M_ContextMenu_Add()
         HandlerStep = "Initialize"
 
 '------------------------------------------------------------------------------
-' ADD STANDARD CELL CONTEXT MENU ENTRY
+' ADD STANDARD CELL CONTEXT MENU ENTRIES
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Add standard cell context menu entry"
-    'Add to the standard cell context menu
-        M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar(CELL_COMMAND_BAR_NAME)
+    'Add to every standard cell context menu
+        BarOrdinal = 0
+        For Each TargetBar In M_ContextMenu_GetCommandBars(CELL_COMMAND_BAR_NAME)
+            BarOrdinal = BarOrdinal + 1
+            If BarOrdinal = 1 Then
+                M_ContextMenu_AddToCommandBar TargetBar
+            Else
+                M_ContextMenu_TryAddToCommandBar TargetBar
+            End If
+        Next TargetBar
 
 '------------------------------------------------------------------------------
-' ADD TABLE / LIST RANGE CONTEXT MENU ENTRY
+' ADD TABLE / LIST RANGE CONTEXT MENU ENTRIES
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Add table / list range context menu entry"
-    'Add to the table / list range context menu
-        M_ContextMenu_AddToCommandBar M_ContextMenu_GetCommandBar(LIST_RANGE_COMMAND_BAR_NAME)
+    'Add to every table / list range context menu
+        BarOrdinal = 0
+        For Each TargetBar In M_ContextMenu_GetCommandBars(LIST_RANGE_COMMAND_BAR_NAME)
+            BarOrdinal = BarOrdinal + 1
+            If BarOrdinal = 1 Then
+                M_ContextMenu_AddToCommandBar TargetBar
+            Else
+                M_ContextMenu_TryAddToCommandBar TargetBar
+            End If
+        Next TargetBar
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
+    'Release the command-bar reference
+        Set TargetBar = Nothing
     'Exit before the error handler
         Exit Sub
 
@@ -16519,6 +16646,8 @@ ErrorHandler:
         ErrorNumber = Err.Number
     'Capture the original error description
         ErrorDescription = Err.Description
+    'Release the command-bar reference
+        Set TargetBar = Nothing
     'Raise a descriptive error to the caller
         Err.Raise ErrorNumber, _
             PROC_NAME & " | Step=" & HandlerStep, _
@@ -16548,15 +16677,15 @@ Public Sub M_ContextMenu_Remove()
 '
 ' BEHAVIOR
 '   Removes the DatePicker right-click entry from:
-'     - the standard cell context menu
-'     - the table / list range context menu
+'     - every standard cell context menu
+'     - every table / list range context menu
 '
 ' ERROR POLICY
 '   Delegates best-effort removal to M_ContextMenu_RemoveFromCommandBar
 '   Does not normally raise for missing, protected, or stale command-bar controls
 '
 ' DEPENDENCIES
-'   M_ContextMenu_GetCommandBar
+'   M_ContextMenu_GetCommandBars
 '   M_ContextMenu_RemoveFromCommandBar
 '   Application.CommandBars
 '
@@ -16567,8 +16696,11 @@ Public Sub M_ContextMenu_Remove()
 '
 '   This routine owns only the list of supported right-click command bars
 '
+'   Every bar sharing a supported name is cleaned, including the Page Layout
+'   "Cell" bar, so an entry added there cannot outlive teardown (#114)
+'
 ' UPDATED
-'   2026-05-06
+'   2026-10-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -16577,17 +16709,29 @@ Public Sub M_ContextMenu_Remove()
     Const CELL_COMMAND_BAR_NAME         As String = "Cell"
     Const LIST_RANGE_COMMAND_BAR_NAME   As String = "List Range Popup"
 
-'------------------------------------------------------------------------------
-' REMOVE STANDARD CELL CONTEXT MENU ENTRY
-'------------------------------------------------------------------------------
-    'Remove from the standard cell context menu
-        M_ContextMenu_RemoveFromCommandBar M_ContextMenu_GetCommandBar(CELL_COMMAND_BAR_NAME)
+    Dim TargetBar                       As Variant      'Current command bar
 
 '------------------------------------------------------------------------------
-' REMOVE TABLE / LIST RANGE CONTEXT MENU ENTRY
+' REMOVE STANDARD CELL CONTEXT MENU ENTRIES
 '------------------------------------------------------------------------------
-    'Remove from the table / list range context menu
-        M_ContextMenu_RemoveFromCommandBar M_ContextMenu_GetCommandBar(LIST_RANGE_COMMAND_BAR_NAME)
+    'Remove from every standard cell context menu
+        For Each TargetBar In M_ContextMenu_GetCommandBars(CELL_COMMAND_BAR_NAME)
+            M_ContextMenu_RemoveFromCommandBar TargetBar
+        Next TargetBar
+
+'------------------------------------------------------------------------------
+' REMOVE TABLE / LIST RANGE CONTEXT MENU ENTRIES
+'------------------------------------------------------------------------------
+    'Remove from every table / list range context menu
+        For Each TargetBar In M_ContextMenu_GetCommandBars(LIST_RANGE_COMMAND_BAR_NAME)
+            M_ContextMenu_RemoveFromCommandBar TargetBar
+        Next TargetBar
+
+'------------------------------------------------------------------------------
+' RELEASE REFERENCES
+'------------------------------------------------------------------------------
+    'Release the command-bar reference
+        Set TargetBar = Nothing
 
 End Sub
 
@@ -16680,6 +16824,203 @@ Private Function M_ContextMenu_GetCommandBar(ByVal CommandBarName As String) As 
         End If
 
 End Function
+
+Private Function M_ContextMenu_GetCommandBars(ByVal CommandBarName As String) As Collection
+
+'
+'------------------------------------------------------------------------------
+'                         GET ALL SAME-NAMED COMMAND BARS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Returns every Excel command bar that carries the requested name
+'
+' WHY THIS EXISTS
+'   Excel exposes more than one command bar named "Cell": one serves Normal view
+'   and another Page Layout view. Application.CommandBars(Name) returns only the
+'   first, so a right-click entry registered by name was missing in Page Layout
+'   view and a teardown verified by name could not see that bar at all (#114)
+'
+' INPUTS
+'   CommandBarName
+'     Name of the Excel command bars to collect
+'
+' RETURNS
+'   A Collection of CommandBar objects, possibly empty. Never Nothing
+'
+' BEHAVIOR
+'   Walks Application.CommandBars and collects every bar whose Name matches,
+'   case-insensitively as Excel's own name lookup does. When the walk finds none,
+'   falls back to M_ContextMenu_GetCommandBar so a host that cannot be enumerated
+'   keeps the previous single-bar behavior
+'
+' ERROR POLICY
+'   Safe default. Enumeration errors are suppressed and reported to the
+'   Immediate Window. The caller always receives a Collection
+'
+' DEPENDENCIES
+'   M_ContextMenu_GetCommandBar
+'   Application.CommandBars
+'
+' NOTES
+'   This routine does not create command bars
+'
+'   Callers must tolerate an empty Collection, exactly as they tolerated a
+'   Nothing command bar before
+'
+' UPDATED
+'   2026-10-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_GetCommandBars"
+
+    Dim Result                  As Collection    'Collected command bars
+    Dim Bar                     As CommandBar    'Current command bar while walking
+    Dim FallbackBar             As CommandBar    'Single bar resolved by name
+    Dim BarName                 As String        'Name read from the current bar
+    Dim WalkErrNumber           As Long          'Captured enumeration error number
+    Dim WalkErrDescription      As String        'Captured enumeration error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Create the result so callers never receive Nothing
+        Set Result = New Collection
+    'Suppress enumeration errors
+        On Error Resume Next
+
+'------------------------------------------------------------------------------
+' COLLECT MATCHING BARS
+'------------------------------------------------------------------------------
+    'Walk every command bar and keep the ones with the requested name. The name
+    'is read into a variable first: under Resume Next, a failing If condition
+    'would fall into its Then branch and collect an unreadable bar
+        For Each Bar In Application.CommandBars
+            BarName = VBA.vbNullString
+            BarName = Bar.Name
+            If VBA.StrComp(BarName, CommandBarName, vbTextCompare) = 0 Then
+                Result.Add Bar
+            End If
+        Next Bar
+    'Capture enumeration error number
+        WalkErrNumber = Err.Number
+    'Capture enumeration error description
+        WalkErrDescription = Err.Description
+    'Clear any suppressed enumeration error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' DIAGNOSTICS
+'------------------------------------------------------------------------------
+    'Write diagnostics only when enumeration failed with an error
+        If WalkErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | CommandBarName=" & CommandBarName & _
+                " | Error=" & VBA.CStr(WalkErrNumber) & _
+                " | " & WalkErrDescription
+        End If
+
+'------------------------------------------------------------------------------
+' FALL BACK TO NAME LOOKUP
+'------------------------------------------------------------------------------
+    'Keep the previous single-bar behavior when the walk found nothing
+        If Result.Count = 0 Then
+            Set FallbackBar = M_ContextMenu_GetCommandBar(CommandBarName)
+            If Not FallbackBar Is Nothing Then Result.Add FallbackBar
+        End If
+
+'------------------------------------------------------------------------------
+' RETURN
+'------------------------------------------------------------------------------
+    'Return the collected bars
+        Set M_ContextMenu_GetCommandBars = Result
+    'Release object references
+        Set FallbackBar = Nothing
+        Set Bar = Nothing
+        Set Result = Nothing
+
+End Function
+
+Private Sub M_ContextMenu_TryAddToCommandBar(ByVal TargetCommandBar As CommandBar)
+
+'
+'------------------------------------------------------------------------------
+'                      TRY TO ADD TO AN ADDITIONAL COMMAND BAR
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Adds the DatePicker command to an additional same-named command bar without
+'   raising
+'
+' WHY THIS EXISTS
+'   Registration on the second "Cell" bar (Page Layout view) is new in #114.
+'   A host that refuses it must not turn a start that used to succeed into a
+'   failure
+'
+' INPUTS
+'   TargetCommandBar
+'     Command bar to add the DatePicker command to
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_ContextMenu_AddToCommandBar and reports any failure to the
+'   Immediate Window
+'
+' ERROR POLICY
+'   Never raises outward
+'
+' DEPENDENCIES
+'   M_ContextMenu_AddToCommandBar
+'
+' NOTES
+'   Removal already treats every bar as best-effort, and teardown verification
+'   reads every bar back, so a control that was added here is never left behind
+'   unnoticed
+'
+' UPDATED
+'   2026-10-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_TryAddToCommandBar"
+
+    Dim AddErrNumber            As Long          'Captured add error number
+    Dim AddErrDescription       As String        'Captured add error description
+
+'------------------------------------------------------------------------------
+' ADD
+'------------------------------------------------------------------------------
+    'Suppress add errors
+        On Error Resume Next
+    'Add the DatePicker command
+        M_ContextMenu_AddToCommandBar TargetCommandBar
+    'Capture add error number
+        AddErrNumber = Err.Number
+    'Capture add error description
+        AddErrDescription = Err.Description
+    'Clear any suppressed add error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' DIAGNOSTICS
+'------------------------------------------------------------------------------
+    'Write diagnostics only when the add failed
+        If AddErrNumber <> 0 Then
+            Debug.Print PROC_NAME & _
+                " | Error=" & VBA.CStr(AddErrNumber) & _
+                " | " & AddErrDescription
+        End If
+
+End Sub
 
 Private Sub M_ContextMenu_AddToCommandBar(ByVal TargetCommandBar As CommandBar)
 
@@ -22428,15 +22769,23 @@ Public Sub Ribbon_Reset(ByVal control As IRibbonControl)
 '   Nothing
 '
 ' BEHAVIOR
-'   Delegates runtime repair to DP_RepairRuntime and displays a confirmation
-'   message when repair completes successfully
+'   Starts the runtime with DP_Start when no provider holds the lease, so Reset
+'   also recovers a copy that never started. Otherwise delegates to
+'   DP_RepairRuntime. Displays a confirmation only when the recorded lifecycle
+'   outcome of that exact operation is a success
 '
 ' ERROR POLICY
 '   Catches runtime errors and reports them through Ribbon_ReportError
 '
+'   A refused start or repair does not raise. The refusal is reported at the
+'   admission boundary and this callback adds nothing after it
+'
 ' DEPENDENCIES
 '   IRibbonControl
+'   DP_Start
 '   DP_RepairRuntime
+'   M_Ribbon_ResetShouldStart
+'   M_Ribbon_LifecycleSucceeded
 '   Ribbon_ReportInfo
 '   Ribbon_ReportError
 '
@@ -22444,14 +22793,26 @@ Public Sub Ribbon_Reset(ByVal control As IRibbonControl)
 '   The Control argument is required by the RibbonX callback signature even when
 '   this routine does not use it directly
 '
+'   Returning without an error is not proof of success. DP_RepairRuntime
+'   returns normally when it refuses, and this callback used to follow the
+'   refusal message with "repair completed successfully" (#89)
+'
+'   Starting instead of repairing applies only to a free lease, which is the
+'   same condition under which DP_Start itself admits a provider. It never
+'   takes over a lease another provider holds. This gives a copy whose
+'   Workbook_Open did not start the runtime a one-click recovery (#113)
+'
 ' UPDATED
-'   2026-05-15
+'   2026-10-01
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME As String = "Ribbon_Reset"
+
+    Dim StartInstead    As Boolean      'True to start rather than repair
+    Dim OperationName   As String       'Lifecycle operation this callback ran
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -22460,19 +22821,39 @@ Public Sub Ribbon_Reset(ByVal control As IRibbonControl)
         On Error GoTo ErrorHandler
 
 '------------------------------------------------------------------------------
-' REPAIR RUNTIME
+' START OR REPAIR RUNTIME
 '------------------------------------------------------------------------------
-    'Repair DatePicker runtime state
-        DP_RepairRuntime
+    'Start when no provider holds the lease; repair otherwise
+        StartInstead = M_Ribbon_ResetShouldStart( _
+            M_Lease_IsOwner(), (VBA.LenB(M_Lease_ReadOwner()) = 0))
+        If StartInstead Then
+            OperationName = "DP_Start"
+            DP_Start
+        Else
+            OperationName = "DP_RepairRuntime"
+            DP_RepairRuntime
+        End If
 
 '------------------------------------------------------------------------------
 ' CONFIRM SUCCESS
 '------------------------------------------------------------------------------
-    'Report successful runtime repair to the user
-        Ribbon_ReportInfo _
-            "Date / Time Picker runtime repair completed successfully." & _
-            VBA.vbCrLf & VBA.vbCrLf & _
-            "You can now select a date cell or click Show Picker again."
+    'Say nothing more after a refusal: it has already been reported
+        If Not M_Ribbon_LifecycleSucceeded(OperationName, _
+            mDP_LifecycleLastOperation, mDP_LifecycleLastSucceeded) Then
+            Exit Sub
+        End If
+    'Report the successful start or repair to the user
+        If StartInstead Then
+            Ribbon_ReportInfo _
+                "Date / Time Picker runtime started." & _
+                VBA.vbCrLf & VBA.vbCrLf & _
+                "You can now select a date cell or click Show Picker again."
+        Else
+            Ribbon_ReportInfo _
+                "Date / Time Picker runtime repair completed successfully." & _
+                VBA.vbCrLf & VBA.vbCrLf & _
+                "You can now select a date cell or click Show Picker again."
+        End If
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -22489,6 +22870,118 @@ ErrorHandler:
 
 End Sub
 
+
+Public Function M_Ribbon_ResetShouldStart( _
+    ByVal IsLeaseOwner As Boolean, _
+    ByVal LeaseIsFree As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                  DECIDE WHETHER RIBBON RESET STARTS OR REPAIRS
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether the Ribbon Reset command starts the runtime or repairs it
+'
+' WHY THIS EXISTS
+'   DP_RepairRuntime refuses unless this project owns the lease, so Reset could
+'   not recover a copy that had never started. When no provider holds the lease,
+'   starting is exactly what DP_Start would admit anyway (#113)
+'
+' INPUTS
+'   IsLeaseOwner
+'     True when this project owns the provider lease
+'
+'   LeaseIsFree
+'     True when no provider lease exists
+'
+' RETURNS
+'   True to start with DP_Start, False to repair with DP_RepairRuntime
+'
+' BEHAVIOR
+'   Starts only when this project is not the owner and the lease is free. An
+'   owner repairs. A lease held by anyone else goes to repair, which refuses it
+'
+' ERROR POLICY
+'   Cannot raise. Boolean logic only
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Ribbon_Reset is the only production consumer. Public only because the
+'   regression harness is a separate module. It takes arguments, so it does not
+'   appear in the macro dialog, and it is internal rather than supported API
+'
+' UPDATED
+'   2026-10-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECIDE
+'------------------------------------------------------------------------------
+    'Start only a session that no provider holds
+        M_Ribbon_ResetShouldStart = (Not IsLeaseOwner) And LeaseIsFree
+
+End Function
+
+Public Function M_Ribbon_LifecycleSucceeded( _
+    ByVal ExpectedOperation As String, _
+    ByVal ObservedOperation As String, _
+    ByVal ObservedSucceeded As Boolean) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'               DECIDE WHETHER A RIBBON LIFECYCLE ACTION SUCCEEDED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Decides whether a Ribbon command may report success for the lifecycle
+'   operation it just ran
+'
+' WHY THIS EXISTS
+'   DP_Start and DP_RepairRuntime return normally when they refuse, so "the call
+'   returned" is not "the call succeeded". Ribbon_Reset reported success after a
+'   refused repair (#89). Both operations already record their outcome
+'
+' INPUTS
+'   ExpectedOperation
+'     Name of the lifecycle operation the caller ran
+'
+'   ObservedOperation
+'     Operation name recorded by the lifecycle observation fields
+'
+'   ObservedSucceeded
+'     Success flag recorded by the lifecycle observation fields
+'
+' RETURNS
+'   True only when the recorded operation is the expected one and it succeeded
+'
+' BEHAVIOR
+'   Trusts the success flag only after confirming it belongs to the operation
+'   the caller ran, so a stale record from an earlier operation cannot pass
+'
+' ERROR POLICY
+'   Cannot raise. String comparison and Boolean logic only
+'
+' DEPENDENCIES
+'   None
+'
+' NOTES
+'   Ribbon_Reset is the only production consumer. Public only because the
+'   regression harness is a separate module. It takes arguments, so it does not
+'   appear in the macro dialog, and it is internal rather than supported API
+'
+' UPDATED
+'   2026-10-01
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECIDE
+'------------------------------------------------------------------------------
+    'A success flag counts only for the operation the caller actually ran
+        M_Ribbon_LifecycleSucceeded = ObservedSucceeded And _
+            (VBA.StrComp(ObservedOperation, ExpectedOperation, vbBinaryCompare) = 0)
+
+End Function
 
 Public Function M_DemoSheet_ResolveShowOnToggle( _
     ByVal ExistedBefore As Boolean, _
