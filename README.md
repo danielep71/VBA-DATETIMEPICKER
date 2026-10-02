@@ -10,7 +10,7 @@
 
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
-[![Source](https://img.shields.io/badge/Source-v1.2.2-6f42c1?style=for-the-badge)](#release-status)
+[![Source](https://img.shields.io/badge/Source-v1.2.3-6f42c1?style=for-the-badge)](#release-status)
 [![Tests](https://img.shields.io/badge/Regression-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge)](LICENSE)
 
@@ -334,10 +334,10 @@ DP_Demo_CreateDemoSheet
 
 Download the add-in asset from
 [GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases). At
-`v1.2.2` it is:
+`v1.2.3` it is:
 
 ```text
-DATETIMEPICKER.v1.2.2.xlam
+DATETIMEPICKER.v1.2.3.xlam
 ```
 
 Take the exact name from the Release page and check its SHA-256 against the one
@@ -1196,12 +1196,14 @@ It does not blindly retry `Worksheets.Add`.
 ## Latest recorded regression figures
 
 ```text
-State=PASS; Run=879; Passed=879; Failed=0; CleanupFailures=0
+State=PASS; Run=911; Passed=911; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the `v1.2.2` source. With the UI smoke suite the figure is `882`. The source runs 28 standard suites, 29 with UI smoke.
+This is the latest recorded **standard regression pack** for the `v1.2.3` source: 31 standard suites, 32 with UI smoke. It was observed at [`69a94d0`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/69a94d0a00d35f33bcb0ace7ca98a6b6399d94f2) on the embedded macro-enabled workbook; the UI smoke total was not observed at that commit. Release certification of the exact tagged commit on both packaged hosts is recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
-These are historical development-host figures at `d99fefa`, taken on the embedded macro-enabled workbook. The [published v1.2.2 Release](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2) separately reports 879/882 PASS results for both generated hosts at `4d5b041`; issue [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) was administratively closed with explicitly accepted deviations, but release certification remains incomplete because several mandatory manual matrices were not run (see [Status](#-status)). Historical development runs are not transferred to the release SHA. `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
+For `v1.2.2` the pack recorded 879 standard and 882 with UI smoke (28 and 29 suites).
+
+The `v1.2.2` figures are historical development-host figures at `d99fefa`, taken on the embedded macro-enabled workbook. The [published v1.2.2 Release](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2) separately reports 879/882 PASS results for both generated hosts at `4d5b041`; issue [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) was administratively closed with explicitly accepted deviations, but release certification remains incomplete because several mandatory manual matrices were not run (see [Status](#-status)). Historical development runs are not transferred to the release SHA. `v1.2.1` certification was the first time the pack was runnable inside a packaged `.xlam` at all.
 
 > [!IMPORTANT]
 > Tests manipulate real Excel state: worksheets, settings, application flags,
@@ -1428,7 +1430,7 @@ policy recorded under
 
 ### One current-version provider at a time
 
-`v1.2.2` deliberately supports:
+`v1.2.3` deliberately supports:
 
 ```text
 one active DatePicker provider per Excel process
@@ -1515,18 +1517,15 @@ No CI runs the regression pack — the only workflow in the repository is reposi
 
 ## 📚 Documentation
 
-The project Wiki was rewritten and reviewed for `v1.2.0`, amended in `v1.2.1` for the corrections under [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17), and reconciled for `v1.2.2`.
+The project Wiki was rewritten and reviewed for `v1.2.0`, amended in `v1.2.1` for the corrections under [#17](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/17), reconciled for `v1.2.2`, and given a targeted `v1.2.3` update for [#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88), [#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89), [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90) and [#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114).
 
-Every page is stamped:
-
-```text
-Applies to:      v1.2.2
-Reviewed commit: 029d3d4
-```
-
-That is the behavior/documentation review point
-([`029d3d4`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/029d3d4a2fd33413009852b69c2602e03602a621)),
-not the `v1.2.2` tag target.
+Every page is stamped with the release it applies to and its review point.
+Pages changed for `v1.2.3` name
+[`69a94d0`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/69a94d0a00d35f33bcb0ace7ca98a6b6399d94f2) for the changed
+sections and keep
+[`029d3d4`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/029d3d4a2fd33413009852b69c2602e03602a621) for the rest.
+Neither is the `v1.2.3` tag target; the stamps are updated to it after
+publication ([#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122)).
 
 The Wiki covers installation, API, manager/events, settings, testing/demo guidance, WinAPI behavior, Ribbon integration and deployment details.
 
@@ -1547,6 +1546,20 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 <a id="release-status"></a>
 
 # 🧭 Release status
+
+## v1.2.3 — user-facing consistency and Ribbon source
+
+`v1.2.3` is a patch release. The component shows one name, **Date / Time
+Picker**, on every surface ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). The Ribbon **Reset** command reports
+success only from the recorded outcome of the operation it ran, and starts the
+runtime when no provider holds the lease ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)). The right-click entry appears
+in every worksheet view, including Page Layout ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)). `DP_Stop` no longer
+shows the "another copy is already active" message for a copy that never
+started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)). The repository now holds the complete Ribbon source as it
+ships, `customUI.xml` with its relationship part and images, and CI checks it
+([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90), [#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). No supported API name, signature or default changed.
+
+Release certification for the exact tagged commit is recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 ## v1.2.2 — lifecycle and diagnostic stabilization
 
@@ -1682,7 +1695,9 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Published release:** [v1.2.2](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2), published on 2026-10-01. Its annotated tag targets [`4d5b0419154c48b580c504f69629ea64efefa6d1`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/4d5b0419154c48b580c504f69629ea64efefa6d1). Both downloaded asset hashes match the Release's SHA-256 values. The Release reports both-host regression results (879/882 PASS). Issue [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) was administratively closed on 2026-10-01 by maintainer decision with explicitly accepted deviations; this does **not** constitute full certification under [RELEASING.md](RELEASING.md), because mandatory manual matrices remain unexecuted: the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. Publication and matching hashes do not substitute for those checks.
+**Release in preparation:** `v1.2.3`. Its certification record is [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122); `v1.2.2` remains the latest published release until the `v1.2.3` tag and Release exist.
+
+**Previous release:** [v1.2.2](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2), published on 2026-10-01. Its annotated tag targets [`4d5b0419154c48b580c504f69629ea64efefa6d1`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/4d5b0419154c48b580c504f69629ea64efefa6d1). Both downloaded asset hashes match the Release's SHA-256 values. The Release reports both-host regression results (879/882 PASS). Issue [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) was administratively closed on 2026-10-01 by maintainer decision with explicitly accepted deviations; this does **not** constitute full certification under [RELEASING.md](RELEASING.md), because mandatory manual matrices remain unexecuted: the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. Publication and matching hashes do not substitute for those checks.
 
 **Reviewed executable implementation baseline:** [`d99fefa`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/d99fefaa8fec97348ffb990e066d42371a0cdb69). The `v1.2.2` behavioral claims on this page were reviewed against that implementation commit; the endpoint comparison to the published tag has no `src/`, `test/` or `demo/` changes. This proves source-review continuity, not fresh package execution. This post-release documentation correction does not change the published tag or artifacts, or certify a later `main` SHA.
 

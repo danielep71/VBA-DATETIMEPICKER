@@ -97,21 +97,100 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
-### Maintenance
+---
 
-- Fixed label drift checks for valid label names containing pipes or backticks
-  by comparing structured canonical plans instead of parsing Markdown reports
-  (PR #116 follow-up). Added clean, drift and failure regression fixtures.
+## [1.2.3] - 2026-10-02
+
+> 🩹 **Patch** · user-facing consistency and Ribbon source patch · no supported API break
+
+Release certification for the exact tagged commit is recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+The date must match the tag date; change it here if certification lands later.
+
+### Added
+
+- New `.github/scripts/check-ribbon-resources.py` and the **Check Ribbon
+  resources** workflow fail a pull request or release push when the Ribbon XML
+  references a custom image with no tracked file or mapping, or when a part's
+  namespace does not match its file name. It fails on the `v1.2.2` tree and
+  passes now.
 
 - Added portable source and release-evidence tooling adapted from the Excel VBA
   template, with CI reports, workflow validation and CodeQL for the tooling.
   One local command checks the repository; release records preserve accepted
   manual limitations separately from passed tests.
 
+### Changed
+
+- `VERSION` is `1.2.3`.
+
+- RELEASING §9 now writes the annotated tag message from a template: certified
+  SHA, verbatim runner totals for both hosts, fixed issues, a mandatory
+  `Deviations:` line and the evidence issue. The previous one-line message left
+  the `v1.2.2` tag with a title only. It also records that the GitHub Release
+  form creates a lightweight tag.
+
+- The Ribbon **Reset** command starts the runtime with `DP_Start` when no
+  provider holds the lease, instead of refusing a repair. A copy whose
+  `Workbook_Open` did not start the runtime can now be recovered in one click.
+  Reset never takes over a lease another provider holds. This mitigates, but
+  does not resolve, the startup-folder issue
+  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113).
+
+- The release procedure and certification template now treat RibbonX as an
+  Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
+  relationships/package metadata and every custom image it references must come
+  from the candidate; a missing part or resource blocks the build; and the
+  packaged Ribbon's images and callbacks must be verified directly, because
+  **Debug → Compile VBAProject** cannot see Open XML parts
+  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). The repository does not yet track the three custom Ribbon
+  images; that remains [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
+
+- Fixed label drift checks for valid label names containing pipes or backticks
+  by comparing structured canonical plans instead of parsing Markdown reports
+  (PR #116 follow-up). Added clean, drift and failure regression fixtures.
+
 - Aligned core issue labels with the Excel VBA repository template, preserved
   DateTimePicker labels, and added automatic label sync and drift detection.
   Standardized traffic workflow permissions, runner and action pin; enabled
   weekly GitHub Actions dependency updates.
+
+### Fixed
+
+- The right-click entry now appears in **Page Layout** view. Excel has more
+  than one command bar named `Cell`, and registration by name reached only the
+  first (Normal view). Registration, removal and teardown verification now
+  cover every bar named `Cell` or `List Range Popup`
+  ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)).
+
+- `DP_Stop` no longer shows "Another copy of the DatePicker is already active"
+  when the copy never started. A non-owner stop still touches nothing; it reports
+  the refusal only when this copy holds an ownership token the lease no longer
+  matches, or the lease cannot be read. Otherwise it returns quietly and writes
+  one Immediate Window line ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+
+- The Ribbon **Reset** command no longer reports "repair completed
+  successfully" after a refused repair. It reads the recorded lifecycle outcome
+  of the operation it ran instead of inferring success from a normal return
+  ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)).
+
+- The component now shows one name everywhere: **Date / Time Picker**. The
+  Ribbon group (`DateTime Picker`), the right-click entry (`Date Picker`), the
+  picker window title (`DATETIME PICKER`) and the demo sheet's title band now
+  match the message boxes, README and Wiki ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). The regression pack asserts
+  the runtime window title and every right-click entry's caption against
+  `DP_MSGBOX_TITLE`, and still resolves the picker's native window by its new
+  title.
+
+- The repository now holds the complete Ribbon source, recovered from the
+  published `v1.2.2` add-in ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). `src/ribbon/` mirrors the package's
+  `customUI/` folder: `customUI.xml`, `_rels/customUI.xml.rels` (image id to
+  file mapping) and `images/` with `DP_GridIcon_64.png`, `reset.png` and
+  `demo.png`. Before this, the repository tracked only an Office 2010
+  `customUI14.xml` that no release had shipped, and none of the images or the
+  mapping. `.gitattributes` checks the Ribbon parts out with CRLF, so a checkout
+  reproduces the shipped bytes; the relationship part is stored with LF in
+  Git's index, as the repository's text policy requires (this corrects the
+  "byte for byte" wording of the commit that added it).
 
 ### Documentation
 
@@ -142,91 +221,53 @@ Use only the categories needed by a release.
   was still to be reconciled is replaced; the published tag and assets are
   unchanged.
 
-### Changed
+### Validation
 
-- RELEASING §9 now writes the annotated tag message from a template: certified
-  SHA, verbatim runner totals for both hosts, fixed issues, a mandatory
-  `Deviations:` line and the evidence issue. The previous one-line message left
-  the `v1.2.2` tag with a title only. It also records that the GitHub Release
-  form creates a lightweight tag.
-- The Ribbon **Reset** command starts the runtime with `DP_Start` when no
-  provider holds the lease, instead of refusing a repair. A copy whose
-  `Workbook_Open` did not start the runtime can now be recovered in one click.
-  Reset never takes over a lease another provider holds. This mitigates, but
-  does not resolve, the startup-folder issue
-  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113).
-- The release procedure and certification template now treat RibbonX as an
-  Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
-  relationships/package metadata and every custom image it references must come
-  from the candidate; a missing part or resource blocks the build; and the
-  packaged Ribbon's images and callbacks must be verified directly, because
-  **Debug → Compile VBAProject** cannot see Open XML parts
-  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). The repository does not yet track the three custom Ribbon
-  images; that remains [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
-
-### Fixed
-
-- The right-click entry now appears in **Page Layout** view. Excel has more
-  than one command bar named `Cell`, and registration by name reached only the
-  first (Normal view). Registration, removal and teardown verification now
-  cover every bar named `Cell` or `List Range Popup`
-  ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)).
-- `DP_Stop` no longer shows "Another copy of the DatePicker is already active"
-  when the copy never started. A non-owner stop still touches nothing; it reports
-  the refusal only when this copy holds an ownership token the lease no longer
-  matches, or the lease cannot be read. Otherwise it returns quietly and writes
-  one Immediate Window line ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
-- The Ribbon **Reset** command no longer reports "repair completed
-  successfully" after a refused repair. It reads the recorded lifecycle outcome
-  of the operation it ran instead of inferring success from a normal return
-  ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)).
-
-- The component now shows one name everywhere: **Date / Time Picker**. The
-  Ribbon group (`DateTime Picker`), the right-click entry (`Date Picker`), the
-  picker window title (`DATETIME PICKER`) and the demo sheet's title band now
-  match the message boxes, README and Wiki ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). The regression pack asserts
-  the runtime window title and every right-click entry's caption against
-  `DP_MSGBOX_TITLE`, and still resolves the picker's native window by its new
-  title.
-
-- The repository now holds the complete Ribbon source, recovered from the
-  published `v1.2.2` add-in ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). `src/ribbon/` mirrors the package's
-  `customUI/` folder: `customUI.xml`, `_rels/customUI.xml.rels` (image id to
-  file mapping) and `images/` with `DP_GridIcon_64.png`, `reset.png` and
-  `demo.png`. Before this, the repository tracked only an Office 2010
-  `customUI14.xml` that no release had shipped, and none of the images or the
-  mapping. `.gitattributes` checks the Ribbon parts out with CRLF, so a checkout
-  reproduces the shipped bytes; the relationship part is stored with LF in
-  Git's index, as the repository's text policy requires (this corrects the
-  "byte for byte" wording of the commit that added it).
-- New `.github/scripts/check-ribbon-resources.py` and the **Check Ribbon
-  resources** workflow fail a pull request or release push when the Ribbon XML
-  references a custom image with no tracked file or mapping, or when a part's
-  namespace does not match its file name. It fails on the `v1.2.2` tree and
-  passes now.
+- Pre-certification development run at `69a94d0` on the embedded `.xlsm` with
+  the branch modules re-imported: standard pack
+  `State=PASS; Run=911; Passed=911; Failed=0; CleanupFailures=0` (879 plus the
+  32 assertions added for [#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88), [#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89), [#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114) and [#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)). Manual
+  checks on the same host: caption on the Ribbon, right-click entry and picker
+  window; right-click entry in Page Layout view; no message when closing a copy
+  that never started; Reset when running and when never started. This is
+  development evidence; release certification of the exact tagged commit and
+  both packaged hosts is recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 ### Compatibility
 
 - No supported API name, signature or default changed.
+
 - `src/ribbon/customUI14.xml` (Office 2010 format) is replaced by
   `src/ribbon/customUI.xml` (Office 2007 format, `2006/01`), the part every
   release has actually shipped ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). Nothing the Ribbon uses needs the 2010
   format. Build scripts or notes that copied `customUI14.xml` must copy
   `src/ribbon/` into the package's `customUI/` folder instead; RELEASING.md
   lists the mapping.
+
 - Display captions only ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). Code that looked for the picker window by
   its old title `DATETIME PICKER` must use `Date / Time Picker`. Identifiers
   are unchanged: `VBA_DATETIMEPICKER` (settings and context-menu tag), the
   provider-lease names, Ribbon control ids and callbacks, and the demo
   worksheet name `DATE PICKER DEMO`. A demo sheet built by an earlier version
   keeps its old title band until it is rebuilt.
+
 - New technically public routines `M_Ribbon_ResetShouldStart` and
   `M_Ribbon_LifecycleSucceeded` exist only for the regression harness; they are
   not supported API. The harness gains the `ContextMenuCoverage`,
   `StopWithoutOwnership` and `RibbonReset` suites.
+
 - Code that relied on `DP_Stop` showing the refusal for a copy that never
   started will no longer see it. `M_Lifecycle_Test_LastSucceeded` is still
   `False` after such a stop.
+
+### Known limitations
+
+- An add-in opened from Excel's **At startup, open all files in** folder may not
+  start its runtime ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113), moved to `v1.3.0`). Install through the Add-ins
+  dialog, or start it with the Ribbon **Reset** command or `DP_Start`.
+
+- The `v1.2.2` manual matrices accepted as disclosed limitations in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) are
+  not backfilled by this release.
 
 ---
 
@@ -1399,7 +1440,8 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0
