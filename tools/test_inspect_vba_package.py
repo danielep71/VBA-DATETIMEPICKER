@@ -169,14 +169,24 @@ class Fixture(unittest.TestCase):
         self.temp.cleanup()
 
     def inspect(self, hook: str | None = None, extra: dict | None = None, raw: bytes | None = None,
-                **options) -> dict:
+                source_extra: dict | None = None, **options) -> dict:
         modules = {"ThisWorkbook": ("document", workbook(hook or "")),
                    "M_DatePicker": ("standard", STANDARD), "cHook": ("class", CLASS_STREAM)}
         modules.update(extra or {})
         modules = {k: v for k, v in modules.items() if v is not None}
         path = self.root / "fixture.xlsm"
         path.write_bytes(raw if raw is not None else package(modules, **options))
-        return inspector.inspect(path, None, self.repo, "HEAD", "fixture", MANIFEST)
+        manifest = MANIFEST
+        if source_extra:
+            for name, text in source_extra.items():
+                (self.repo / name).write_text(text.replace("\n", "\r\n"), encoding="cp1252", newline="")
+            subprocess.run(["git", "-C", str(self.repo), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(self.repo), "-c", "user.name=fixture", "-c",
+                            "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "extra"],
+                           check=True, capture_output=True)
+            config = {"modules": MANIFEST["configurations"]["fixture"]["modules"] + sorted(source_extra)}
+            manifest = {**MANIFEST, "configurations": {"fixture": config}}
+        return inspector.inspect(path, None, self.repo, "HEAD", "fixture", manifest)
 
     @staticmethod
     def codes(report: dict, severity: str | None = None) -> list[str]:
@@ -240,7 +250,7 @@ class StartupTests(Fixture):
         self.assertEqual(report["startup"]["verdict"], "wired")
         hook = report["startup"]["environments"]["vba7-win64"]["hooks"][0]
         self.assertEqual((hook["placement"], hook["signature_check"]), ("correct", "correct"))
-        self.assertEqual(hook["reaches_target"][0]["path"], ["ThisWorkbook.Workbook_Open:6 -> DP_Start"])
+        self.assertEqual(hook["reaches_target"][0]["path"], ["ThisWorkbook.Workbook_Open:6 -> M_DatePicker.DP_Start"])
         self.assertEqual(self.codes(report, "error"), [])
 
     def test_intermediate_call_and_auto_open(self):
@@ -285,6 +295,19 @@ class StartupTests(Fixture):
         self.assertEqual(unresolved["startup"]["verdict"], "not-established")
         self.assertIn("VBA-PKG-005", self.codes(unresolved, "unknown"))
 
+    def test_object_receiver_and_depth_limit_are_unknown(self):
+        receiver = self.inspect("Private Sub Workbook_Open()\n    Dim m As Object\n    m.DP_Start\nEnd Sub\n")
+        self.assertEqual(receiver["startup"]["verdict"], "not-established")
+        self.assertEqual(self.codes(receiver, "error"), [])
+        self.assertIn("VBA-PKG-005", self.codes(receiver, "unknown"))
+        chain = "".join(f"Public Sub DP_Step{i}()\n    DP_Step{i + 1}\nEnd Sub\n" for i in range(6))
+        chain += "Public Sub DP_Step6()\n    DP_Start\nEnd Sub\n"
+        deep = self.inspect("Private Sub Workbook_Open()\n    DP_Step0\nEnd Sub\n",
+                            {"M_Chain": ("standard", 'Attribute VB_Name = "M_Chain"\n' + chain)})
+        self.assertEqual(deep["startup"]["verdict"], "not-established")
+        self.assertEqual(self.codes(deep, "error"), [])
+        self.assertEqual(self.codes(deep, "unknown"), ["VBA-PKG-001", "VBA-PKG-005"])
+
     def test_error_diversion_before_target(self):
         report = self.inspect("Private Sub Workbook_Open()\n    On Error GoTo Fail\n    DP_Prepare\n    DP_Start\n"
                               "    Exit Sub\nFail:\n    Debug.Print Err.Description\nEnd Sub\n",
@@ -311,6 +334,13 @@ class StartupTests(Fixture):
                               ribbon=b'<customUI onLoad="DP_RibbonLoad"><ribbon/></customUI>')
         self.assertEqual(report["package"]["ribbon"]["onLoad"], "DP_RibbonLoad")
         self.assertEqual(report["startup"]["verdict"], "wired")
+        for params in ("", "a As Object, b As Object", "Optional r As Object", "r As Long"):
+            with self.subTest(params):
+                wrong = self.inspect(extra={"M_Ribbon": ("standard", 'Attribute VB_Name = "M_Ribbon"\n'
+                                                         f"Public Sub DP_RibbonLoad({params})\n    DP_Start\nEnd Sub\n")},
+                                     ribbon=b'<customUI onLoad="DP_RibbonLoad"><ribbon/></customUI>')
+                self.assertIn("VBA-PKG-003", self.codes(wrong, "error"))
+                self.assertEqual(wrong["startup"]["verdict"], "not-wired")
 
     def test_incomplete_analysis_never_reports_a_missing_hook(self):
         report = self.inspect("Private Sub Workbook_BeforeClose(Cancel As Boolean)\n",
@@ -331,6 +361,14 @@ class ComparisonTests(Fixture):
         self.assertIn("VBA-PKG-010", self.codes(missing, "error"))
         unexpected = self.inspect(hook, {"M_Extra": ("standard", 'Attribute VB_Name = "M_Extra"\n')})
         self.assertIn("VBA-PKG-011", self.codes(unexpected, "warning"))
+        literal = 'Attribute VB_Name = "M_Text"\nPublic Const DP_TEXT As String = "a b"\n'
+        spaced = self.inspect(hook, {"M_Text": ("standard", literal.replace('"a b"', '"a  b"'))},
+                              source_extra={"src/M_Text.bas": literal})
+        self.assertIn("VBA-PKG-012", self.codes(spaced, "error"))
+        layout = self.inspect(hook, {"M_Text": ("standard", literal.replace("As String =", "As String  ="))},
+                              source_extra={"src/M_Text.bas": literal})
+        self.assertIn("VBA-PKG-015", self.codes(layout, "info"))
+        self.assertNotIn("VBA-PKG-012", self.codes(layout))
         comments = self.inspect(hook, {"M_DatePicker": ("standard", STANDARD + "' trailing note\n")})
         self.assertEqual(self.codes(comments, "error"), [])
         self.assertIn("VBA-PKG-015", self.codes(comments, "info"))

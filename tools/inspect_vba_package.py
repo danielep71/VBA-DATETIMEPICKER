@@ -40,7 +40,7 @@ from typing import Any
 from _gatelib import git_bytes, git_text, run_gate
 from check_source import ribbon_callback_attributes
 from check_vba_calls import (
-    MANIFEST, KEYWORDS, Module, Proc, merge_environments, parse_module,
+    MANIFEST, KEYWORDS, Module, Proc, merge_environments, parse_module, tokenize,
 )
 from check_vba_conditionals import ENVIRONMENTS, logical_units, reachable_sources
 
@@ -465,7 +465,9 @@ def normalize(text: str, kind: str) -> str:
 
 
 def code_lines(text: str) -> list[str]:
-    return [" ".join(code.split()) for _s, _e, _k, code in logical_units(text.split("\n")) if code.strip()]
+    """Logical code lines as tokens: whitespace between tokens is ignored, string literals are kept verbatim."""
+    return [" ".join(t.text for t in tokenize(code)) for _s, _e, _k, code in logical_units(text.split("\n"))
+            if code.strip()]
 
 
 def read_source(source: Path, revision: str, configuration: dict[str, Any]) -> dict[str, Any]:
@@ -634,7 +636,7 @@ def on_error_handler(proc: Proc) -> str | None:
 
 def trace(proc: Proc, module: Module, index: Index, depth: int, seen: set[str]) -> dict[str, Any]:
     """Walk one procedure's statements in order, following project calls toward TARGET."""
-    result: dict[str, Any] = {"reaches": [], "dynamic": [], "unresolved": [], "diversions": []}
+    result: dict[str, Any] = {"reaches": [], "dynamic": [], "unresolved": [], "truncated": []}
     nesting, exited, handler = 0, False, None
     earlier_calls: list[dict[str, Any]] = []
     single_if_line = None
@@ -682,21 +684,28 @@ def trace(proc: Proc, module: Module, index: Index, depth: int, seen: set[str]) 
                 site.update(call=f"{qualifier}", literal=name)
                 result["dynamic"].append(site)
                 continue
+            callee = index.resolve(name, module, qualifier)
             if name.casefold() == TARGET.casefold():
-                site["handler"] = handler
-                site["earlier_calls_under_goto"] = [c for c in earlier_calls if c["handler"] == "goto"]
+                if callee is None:
+                    receiver = qualifier is not None and qualifier.casefold() not in index.modules
+                    result["unresolved"].append({**site, "reason": "object receiver" if receiver else "undeclared"})
+                    continue
+                site.update(call=f"{callee.module}.{callee.name}", handler=handler,
+                            earlier_calls_under_goto=[c for c in earlier_calls if c["handler"] == "goto"])
                 result["reaches"].append({**site, "path": [site]})
                 continue
-            callee = index.resolve(name, module, qualifier)
             if callee is None:
                 if index.undeclared_project_name(name):
-                    result["unresolved"].append(site)
+                    result["unresolved"].append({**site, "reason": "undeclared"})
                 continue
             callee_module = index.modules[callee.module.casefold()][0]
             earlier_calls.append({"call": callee.name, "line": line, "handler": handler,
                                   "callee_handler": on_error_handler(callee)})
             key = f"{callee.module}.{callee.name}".casefold()
-            if depth >= MAX_TRACE_DEPTH or key in seen:
+            if key in seen:
+                continue
+            if depth >= MAX_TRACE_DEPTH:
+                result["truncated"].append(site)
                 continue
             nested = trace(callee, callee_module, index, depth + 1, seen | {key})
             for reach in nested["reaches"]:
@@ -704,7 +713,17 @@ def trace(proc: Proc, module: Module, index: Index, depth: int, seen: set[str]) 
                                           "path": [site] + reach["path"]})
             result["dynamic"] += nested["dynamic"]
             result["unresolved"] += nested["unresolved"]
+            result["truncated"] += nested["truncated"]
     return result
+
+
+def onload_signature(proc: Proc) -> bool:
+    """Office passes one IRibbonUI object to a Ribbon onLoad callback."""
+    if proc.accessor != "sub" or len(proc.params) != 1:
+        return False
+    param = proc.params[0]
+    return not (param.optional or param.paramarray) and (param.type or "Object").casefold() in {
+        "object", "variant", "iribbonui", "office.iribbonui"}
 
 
 def analyze_environment(modules: list[dict[str, Any]], environment: str, patterns: list[re.Pattern[str]],
@@ -752,7 +771,10 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
                 placement = "unknown"
         elif module.kind != "standard":
             placement = "misplaced"
-        signature = "correct" if proc.accessor == "sub" and (not proc.params or key == "ribbon_onload") else "mismatch"
+        if key == "ribbon_onload":
+            signature = "correct" if onload_signature(proc) else "mismatch"
+        else:
+            signature = "correct" if proc.accessor == "sub" and not proc.params else "mismatch"
         result = trace(proc, module, index, 0, {f"{module.name}.{proc.name}".casefold()})
         hook = {"hook": label, "module": module.name, "module_kind": module.kind, "document_object": obj,
                 "procedure": proc.name, "line": proc.line, "signature": proc.signature(), "accessor": proc.accessor,
@@ -761,7 +783,8 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
                                     "earlier_calls_under_goto": r.get("earlier_calls_under_goto", []),
                                     "path": [f"{s['module']}.{s['procedure']}:{s['line']} -> {s['call']}"
                                              for s in r["path"]]} for r in result["reaches"]],
-                "dynamic_calls": result["dynamic"], "unresolved_calls": result["unresolved"]}
+                "dynamic_calls": result["dynamic"], "unresolved_calls": result["unresolved"],
+                "calls_beyond_depth": result["truncated"]}
         hooks.append(hook)
         where = {"module": module.name, "procedure": proc.name, "line": proc.line}
         if placement == "misplaced":
@@ -771,13 +794,25 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
                                     **where))
         if signature == "mismatch":
             findings.append(finding("VBA-PKG-003", f"{proc.name} is declared as {proc.accessor} "
-                                    f"{proc.signature()}; Excel calls a Sub with no parameters.", **where))
+                                    f"{proc.signature()}; Excel calls a Sub with "
+                                    f"{'one IRibbonUI parameter' if key == 'ribbon_onload' else 'no parameters'}.",
+                                    **where))
         for site in result["dynamic"] + result["unresolved"]:
-            what = (f"dynamic call {site['call']}" + (f" with literal {site['literal']!r}" if site.get("literal") else "")
-                    if "literal" in site else f"unresolved project call {site['call']}")
+            if "literal" in site:
+                what = f"dynamic call {site['call']}" + (f" with literal {site['literal']!r}" if site["literal"] else "")
+            elif site["reason"] == "object receiver":
+                what = f"call {site['call']} on an object receiver"
+            else:
+                what = f"unresolved project call {site['call']}"
             findings.append(finding("VBA-PKG-005", f"{label} path: {what}; where it leads is not established.",
                                     module=site["module"], procedure=site["procedure"], line=site["line"],
                                     target=site["call"]))
+        if result["truncated"]:
+            first = result["truncated"][0]
+            findings.append(finding("VBA-PKG-005", f"{label} path: {len(result['truncated'])} call(s) beyond trace depth "
+                                    f"{MAX_TRACE_DEPTH} were not followed, first {first['call']}.",
+                                    module=first["module"], procedure=first["procedure"], line=first["line"],
+                                    target=first["call"]))
         for reach in result["reaches"]:
             for earlier in reach.get("earlier_calls_under_goto", []):
                 contained = earlier["callee_handler"] == "resume-next"
@@ -790,12 +825,12 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
     usable = [h for h in hooks if h["placement"] != "misplaced" and h["signature_check"] == "correct"]
     reaching = [h for h in usable if h["reaches_target"]]
     unconditional = [h for h in reaching if any(not r["conditional"] for r in h["reaches_target"])]
-    opaque = [h for h in usable if h["dynamic_calls"] or h["unresolved_calls"]]
+    opaque = [h for h in usable if h["dynamic_calls"] or h["unresolved_calls"] or h["calls_beyond_depth"]]
     if not reaching:
         item = finding("VBA-PKG-001", f"No correctly placed startup hook calls {TARGET} in this environment "
                        f"({len(hooks)} lifecycle procedure(s) found).", target=TARGET)
         if opaque:
-            item.update(severity="unknown", resolution="dynamic or unresolved calls on a startup path")
+            item.update(severity="unknown", resolution="dynamic, unresolved or unfollowed calls on a startup path")
         findings.append(item)
     elif not unconditional:
         for hook in reaching:
