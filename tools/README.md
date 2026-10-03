@@ -79,6 +79,66 @@ which are not exported; and project `#Const` symbols.
 When a module is added, renamed or moved, update `tools/vba-projects.json` in the
 same change; an unlisted or missing module makes the report `incomplete`.
 
+## Inspect the VBA inside a built package (diagnostic)
+
+```sh
+python tools/inspect_vba_package.py --package <file.xlam|file.xlsm> \
+  --source . --source-rev <tag-or-sha> \
+  --output test-results/package-inspection.json --summary test-results/package-inspection.md
+```
+
+Written for the automatic-startup investigation (#113); **not a release gate**
+and not run by `check.py` or CI (its fixtures run in `tool-tests`). It reads the
+package without opening Excel or running a macro, and reports:
+
+- **Identity:** package filename, size and SHA-256, the `xl/vbaProject.bin` hash,
+  the resolved source SHA and the tool version and revision.
+- **Inventory:** every embedded module, including `ThisWorkbook` and worksheet
+  modules, with its kind and raw SHA-256.
+- **Startup wiring:** `Workbook_Open`, `Workbook_AddinInstall`, `Auto_Open` and a
+  Ribbon `onLoad` callback: placement, signature, and whether each reaches
+  `DP_Start` directly or through project procedures, per `#If` environment.
+  Paths through `Application.Run`/`OnTime`/`CallByName` or undeclared project
+  names are unknown, and earlier calls under `On Error GoTo` are listed.
+- **Source comparison** with the `--configuration` modules of
+  `tools/vba-projects.json` (default `packaged-hosts`) at `--source-rev`.
+
+Extraction uses the standard library only: the zip container, then the VBA
+storage of `vbaProject.bin` ([MS-CFB], [MS-OVBA] decompression). It fails closed:
+any structural surprise is `VBA-PKG-090`, and the inspection is then `failed`,
+never a clean result. `--export-dir` accepts a folder of modules exported from the
+VBE instead; that run is labelled `manual-export` (`VBA-PKG-092`) and stays
+`incomplete`, because it does not prove what a package contains.
+
+Comparison normalizes only: code page decoding, line endings, the export-only
+header before `Attribute VB_Name`, trailing empty lines, and the `VB_Base`,
+`VB_TemplateDerived` and `VB_Customizable` attributes that the VBE stores in
+class and form streams but omits from exports. Raw hashes of both sides are kept.
+A remaining difference is `VBA-PKG-012` unless it disappears once comments and
+blank lines are removed (`VBA-PKG-015`).
+
+The report keeps inspection completeness (`complete`, `incomplete`, `failed`)
+separate from the findings outcome. `pass` needs a complete inspection and no
+error. A hook that reaches `DP_Start` shows wiring, not that Excel calls it in a
+given load mode: the compiled p-code, macro security, event state and add-in
+load behaviour are not inspected. Only a fresh Excel session shows that.
+
+| Code | Severity | Finding |
+| --- | --- | --- |
+| `VBA-PKG-001` | error | no correctly placed startup hook reaches `DP_Start` (unknown when a path is dynamic or analysis is incomplete) |
+| `VBA-PKG-002` / `003` | error | lifecycle procedure misplaced / signature mismatch |
+| `VBA-PKG-004` | warning | `DP_Start` reached only on a conditional path |
+| `VBA-PKG-005` | unknown | dynamic or unresolved call on a startup path |
+| `VBA-PKG-006` | info | hook text only in comments |
+| `VBA-PKG-007` | warning | only `Workbook_AddinInstall` reaches `DP_Start` |
+| `VBA-PKG-009` | info | an earlier call under `On Error GoTo` can skip `DP_Start` |
+| `VBA-PKG-010` / `011` | error / warning | expected module missing / unexpected module |
+| `VBA-PKG-012` / `015` | error / info | code differs / differs only in comments |
+| `VBA-PKG-013` | info | document module with no tracked source |
+| `VBA-PKG-014` | warning | module kind differs |
+| `VBA-PKG-090` / `091` | failure | extraction failed / analysis incomplete |
+| `VBA-PKG-092` | unknown | manual export, not package evidence |
+
 ## Prepare and check one release record
 
 After building the two packages from the exact candidate, prepare one record:

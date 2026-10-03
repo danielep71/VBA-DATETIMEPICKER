@@ -113,6 +113,15 @@ Use only the categories needed by a release.
   module split (#24), not a release gate: `check.py` does not run it and the
   static workflow reports it without blocking.
 
+- Diagnostic package inspector, `tools/inspect_vba_package.py`, with fixtures
+  (`tools/test_inspect_vba_package.py`), for the automatic-startup investigation
+  (#113). Without opening Excel, it reads a built `.xlam`/`.xlsm` with the
+  standard library and reports the package hash, every embedded module including
+  `ThisWorkbook`, the startup hooks that reach `DP_Start`, and how each module
+  compares with the exported source at a stated revision. Failed or incomplete
+  extraction never yields a clean result. It is not a release gate and not
+  runtime evidence.
+
 - New `.github/scripts/check-ribbon-resources.py` and the **Check Ribbon
   resources** workflow fail a pull request or release push when the Ribbon XML
   references a custom image with no mapping, when a mapping targets a file

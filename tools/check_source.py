@@ -18,12 +18,12 @@ REQUIRED = {
 }
 
 
-def ribbon_callbacks(data: bytes) -> list[str]:
-    """Parse bounded XML with DTDs forbidden, collecting callback attributes."""
+def ribbon_callback_attributes(data: bytes) -> list[tuple[str, str, str]]:
+    """Parse bounded XML with DTDs forbidden; return (element, attribute, callback) triples."""
     if len(data) > 1_000_000:
         raise ValueError("Ribbon XML exceeds 1 MB")
     parser = expat.ParserCreate()
-    callbacks: list[str] = []
+    callbacks: list[tuple[str, str, str]] = []
 
     def reject_dtd(*args: object) -> None:
         raise ValueError("Ribbon DTD declarations are forbidden")
@@ -31,12 +31,17 @@ def ribbon_callbacks(data: bytes) -> list[str]:
     def element(name: str, attributes: dict[str, str]) -> None:
         for key, value in attributes.items():
             if key.startswith("on") or key.startswith("get") or key == "loadImage":
-                callbacks.append(value)
+                callbacks.append((name, key, value))
 
     parser.StartDoctypeDeclHandler = reject_dtd
     parser.StartElementHandler = element
     parser.Parse(data, True)
     return callbacks
+
+
+def ribbon_callbacks(data: bytes) -> list[str]:
+    """Callback names referenced by Ribbon XML, in document order."""
+    return [value for _element, _attribute, value in ribbon_callback_attributes(data)]
 
 
 def run_check(root: Path) -> dict:
