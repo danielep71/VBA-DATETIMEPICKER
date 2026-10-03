@@ -144,11 +144,7 @@ Use only the categories needed by a release.
 - The Ribbon **Reset** command starts the runtime with `DP_Start` when no
   provider holds the lease, instead of refusing a repair. A copy whose
   `Workbook_Open` did not start the runtime can now be recovered in one click.
-  Reset never takes over a lease another provider holds. This remains a recovery
-  path if the startup failure reported in
-  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) recurs;
-  that issue was closed as not reproducible after same-package, same-build
-  fresh-session retests on 2026-10-03, without a startup code fix.
+  Reset never takes over a lease another provider holds.
 
 - The release procedure and certification template now treat RibbonX as an
   Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
@@ -169,6 +165,15 @@ Use only the categories needed by a release.
   weekly GitHub Actions dependency updates.
 
 ### Fixed
+
+- The right-click entry is restored when it is missing after Excel startup.
+  Loaded from an **At startup, open all files in** folder, the add-in started
+  and owned the runtime, yet its entry was gone from every `Cell` menu by the
+  first right-click; running the menu update again restored it. The manager now
+  handles `SheetBeforeRightClick` and re-adds a missing entry before the menu
+  opens, only for the copy that owns the runtime and only while the right-click
+  setting is enabled. What removed the entry at startup was not identified
+  ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)).
 
 - The right-click entry now appears in **Page Layout** view. Excel has more
   than one command bar named `Cell`, and registration by name reached only the
@@ -271,23 +276,16 @@ Use only the categories needed by a release.
 
 - New technically public routines `M_Ribbon_ResetShouldStart` and
   `M_Ribbon_LifecycleSucceeded` exist only for the regression harness; they are
-  not supported API. The harness gains the `ContextMenuCoverage`,
-  `StopWithoutOwnership` and `RibbonReset` suites.
+  not supported API. The same applies to `M_ContextMenu_EnsureForRightClick`,
+  which the manager calls from `SheetBeforeRightClick`. The harness gains the
+  `ContextMenuCoverage`, `ContextMenuResync`, `StopWithoutOwnership` and
+  `RibbonReset` suites.
 
 - Code that relied on `DP_Stop` showing the refusal for a copy that never
   started will no longer see it. `M_Lifecycle_Test_LastSucceeded` is still
   `False` after such a stop.
 
 ### Known limitations
-
-- The alternate-startup-folder failure reported once in
-  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) was not
-  reproduced on 2026-10-03: the published `v1.2.2` package started automatically
-  on the same Excel build and machine in all four recorded launch scenarios.
-  The original cause remains unknown. Installation and troubleshooting guidance
-  now reflect this [retest evidence](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113#issuecomment-5966278179).
-  If it recurs, record the failing session and reopen the issue; `DP_Start`
-  remains a recovery option, with Ribbon **Reset** recovery added in `v1.2.3`.
 
 - The `v1.2.2` manual matrices accepted as disclosed limitations in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) are
   not backfilled by this release.

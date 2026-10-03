@@ -1476,22 +1476,21 @@ Protected sheets can prevent the icon from appearing even when the target cell i
 
 The project is designed and documented for Excel desktop on Windows. Optional borderless styling and mouse/window helpers use Windows APIs.
 
-### Alternate startup folder: one reported failure, not reproduced
+### Right-click entry missing after Excel starts
 
-A startup failure was reported once with the published `v1.2.2` `.xlam` loaded
-from Excel's **At startup, open all files in** folder. On 2026-10-03 the same
-package started automatically in fresh Excel sessions on the same reported
-build and machine, from both trusted and untrusted folders and with either
-response to the `PERSONAL.XLSB` macro prompt. The
-[retest record](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113#issuecomment-5966278179)
-includes the package hash and successful lifecycle observations.
+Loaded from Excel's **At startup, open all files in** folder, the add-in starts
+its runtime, but its right-click entry can be gone from the cell menu by the
+first right-click: on the affected host it was no longer on any `Cell` command
+bar, although `DP_Start` had succeeded
+([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). What removes it was not identified;
+other add-ins that customize the cell menu are a likely cause.
 
-[#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) is closed as
-not reproducible; the original cause remains unknown and no startup code fix
-was made. If it recurs, retain the package identity and failing-session
-observations and reopen the issue. For a loaded copy, use `DP_Start` for
-recovery; in `v1.2.3`, Ribbon **Reset** can also start a runtime when no other
-provider owns it. These retests do not establish behavior on every environment.
+From `v1.2.3` the add-in restores a missing entry when you right-click a cell,
+before the menu opens. In `v1.2.2`, turn the right-click setting off and on
+again, or run `M_ContextMenu_Update` once from the Immediate window with
+`Application.Run "'<add-in file name>'!M_ContextMenu_Update"`. If the runtime did
+not start at all, use `DP_Start`; in `v1.2.3` the Ribbon **Reset** command also
+starts it.
 
 ### Accessibility / DPI
 

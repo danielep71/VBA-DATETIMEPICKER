@@ -16521,6 +16521,110 @@ ErrorHandler:
 
 End Sub
 
+Public Sub M_ContextMenu_EnsureForRightClick()
+
+'
+'------------------------------------------------------------------------------
+'                           RIGHT-CLICK MENU RE-ENSURE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores a missing DatePicker right-click entry just before Excel shows a
+'   cell context menu
+'
+' WHY THIS EXISTS
+'   The entry is a temporary command-bar control added once by DP_Start. When
+'   the add-in loads at Excel startup, the entry can be gone by the time the
+'   user first right-clicks, although the runtime started and owns the lease:
+'   another add-in or Excel itself can reset the Cell menu after this project
+'   registered it (#113). Re-ensuring on demand repairs that whenever and by
+'   whatever it was removed
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Does nothing unless this project owns the runtime lease and the right-click
+'   setting is enabled
+'   Otherwise delegates to M_ContextMenu_Add, which adds an entry only to bars
+'   that do not already carry one
+'
+' ERROR POLICY
+'   Best-effort. Never raises: it runs from an Excel event, before the menu is
+'   shown, and a failure must not affect the right-click
+'
+' DEPENDENCIES
+'   M_Lease_IsOwner
+'   M_Settings_EnsureLoaded
+'   M_ContextMenu_Add
+'   gDP_ShowRightClick
+'
+' NOTES
+'   Only adds. Removing entries when the setting is disabled stays with
+'   M_ContextMenu_Update, so this path can never change the user's setting
+'
+'   A copy that does not own the runtime never touches the shared menus, which
+'   keeps the one-provider rule intact
+'
+' UPDATED
+'   2026-10-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_EnsureForRightClick"
+
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' CHECK OWNERSHIP AND SETTING
+'------------------------------------------------------------------------------
+    'Only the copy that owns the runtime may touch the shared right-click menus
+        If Not M_Lease_IsOwner() Then Exit Sub
+    'Ensure settings are loaded before reading the right-click feature flag
+        M_Settings_EnsureLoaded
+    'Leave a disabled entry alone; removal belongs to M_ContextMenu_Update
+        If Not gDP_ShowRightClick Then Exit Sub
+
+'------------------------------------------------------------------------------
+' RESTORE MISSING ENTRIES
+'------------------------------------------------------------------------------
+    'Add the entry to every supported bar that lost it; existing entries stay
+        M_ContextMenu_Add
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Write diagnostics without interrupting the right-click
+        Debug.Print PROC_NAME & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Clear the suppressed error
+        Err.Clear
+
+End Sub
+
 Private Sub M_ContextMenu_Add()
 
 '
