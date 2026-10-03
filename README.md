@@ -726,10 +726,12 @@ and dismantle the current owner's runtime.
 Ownership is checked before destructive lifecycle operations.
 
 A non-owner `DP_Stop` touches nothing. It shows the refusal message only when
-there is something to act on: this copy holds an ownership token the lease no
-longer matches, or the lease cannot be read. A copy that never started, or one
-running beside another copy that owns the lease, returns quietly and writes one
-line to the Immediate Window. `DP_Stop` usually runs from `Workbook_BeforeClose`,
+there is something to act on: this copy holds an ownership token that a lease
+held by another provider no longer matches, or the lease cannot be read. A copy
+that never started, or one running beside another copy that owns the lease,
+returns quietly and writes one line to the Immediate Window. A copy that still
+holds its token but whose lease bar has vanished reclaims the free lease and
+stops as the owner ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). `DP_Stop` usually runs from `Workbook_BeforeClose`,
 so the refusal no longer appears at every Excel exit for a copy that never
 started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
 
@@ -1486,7 +1488,8 @@ bar, and the provider lease bar was gone too, although `DP_Start` had succeeded
 other add-ins that customize the cell menu are a likely cause.
 
 From `v1.2.3` the add-in restores a missing entry, and reclaims its lease if it
-is free, when you right-click a cell, before the menu opens. In `v1.2.2`, turn the right-click setting off and on
+is free, when you right-click a cell, before the menu opens. Closing Excel no
+longer shows "another copy is already active" in that situation. In `v1.2.2`, turn the right-click setting off and on
 again, or run `M_ContextMenu_Update` once from the Immediate window with
 `Application.Run "'<add-in file name>'!M_ContextMenu_Update"`. If the runtime did
 not start at all, use `DP_Start`; in `v1.2.3` the Ribbon **Reset** command also

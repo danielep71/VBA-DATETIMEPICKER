@@ -173,8 +173,10 @@ Use only the categories needed by a release.
   was gone too. The manager now handles `SheetBeforeRightClick`: a copy that
   still holds its owner token reclaims the lease if it is free, then re-adds a
   missing entry before the menu opens, only while the right-click setting is
-  enabled. A lease held by another copy is never taken. What removed the
-  command bars at startup was not identified
+  enabled. `DP_Stop` reclaims a vanished lease the same way, so Excel closes
+  without the "another copy is already active" message. A lease held by another
+  copy is never taken. What removed the command bars at startup was not
+  identified
   ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)).
 
 - The right-click entry now appears in **Page Layout** view. Excel has more
@@ -185,9 +187,11 @@ Use only the categories needed by a release.
 
 - `DP_Stop` no longer shows "Another copy of the DatePicker is already active"
   when the copy never started. A non-owner stop still touches nothing; it reports
-  the refusal only when this copy holds an ownership token the lease no longer
-  matches, or the lease cannot be read. Otherwise it returns quietly and writes
-  one Immediate Window line ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+  the refusal only when this copy holds an ownership token that a lease held by
+  another provider no longer matches, or the lease cannot be read. Otherwise it
+  returns quietly and writes one Immediate Window line. A copy whose lease bar
+  vanished while it held its token reclaims the free lease and stops as the
+  owner ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)) ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
 
 - The Ribbon **Reset** command no longer reports "repair completed
   successfully" after a refused repair. It reads the recorded lifecycle outcome

@@ -5936,7 +5936,7 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '   the observed outcome and the lease left behind:
 '     - no token, no lease              quiet
 '     - no token, another owner's lease quiet, owner's lease intact
-'     - token, lease gone               reported
+'     - token, lease gone               reclaimed, stopped quietly (#113)
 '     - no token, unreadable lease      reported, lease intact
 '
 ' ERROR POLICY
@@ -6016,10 +6016,16 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
         TST_DP_ForceClearLeaseForTest
         RefusalsBefore = M_Lease_Test_RefusalReportCount()
         DP_Stop
-        TST_DP_AssertTrue "Stop with a token but no lease reports a refusal", _
-            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
-        TST_DP_AssertFalse "Stop with a token but no lease is not a success", _
+        TST_DP_AssertEqualsLong "Stop with a token but no lease reports no refusal", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
+        TST_DP_AssertTrue "Stop with a token but no lease reclaims and succeeds", _
             M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertTrue "Stop with a token but no lease records the reclaim", _
+            M_Lifecycle_Test_LastLeaseAcquiredThisCall()
+        TST_DP_AssertFalse "Stop with a token but no lease leaves no lease bar", _
+            TST_DP_LeaseBarExistsForTest()
+        TST_DP_AssertFalse "Stop with a token but no lease leaves no token", _
+            M_Lifecycle_Test_HasLocalOwnerToken()
 
 '------------------------------------------------------------------------------
 ' NO TOKEN, UNREADABLE LEASE

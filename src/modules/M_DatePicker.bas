@@ -6431,6 +6431,80 @@ Private Function M_Lease_ReadOwner() As String
 
 End Function
 
+Private Function M_Lease_TryReclaimVanished(ByVal EntryPoint As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       RECLAIM A VANISHED PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores ownership for a project whose lease bar disappeared while it still
+'   held its owner token
+'
+' WHY THIS EXISTS
+'   The lease is a temporary command bar. Loaded from Excel's alternate startup
+'   folder, the add-in started and acquired it, yet the bar was gone shortly
+'   after, together with the right-click entry, while the token remained (#113).
+'   Without this, the owner could neither restore its menu nor stop cleanly
+'
+' INPUTS
+'   EntryPoint
+'     Name of the calling entry point, for diagnostics
+'
+' RETURNS
+'   True when the lease was free and is now held by this project
+'
+' BEHAVIOR
+'   Does nothing unless this project holds a token and no lease exists at all.
+'   It then acquires the free lease through the silent admission path. A lease
+'   held by another provider, or unreadable, is never taken
+'
+' ERROR POLICY
+'   Never raises. Returns False on any failure
+'
+' DEPENDENCIES
+'   mDP_RuntimeOwnerId
+'   M_Lease_ReadOwner
+'   M_Lease_EnsureAdmitted
+'
+' NOTES
+'   This is the acquisition any copy may make of a free lease, restricted to
+'   the copy that last held it. A copy that never held a token never claims
+'   one here, so a right-click or a shutdown cannot start a copy that was never
+'   started
+'
+' UPDATED
+'   2026-10-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECIDE
+'------------------------------------------------------------------------------
+    'Never let a reclaim raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_TryReclaimVanished = False
+    'Only a project that held the lease may reclaim it
+        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then Exit Function
+    'Only a lease that is absent is free; held or unreadable leases are not
+        If VBA.LenB(M_Lease_ReadOwner()) > 0 Then
+            Err.Clear
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RECLAIM
+'------------------------------------------------------------------------------
+    'Acquire the free lease without any user-facing report
+        If M_Lease_EnsureAdmitted(EntryPoint, False) Then
+            M_Lease_TryReclaimVanished = True
+            Debug.Print EntryPoint & " | Reclaimed a vanished provider lease"
+        End If
+    'Clear any suppressed error
+        Err.Clear
+
+End Function
+
 Public Function M_Lease_IsOwner() As Boolean
 
 '
@@ -9637,6 +9711,7 @@ Public Sub DP_Stop()
 '
 ' DEPENDENCIES
 '   M_Lease_IsOwner
+'   M_Lease_TryReclaimVanished
 '   M_Lease_ReadOwner
 '   M_Lease_ReportRefusal
 '   M_Lifecycle_StopNeedsRefusalReport
@@ -9656,8 +9731,13 @@ Public Sub DP_Stop()
 '   to show the "another copy is already active" message on every exit, although
 '   no other copy existed (#115). Which cases still report is decided by
 '   M_Lifecycle_StopNeedsRefusalReport
+'
+'   A copy that holds its token but whose lease bar vanished, as observed after
+'   loading from the alternate startup folder (#113), first reclaims the free
+'   lease and then stops as the owner, without a message. A lease held by
+'   another provider or unreadable still refuses
 ' UPDATED
-'   2026-10-01
+'   2026-10-03
 '------------------------------------------------------------------------------
 
     Dim CallerEnableEvents As Boolean
@@ -9675,6 +9755,10 @@ Public Sub DP_Stop()
     OwnedOnEntry = M_Lease_IsOwner()
     mDP_LifecycleLastLeaseWasAlreadyOwned = OwnedOnEntry
     mDP_LifecycleLastLeaseAcquiredThisCall = False
+    If Not OwnedOnEntry Then
+        OwnedOnEntry = M_Lease_TryReclaimVanished("DP_Stop")
+        mDP_LifecycleLastLeaseAcquiredThisCall = OwnedOnEntry
+    End If
 
     If Not OwnedOnEntry Then
         If M_Lifecycle_StopNeedsRefusalReport( _
@@ -16562,11 +16646,10 @@ Public Sub M_ContextMenu_EnsureForRightClick()
 '
 ' DEPENDENCIES
 '   M_Lease_IsOwner
-'   M_Lease_EnsureAdmitted
+'   M_Lease_TryReclaimVanished
 '   M_Settings_EnsureLoaded
 '   M_ContextMenu_Add
 '   gDP_ShowRightClick
-'   mDP_RuntimeOwnerId
 '
 ' NOTES
 '   Only adds. Removing entries when the setting is disabled stays with
@@ -16601,10 +16684,7 @@ Public Sub M_ContextMenu_EnsureForRightClick()
     'Only the copy that owns the runtime may touch the shared right-click menus
         If Not M_Lease_IsOwner() Then
         'Only a copy that held the lease may reclaim it, and only while it is free
-            If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then Exit Sub
-            If Not M_Lease_EnsureAdmitted(PROC_NAME, False) Then Exit Sub
-        'Record the repair for diagnostics
-            Debug.Print PROC_NAME & " | Reclaimed a vanished provider lease"
+            If Not M_Lease_TryReclaimVanished(PROC_NAME) Then Exit Sub
         End If
     'Ensure settings are loaded before reading the right-click feature flag
         M_Settings_EnsureLoaded
