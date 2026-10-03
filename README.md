@@ -1481,12 +1481,12 @@ The project is designed and documented for Excel desktop on Windows. Optional bo
 Loaded from Excel's **At startup, open all files in** folder, the add-in starts
 its runtime, but its right-click entry can be gone from the cell menu by the
 first right-click: on the affected host it was no longer on any `Cell` command
-bar, although `DP_Start` had succeeded
+bar, and the provider lease bar was gone too, although `DP_Start` had succeeded
 ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). What removes it was not identified;
 other add-ins that customize the cell menu are a likely cause.
 
-From `v1.2.3` the add-in restores a missing entry when you right-click a cell,
-before the menu opens. In `v1.2.2`, turn the right-click setting off and on
+From `v1.2.3` the add-in restores a missing entry, and reclaims its lease if it
+is free, when you right-click a cell, before the menu opens. In `v1.2.2`, turn the right-click setting off and on
 again, or run `M_ContextMenu_Update` once from the Immediate window with
 `Application.Run "'<add-in file name>'!M_ContextMenu_Update"`. If the runtime did
 not start at all, use `DP_Start`; in `v1.2.3` the Ribbon **Reset** command also

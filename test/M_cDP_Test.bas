@@ -5420,11 +5420,11 @@ Private Sub TST_DP_RunSuite_ContextMenuResync()
 '
 ' WHY THIS EXISTS
 '   Loaded at Excel startup, the add-in started and owned the runtime, yet its
-'   right-click entry was gone from every Cell bar by the first right-click.
-'   Re-running the menu update restored it. The re-ensure path must restore a
-'   lost entry for the owner, add no duplicate, never re-add an entry the user
-'   disabled, and never touch the shared menus from a copy that does not own
-'   the runtime
+'   right-click entry and its provider lease bar were both gone by the first
+'   right-click. The re-ensure path must restore a lost entry for the owner,
+'   reclaim a vanished lease only for the copy that held it, add no duplicate,
+'   never re-add an entry the user disabled, and never touch the shared menus
+'   from a copy that does not own the runtime
 '
 ' INPUTS
 '   None
@@ -5436,8 +5436,10 @@ Private Sub TST_DP_RunSuite_ContextMenuResync()
 '   As owner: removes the entries to stand in for an external reset, then
 '   asserts the re-ensure restores exactly one per supported bar, and that a
 '   second call adds none. With the setting disabled, asserts nothing is added.
-'   Under a planted foreign lease, asserts nothing is added. Restores the lease,
-'   the setting and its registration afterwards
+'   With the lease bar deleted but the token kept, asserts the lease is
+'   reclaimed and the entry restored. Under a planted foreign lease, and with no
+'   token and no lease, asserts nothing is added and no lease is taken. Restores
+'   the lease, the setting and its registration afterwards
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues. Always restores state
@@ -5451,6 +5453,7 @@ Private Sub TST_DP_RunSuite_ContextMenuResync()
 '   M_Lease_Test_ClearOwnerToken
 '   M_Lease_Test_SilenceRefusalReport
 '   TST_DP_ForceClearLeaseForTest
+'   TST_DP_ReadLeaseOwnerForTest
 '   TST_DP_ContextMenuControlCount
 '   TST_DP_IsContextMenuBarForTest
 '   TST_DP_CountMenuTagOnBarForTest
@@ -5543,10 +5546,26 @@ Private Sub TST_DP_RunSuite_ContextMenuResync()
             M_Settings_GetShowRightClick()
 
 '------------------------------------------------------------------------------
+' OWNER: A VANISHED LEASE IS RECLAIMED, THEN THE ENTRY RESTORED
+'------------------------------------------------------------------------------
+    'Enable the setting, then lose both the entry and the lease bar, keeping the
+    'token, as observed after Excel startup
+        M_Settings_SetShowRightClick True
+        M_ContextMenu_Remove
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertFalse "Vanished lease: ownership can no longer be proven", _
+            M_Lease_IsOwner()
+    'The token holder reclaims the free lease and restores the entry
+        M_ContextMenu_EnsureForRightClick
+        TST_DP_AssertTrue "Vanished lease: re-ensure reclaims ownership", _
+            M_Lease_IsOwner()
+        TST_DP_AssertEqualsLong "Vanished lease: one entry restored per supported bar", _
+            TargetBarCount, TST_DP_ContextMenuControlCount()
+
+'------------------------------------------------------------------------------
 ' FOREIGN LEASE: THE SHARED MENUS ARE NOT TOUCHED
 '------------------------------------------------------------------------------
-    'Enable the setting as owner, then clear the entry and give up ownership
-        M_Settings_SetShowRightClick True
+    'Clear the entry and give up ownership; the lease stays held
         M_ContextMenu_Remove
         M_Lease_Test_ClearOwnerToken
         TST_DP_AssertFalse "This project does not own the planted lease", _
@@ -5554,6 +5573,19 @@ Private Sub TST_DP_RunSuite_ContextMenuResync()
     'A copy that does not own the runtime must add nothing
         M_ContextMenu_EnsureForRightClick
         TST_DP_AssertEqualsLong "Re-ensure adds nothing under a foreign lease", _
+            0, TST_DP_ContextMenuControlCount()
+        TST_DP_AssertFalse "Re-ensure does not take a foreign lease", _
+            M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
+' NO TOKEN, NO LEASE: NOTHING IS CLAIMED
+'------------------------------------------------------------------------------
+    'A copy that never held the lease must not claim a free one from this path
+        TST_DP_ForceClearLeaseForTest
+        M_ContextMenu_EnsureForRightClick
+        TST_DP_AssertEqualsLong "Re-ensure without a token claims no lease", _
+            0, VBA.LenB(TST_DP_ReadLeaseOwnerForTest())
+        TST_DP_AssertEqualsLong "Re-ensure without a token adds no entry", _
             0, TST_DP_ContextMenuControlCount()
 
 '------------------------------------------------------------------------------

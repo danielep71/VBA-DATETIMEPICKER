@@ -168,11 +168,13 @@ Use only the categories needed by a release.
 
 - The right-click entry is restored when it is missing after Excel startup.
   Loaded from an **At startup, open all files in** folder, the add-in started
-  and owned the runtime, yet its entry was gone from every `Cell` menu by the
-  first right-click; running the menu update again restored it. The manager now
-  handles `SheetBeforeRightClick` and re-adds a missing entry before the menu
-  opens, only for the copy that owns the runtime and only while the right-click
-  setting is enabled. What removed the entry at startup was not identified
+  and owned the runtime, yet by the first right-click its entry was gone from
+  every `Cell` menu and its provider lease bar, also a temporary command bar,
+  was gone too. The manager now handles `SheetBeforeRightClick`: a copy that
+  still holds its owner token reclaims the lease if it is free, then re-adds a
+  missing entry before the menu opens, only while the right-click setting is
+  enabled. A lease held by another copy is never taken. What removed the
+  command bars at startup was not identified
   ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)).
 
 - The right-click entry now appears in **Page Layout** view. Excel has more

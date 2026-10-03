@@ -16534,10 +16534,11 @@ Public Sub M_ContextMenu_EnsureForRightClick()
 ' WHY THIS EXISTS
 '   The entry is a temporary command-bar control added once by DP_Start. When
 '   the add-in loads at Excel startup, the entry can be gone by the time the
-'   user first right-clicks, although the runtime started and owns the lease:
-'   another add-in or Excel itself can reset the Cell menu after this project
-'   registered it (#113). Re-ensuring on demand repairs that whenever and by
-'   whatever it was removed
+'   user first right-clicks, although the runtime started (#113). On the
+'   affected host the provider lease bar, also a temporary command bar, was
+'   gone as well, so the copy still held its owner token but could no longer
+'   prove ownership. Re-ensuring on demand repairs both, whenever and by
+'   whatever they were removed
 '
 ' INPUTS
 '   None
@@ -16546,8 +16547,12 @@ Public Sub M_ContextMenu_EnsureForRightClick()
 '   Nothing
 '
 ' BEHAVIOR
-'   Does nothing unless this project owns the runtime lease and the right-click
-'   setting is enabled
+'   When this project holds its owner token but the lease has vanished, reclaims
+'   the free lease through the silent admission path. A lease held by anyone
+'   else, or unreadable, is never taken, and a project without a token never
+'   claims one here
+'   Does nothing unless this project then owns the runtime lease and the
+'   right-click setting is enabled
 '   Otherwise delegates to M_ContextMenu_Add, which adds an entry only to bars
 '   that do not already carry one
 '
@@ -16557,16 +16562,20 @@ Public Sub M_ContextMenu_EnsureForRightClick()
 '
 ' DEPENDENCIES
 '   M_Lease_IsOwner
+'   M_Lease_EnsureAdmitted
 '   M_Settings_EnsureLoaded
 '   M_ContextMenu_Add
 '   gDP_ShowRightClick
+'   mDP_RuntimeOwnerId
 '
 ' NOTES
 '   Only adds. Removing entries when the setting is disabled stays with
 '   M_ContextMenu_Update, so this path can never change the user's setting
 '
 '   A copy that does not own the runtime never touches the shared menus, which
-'   keeps the one-provider rule intact
+'   keeps the one-provider rule intact. Reclaiming a vanished lease is the same
+'   acquisition any copy may make of a free lease, restricted here to the copy
+'   that last held it
 '
 ' UPDATED
 '   2026-10-03
@@ -16590,7 +16599,13 @@ Public Sub M_ContextMenu_EnsureForRightClick()
 ' CHECK OWNERSHIP AND SETTING
 '------------------------------------------------------------------------------
     'Only the copy that owns the runtime may touch the shared right-click menus
-        If Not M_Lease_IsOwner() Then Exit Sub
+        If Not M_Lease_IsOwner() Then
+        'Only a copy that held the lease may reclaim it, and only while it is free
+            If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then Exit Sub
+            If Not M_Lease_EnsureAdmitted(PROC_NAME, False) Then Exit Sub
+        'Record the repair for diagnostics
+            Debug.Print PROC_NAME & " | Reclaimed a vanished provider lease"
+        End If
     'Ensure settings are loaded before reading the right-click feature flag
         M_Settings_EnsureLoaded
     'Leave a disabled entry alone; removal belongs to M_ContextMenu_Update
