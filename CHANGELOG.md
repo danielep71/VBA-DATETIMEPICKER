@@ -144,9 +144,11 @@ Use only the categories needed by a release.
 - The Ribbon **Reset** command starts the runtime with `DP_Start` when no
   provider holds the lease, instead of refusing a repair. A copy whose
   `Workbook_Open` did not start the runtime can now be recovered in one click.
-  Reset never takes over a lease another provider holds. This mitigates, but
-  does not resolve, the startup-folder issue
-  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113).
+  Reset never takes over a lease another provider holds. This remains a recovery
+  path if the startup failure reported in
+  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) recurs;
+  that issue was closed as not reproducible after same-package, same-build
+  fresh-session retests on 2026-10-03, without a startup code fix.
 
 - The release procedure and certification template now treat RibbonX as an
   Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
@@ -278,9 +280,14 @@ Use only the categories needed by a release.
 
 ### Known limitations
 
-- An add-in opened from Excel's **At startup, open all files in** folder may not
-  start its runtime ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). Install through the Add-ins
-  dialog, or start it with the Ribbon **Reset** command or `DP_Start`.
+- The alternate-startup-folder failure reported once in
+  [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) was not
+  reproduced on 2026-10-03: the published `v1.2.2` package started automatically
+  on the same Excel build and machine in all four recorded launch scenarios.
+  The original cause remains unknown. Installation and troubleshooting guidance
+  now reflect this [retest evidence](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113#issuecomment-5966278179).
+  If it recurs, record the failing session and reopen the issue; `DP_Start`
+  remains a recovery option, with Ribbon **Reset** recovery added in `v1.2.3`.
 
 - The `v1.2.2` manual matrices accepted as disclosed limitations in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) are
   not backfilled by this release.

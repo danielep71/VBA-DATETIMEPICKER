@@ -1476,14 +1476,22 @@ Protected sheets can prevent the icon from appearing even when the target cell i
 
 The project is designed and documented for Excel desktop on Windows. Optional borderless styling and mouse/window helpers use Windows APIs.
 
-### An add-in opened from an alternate startup folder may not start
+### Alternate startup folder: one reported failure, not reproduced
 
-When the `.xlam` is opened from Excel's **At startup, open all files in** folder
-instead of being installed through **File → Options → Add-ins**, the runtime has
-been observed not to start: no right-click entry until it is started by hand. The
-cause is under investigation in [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113). Install the add-in through the
-Add-ins dialog, or start the runtime with the Ribbon **Reset** command or
-`DP_Start`.
+A startup failure was reported once with the published `v1.2.2` `.xlam` loaded
+from Excel's **At startup, open all files in** folder. On 2026-10-03 the same
+package started automatically in fresh Excel sessions on the same reported
+build and machine, from both trusted and untrusted folders and with either
+response to the `PERSONAL.XLSB` macro prompt. The
+[retest record](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113#issuecomment-5966278179)
+includes the package hash and successful lifecycle observations.
+
+[#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) is closed as
+not reproducible; the original cause remains unknown and no startup code fix
+was made. If it recurs, retain the package identity and failing-session
+observations and reopen the issue. For a loaded copy, use `DP_Start` for
+recovery; in `v1.2.3`, Ribbon **Reset** can also start a runtime when no other
+provider owns it. These retests do not establish behavior on every environment.
 
 ### Accessibility / DPI
 

@@ -183,11 +183,16 @@ from source you imported.
 5. Close and reopen Excel so the add-in loads in a clean session.
 
 > [!NOTE]
-> Install through the Add-ins dialog rather than opening the `.xlam` from an
-> **At startup, open all files in** folder. Loaded that way, the runtime has been
-> observed not to start, so the right-click entry is missing
-> ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). If it
-> happens, the Ribbon **Reset** command or `DP_Start` starts it.
+> A startup failure was reported once when the published `v1.2.2` `.xlam` was
+> loaded from an **At startup, open all files in** folder. It was **not reproduced**
+> on 2026-10-03 with the same package, Excel build and machine: fresh sessions
+> started automatically from both trusted and untrusted folders, including with
+> either response to the `PERSONAL.XLSB` macro prompt. See the
+> [retest record for #113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113#issuecomment-5966278179).
+> The original cause remains unknown; no startup code fix was made. If it recurs,
+> retain the package identity and launch observations and reopen #113. For a
+> loaded copy, use `DP_Start` for recovery; in `v1.2.3`, Ribbon **Reset** can also
+> start the runtime when no other provider owns it.
 
 ### Validate
 
