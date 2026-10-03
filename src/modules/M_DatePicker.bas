@@ -9702,9 +9702,8 @@ Public Sub DP_Stop()
 ' BEHAVIOR
 '   Captures the caller's event state and runs the cleanup transaction with lease
 '   release enabled when this project owns the lease. When it does not, it
-'   touches nothing and records an unsuccessful stop. It reports a refusal only
-'   when there is something the operator can act on; a copy that never started
-'   returns quietly
+'   touches nothing, records an unsuccessful stop and writes one Immediate
+'   Window line. It never shows a dialog
 '
 ' ERROR POLICY
 '   Never raises outward. The outcome is reported through the observation fields
@@ -9712,9 +9711,6 @@ Public Sub DP_Stop()
 ' DEPENDENCIES
 '   M_Lease_IsOwner
 '   M_Lease_TryReclaimVanished
-'   M_Lease_ReadOwner
-'   M_Lease_ReportRefusal
-'   M_Lifecycle_StopNeedsRefusalReport
 '   M_Lifecycle_Cleanup
 '
 ' NOTES
@@ -9729,13 +9725,15 @@ Public Sub DP_Stop()
 '   DP_Stop usually runs from Workbook_BeforeClose, at shutdown. A copy that
 '   never started (for example an add-in whose Workbook_Open did not run) used
 '   to show the "another copy is already active" message on every exit, although
-'   no other copy existed (#115). Which cases still report is decided by
-'   M_Lifecycle_StopNeedsRefusalReport
+'   no other copy existed (#115). After a startup-folder launch the lease could
+'   also be lost or replaced while Excel ran, so the message still appeared at
+'   exit (#113). A stop runs at shutdown, where the operator can do nothing
+'   with it, so a non-owner stop is silent in every case. Genuine provider
+'   conflicts are still reported by the start and open paths
 '
-'   A copy that holds its token but whose lease bar vanished, as observed after
-'   loading from the alternate startup folder (#113), first reclaims the free
-'   lease and then stops as the owner, without a message. A lease held by
-'   another provider or unreadable still refuses
+'   A copy that holds its token but whose lease bar vanished first reclaims the
+'   free lease and then stops as the owner. A lease held by another provider or
+'   unreadable is left untouched
 ' UPDATED
 '   2026-10-03
 '------------------------------------------------------------------------------
@@ -9761,13 +9759,8 @@ Public Sub DP_Stop()
     End If
 
     If Not OwnedOnEntry Then
-        If M_Lifecycle_StopNeedsRefusalReport( _
-            (VBA.LenB(mDP_RuntimeOwnerId) > 0), M_Lease_ReadOwner()) Then
-            M_Lease_ReportRefusal "DP_Stop"
-        Else
-            Debug.Print "DP_Stop | Skipped | This copy holds no runtime ownership, " & _
-                "so there is nothing for it to stop"
-        End If
+        Debug.Print "DP_Stop | Skipped | This copy cannot prove runtime ownership, " & _
+            "so it touches nothing"
         mDP_LifecycleLastSucceeded = False
         GoTo CleanExit
     End If
@@ -9780,74 +9773,6 @@ CleanExit:
     On Error GoTo 0
 
 End Sub
-
-Private Function M_Lifecycle_StopNeedsRefusalReport( _
-    ByVal HasLocalOwnerToken As Boolean, _
-    ByVal LeaseOwner As String) As Boolean
-
-'
-'------------------------------------------------------------------------------
-'                 DECIDE WHETHER A NON-OWNER STOP REPORTS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Decides whether DP_Stop, called by a project that does not own the lease,
-'   shows the provider-refusal message
-'
-' WHY THIS EXISTS
-'   A non-owner stop never touches anything, whatever this returns. The only
-'   question is whether the operator needs to hear about it. Reporting every
-'   non-owner stop showed "another copy is already active" at every Excel exit
-'   for a copy that had simply never started (#115)
-'
-' INPUTS
-'   HasLocalOwnerToken
-'     True when this project still holds an ownership token
-'
-'   LeaseOwner
-'     The value M_Lease_ReadOwner returned: empty for no lease, a token for a
-'     readable lease, or DP_LEASE_AMBIGUOUS
-'
-' RETURNS
-'   True to report the refusal, False to return quietly
-'
-' BEHAVIOR
-'   Quiet when this project holds no token and the lease is either absent or
-'   readably held by another provider: this copy never ran, so it has nothing to
-'   stop and nothing it could have broken
-'
-'   Reports when this project holds a token it can no longer match to the lease,
-'   or when the lease cannot be read. Both mean registrations may exist that no
-'   one can prove it owns, which DP_ForceReleaseProviderLease exists to resolve
-'
-' ERROR POLICY
-'   Cannot raise. String comparison and Boolean logic only
-'
-' DEPENDENCIES
-'   DP_LEASE_AMBIGUOUS
-'
-' NOTES
-'   A VBA project reset also clears the token. That case is quiet here as well,
-'   because at shutdown there is nothing useful the operator can do; Excel
-'   discards the temporary lease and menu entries when it closes. The caller
-'   still writes a line to the Immediate Window
-'
-' UPDATED
-'   2026-10-01
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECIDE
-'------------------------------------------------------------------------------
-    'A token this project cannot match is an ownership question worth reporting
-        If HasLocalOwnerToken Then
-            M_Lifecycle_StopNeedsRefusalReport = True
-            Exit Function
-        End If
-    'An unreadable lease is unverifiable, never quietly ignored
-        M_Lifecycle_StopNeedsRefusalReport = _
-            (VBA.StrComp(LeaseOwner, DP_LEASE_AMBIGUOUS, vbBinaryCompare) = 0)
-
-End Function
 
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 

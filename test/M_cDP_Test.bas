@@ -5917,8 +5917,9 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '                       STOP WITHOUT OWNERSHIP SUITE
 '==============================================================================
 ' PURPOSE
-'   Validates when DP_Stop reports a refusal for a project that does not own
-'   the provider lease, and that it touches nothing in every such case
+'   Validates that DP_Stop, for a project that does not own the provider lease,
+'   never reports a refusal and touches nothing, and that a vanished lease is
+'   reclaimed and stopped as the owner
 '
 ' WHY THIS EXISTS
 '   DP_Stop runs from Workbook_BeforeClose. A copy that never started used to
@@ -5937,7 +5938,7 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '     - no token, no lease              quiet
 '     - no token, another owner's lease quiet, owner's lease intact
 '     - token, lease gone               reclaimed, stopped quietly (#113)
-'     - no token, unreadable lease      reported, lease intact
+'     - no token, unreadable lease      quiet, lease intact
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues. Always restores refusal
@@ -6036,8 +6037,8 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
             Name:=LEASE_BAR, Temporary:=True)
         RefusalsBefore = M_Lease_Test_RefusalReportCount()
         DP_Stop
-        TST_DP_AssertTrue "Stop under an unreadable lease reports a refusal", _
-            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsLong "Stop under an unreadable lease reports no refusal", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
         TST_DP_AssertTrue "Stop under an unreadable lease leaves the bar in place", _
             TST_DP_LeaseBarExistsForTest()
         Set AmbiguousBar = Nothing

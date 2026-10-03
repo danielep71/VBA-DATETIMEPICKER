@@ -725,15 +725,12 @@ and dismantle the current owner's runtime.
 
 Ownership is checked before destructive lifecycle operations.
 
-A non-owner `DP_Stop` touches nothing. It shows the refusal message only when
-there is something to act on: this copy holds an ownership token that a lease
-held by another provider no longer matches, or the lease cannot be read. A copy
-that never started, or one running beside another copy that owns the lease,
-returns quietly and writes one line to the Immediate Window. A copy that still
-holds its token but whose lease bar has vanished reclaims the free lease and
-stops as the owner ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). `DP_Stop` usually runs from `Workbook_BeforeClose`,
-so the refusal no longer appears at every Excel exit for a copy that never
-started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+A non-owner `DP_Stop` touches nothing and never shows a message: it runs at
+Excel exit, where the operator cannot act on it. It writes one line to the
+Immediate Window instead. A copy that still holds its token but whose lease bar
+has vanished reclaims the free lease and stops as the owner
+([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113), [#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+Provider conflicts are still reported when a copy starts or opens the picker.
 
 The Ribbon **Reset** command reports success only from the recorded outcome of
 the operation it ran, never from the fact that the call returned
