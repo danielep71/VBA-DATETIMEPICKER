@@ -1035,6 +1035,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "StopWithoutOwnership"
     'Run entry-path admission checks under owned and foreign leases
         TST_DP_RunSuiteSafe "RuntimeAdmission"
+    'Run right-click entry re-ensure checks for owned and foreign leases
+        TST_DP_RunSuiteSafe "ContextMenuResync"
     'Run DP_RepairRuntime behavior checks
         TST_DP_RunSuiteSafe "RepairRuntime"
     'Run transactional startup / shutdown / repair fault matrices
@@ -1385,6 +1387,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "CONTEXTMENUCOVERAGE"
                 TST_DP_RunSuite_ContextMenuCoverage
+
+            Case "CONTEXTMENURESYNC"
+                TST_DP_RunSuite_ContextMenuResync
 
             Case "REPAIRRUNTIME"
                 TST_DP_RunSuite_RepairRuntime
@@ -5403,6 +5408,216 @@ SuiteFail:
 
 End Sub
 
+Private Sub TST_DP_RunSuite_ContextMenuResync()
+
+'
+'==============================================================================
+'                        CONTEXT MENU RESYNC SUITE
+'==============================================================================
+' PURPOSE
+'   Validates M_ContextMenu_EnsureForRightClick, which restores a missing
+'   right-click entry before Excel shows a cell context menu (#113)
+'
+' WHY THIS EXISTS
+'   Loaded at Excel startup, the add-in started and owned the runtime, yet its
+'   right-click entry and its provider lease bar were both gone by the first
+'   right-click. The re-ensure path must restore a lost entry for the owner,
+'   reclaim a vanished lease only for the copy that held it, add no duplicate,
+'   never re-add an entry the user disabled, and never touch the shared menus
+'   from a copy that does not own the runtime
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   As owner: removes the entries to stand in for an external reset, then
+'   asserts the re-ensure restores exactly one per supported bar, and that a
+'   second call adds none. With the setting disabled, asserts nothing is added.
+'   With the lease bar deleted but the token kept, asserts the lease is
+'   reclaimed and the entry restored. Under a planted foreign lease, and with no
+'   token and no lease, asserts nothing is added and no lease is taken. Restores
+'   the lease, the setting and its registration afterwards
+'
+' ERROR POLICY
+'   Records suite-level failures and continues. Always restores state
+'
+' DEPENDENCIES
+'   M_ContextMenu_EnsureForRightClick
+'   M_ContextMenu_Update
+'   M_ContextMenu_Remove
+'   M_Settings_SetShowRightClick
+'   M_Lease_TryAcquire
+'   M_Lease_Test_ClearOwnerToken
+'   M_Lease_Test_SilenceRefusalReport
+'   TST_DP_ForceClearLeaseForTest
+'   TST_DP_ReadLeaseOwnerForTest
+'   TST_DP_ContextMenuControlCount
+'   TST_DP_IsContextMenuBarForTest
+'   TST_DP_CountMenuTagOnBarForTest
+'
+' NOTES
+'   The SheetBeforeRightClick event itself cannot be raised from VBA, so the
+'   suite drives the routine the manager's handler delegates to. Whether a
+'   restored entry appears in the menu of the same right-click is verified in
+'   Excel, not here
+'
+'   The lease is left owned by this project on exit, as RuntimeAdmission does
+'
+' UPDATED
+'   2026-10-03
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const MENU_TAG          As String = "VBA_DATETIMEPICKER"    'Legacy context-menu tag
+
+    Dim SavedShowRightClick As Boolean      'Right-click setting before the suite
+    Dim Bar                 As Object       'Current command bar
+    Dim TargetBarCount      As Long         'Bars carrying a supported name
+    Dim RestoredOnce        As Long         'Bars with exactly one entry after the re-ensure
+    Dim RestoredAgain       As Long         'Bars with exactly one entry after a second re-ensure
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "ContextMenuResync"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Silence the modal refusal report so no path can block the run
+        M_Lease_Test_SilenceRefusalReport True
+    'Capture the setting so the suite leaves it as it found it
+        SavedShowRightClick = M_Settings_GetShowRightClick()
+    'Begin as the runtime owner
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertTrue "Resync setup acquires a free lease", _
+            M_Lease_TryAcquire()
+
+'------------------------------------------------------------------------------
+' OWNER: A LOST ENTRY IS RESTORED ONCE
+'------------------------------------------------------------------------------
+    'Enable and register the entry, then remove it as an external reset would
+        M_Settings_SetShowRightClick True
+        M_ContextMenu_Update
+        M_ContextMenu_Remove
+        TST_DP_AssertEqualsLong "Resync setup leaves no entry on any bar", _
+            0, TST_DP_ContextMenuControlCount()
+    'Re-ensure as the right-click handler would, and count bars per entry
+        M_ContextMenu_EnsureForRightClick
+        For Each Bar In Excel.Application.CommandBars
+            If TST_DP_IsContextMenuBarForTest(Bar) Then
+                TargetBarCount = TargetBarCount + 1
+                If TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG) = 1 Then
+                    RestoredOnce = RestoredOnce + 1
+                End If
+            End If
+        Next Bar
+    'A second re-ensure must not add a duplicate
+        M_ContextMenu_EnsureForRightClick
+        For Each Bar In Excel.Application.CommandBars
+            If TST_DP_IsContextMenuBarForTest(Bar) Then
+                If TST_DP_CountMenuTagOnBarForTest(Bar, MENU_TAG) = 1 Then
+                    RestoredAgain = RestoredAgain + 1
+                End If
+            End If
+        Next Bar
+        Set Bar = Nothing
+        TST_DP_AssertTrue "At least one supported context menu exists", _
+            (TargetBarCount >= 1)
+        TST_DP_AssertEqualsLong "Re-ensure restores one entry on every supported bar", _
+            TargetBarCount, RestoredOnce
+        TST_DP_AssertEqualsLong "Repeated re-ensure adds no duplicate", _
+            TargetBarCount, RestoredAgain
+
+'------------------------------------------------------------------------------
+' OWNER: A DISABLED ENTRY IS NOT RE-ADDED
+'------------------------------------------------------------------------------
+    'Disabling the setting removes the entry; the re-ensure must respect that
+        M_Settings_SetShowRightClick False
+        M_ContextMenu_Update
+        M_ContextMenu_EnsureForRightClick
+        TST_DP_AssertEqualsLong "Re-ensure adds nothing while the setting is disabled", _
+            0, TST_DP_ContextMenuControlCount()
+        TST_DP_AssertFalse "Re-ensure leaves the disabled setting unchanged", _
+            M_Settings_GetShowRightClick()
+
+'------------------------------------------------------------------------------
+' OWNER: A VANISHED LEASE IS RECLAIMED, THEN THE ENTRY RESTORED
+'------------------------------------------------------------------------------
+    'Enable the setting, then lose both the entry and the lease bar, keeping the
+    'token, as observed after Excel startup
+        M_Settings_SetShowRightClick True
+        M_ContextMenu_Remove
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertFalse "Vanished lease: ownership can no longer be proven", _
+            M_Lease_IsOwner()
+    'The token holder reclaims the free lease and restores the entry
+        M_ContextMenu_EnsureForRightClick
+        TST_DP_AssertTrue "Vanished lease: re-ensure reclaims ownership", _
+            M_Lease_IsOwner()
+        TST_DP_AssertEqualsLong "Vanished lease: one entry restored per supported bar", _
+            TargetBarCount, TST_DP_ContextMenuControlCount()
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE: THE SHARED MENUS ARE NOT TOUCHED
+'------------------------------------------------------------------------------
+    'Clear the entry and give up ownership; the lease stays held
+        M_ContextMenu_Remove
+        M_Lease_Test_ClearOwnerToken
+        TST_DP_AssertFalse "This project does not own the planted lease", _
+            M_Lease_IsOwner()
+    'A copy that does not own the runtime must add nothing
+        M_ContextMenu_EnsureForRightClick
+        TST_DP_AssertEqualsLong "Re-ensure adds nothing under a foreign lease", _
+            0, TST_DP_ContextMenuControlCount()
+        TST_DP_AssertFalse "Re-ensure does not take a foreign lease", _
+            M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
+' NO TOKEN, NO LEASE: NOTHING IS CLAIMED
+'------------------------------------------------------------------------------
+    'A copy that never held the lease must not claim a free one from this path
+        TST_DP_ForceClearLeaseForTest
+        M_ContextMenu_EnsureForRightClick
+        TST_DP_AssertEqualsLong "Re-ensure without a token claims no lease", _
+            0, VBA.LenB(TST_DP_ReadLeaseOwnerForTest())
+        TST_DP_AssertEqualsLong "Re-ensure without a token adds no entry", _
+            0, TST_DP_ContextMenuControlCount()
+
+'------------------------------------------------------------------------------
+' RESTORE
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Own the runtime again, then restore the setting and its registration
+        On Error Resume Next
+        TST_DP_ForceClearLeaseForTest
+        M_Lease_TryAcquire
+        M_Settings_SetShowRightClick SavedShowRightClick
+        M_ContextMenu_Update
+        M_Lease_Test_SilenceRefusalReport False
+        Set Bar = Nothing
+        Err.Clear
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the suite-level failure and clear the error
+        TST_DP_RecordFail "ContextMenuResync suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore state regardless
+        Resume SuiteExit
+
+End Sub
+
 Private Sub TST_DP_RunSuite_LifecyclePair()
 
 '
@@ -5702,8 +5917,9 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '                       STOP WITHOUT OWNERSHIP SUITE
 '==============================================================================
 ' PURPOSE
-'   Validates when DP_Stop reports a refusal for a project that does not own
-'   the provider lease, and that it touches nothing in every such case
+'   Validates that DP_Stop, for a project that does not own the provider lease,
+'   never reports a refusal and touches nothing, and that a vanished lease is
+'   reclaimed and stopped as the owner
 '
 ' WHY THIS EXISTS
 '   DP_Stop runs from Workbook_BeforeClose. A copy that never started used to
@@ -5721,8 +5937,8 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '   the observed outcome and the lease left behind:
 '     - no token, no lease              quiet
 '     - no token, another owner's lease quiet, owner's lease intact
-'     - token, lease gone               reported
-'     - no token, unreadable lease      reported, lease intact
+'     - token, lease gone               reclaimed, stopped quietly (#113)
+'     - no token, unreadable lease      quiet, lease intact
 '
 ' ERROR POLICY
 '   Records suite-level failures and continues. Always restores refusal
@@ -5801,10 +6017,16 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
         TST_DP_ForceClearLeaseForTest
         RefusalsBefore = M_Lease_Test_RefusalReportCount()
         DP_Stop
-        TST_DP_AssertTrue "Stop with a token but no lease reports a refusal", _
-            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
-        TST_DP_AssertFalse "Stop with a token but no lease is not a success", _
+        TST_DP_AssertEqualsLong "Stop with a token but no lease reports no refusal", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
+        TST_DP_AssertTrue "Stop with a token but no lease reclaims and succeeds", _
             M_Lifecycle_Test_LastSucceeded()
+        TST_DP_AssertTrue "Stop with a token but no lease records the reclaim", _
+            M_Lifecycle_Test_LastLeaseAcquiredThisCall()
+        TST_DP_AssertFalse "Stop with a token but no lease leaves no lease bar", _
+            TST_DP_LeaseBarExistsForTest()
+        TST_DP_AssertFalse "Stop with a token but no lease leaves no token", _
+            M_Lifecycle_Test_HasLocalOwnerToken()
 
 '------------------------------------------------------------------------------
 ' NO TOKEN, UNREADABLE LEASE
@@ -5815,8 +6037,8 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
             Name:=LEASE_BAR, Temporary:=True)
         RefusalsBefore = M_Lease_Test_RefusalReportCount()
         DP_Stop
-        TST_DP_AssertTrue "Stop under an unreadable lease reports a refusal", _
-            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsLong "Stop under an unreadable lease reports no refusal", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
         TST_DP_AssertTrue "Stop under an unreadable lease leaves the bar in place", _
             TST_DP_LeaseBarExistsForTest()
         Set AmbiguousBar = Nothing

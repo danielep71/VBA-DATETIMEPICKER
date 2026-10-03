@@ -183,11 +183,11 @@ from source you imported.
 5. Close and reopen Excel so the add-in loads in a clean session.
 
 > [!NOTE]
-> Install through the Add-ins dialog rather than opening the `.xlam` from an
-> **At startup, open all files in** folder. Loaded that way, the runtime has been
-> observed not to start, so the right-click entry is missing
-> ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). If it
-> happens, the Ribbon **Reset** command or `DP_Start` starts it.
+> Loaded from an **At startup, open all files in** folder, `v1.2.2` starts its
+> runtime, but its right-click entry can be missing
+> ([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). Turn the
+> right-click setting off and on again to restore it. From `v1.2.3` the add-in
+> restores a missing entry itself when you right-click a cell.
 
 ### Validate
 

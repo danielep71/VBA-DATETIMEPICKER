@@ -38,7 +38,7 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 
 # UF_DatePicker.frx is binary and is intentionally outside EditorConfig.
-# RibbonX source is XML and uses compact two-space indentation.
+# XML uses compact two-space indentation.
 [*.xml]
 charset = utf-8
 end_of_line = lf
@@ -48,8 +48,42 @@ tab_width = 2
 insert_final_newline = true
 trim_trailing_whitespace = true
 
-# GitHub workflows use two-space YAML indentation.
-[*.{yml,yaml}]
+# RibbonX package parts. src/ribbon/ mirrors the package's customUI/ folder
+# and .gitattributes checks these parts out with CRLF, as Office writes them.
+# These sections follow [*.xml] so they override its LF line ending. The
+# shipped customUI.xml ends with a newline; the shipped .rels part does not,
+# so editors must not add one there.
+[src/ribbon/*.xml]
+end_of_line = crlf
+
+[src/ribbon/_rels/*.rels]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = false
+trim_trailing_whitespace = true
+
+# Python tooling under tools/ and .github/scripts/.
+[*.{py,pyw}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Node tooling under .github/scripts/.
+[*.{js,mjs,cjs}]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+tab_width = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# GitHub workflows and structured configuration use two-space indentation.
+[*.{yml,yaml,json,jsonc}]
 charset = utf-8
 end_of_line = lf
 indent_style = space
