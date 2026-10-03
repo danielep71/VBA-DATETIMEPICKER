@@ -6431,6 +6431,80 @@ Private Function M_Lease_ReadOwner() As String
 
 End Function
 
+Private Function M_Lease_TryReclaimVanished(ByVal EntryPoint As String) As Boolean
+
+'
+'------------------------------------------------------------------------------
+'                       RECLAIM A VANISHED PROVIDER LEASE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores ownership for a project whose lease bar disappeared while it still
+'   held its owner token
+'
+' WHY THIS EXISTS
+'   The lease is a temporary command bar. Loaded from Excel's alternate startup
+'   folder, the add-in started and acquired it, yet the bar was gone shortly
+'   after, together with the right-click entry, while the token remained (#113).
+'   Without this, the owner could neither restore its menu nor stop cleanly
+'
+' INPUTS
+'   EntryPoint
+'     Name of the calling entry point, for diagnostics
+'
+' RETURNS
+'   True when the lease was free and is now held by this project
+'
+' BEHAVIOR
+'   Does nothing unless this project holds a token and no lease exists at all.
+'   It then acquires the free lease through the silent admission path. A lease
+'   held by another provider, or unreadable, is never taken
+'
+' ERROR POLICY
+'   Never raises. Returns False on any failure
+'
+' DEPENDENCIES
+'   mDP_RuntimeOwnerId
+'   M_Lease_ReadOwner
+'   M_Lease_EnsureAdmitted
+'
+' NOTES
+'   This is the acquisition any copy may make of a free lease, restricted to
+'   the copy that last held it. A copy that never held a token never claims
+'   one here, so a right-click or a shutdown cannot start a copy that was never
+'   started
+'
+' UPDATED
+'   2026-10-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECIDE
+'------------------------------------------------------------------------------
+    'Never let a reclaim raise into a caller
+        On Error Resume Next
+    'Set safe default result
+        M_Lease_TryReclaimVanished = False
+    'Only a project that held the lease may reclaim it
+        If VBA.LenB(mDP_RuntimeOwnerId) = 0 Then Exit Function
+    'Only a lease that is absent is free; held or unreadable leases are not
+        If VBA.LenB(M_Lease_ReadOwner()) > 0 Then
+            Err.Clear
+            Exit Function
+        End If
+
+'------------------------------------------------------------------------------
+' RECLAIM
+'------------------------------------------------------------------------------
+    'Acquire the free lease without any user-facing report
+        If M_Lease_EnsureAdmitted(EntryPoint, False) Then
+            M_Lease_TryReclaimVanished = True
+            Debug.Print EntryPoint & " | Reclaimed a vanished provider lease"
+        End If
+    'Clear any suppressed error
+        Err.Clear
+
+End Function
+
 Public Function M_Lease_IsOwner() As Boolean
 
 '
@@ -9628,18 +9702,15 @@ Public Sub DP_Stop()
 ' BEHAVIOR
 '   Captures the caller's event state and runs the cleanup transaction with lease
 '   release enabled when this project owns the lease. When it does not, it
-'   touches nothing and records an unsuccessful stop. It reports a refusal only
-'   when there is something the operator can act on; a copy that never started
-'   returns quietly
+'   touches nothing, records an unsuccessful stop and writes one Immediate
+'   Window line. It never shows a dialog
 '
 ' ERROR POLICY
 '   Never raises outward. The outcome is reported through the observation fields
 '
 ' DEPENDENCIES
 '   M_Lease_IsOwner
-'   M_Lease_ReadOwner
-'   M_Lease_ReportRefusal
-'   M_Lifecycle_StopNeedsRefusalReport
+'   M_Lease_TryReclaimVanished
 '   M_Lifecycle_Cleanup
 '
 ' NOTES
@@ -9654,10 +9725,17 @@ Public Sub DP_Stop()
 '   DP_Stop usually runs from Workbook_BeforeClose, at shutdown. A copy that
 '   never started (for example an add-in whose Workbook_Open did not run) used
 '   to show the "another copy is already active" message on every exit, although
-'   no other copy existed (#115). Which cases still report is decided by
-'   M_Lifecycle_StopNeedsRefusalReport
+'   no other copy existed (#115). After a startup-folder launch the lease could
+'   also be lost or replaced while Excel ran, so the message still appeared at
+'   exit (#113). A stop runs at shutdown, where the operator can do nothing
+'   with it, so a non-owner stop is silent in every case. Genuine provider
+'   conflicts are still reported by the start and open paths
+'
+'   A copy that holds its token but whose lease bar vanished first reclaims the
+'   free lease and then stops as the owner. A lease held by another provider or
+'   unreadable is left untouched
 ' UPDATED
-'   2026-10-01
+'   2026-10-03
 '------------------------------------------------------------------------------
 
     Dim CallerEnableEvents As Boolean
@@ -9675,15 +9753,14 @@ Public Sub DP_Stop()
     OwnedOnEntry = M_Lease_IsOwner()
     mDP_LifecycleLastLeaseWasAlreadyOwned = OwnedOnEntry
     mDP_LifecycleLastLeaseAcquiredThisCall = False
+    If Not OwnedOnEntry Then
+        OwnedOnEntry = M_Lease_TryReclaimVanished("DP_Stop")
+        mDP_LifecycleLastLeaseAcquiredThisCall = OwnedOnEntry
+    End If
 
     If Not OwnedOnEntry Then
-        If M_Lifecycle_StopNeedsRefusalReport( _
-            (VBA.LenB(mDP_RuntimeOwnerId) > 0), M_Lease_ReadOwner()) Then
-            M_Lease_ReportRefusal "DP_Stop"
-        Else
-            Debug.Print "DP_Stop | Skipped | This copy holds no runtime ownership, " & _
-                "so there is nothing for it to stop"
-        End If
+        Debug.Print "DP_Stop | Skipped | This copy cannot prove runtime ownership, " & _
+            "so it touches nothing"
         mDP_LifecycleLastSucceeded = False
         GoTo CleanExit
     End If
@@ -9696,74 +9773,6 @@ CleanExit:
     On Error GoTo 0
 
 End Sub
-
-Private Function M_Lifecycle_StopNeedsRefusalReport( _
-    ByVal HasLocalOwnerToken As Boolean, _
-    ByVal LeaseOwner As String) As Boolean
-
-'
-'------------------------------------------------------------------------------
-'                 DECIDE WHETHER A NON-OWNER STOP REPORTS
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Decides whether DP_Stop, called by a project that does not own the lease,
-'   shows the provider-refusal message
-'
-' WHY THIS EXISTS
-'   A non-owner stop never touches anything, whatever this returns. The only
-'   question is whether the operator needs to hear about it. Reporting every
-'   non-owner stop showed "another copy is already active" at every Excel exit
-'   for a copy that had simply never started (#115)
-'
-' INPUTS
-'   HasLocalOwnerToken
-'     True when this project still holds an ownership token
-'
-'   LeaseOwner
-'     The value M_Lease_ReadOwner returned: empty for no lease, a token for a
-'     readable lease, or DP_LEASE_AMBIGUOUS
-'
-' RETURNS
-'   True to report the refusal, False to return quietly
-'
-' BEHAVIOR
-'   Quiet when this project holds no token and the lease is either absent or
-'   readably held by another provider: this copy never ran, so it has nothing to
-'   stop and nothing it could have broken
-'
-'   Reports when this project holds a token it can no longer match to the lease,
-'   or when the lease cannot be read. Both mean registrations may exist that no
-'   one can prove it owns, which DP_ForceReleaseProviderLease exists to resolve
-'
-' ERROR POLICY
-'   Cannot raise. String comparison and Boolean logic only
-'
-' DEPENDENCIES
-'   DP_LEASE_AMBIGUOUS
-'
-' NOTES
-'   A VBA project reset also clears the token. That case is quiet here as well,
-'   because at shutdown there is nothing useful the operator can do; Excel
-'   discards the temporary lease and menu entries when it closes. The caller
-'   still writes a line to the Immediate Window
-'
-' UPDATED
-'   2026-10-01
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECIDE
-'------------------------------------------------------------------------------
-    'A token this project cannot match is an ownership question worth reporting
-        If HasLocalOwnerToken Then
-            M_Lifecycle_StopNeedsRefusalReport = True
-            Exit Function
-        End If
-    'An unreadable lease is unverifiable, never quietly ignored
-        M_Lifecycle_StopNeedsRefusalReport = _
-            (VBA.StrComp(LeaseOwner, DP_LEASE_AMBIGUOUS, vbBinaryCompare) = 0)
-
-End Function
 
 Public Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean
 
@@ -16518,6 +16527,121 @@ ErrorHandler:
         ErrorDescription = Err.Description
     'Raise a descriptive error to the caller
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
+
+End Sub
+
+Public Sub M_ContextMenu_EnsureForRightClick()
+
+'
+'------------------------------------------------------------------------------
+'                           RIGHT-CLICK MENU RE-ENSURE
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores a missing DatePicker right-click entry just before Excel shows a
+'   cell context menu
+'
+' WHY THIS EXISTS
+'   The entry is a temporary command-bar control added once by DP_Start. When
+'   the add-in loads at Excel startup, the entry can be gone by the time the
+'   user first right-clicks, although the runtime started (#113). On the
+'   affected host the provider lease bar, also a temporary command bar, was
+'   gone as well, so the copy still held its owner token but could no longer
+'   prove ownership. Re-ensuring on demand repairs both, whenever and by
+'   whatever they were removed
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   When this project holds its owner token but the lease has vanished, reclaims
+'   the free lease through the silent admission path. A lease held by anyone
+'   else, or unreadable, is never taken, and a project without a token never
+'   claims one here
+'   Does nothing unless this project then owns the runtime lease and the
+'   right-click setting is enabled
+'   Otherwise delegates to M_ContextMenu_Add, which adds an entry only to bars
+'   that do not already carry one
+'
+' ERROR POLICY
+'   Best-effort. Never raises: it runs from an Excel event, before the menu is
+'   shown, and a failure must not affect the right-click
+'
+' DEPENDENCIES
+'   M_Lease_IsOwner
+'   M_Lease_TryReclaimVanished
+'   M_Settings_EnsureLoaded
+'   M_ContextMenu_Add
+'   gDP_ShowRightClick
+'
+' NOTES
+'   Only adds. Removing entries when the setting is disabled stays with
+'   M_ContextMenu_Update, so this path can never change the user's setting
+'
+'   A copy that does not own the runtime never touches the shared menus, which
+'   keeps the one-provider rule intact. Reclaiming a vanished lease is the same
+'   acquisition any copy may make of a free lease, restricted here to the copy
+'   that last held it
+'
+' UPDATED
+'   2026-10-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "M_ContextMenu_EnsureForRightClick"
+
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Enable controlled error handling
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' CHECK OWNERSHIP AND SETTING
+'------------------------------------------------------------------------------
+    'Only the copy that owns the runtime may touch the shared right-click menus
+        If Not M_Lease_IsOwner() Then
+        'Only a copy that held the lease may reclaim it, and only while it is free
+            If Not M_Lease_TryReclaimVanished(PROC_NAME) Then Exit Sub
+        End If
+    'Ensure settings are loaded before reading the right-click feature flag
+        M_Settings_EnsureLoaded
+    'Leave a disabled entry alone; removal belongs to M_ContextMenu_Update
+        If Not gDP_ShowRightClick Then Exit Sub
+
+'------------------------------------------------------------------------------
+' RESTORE MISSING ENTRIES
+'------------------------------------------------------------------------------
+    'Add the entry to every supported bar that lost it; existing entries stay
+        M_ContextMenu_Add
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Write diagnostics without interrupting the right-click
+        Debug.Print PROC_NAME & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Clear the suppressed error
+        Err.Clear
 
 End Sub
 

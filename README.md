@@ -725,13 +725,12 @@ and dismantle the current owner's runtime.
 
 Ownership is checked before destructive lifecycle operations.
 
-A non-owner `DP_Stop` touches nothing. It shows the refusal message only when
-there is something to act on: this copy holds an ownership token the lease no
-longer matches, or the lease cannot be read. A copy that never started, or one
-running beside another copy that owns the lease, returns quietly and writes one
-line to the Immediate Window. `DP_Stop` usually runs from `Workbook_BeforeClose`,
-so the refusal no longer appears at every Excel exit for a copy that never
-started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+A non-owner `DP_Stop` touches nothing and never shows a message: it runs at
+Excel exit, where the operator cannot act on it. It writes one line to the
+Immediate Window instead. A copy that still holds its token but whose lease bar
+has vanished reclaims the free lease and stops as the owner
+([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113), [#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)).
+Provider conflicts are still reported when a copy starts or opens the picker.
 
 The Ribbon **Reset** command reports success only from the recorded outcome of
 the operation it ran, never from the fact that the call returned
@@ -1476,22 +1475,22 @@ Protected sheets can prevent the icon from appearing even when the target cell i
 
 The project is designed and documented for Excel desktop on Windows. Optional borderless styling and mouse/window helpers use Windows APIs.
 
-### Alternate startup folder: one reported failure, not reproduced
+### Right-click entry missing after Excel starts
 
-A startup failure was reported once with the published `v1.2.2` `.xlam` loaded
-from Excel's **At startup, open all files in** folder. On 2026-10-03 the same
-package started automatically in fresh Excel sessions on the same reported
-build and machine, from both trusted and untrusted folders and with either
-response to the `PERSONAL.XLSB` macro prompt. The
-[retest record](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113#issuecomment-5966278179)
-includes the package hash and successful lifecycle observations.
+Loaded from Excel's **At startup, open all files in** folder, the add-in starts
+its runtime, but its right-click entry can be gone from the cell menu by the
+first right-click: on the affected host it was no longer on any `Cell` command
+bar, and the provider lease bar was gone too, although `DP_Start` had succeeded
+([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). What removes it was not identified;
+other add-ins that customize the cell menu are a likely cause.
 
-[#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113) is closed as
-not reproducible; the original cause remains unknown and no startup code fix
-was made. If it recurs, retain the package identity and failing-session
-observations and reopen the issue. For a loaded copy, use `DP_Start` for
-recovery; in `v1.2.3`, Ribbon **Reset** can also start a runtime when no other
-provider owns it. These retests do not establish behavior on every environment.
+From `v1.2.3` the add-in restores a missing entry, and reclaims its lease if it
+is free, when you right-click a cell, before the menu opens. Closing Excel no
+longer shows "another copy is already active" in that situation. In `v1.2.2`, turn the right-click setting off and on
+again, or run `M_ContextMenu_Update` once from the Immediate window with
+`Application.Run "'<add-in file name>'!M_ContextMenu_Update"`. If the runtime did
+not start at all, use `DP_Start`; in `v1.2.3` the Ribbon **Reset** command also
+starts it.
 
 ### Accessibility / DPI
 

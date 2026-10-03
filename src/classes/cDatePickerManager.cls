@@ -47,6 +47,7 @@ Option Explicit
 '     - loaded DatePicker form cleanup
 '     - open-form refresh when close-after-selection is disabled
 '     - keyboard shortcut synchronization and teardown
+'     - right-click entry re-ensure before a cell context menu opens
 '     - safe reset of transient DatePicker UI
 '
 ' ERROR POLICY
@@ -69,6 +70,7 @@ Option Explicit
 '   M_Settings_Load
 '   M_KeyboardShortcut_Update
 '   M_KeyboardShortcut_Remove
+'   M_ContextMenu_EnsureForRightClick
 '   M_GridIcon_ShowOrMove
 '   M_GridIcon_Hide
 '   M_GridIcon_Remove
@@ -81,8 +83,8 @@ Option Explicit
 '   Runtime UserForm control / label event wiring does not belong here. It is
 '   handled by cDatePickerLabelHook and UF_DatePicker
 '
-'   Right-click menu integration is not owned by this class unless a dedicated
-'   SheetBeforeRightClick handler is added
+'   Right-click menu registration is owned by M_DatePicker. This class only
+'   asks it to restore a missing entry from SheetBeforeRightClick (#113)
 '
 '   The manager distinguishes between:
 '     - the picker being loaded in memory
@@ -3358,6 +3360,101 @@ ErrorHandler:
         Debug.Print PROC_NAME & _
             " | Sheet=" & SheetName & _
             " | Target=" & TargetAddress & _
+            " | Error=" & VBA.CStr(ErrorNumber) & _
+            " | " & ErrorDescription
+    'Clear the suppressed event error
+        Err.Clear
+
+End Sub
+
+Private Sub mExcelApp_SheetBeforeRightClick( _
+    ByVal Sh As Object, _
+    ByVal Target As Excel.Range, _
+    Cancel As Boolean)
+
+'
+'------------------------------------------------------------------------------
+'                           APP SHEET BEFORE RIGHT-CLICK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Restores a missing DatePicker right-click entry before Excel shows the
+'   cell context menu
+'
+' WHY THIS EXISTS
+'   When the add-in loads at Excel startup, its right-click entry can be gone
+'   by the first right-click although the runtime started (#113). This event
+'   fires before the menu is shown, so a restored entry appears in that same
+'   menu
+'
+' INPUTS
+'   Sh
+'     Worksheet receiving the right-click
+'
+'   Target
+'     Range under the right-click
+'
+'   Cancel
+'     Excel cancel flag. Never changed: the normal context menu always opens
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Delegates to M_ContextMenu_EnsureForRightClick, which acts only for the
+'   runtime owner with the right-click setting enabled
+'
+' ERROR POLICY
+'   Best-effort. Does not raise into Excel event flow
+'
+' DEPENDENCIES
+'   M_ContextMenu_EnsureForRightClick
+'
+' NOTES
+'   The worksheet and range arguments are not used
+'
+'   This event only fires when Application.EnableEvents is True and the manager
+'   instance already exists
+'
+' UPDATED
+'   2026-10-03
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "cDatePickerManager.mExcelApp_SheetBeforeRightClick"
+
+    Dim ErrorNumber             As Long          'Captured error number
+    Dim ErrorDescription        As String        'Captured error description
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Protect Excel from event-handler failures
+        On Error GoTo ErrorHandler
+
+'------------------------------------------------------------------------------
+' RE-ENSURE RIGHT-CLICK ENTRY
+'------------------------------------------------------------------------------
+    'Restore the entry if it was removed after registration
+        M_ContextMenu_EnsureForRightClick
+
+'------------------------------------------------------------------------------
+' EXIT PROCEDURE
+'------------------------------------------------------------------------------
+    'Exit before the error handler
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Capture the error number
+        ErrorNumber = Err.Number
+    'Capture the error description
+        ErrorDescription = Err.Description
+    'Write event diagnostics without interrupting Excel event flow
+        Debug.Print PROC_NAME & _
             " | Error=" & VBA.CStr(ErrorNumber) & _
             " | " & ErrorDescription
     'Clear the suppressed event error
