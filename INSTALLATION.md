@@ -8,7 +8,7 @@
 [![Validation](https://img.shields.io/badge/Validation-Required-d97706?style=flat-square)](#validation)
 [![Security](https://img.shields.io/badge/Security-Review_before_enabling-d73a49?style=flat-square)](SECURITY.md)
 [![Version](https://img.shields.io/badge/Version-VERSION_file-6f42c1?style=flat-square)](VERSION)
-[![License](https://img.shields.io/badge/License-MIT-217346?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-217346?style=flat-square)](LICENSE)
 
 <br>
 
@@ -36,7 +36,7 @@ This guide covers installation, validation, upgrade, recovery, and removal of
 | Office bitness | 32-bit and 64-bit Office |
 | Version identity | Root `VERSION` file and the selected tag/commit |
 | Source policy | Exported repository source is authoritative |
-| Licence | MIT |
+| Licence | Apache 2.0 (releases up to `v1.2.2`: MIT) |
 | Current deployment status | Source-first component with embedded-source and optional `.xlam` deployment. |
 
 Compatibility claims apply only to environments actually certified for the
@@ -331,7 +331,7 @@ owns and document anything intentionally retained.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards
 - [RELEASING.md](RELEASING.md) — maintainer release and provenance procedure
 - [SECURITY.md](SECURITY.md) — private vulnerability reporting
-- [LICENSE](LICENSE) — MIT licence terms
+- [LICENSE](LICENSE) — Apache 2.0 licence terms
 
 ---
 

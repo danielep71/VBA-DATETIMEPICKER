@@ -12,7 +12,7 @@
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
 [![Source](https://img.shields.io/badge/Source-v1.2.2-6f42c1?style=for-the-badge)](#release-status)
 [![Tests](https://img.shields.io/badge/Regression-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
-[![License](https://img.shields.io/badge/License-MIT-2ea44f?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-2ea44f?style=for-the-badge)](LICENSE)
 
 <br>
 
@@ -1286,6 +1286,7 @@ VBA-DATETIMEPICKER/
 ├─ CONTRIBUTING.md
 ├─ INSTALLATION.md
 ├─ LICENSE
+├─ NOTICE
 ├─ README.md
 ├─ RELEASING.md
 ├─ SECURITY.md
@@ -1727,4 +1728,7 @@ The codebase remains intentionally conservative about claims it cannot prove:
 
 ## 📄 License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [Apache License 2.0](LICENSE); see also [NOTICE](NOTICE).
+
+Releases up to and including `v1.2.2` were published under the MIT License,
+which continues to apply to those releases.
