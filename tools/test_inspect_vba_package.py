@@ -1,7 +1,9 @@
 """Fixtures for inspect_vba_package.py: built packages with each startup and comparison case."""
 import io
+import json
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -195,6 +197,25 @@ class Fixture(unittest.TestCase):
 
 
 class ExtractionTests(Fixture):
+    def test_invalid_ribbon_writes_structured_cli_reports(self):
+        for xml in (b'<customUI>', b'<!DOCTYPE customUI><customUI/>'):
+            with self.subTest(xml=xml):
+                report = self.inspect(ribbon=xml)
+                self.assertEqual(report['inspection']['status'], 'failed')
+                self.assertEqual(report['startup']['verdict'], 'not-established')
+                self.assertIn('VBA-PKG-090', self.codes(report))
+                output, summary = self.root / 'report.json', self.root / 'report.md'
+                output.unlink(missing_ok=True)
+                summary.unlink(missing_ok=True)
+                completed = subprocess.run([
+                    sys.executable, inspector.__file__, '--package', str(self.root / 'fixture.xlsm'),
+                    '--source', str(self.repo), '--source-rev', 'HEAD',
+                    '--output', str(output), '--summary', str(summary)], capture_output=True, text=True)
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertNotIn('Traceback', completed.stderr)
+                self.assertEqual(json.loads(output.read_text())['inspection']['status'], 'failed')
+                self.assertIn('VBA-PKG-090', summary.read_text())
+
     def test_decompression_example_from_the_specification(self):
         compressed = bytes.fromhex("012FB0002361616162636465826600706167686" "96A013808616B6C00306D6E6F70067102"
                                    "700410727374757610777879 7A003C".replace(" ", ""))
@@ -244,6 +265,31 @@ class ExtractionTests(Fixture):
 
 
 class StartupTests(Fixture):
+    def test_calls_in_if_conditions_are_traced_before_the_branch(self):
+        helper = {'M_Boot': ('standard', 'Attribute VB_Name = "M_Boot"\n'
+                            'Function DP_Boot() As Boolean\n DP_Start\n DP_Boot = True\nEnd Function\n')}
+        for body, expected in (
+            ('If DP_Boot() Then\n Debug.Print "yes"\nEnd If', 'wired'),
+            ('If DP_Boot() Then Debug.Print "yes"', 'wired'),
+            ('If False Then\n Debug.Print "no"\nElseIf DP_Boot() Then\nEnd If', 'wired-conditionally'),
+            ('If False Then\n If DP_Boot() Then\n End If\nEnd If', 'wired-conditionally'),
+        ):
+            with self.subTest(body=body):
+                report = self.inspect('Private Sub Workbook_Open()\n' + body + '\nEnd Sub\n', helper)
+                self.assertEqual(report['startup']['verdict'], expected)
+                self.assertNotIn('VBA-PKG-001', self.codes(report, 'error'))
+        dynamic = self.inspect('Private Sub Workbook_Open()\nIf Application.Run("DP_Boot") Then\nEnd If\n')
+        self.assertEqual(dynamic['startup']['verdict'], 'not-established')
+
+    def test_addressof_is_not_an_executable_call(self):
+        for target in ('DP_Start', 'M_DatePicker.DP_Start', 'DP_Init'):
+            with self.subTest(target=target):
+                report = self.inspect('Private Sub Workbook_Open()\n Register AddressOf ' + target + '\nEnd Sub\n')
+                self.assertEqual(report['startup']['verdict'], 'not-established')
+                self.assertIn('VBA-PKG-005', self.codes(report, 'unknown'))
+                hooks = report['startup']['environments']['vba7-win64']['hooks']
+                self.assertEqual(hooks[0]['reaches_target'], [])
+
     def test_valid_hook_with_direct_call(self):
         report = self.inspect("Private Sub Workbook_Open()\n    On Error Resume Next\n    DP_Start\nEnd Sub\n")
         self.assertEqual(report["status"], "pass")

@@ -34,8 +34,10 @@ import struct
 import subprocess
 import sys
 import zipfile
+from collections import deque
 from pathlib import Path
 from typing import Any
+from xml.parsers.expat import ExpatError
 
 from _gatelib import git_bytes, git_text, run_gate
 from check_source import ribbon_callback_attributes
@@ -379,8 +381,13 @@ def extract_package(path: Path) -> dict[str, Any]:
             info = names.get(part)
             if info is not None and info.file_size <= 1_000_000:
                 xml = archive.read(info)
-                onload = [value for element, attribute, value in ribbon_callback_attributes(xml)
-                          if element.split(":")[-1] == "customUI" and attribute == "onLoad"]
+                try:
+                    onload = [value for element, attribute, value in ribbon_callback_attributes(xml)
+                              if element.split(":")[-1] == "customUI" and attribute == "onLoad"]
+                except (ExpatError, ValueError) as error:
+                    result["failures"].append(finding(
+                        "VBA-PKG-090", f"Ribbon part {info.filename} could not be parsed: {error}"))
+                    return result
                 result["ribbon"] = {"part": info.filename, "sha256": sha256(xml), "onLoad": onload[0] if onload else None}
                 break
         info = names.get("xl/vbaproject.bin")
@@ -597,10 +604,23 @@ class Index:
 def calls_in(tokens: list[Any], proc: Proc) -> list[tuple[str, str | None, str | None]]:
     """(kind, qualifier, name) for each call candidate: 'call', or 'dynamic' with an optional literal."""
     found = []
+    address_operands = set()
+    for index, token in enumerate(tokens):
+        if token.is_kw("addressof"):
+            end = index + 1
+            while end < len(tokens) and (tokens[end].is_id() or tokens[end].is_op(".")):
+                address_operands.add(end)
+                end += 1
+                if end >= len(tokens) or not tokens[end].is_op("."):
+                    break
+                address_operands.add(end)
+                end += 1
+            found.append(("dynamic", "AddressOf", "".join(t.text for t in tokens[index + 1:end])))
     start = 1 if tokens and tokens[0].is_kw("call") else 0
     assignment = len(tokens) > 1 and tokens[0].is_id() and tokens[1].is_op("=")
     for index, token in enumerate(tokens):
-        if not token.is_id() or token.is_kw(*KEYWORDS) or (assignment and index == 0) or index < start:
+        if (index in address_operands or token.is_kw("addressof") or not token.is_id()
+                or token.is_kw(*KEYWORDS) or (assignment and index == 0) or index < start):
             continue
         if token.low in DYNAMIC:
             literal = next((t.text.strip('"') for t in tokens[index + 1:] if t.kind == "str"), None)
@@ -640,7 +660,9 @@ def trace(proc: Proc, module: Module, index: Index, depth: int, seen: set[str]) 
     nesting, exited, handler = 0, False, None
     earlier_calls: list[dict[str, Any]] = []
     single_if_line = None
-    for line, tokens in proc.statements:
+    statements = deque(proc.statements)
+    while statements:
+        line, tokens = statements.popleft()
         head = tokens[0].low if tokens[0].is_id() else ""
         conditional = nesting > 0 or exited or single_if_line == line
         if head == "on" and len(tokens) > 2 and tokens[1].is_kw("error"):
@@ -649,17 +671,19 @@ def trace(proc: Proc, module: Module, index: Index, depth: int, seen: set[str]) 
             elif tokens[2].is_kw("goto") and len(tokens) > 3:
                 handler = None if tokens[3].text in {"0", "-1"} else "goto"
             continue
-        if head in {"if", "elseif"} and tokens[-1].is_kw("then"):
-            nesting += head == "if"
-            continue
-        if head == "if":
-            single_if_line = line
+        if head in {"if", "elseif"}:
             then = next((i for i, t in enumerate(tokens) if t.is_kw("then")), len(tokens))
-            tokens = tokens[then + 1:]
-            conditional = True
+            if then == len(tokens) - 1:
+                nesting += head == "if"
+            else:
+                single_if_line = line
+                if tokens[then + 1:]:
+                    statements.appendleft((line, tokens[then + 1:]))
+            # The condition is evaluated before entering the branch. ElseIf
+            # remains conditional on earlier branches not having been taken.
+            tokens = tokens[1:then]
             if not tokens:
                 continue
-            head = tokens[0].low if tokens[0].is_id() else ""
         if head == "else":
             continue
         if head == "end" and len(tokens) > 1 and tokens[1].is_kw("if", "select"):

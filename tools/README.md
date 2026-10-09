@@ -100,13 +100,16 @@ package without opening Excel or running a macro, and reports:
   `DP_Start` directly or through project procedures, per `#If` environment.
   Paths through `Application.Run`/`OnTime`/`CallByName` or undeclared project
   names are unknown, and earlier calls under `On Error GoTo` are listed.
+  Calls in `If`/`ElseIf` conditions are traced before the branch body;
+  `AddressOf` references remain unknown, not proof that the target executes.
 - **Source comparison** with the `--configuration` modules of
   `tools/vba-projects.json` (default `packaged-hosts`) at `--source-rev`.
 
 Extraction uses the standard library only: the zip container, then the VBA
 storage of `vbaProject.bin` ([MS-CFB], [MS-OVBA] decompression). It fails closed:
 any structural surprise is `VBA-PKG-090`, and the inspection is then `failed`,
-never a clean result. `--export-dir` accepts a folder of modules exported from the
+never a clean result. This includes malformed Ribbon XML and prohibited DTDs;
+the CLI still writes its JSON and readable reports. `--export-dir` accepts a folder of modules exported from the
 VBE instead; that run is labelled `manual-export` (`VBA-PKG-092`) and stays
 `incomplete`, because it does not prove what a package contains.
 
