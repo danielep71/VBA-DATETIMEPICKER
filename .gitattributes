@@ -119,6 +119,7 @@
 .gitignore      text eol=lf
 .gitkeep        text eol=lf
 LICENSE         text eol=lf
+NOTICE          text eol=lf
 VERSION         text eol=lf
 CITATION.cff    text eol=lf
 

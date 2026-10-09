@@ -8,7 +8,7 @@
 [![Conduct](https://img.shields.io/badge/Conduct-Required-6f42c1?style=flat-square)](CODE_OF_CONDUCT.md)
 [![Security](https://img.shields.io/badge/Security-Private_reporting-d73a49?style=flat-square)](SECURITY.md)
 [![Workflow](https://img.shields.io/badge/Workflow-Source--first-0969da?style=flat-square)](#source-first-vba)
-[![License](https://img.shields.io/badge/License-MIT-217346?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-217346?style=flat-square)](LICENSE)
 
 <br>
 
@@ -426,7 +426,7 @@ through Git history and release notes where appropriate.
 ## 📄 Licensing
 
 By contributing, you agree that your contribution is licensed under the
-repository's [MIT License](LICENSE). You must have the right to submit every
+repository's [Apache License 2.0](LICENSE). You must have the right to submit every
 part of the contribution, including code, tests, data, images, and generated
 material.
 

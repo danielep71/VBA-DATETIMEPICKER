@@ -135,6 +135,11 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- The project license changes from MIT to the
+  [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
+  including `v1.2.2` were published under the MIT License, which continues to
+  apply to them.
+
 - RELEASING §9 now writes the annotated tag message from a template: certified
   SHA, verbatim runner totals for both hosts, fixed issues, a mandatory
   `Deviations:` line and the evidence issue. The previous one-line message left
