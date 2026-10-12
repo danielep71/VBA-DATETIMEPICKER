@@ -171,6 +171,11 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Package inspector review follow-up (#129): trace calls evaluated in `If` and
+  `ElseIf` conditions, treat `AddressOf` operands as unknown dispatch rather than
+  execution, and report malformed or prohibited Ribbon XML as structured
+  extraction failures. Added regression fixtures for all three cases.
+
 - The right-click entry is restored when it is missing after Excel startup.
   Loaded from an **At startup, open all files in** folder, the add-in started
   and owned the runtime, yet by the first right-click its entry was gone from
