@@ -18561,7 +18561,7 @@ Private Function M_GridIcon_IsOwnedShape(ByVal TargetShape As Excel.Shape) As Bo
 '   #53 and are recognized as product-owned so the component does not abandon
 '   icons it created before the marker existed
 '
-'   Ownership here is product-level by design for v1.2.2, which is what allows a
+'   Ownership here is product-level by design until #14, which is what allows a
 '   stale icon left by a crashed provider to be reclaimed. #14 narrows the
 '   predicate to token equality without changing the carrier
 '
@@ -22924,7 +22924,7 @@ Public Sub Ribbon_Reset(ByVal control As IRibbonControl)
 '   Starting instead of repairing applies only to a free lease, which is the
 '   same condition under which DP_Start itself admits a provider. It never
 '   takes over a lease another provider holds. This gives a copy whose
-'   Workbook_Open did not start the runtime a one-click recovery (#113)
+'   runtime never started a one-click recovery
 '
 ' UPDATED
 '   2026-10-01

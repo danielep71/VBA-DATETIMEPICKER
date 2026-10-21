@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Private standard-library primitives shared by focused repository gates.
-
-The canonical portable checker, ``check_repo.py``, intentionally does not import
-this module: that file remains a self-contained distributable artifact.
-"""
+"""Private standard-library primitives shared by the focused gates in tools/."""
 
 from __future__ import annotations
 
@@ -96,13 +92,9 @@ def run_gate(
     reported ``ERROR``. Callers select that wording with
     ``self_test_error_prefix``.
 
-    Gates whose output contract differs -- ``check_release.py`` (atomic writes
-    and a console rendering distinct from its Markdown summary),
-    ``test_workflow_validation.py`` (text-only report, no JSON output) and
-    ``check_repo.py`` (a self-contained distributable that must not import this
-    module) -- keep their own ``main``. The template's complete focused-tool
-    consumer/exclusion registry lives in ``checker_development.py``; the
-    canonical checker is independently excluded by its single-file contract.
+    Gates whose output contract differs keep their own ``main``: here that is
+    ``check_release.py`` (atomic writes and a console rendering distinct from
+    its Markdown summary) and ``check.py`` (the aggregate runner).
     """
     if self_test is not None and options.self_test:
         try:

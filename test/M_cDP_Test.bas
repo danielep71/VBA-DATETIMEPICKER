@@ -1031,7 +1031,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "LifecyclePair"
     'Run the one-provider lease suite
         TST_DP_RunSuiteSafe "ProviderLease"
-    'Run DP_Stop reporting checks for a copy that holds no ownership
+    'Run DP_Stop checks for a copy that cannot prove ownership: silent, no
+    'side effects, and a vanished lease reclaimed
         TST_DP_RunSuiteSafe "StopWithoutOwnership"
     'Run entry-path admission checks under owned and foreign leases
         TST_DP_RunSuiteSafe "RuntimeAdmission"
@@ -6729,7 +6730,8 @@ Private Sub TST_DP_RunSuite_LifecycleTransaction()
 '
 ' NOTES
 '   The suite contains no package-certification claim. It is source-host evidence
-'   only. #63 remains the final .xlsm/.xlam certification boundary.
+'   only. Each release's certification issue (#122 for v1.2.3) remains the
+'   final .xlsm/.xlam certification boundary.
 '
 ' UPDATED
 '   2026-09-05
