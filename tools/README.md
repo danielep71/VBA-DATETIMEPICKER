@@ -199,7 +199,9 @@ re-certify v1.2.2: its accepted limitations, tag and packages remain authoritati
 Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at
 `b903fe44ef6a032c4689870b83745afa1c22490d` under MIT (Daniele Penza):
 
-- `_gatelib.py` and `check_committed_whitespace.py`: unchanged.
+- `_gatelib.py`: docstrings no longer refer to template-only tools; code
+  unchanged.
+- `check_committed_whitespace.py`: unchanged.
 - `check_vba_conditionals.py`: Windows environments explicitly set `Mac=False`;
   the unknown-symbol fixture uses a genuinely unknown project symbol.
 - `check_vba_jumps.py`: evaluates each reachable conditional source separately,
