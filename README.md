@@ -31,6 +31,8 @@
 
 **No installer for source import · No admin rights required for embedded use · No COM add-in · No third-party DLL · No external runtime dependency**
 
+[Project website](https://danielep71.github.io/VBA-DATETIMEPICKER/)
+&nbsp;·&nbsp;
 [Quick start](#quick-start)
 &nbsp;·&nbsp;
 [Installation](#installation)
@@ -1539,6 +1541,7 @@ The Wiki covers installation, API, manager/events, settings, testing/demo guidan
 
 | Resource | Purpose |
 |---|---|
+| [Project website](https://danielep71.github.io/VBA-DATETIMEPICKER/) | Component overview, screenshots, downloads, and getting started |
 | [Wiki](https://github.com/danielep71/VBA-DATETIMEPICKER/wiki) | Extended installation, API and design documentation |
 | [README.md](README.md) | High-level contract, usage, architecture and limitations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history and behavioral changes |
