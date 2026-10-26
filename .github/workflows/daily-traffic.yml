@@ -25,10 +25,10 @@
 #
 #   Scope
 #     This is repository analytics. It is not CI. It compiles nothing, runs no
-#     tests, and must never be extended to do so — see issue #15 for the
-#     software-quality workflow, which is deliberately separate so that a
-#     high-privilege analytics token is never available to a job that executes
-#     repository code.
+#     tests, and must never be extended to do so. CI lives in separate
+#     workflows (static-checks.yml, codeql.yml), so that a high-privilege
+#     analytics token is never available to a job that executes repository
+#     code.
 # ---------------------------------------------------------------------------
 
 name: Daily traffic export
