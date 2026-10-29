@@ -152,13 +152,15 @@ Use only the categories needed by a release.
   Reset never takes over a lease another provider holds.
 
 - The release procedure and certification template now treat RibbonX as an
-  Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
-  relationships/package metadata and every custom image it references must come
-  from the candidate; a missing part or resource blocks the build; and the
+  Open XML package input, separate from VBE/VBA source. `src/ribbon/customUI.xml`,
+  its relationships/package metadata and every custom image it references must
+  come from the candidate; a missing part or resource blocks the build; and the
   packaged Ribbon's images and callbacks must be verified directly, because
   **Debug → Compile VBAProject** cannot see Open XML parts
-  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). The repository does not yet track the three custom Ribbon
-  images; that remains [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
+  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). All three
+  custom Ribbon images and their relationship part are now tracked. Evidence
+  that a clean package built from these inputs renders all three images remains
+  outstanding under [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
 
 - Fixed label drift checks for valid label names containing pipes or backticks
   by comparing structured canonical plans instead of parsing Markdown reports
