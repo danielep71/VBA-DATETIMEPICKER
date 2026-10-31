@@ -1,0 +1,4 @@
+# Python quality gates for tools/ and .github/scripts/. Edit this file, then
+# regenerate requirements-lint.txt as described in tools/README.md.
+ruff==0.17.1
+mypy==2.4.0

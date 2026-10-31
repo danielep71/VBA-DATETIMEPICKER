@@ -141,6 +141,23 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- CodeQL now also scans the GitHub Actions workflows (the `actions`
+  language), on push, schedule and pull-request runs; pull-request analysis
+  stays read-only. The eligibility job has a timeout like the analysis jobs
+  ([#151](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/151)).
+
+- The Python tooling is now checked by Ruff and strict mypy, configured in
+  `pyproject.toml` and installed in CI from the hash-locked, wheels-only
+  `tools/requirements-lint.txt`, which Dependabot keeps current. The tools
+  gained type annotations, with no behaviour change and no suppressions
+  ([#149](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/149)).
+
+- CI runs the tooling on Python 3.13 instead of 3.10, which reaches end of
+  life in October 2026. The documented minimum is now Python 3.11, and a
+  separate job runs the tooling tests and fixtures on 3.11 so the minimum is
+  tested, not only stated
+  ([#148](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/148)).
+
 - The project license changes from MIT to the
   [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
   including `v1.2.2` were published under the MIT License, which continues to
