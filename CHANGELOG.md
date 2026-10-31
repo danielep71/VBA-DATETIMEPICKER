@@ -135,6 +135,12 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- CI runs the tooling on Python 3.13 instead of 3.10, which reaches end of
+  life in October 2026. The documented minimum is now Python 3.11, and a
+  separate job runs the tooling tests and fixtures on 3.11 so the minimum is
+  tested, not only stated
+  ([#148](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/148)).
+
 - The project license changes from MIT to the
   [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
   including `v1.2.2` were published under the MIT License, which continues to
