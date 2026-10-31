@@ -261,6 +261,13 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- CONTRIBUTING describes the release-branch merge flow: task pull requests
+  into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
+  verification, an integration pull request into `main` with `Refs #N` and a
+  merge commit, and a sync pull request back. Dependabot now targets the
+  active release branch
+  ([#154](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/154)).
+
 - CONTRIBUTING and the pull-request template add a final-head review
   record: before a merge, the pull request names the reviewed head SHA, the
   review and the static-checks result for that SHA, and any push sends it back
