@@ -135,6 +135,11 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- CodeQL now also scans the GitHub Actions workflows (the `actions`
+  language), on push, schedule and pull-request runs; pull-request analysis
+  stays read-only. The eligibility job has a timeout like the analysis jobs
+  ([#151](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/151)).
+
 - The project license changes from MIT to the
   [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
   including `v1.2.2` were published under the MIT License, which continues to

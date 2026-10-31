@@ -16,8 +16,9 @@ Both modes read tracked VBA from the working tree. Local results explicitly
 record dirty state and cannot be used as clean committed release evidence.
 
 The static workflow also runs checksum-pinned actionlint. CodeQL analyzes the
-Python and JavaScript tooling, not VBA. PR analysis is read-only. None of these
-checks compiles VBA, executes Excel or proves 32-bit runtime compatibility.
+Python and JavaScript tooling and the workflow files, not VBA. PR analysis is
+read-only. None of these checks compiles VBA, executes Excel or proves 32-bit
+runtime compatibility.
 
 ## Project-wide VBA call resolution (advisory)
 

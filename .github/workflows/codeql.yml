@@ -2,8 +2,9 @@ name: CodeQL security analysis
 run-name: CodeQL — ${{ github.ref_name }} @ ${{ github.sha }}
 
 # Private runs require confirmed eligibility and ENABLE_PRIVATE_CODEQL=true.
-# This analyzes maintained Python and JavaScript source; it does not execute
-# Excel or certify a release candidate.
+# This analyzes maintained Python and JavaScript source and the workflow files
+# themselves (the "actions" language); it does not execute Excel or certify a
+# release candidate.
 
 on:
   push:
@@ -30,6 +31,7 @@ jobs:
     name: Check CodeQL eligibility
     if: github.event.repository.private == false || vars.ENABLE_PRIVATE_CODEQL == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -51,6 +53,7 @@ jobs:
         language:
           - python
           - javascript-typescript
+          - actions
 
     steps:
       - name: Check out the exact SHA under analysis
@@ -85,6 +88,7 @@ jobs:
         language:
           - python
           - javascript-typescript
+          - actions
 
     steps:
       - name: Check out the pull-request merge commit
