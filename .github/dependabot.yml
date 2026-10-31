@@ -19,3 +19,22 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action*"
+
+  # Hash-locked Python lint tools (tools/requirements-lint.in / .txt).
+  - package-ecosystem: "pip"
+    directory: "/tools"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Rome"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(python)"
+    labels:
+      - "ci"
+      - "tests"
+    groups:
+      lint-tools:
+        patterns:
+          - "*"

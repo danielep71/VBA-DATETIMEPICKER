@@ -98,7 +98,7 @@ the review artifact.
 | `src/` | Authoritative production modules, classes, UserForm text, `.frx` resources, and RibbonX |
 | `test/` | Regression and host-lifecycle tests |
 | `demo/` | Demo source and deterministic workbook builders |
-| `docs/` | Release certification template |
+| `docs/` | Release certification template; optional detail checklists for the issue forms |
 | `tools/` | Static checks and release/evidence tooling |
 
 The README and current tree are authoritative if a listed optional directory is
@@ -445,6 +445,7 @@ What remains unverified?
 [ ] No confidential, restricted, generated, or accidental binary content is added
 [ ] Unverified environments and skipped checks are stated plainly
 [ ] Final diff contains no unrelated formatting or local artifacts
+[ ] The final head is covered by a recorded review (see Final-head review)
 ```
 
 Reviews may request changes to scope, tests, contracts, compatibility,
@@ -462,6 +463,29 @@ idea does not guarantee acceptance of every implementation detail.
 The maintainer may edit, squash, defer, or decline a contribution to protect the
 coherence and supportability of the project. Contributors will be credited
 through Git history and release notes where appropriate.
+
+<a id="final-head-review"></a>
+
+### Final-head review
+
+A review covers the commit it read, not the pull request. Before merging:
+
+1. Note the pull request's current head SHA.
+2. If no completed review covers that SHA, request a new review. A review of an
+   earlier head does not cover commits pushed after it.
+3. Fix or answer every finding. A finding left open needs a written reason.
+4. After any push, including a fix for a review finding or a merge of the base
+   branch, go back to step 1.
+5. Record in the pull request the reviewed head SHA, a link to the review, and
+   the static-checks result for that SHA, using the **Final-head review** table
+   in the pull-request template.
+
+Merge only when the recorded SHA is the head being merged.
+
+**Exception for bot pull requests.** Dependabot and other automated pull
+requests that only bump a pinned dependency need no review record. Instead,
+check the diff, confirm that each new pin matches its upstream release tag, and
+require CI to pass on the head being merged.
 
 ---
 
@@ -491,5 +515,7 @@ security matters, use the private channel in [SECURITY.md](SECURITY.md).
 ## Portable checks
 
 Before submitting changes, run `python tools/check.py` from the repository root.
+If you change Python under `tools/` or `.github/scripts/`, also run `ruff check`
+and `mypy`.
 See [tools/README.md](tools/README.md) for requirements, report locations and
 release evidence commands. Static checks do not replace Excel regression runs.

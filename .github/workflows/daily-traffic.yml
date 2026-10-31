@@ -5,6 +5,7 @@
 #   snapshot to CSV files on the orphan `traffic-history` branch. It also
 #   writes data/badges/clones.json, visitors.json and visits.json there, the
 #   shields.io endpoints behind the README clones, visitors and visits badges.
+#   tools/traffic_export.py builds the history and the alert issue.
 #
 #   Data retention
 #     GitHub retains traffic data for 14 days only. This workflow exists to
@@ -14,21 +15,26 @@
 #     contains no identifying information about individual visitors.
 #
 #   Credentials
-#     TRAFFIC_TOKEN is a fine-grained personal access token with
-#     `Administration: read` on this repository, which is what the traffic API
-#     requires. It is stored in the repository-level `analytics` environment.
-#     That environment is not a workflow-identity boundary: any job declaring
-#     it may request access, subject to the configured environment protections.
-#
-#     Rotate it every 90 days, and immediately if this workflow is ever
-#     modified by someone other than the maintainer. See SECURITY.md.
+#     The traffic API requires `Administration: read`. A GitHub App installed
+#     on this repository only, with that single permission, provides it. The
+#     repository-level `analytics` environment holds:
+#       TRAFFIC_APP_CLIENT_ID    environment variable: the App's client ID
+#       TRAFFIC_APP_PRIVATE_KEY  environment secret: the App's private key
+#     Only the token step receives the private key, and only the fetch step
+#     receives the token it mints. The token is scoped to this repository and
+#     to `administration: read`, expires after one hour and is revoked when
+#     the job ends. No long-lived token exists. The environment is not a
+#     workflow-identity boundary: any job declaring it may request access,
+#     subject to the configured environment protections. Key rotation and
+#     revocation are described in SECURITY.md.
 #
 #   Scope
 #     This is repository analytics. It is not CI. It compiles nothing, runs no
 #     tests, and must never be extended to do so. CI lives in separate
-#     workflows (static-checks.yml, codeql.yml), so that a high-privilege
-#     analytics token is never available to a job that executes repository
-#     code.
+#     workflows (static-checks.yml, codeql.yml), so that the analytics key is
+#     never available to a job that executes pull-request code. This job runs
+#     only tools/traffic_export.py from the default branch, and that step
+#     never receives the App key or token.
 # ---------------------------------------------------------------------------
 
 name: Daily traffic export
@@ -41,7 +47,7 @@ on:
 # Least privilege. Write grants are scoped to the traffic job:
 #   contents: write  pushes the CSV history to the traffic-history branch
 #   issues:   write  opens an alert issue on a traffic spike or new referrer
-# Nothing else is granted.
+# Nothing else is granted to GITHUB_TOKEN. The App token is separate.
 permissions:
   contents: read
 
@@ -60,7 +66,7 @@ jobs:
 
     # Requests the repository-level analytics environment. Keep this declaration
     # out of every code-executing build, test and release job; the environment
-    # name alone does not bind the secret to this workflow identity.
+    # name alone does not bind the key to this workflow identity.
     environment: analytics
 
     steps:
@@ -68,44 +74,58 @@ jobs:
         # v7.0.1 - pinned to a full commit SHA so a moved tag cannot change what runs
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0
-          persist-credentials: true
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Prepare traffic-history branch
+      - name: Prepare traffic-history worktree
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git fetch origin traffic-history:traffic-history || true
-
-          if git show-ref --verify --quiet refs/heads/traffic-history; then
-            git checkout traffic-history
+          # Exit code 2 means the branch does not exist yet; any other failure stops here.
+          status=0
+          git -c http.extraheader="$auth" ls-remote --exit-code --heads origin traffic-history >/dev/null || status=$?
+          if [ "$status" -eq 0 ]; then
+            git -c http.extraheader="$auth" fetch --no-tags origin traffic-history:traffic-history
+            git worktree add history traffic-history
+          elif [ "$status" -eq 2 ]; then
+            git worktree add --detach history
+            git -C history checkout --orphan traffic-history
+            git -C history rm -rf --quiet .
           else
-            git checkout --orphan traffic-history
-            git rm -rf . || true
+            echo "::error::Could not query the traffic-history branch (exit $status)"
+            exit 1
           fi
 
-          mkdir -p data
+          mkdir -p history/data
+
+      - name: Mint a short-lived traffic token
+        id: traffic-token
+        # v3.3.0 - pinned to a full commit SHA. Revokes the token when the job ends.
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+        with:
+          client-id: ${{ vars.TRAFFIC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRAFFIC_APP_PRIVATE_KEY }}
+          permission-administration: read
 
       - name: Fetch GitHub traffic API data
         shell: bash
         env:
-          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          TRAFFIC_TOKEN: ${{ steps.traffic-token.outputs.token }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
-          if [ -z "${TRAFFIC_TOKEN:-}" ]; then
-            echo "::error::Missing TRAFFIC_TOKEN repository secret"
-            echo "Create a fine-grained token with Administration: read permission for this repository."
-            exit 1
-          fi
-
           API_VERSION="2026-03-10"
-          REPO="${{ github.repository }}"
           BASE_URL="https://api.github.com/repos/$REPO"
+          API_DIR="$RUNNER_TEMP/traffic-api"
+          mkdir -p "$API_DIR"
 
           api_get() {
             local label="$1"
@@ -130,572 +150,37 @@ jobs:
             fi
           }
 
-          api_get "Page views" "$BASE_URL/traffic/views?per=day" "/tmp/views.json"
-          api_get "Clones" "$BASE_URL/traffic/clones?per=day" "/tmp/clones.json"
-          api_get "Top referrers" "$BASE_URL/traffic/popular/referrers" "/tmp/referrers.json"
-          api_get "Popular paths" "$BASE_URL/traffic/popular/paths" "/tmp/paths.json"
-          api_get "Repository metadata" "$BASE_URL" "/tmp/repo.json"
+          api_get "Page views" "$BASE_URL/traffic/views?per=day" "$API_DIR/views.json"
+          api_get "Clones" "$BASE_URL/traffic/clones?per=day" "$API_DIR/clones.json"
+          api_get "Top referrers" "$BASE_URL/traffic/popular/referrers" "$API_DIR/referrers.json"
+          api_get "Popular paths" "$BASE_URL/traffic/popular/paths" "$API_DIR/paths.json"
+          api_get "Repository metadata" "$BASE_URL" "$API_DIR/repo.json"
 
       - name: Build CSV history
         shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 << 'PY'
-          import csv
-          import json
-          import os
-          from datetime import datetime, timezone
-
-          def load_json(path):
-              with open(path, "r", encoding="utf-8") as f:
-                  return json.load(f)
-
-          def read_csv(path):
-              if not os.path.exists(path):
-                  return []
-              with open(path, "r", newline="", encoding="utf-8") as f:
-                  return list(csv.DictReader(f))
-
-          def write_csv(path, rows, fieldnames):
-              directory = os.path.dirname(path)
-              if directory:
-                  os.makedirs(directory, exist_ok=True)
-
-              with open(path, "w", newline="", encoding="utf-8") as f:
-                  writer = csv.DictWriter(f, fieldnames=fieldnames)
-                  writer.writeheader()
-
-                  for row in rows:
-                      writer.writerow({field: row.get(field, "") for field in fieldnames})
-
-          def upsert_rows(path, new_rows, fieldnames, key_fields, normalizer=None):
-              existing_rows = read_csv(path)
-
-              if normalizer is not None:
-                  normalized_rows = []
-
-                  for row in existing_rows:
-                      normalized = normalizer(row)
-
-                      if normalized is not None:
-                          normalized_rows.append(normalized)
-
-                  existing_rows = normalized_rows
-
-              new_keys = {
-                  tuple(str(row.get(key, "")) for key in key_fields)
-                  for row in new_rows
-              }
-
-              kept_rows = [
-                  row for row in existing_rows
-                  if tuple(str(row.get(key, "")) for key in key_fields) not in new_keys
-              ]
-
-              combined_rows = kept_rows + new_rows
-
-              combined_rows = [
-                  row for row in combined_rows
-                  if all(str(row.get(key, "")) for key in key_fields)
-              ]
-
-              combined_rows.sort(
-                  key=lambda row: tuple(str(row.get(key, "")) for key in key_fields)
-              )
-
-              write_csv(path, combined_rows, fieldnames)
-
-          def to_int(value, default=0):
-              try:
-                  return int(value)
-              except Exception:
-                  return default
-
-          def normalize_traffic_row(row):
-              if row.get("snapshot_date"):
-                  return {
-                      "snapshot_date": row.get("snapshot_date", ""),
-                      "snapshot_datetime_utc": row.get("snapshot_datetime_utc", ""),
-                      "views_14d": row.get("views_14d", "0"),
-                      "unique_views_14d": row.get("unique_views_14d", "0"),
-                      "clones_14d": row.get("clones_14d", "0"),
-                      "unique_clones_14d": row.get("unique_clones_14d", "0"),
-                      "stars": row.get("stars", "0"),
-                      "forks": row.get("forks", "0"),
-                      "watchers": row.get("watchers", "0"),
-                      "open_issues": row.get("open_issues", "0")
-                  }
-
-              if row.get("date"):
-                  return {
-                      "snapshot_date": row.get("date", "")[:10],
-                      "snapshot_datetime_utc": row.get("date", ""),
-                      "views_14d": row.get("views", "0"),
-                      "unique_views_14d": row.get("unique_views", "0"),
-                      "clones_14d": row.get("clones", "0"),
-                      "unique_clones_14d": row.get("unique_clones", "0"),
-                      "stars": row.get("stars", "0"),
-                      "forks": row.get("forks", "0"),
-                      "watchers": row.get("watchers", "0"),
-                      "open_issues": row.get("open_issues", "0")
-                  }
-
-              return None
-
-          views = load_json("/tmp/views.json")
-          clones = load_json("/tmp/clones.json")
-          referrers = load_json("/tmp/referrers.json")
-          paths = load_json("/tmp/paths.json")
-          repo = load_json("/tmp/repo.json")
-
-          if "views" not in views or "count" not in views:
-              raise RuntimeError("Unexpected views API response")
-
-          if "clones" not in clones or "count" not in clones:
-              raise RuntimeError("Unexpected clones API response")
-
-          if not isinstance(referrers, list):
-              raise RuntimeError("Unexpected referrers API response")
-
-          if not isinstance(paths, list):
-              raise RuntimeError("Unexpected popular paths API response")
-
-          if "stargazers_count" not in repo:
-              raise RuntimeError("Unexpected repository metadata API response")
-
-          now = datetime.now(timezone.utc)
-          snapshot_date = now.date().isoformat()
-          snapshot_datetime = now.isoformat(timespec="seconds")
-
-          traffic_fields = [
-              "snapshot_date",
-              "snapshot_datetime_utc",
-              "views_14d",
-              "unique_views_14d",
-              "clones_14d",
-              "unique_clones_14d",
-              "stars",
-              "forks",
-              "watchers",
-              "open_issues"
-          ]
-
-          traffic_row = {
-              "snapshot_date": snapshot_date,
-              "snapshot_datetime_utc": snapshot_datetime,
-              "views_14d": to_int(views.get("count", 0)),
-              "unique_views_14d": to_int(views.get("uniques", 0)),
-              "clones_14d": to_int(clones.get("count", 0)),
-              "unique_clones_14d": to_int(clones.get("uniques", 0)),
-              "stars": to_int(repo.get("stargazers_count", 0)),
-              "forks": to_int(repo.get("forks_count", 0)),
-              "watchers": to_int(repo.get("subscribers_count", 0)),
-              "open_issues": to_int(repo.get("open_issues_count", 0))
-          }
-
-          upsert_rows(
-              "data/traffic.csv",
-              [traffic_row],
-              traffic_fields,
-              ["snapshot_date"],
-              normalize_traffic_row
-          )
-
-          daily_fields = [
-              "date",
-              "views",
-              "unique_views",
-              "clones",
-              "unique_clones"
-          ]
-
-          daily = {}
-
-          for item in views.get("views", []):
-              day = str(item.get("timestamp", ""))[:10]
-
-              if not day:
-                  continue
-
-              daily.setdefault(day, {
-                  "date": day,
-                  "views": 0,
-                  "unique_views": 0,
-                  "clones": 0,
-                  "unique_clones": 0
-              })
-
-              daily[day]["views"] = to_int(item.get("count", 0))
-              daily[day]["unique_views"] = to_int(item.get("uniques", 0))
-
-          for item in clones.get("clones", []):
-              day = str(item.get("timestamp", ""))[:10]
-
-              if not day:
-                  continue
-
-              daily.setdefault(day, {
-                  "date": day,
-                  "views": 0,
-                  "unique_views": 0,
-                  "clones": 0,
-                  "unique_clones": 0
-              })
-
-              daily[day]["clones"] = to_int(item.get("count", 0))
-              daily[day]["unique_clones"] = to_int(item.get("uniques", 0))
-
-          upsert_rows(
-              "data/traffic_daily.csv",
-              list(daily.values()),
-              daily_fields,
-              ["date"]
-          )
-
-          # README badges: shields.io endpoint JSON files.
-          #   clones   total clones recorded in the daily history since
-          #            tracking began
-          #   visitors unique visitors over GitHub's rolling 14-day window,
-          #            from today's snapshot (daily uniques cannot be summed
-          #            into a unique count)
-          #   visits   cumulative daily unique visitors since tracking began;
-          #            a visitor counts once per day they visit
-          def compact_count(value):
-              if value >= 1000000:
-                  return f"{value / 1000000:.1f}M".replace(".0M", "M")
-              if value >= 1000:
-                  return f"{value / 1000:.1f}k".replace(".0k", "k")
-              return str(value)
-
-          def write_badge(name, label, value):
-              os.makedirs("data/badges", exist_ok=True)
-
-              with open(f"data/badges/{name}.json", "w", encoding="utf-8") as f:
-                  json.dump(
-                      {
-                          "schemaVersion": 1,
-                          "label": label,
-                          "message": compact_count(value),
-                          "color": "217346"
-                      },
-                      f
-                  )
-                  f.write("\n")
-
-          total_clones = sum(
-              to_int(row.get("clones", 0))
-              for row in read_csv("data/traffic_daily.csv")
-          )
-
-          total_visits = sum(
-              to_int(row.get("unique_views", 0))
-              for row in read_csv("data/traffic_daily.csv")
-          )
-
-          write_badge("clones", "clones", total_clones)
-          write_badge("visits", "visits", total_visits)
-          write_badge(
-              "visitors",
-              "visitors (14d)",
-              to_int(traffic_row["unique_views_14d"])
-          )
-
-          referrer_fields = [
-              "snapshot_date",
-              "rank",
-              "referrer",
-              "count",
-              "uniques"
-          ]
-
-          existing_referrers = [
-              row for row in read_csv("data/referrers.csv")
-              if row.get("snapshot_date") != snapshot_date
-          ]
-
-          referrer_rows = []
-
-          for rank, item in enumerate(referrers, start=1):
-              referrer_rows.append({
-                  "snapshot_date": snapshot_date,
-                  "rank": rank,
-                  "referrer": item.get("referrer", ""),
-                  "count": to_int(item.get("count", 0)),
-                  "uniques": to_int(item.get("uniques", 0))
-              })
-
-          combined_referrers = existing_referrers + referrer_rows
-          combined_referrers.sort(
-              key=lambda row: (
-                  row.get("snapshot_date", ""),
-                  to_int(row.get("rank", 999))
-              )
-          )
-
-          write_csv(
-              "data/referrers.csv",
-              combined_referrers,
-              referrer_fields
-          )
-
-          path_fields = [
-              "snapshot_date",
-              "rank",
-              "path",
-              "title",
-              "count",
-              "uniques"
-          ]
-
-          existing_paths = [
-              row for row in read_csv("data/popular_paths.csv")
-              if row.get("snapshot_date") != snapshot_date
-          ]
-
-          path_rows = []
-
-          for rank, item in enumerate(paths, start=1):
-              path_rows.append({
-                  "snapshot_date": snapshot_date,
-                  "rank": rank,
-                  "path": item.get("path", ""),
-                  "title": item.get("title", ""),
-                  "count": to_int(item.get("count", 0)),
-                  "uniques": to_int(item.get("uniques", 0))
-              })
-
-          combined_paths = existing_paths + path_rows
-          combined_paths.sort(
-              key=lambda row: (
-                  row.get("snapshot_date", ""),
-                  to_int(row.get("rank", 999))
-              )
-          )
-
-          write_csv(
-              "data/popular_paths.csv",
-              combined_paths,
-              path_fields
-          )
-          PY
+        run: python3 tools/traffic_export.py build --api-dir "$RUNNER_TEMP/traffic-api" --data-dir history/data
 
       - name: Commit traffic history
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          git add data/
+          git -C history add data/
 
-          if git diff --cached --quiet; then
+          if git -C history diff --cached --quiet; then
             echo "No traffic changes to commit"
           else
-            git commit -m "Update traffic history"
+            git -C history commit -m "Update traffic history"
           fi
 
-          git push origin HEAD:traffic-history
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git -C history -c http.extraheader="$auth" push origin HEAD:traffic-history
 
       - name: Create alert issue on spike or new referrer
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          python3 << 'PY'
-          import csv
-          import os
-          import subprocess
-          import sys
-          import textwrap
-
-          def read_csv(path):
-              if not os.path.exists(path):
-                  return []
-
-              with open(path, "r", newline="", encoding="utf-8") as f:
-                  return list(csv.DictReader(f))
-
-          def to_int(value, default=0):
-              try:
-                  return int(value)
-              except Exception:
-                  return default
-
-          def top_by_count(rows, limit=10):
-              return sorted(
-                  rows,
-                  key=lambda row: to_int(row.get("count", 0)),
-                  reverse=True
-              )[:limit]
-
-          traffic = [
-              row for row in read_csv("data/traffic.csv")
-              if row.get("snapshot_date")
-          ]
-
-          traffic.sort(key=lambda row: row.get("snapshot_date", ""))
-
-          if len(traffic) < 2:
-              sys.exit(0)
-
-          previous = traffic[-2]
-          current = traffic[-1]
-
-          current_date = current["snapshot_date"]
-          previous_date = previous["snapshot_date"]
-
-          views_spike = to_int(current["views_14d"]) >= max(
-              to_int(previous["views_14d"]) * 2,
-              to_int(previous["views_14d"]) + 100
-          )
-
-          clones_spike = to_int(current["clones_14d"]) >= max(
-              to_int(previous["clones_14d"]) * 2,
-              to_int(previous["clones_14d"]) + 10
-          )
-
-          stars_up = to_int(current["stars"]) > to_int(previous["stars"])
-          forks_up = to_int(current["forks"]) > to_int(previous["forks"])
-
-          referrers = read_csv("data/referrers.csv")
-          paths = read_csv("data/popular_paths.csv")
-
-          current_referrers = [
-              row for row in referrers
-              if row.get("snapshot_date") == current_date
-          ]
-
-          current_paths = [
-              row for row in paths
-              if row.get("snapshot_date") == current_date
-          ]
-
-          known_referrers_before_today = {
-              row.get("referrer", "")
-              for row in referrers
-              if row.get("snapshot_date", "") < current_date
-          }
-
-          new_referrers = [
-              row for row in current_referrers
-              if row.get("referrer", "")
-              and row.get("referrer", "") not in known_referrers_before_today
-              and to_int(row.get("count", 0)) >= 5
-          ]
-
-          if not (views_spike or clones_spike or stars_up or forks_up or new_referrers):
-              sys.exit(0)
-
-          reasons = []
-
-          if views_spike:
-              reasons.append("Views spike")
-
-          if clones_spike:
-              reasons.append("Clones spike")
-
-          if stars_up:
-              reasons.append("Stars increased")
-
-          if forks_up:
-              reasons.append("Forks increased")
-
-          if new_referrers:
-              reasons.append("New referrer detected")
-
-          referrer_lines = "\n".join(
-              f"- {row.get('referrer', '')}: {row.get('count', '0')} views, {row.get('uniques', '0')} unique"
-              for row in top_by_count(current_referrers)
-          ) or "- No referrers available"
-
-          path_lines = "\n".join(
-              f"- {row.get('path', '')}: {row.get('count', '0')} views, {row.get('uniques', '0')} unique"
-              for row in top_by_count(current_paths)
-          ) or "- No popular paths available"
-
-          new_referrer_lines = "\n".join(
-              f"- {row.get('referrer', '')}: {row.get('count', '0')} views, {row.get('uniques', '0')} unique"
-              for row in top_by_count(new_referrers)
-          ) or "- No new referrer above threshold"
-
-          title = f"Traffic alert: {current_date}"
-
-          existing_issue = subprocess.run(
-              [
-                  "gh",
-                  "issue",
-                  "list",
-                  "--state",
-                  "all",
-                  "--search",
-                  f'"{title}" in:title',
-                  "--limit",
-                  "10"
-              ],
-              capture_output=True,
-              text=True,
-              check=False
-          )
-
-          if existing_issue.returncode != 0:
-              print("::error::Could not determine whether an alert issue already exists")
-              print(existing_issue.stderr.strip())
-              sys.exit(1)
-
-          if existing_issue.stdout.strip():
-              print(f"Alert issue already exists for {current_date}")
-              sys.exit(0)
-
-          body = textwrap.dedent(f"""
-          Automated traffic alert for **VBA-DateTimePicker**.
-
-          Trigger reason:
-          {", ".join(reasons)}
-
-          Current 14-day snapshot:
-          - Views: {current["views_14d"]} vs {previous["views_14d"]} on {previous_date}
-          - Unique views: {current["unique_views_14d"]} vs {previous["unique_views_14d"]} on {previous_date}
-          - Clones: {current["clones_14d"]} vs {previous["clones_14d"]} on {previous_date}
-          - Unique clones: {current["unique_clones_14d"]} vs {previous["unique_clones_14d"]} on {previous_date}
-          - Stars: {current["stars"]} vs {previous["stars"]} on {previous_date}
-          - Forks: {current["forks"]} vs {previous["forks"]} on {previous_date}
-
-          New referrers:
-          {new_referrer_lines}
-
-          Current top referrers:
-          {referrer_lines}
-
-          Current popular paths:
-          {path_lines}
-
-          Suggested checks:
-          1. Go to **Insights → Traffic**
-          2. Check whether one of the referrers is a blog, forum, Reddit, StackOverflow, GitHub project, or newsletter
-          3. Check which page, release, screenshot, source file, or README section is attracting traffic
-          4. Consider adding a short README CTA asking users to star the repository if they are using the component
-          """).strip()
-
-          created = subprocess.run(
-              [
-                  "gh",
-                  "issue",
-                  "create",
-                  "--title",
-                  title,
-                  "--body",
-                  body
-              ],
-              capture_output=True,
-              text=True,
-              check=False
-          )
-
-          if created.returncode != 0:
-              print("::error::Traffic alert triggered but the issue could not be created")
-              print(created.stderr.strip())
-              sys.exit(1)
-
-          print(created.stdout.strip())
-          PY
+          GH_REPO: ${{ github.repository }}
+        run: python3 tools/traffic_export.py alert --data-dir history/data
