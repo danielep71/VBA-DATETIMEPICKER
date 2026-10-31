@@ -91,6 +91,11 @@ Test both embedded-source and add-in consumption if both are advertised for the 
 
 1. Update refs and start from current protected `main`.
 2. Create the release-preparation branch required by repository policy.
+   Release work follows the pull-request types in
+   [CONTRIBUTING.md](CONTRIBUTING.md#release-branches): task pull requests into
+   the release branch, one integration pull request into `main`, and a sync
+   pull request back. Point Dependabot's `target-branch` at the new release
+   branch in the same change.
 3. Record the base and candidate full commit SHAs.
 4. Stop feature work on that branch.
 5. Review the complete diff from the previous release tag.

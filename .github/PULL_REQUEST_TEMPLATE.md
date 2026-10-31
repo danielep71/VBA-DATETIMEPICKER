@@ -32,11 +32,11 @@
 ## 🔗 Related issues
 
 ```text
-Closes #
-Related to #
+Resolves #
+Refs #
 ```
 
-Use a closing keyword only when this pull request satisfies the issue's complete acceptance criteria.
+Task pull requests into a release branch use `Resolves #N` only when they satisfy the issue's complete acceptance criteria; the issue is closed by hand after verification. Integration pull requests into `main` use `Refs #N` only. See CONTRIBUTING.md, "Release branches and pull-request types".
 
 ## 🧭 Change classification
 
@@ -131,7 +131,7 @@ Evidence from another commit does not certify this candidate.
 ### Static and repository checks
 
 - `git diff --check`
-- Repository source/export inspection — no hosted static source gate is currently configured
+- `python tools/check.py` locally; the **Static repository checks** workflow runs it in CI
 
 | Check | Result / evidence |
 | --- | --- |
@@ -334,6 +334,17 @@ Known boundary not proved by this pull request:
 Unresolved question or accepted trade-off:
 ```
 
+## 🔏 Final-head review
+
+<!-- Complete before merging; see CONTRIBUTING.md, "Final-head review". Re-check after every push. Bot pull requests that only bump a pinned dependency are exempt. -->
+
+| Record | Value |
+| --- | --- |
+| Reviewed head SHA | <!-- Full 40-character SHA; must equal the head being merged --> |
+| Review | <!-- Link to the completed review of that SHA --> |
+| Static checks on that SHA | <!-- PASS / FAIL + workflow run URL --> |
+| Findings | <!-- All fixed / answered; link any left open with the reason --> |
+
 ## ☑️ Final author check
 
 - [ ] The title describes the observable outcome.
@@ -342,6 +353,7 @@ Unresolved question or accepted trade-off:
 - [ ] Compatibility and release impact are assessed.
 - [ ] Evidence belongs to the exact candidate claimed.
 - [ ] Required checks are terminal and passing; incomplete work is not presented as PASS.
+- [ ] The final-head review record names the head being merged.
 - [ ] Executable VBA was compiled and tested when required.
 - [ ] Failure, cleanup, and recovery behavior were reviewed.
 - [ ] The complete diff, including comments, metadata, binary companions, and documentation, was reviewed.

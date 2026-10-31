@@ -6,8 +6,20 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from _gatelib import git_text, write_json, write_text
+
+# Gate names as they appear in static-checks.json. check_release.STATIC_CHECKS
+# must list the same set; test_tooling enforces that.
+FIXTURE_GATES = ("check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace")
+REPORT_GATES = ("check_source", "check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace",
+                "check_markdown_links")
+NODE_GATES = ("labels-sync", "labels-drift")
+
+
+def gate_names() -> set[str]:
+    return {"tool-tests", *(name + "-fixtures" for name in FIXTURE_GATES), *REPORT_GATES, *NODE_GATES}
 
 
 def main() -> int:
@@ -25,9 +37,9 @@ def main() -> int:
     commands = [
         ("tool-tests", [sys.executable, "-m", "unittest", "discover", "-s", "tools", "-p", "test_*.py"]),
     ]
-    for name in ("check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace"):
+    for name in FIXTURE_GATES:
         commands.append((name + "-fixtures", [sys.executable, f"tools/{name}.py", "--self-test"]))
-    for name in ("check_source", "check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace"):
+    for name in REPORT_GATES:
         command = [sys.executable, f"tools/{name}.py", "--root", str(root),
                    "--output", str(output / f"{name}.json")]
         if name == "check_committed_whitespace":
@@ -35,7 +47,7 @@ def main() -> int:
             if args.ci and args.base:
                 command += ["--base", args.base]
         commands.append((name, command))
-    for name in ("labels-sync", "labels-drift"):
+    for name in NODE_GATES:
         commands.append((name, ["node", f".github/scripts/{name}.mjs", "--policy",
                                 ".github/labels-policy.json", "--self-test"]))
     results = []
@@ -51,10 +63,11 @@ def main() -> int:
         if code:
             print(log, flush=True)
     passed = all(r["exit_code"] == 0 for r in results) and (not args.ci or not dirty)
-    report = {"schema_version": 1, "candidate_sha": sha, "dirty": dirty,
-              "mode": "committed" if args.ci else "working-tree",
-              "status": "pass" if passed else "fail", "checks": results,
-              "scope": "Static source and tooling checks only; Excel has not been executed."}
+    report: dict[str, Any] = {
+        "schema_version": 1, "candidate_sha": sha, "dirty": dirty,
+        "mode": "committed" if args.ci else "working-tree",
+        "status": "pass" if passed else "fail", "checks": results,
+        "scope": "Static source and tooling checks only; Excel has not been executed."}
     write_json(output / "static-checks.json", report)
     summary = "# Static checks\n\n" + f"Status: **{report['status'].upper()}**\n\n"
     summary += f"Candidate: `{sha}`; dirty: `{dirty}`\n\n" + report["scope"] + "\n"

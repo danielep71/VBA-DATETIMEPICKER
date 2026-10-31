@@ -249,6 +249,35 @@ Repository secrets must be scoped to the smallest necessary workflow, protected
 from untrusted pull-request code, excluded from logs and artifacts, and rotated
 after suspected exposure.
 
+<a id="automation-credentials"></a>
+
+### Repository automation credentials
+
+The only automation credential beyond the per-job `GITHUB_TOKEN` belongs to
+the **Daily traffic export** workflow, because the traffic API requires
+`Administration: read`:
+
+| Item | Value |
+|---|---|
+| Identity | A GitHub App owned by the maintainer, installed on this repository only |
+| Permission | Repository `Administration: read`, nothing else; no webhook |
+| Storage | `analytics` environment: client ID as the variable `TRAFFIC_APP_CLIENT_ID`, private key as the secret `TRAFFIC_APP_PRIVATE_KEY` |
+| Exposure | Only the token step receives the key; only the fetch step receives the token |
+| Token lifetime | One hour, scoped to this repository and `administration: read`, revoked when the job ends |
+
+No personal access token is used. The private key is the only long-lived
+material, and it never leaves the environment secret.
+
+- **Rotate the key** at least yearly, after a maintainer change, or if the
+  workflow is ever modified by someone other than the maintainer: generate a
+  new private key in the App settings, replace `TRAFFIC_APP_PRIVATE_KEY`, run
+  the workflow manually, then delete the old key in the App settings.
+- **Revoke immediately** on suspected exposure: delete the key in the App
+  settings (or suspend the installation), then rotate as above.
+- **Never** grant the App further permissions or install it on other
+  repositories, and never declare the `analytics` environment in a job that
+  builds, tests or runs pull-request code.
+
 ---
 
 <a id="supply-chain"></a>
@@ -296,6 +325,8 @@ Workflow code and configuration are security-sensitive.
 
 Automation that writes repository content or publishes releases must have
 explicit, least-privilege authorization.
+The one credential beyond `GITHUB_TOKEN`, the traffic export's GitHub App key, is
+described under [Repository automation credentials](#automation-credentials).
 
 ---
 

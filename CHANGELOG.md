@@ -103,6 +103,12 @@ Use only the categories needed by a release.
 
 ### Added
 
+- Markdown link checking, `tools/check_markdown_links.py`, with fixtures.
+  A new `check.py` gate resolves every relative link and heading anchor in
+  tracked Markdown offline, using GitHub's heading-slug rule. A weekly
+  **External Markdown links** workflow reports dead external links
+  ([#152](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/152)).
+
 - Advisory project-wide VBA call checker, `tools/check_vba_calls.py`, with its
   configuration manifest `tools/vba-projects.json` and fixtures
   (`tools/test_vba_calls.py`). It resolves direct, module-qualified and typed
@@ -134,6 +140,33 @@ Use only the categories needed by a release.
   manual limitations separately from passed tests.
 
 ### Changed
+
+- The daily traffic export authenticates with a GitHub App instead of a
+  long-lived personal access token. The App has only `Administration: read`
+  on this repository; its private key lives in the `analytics` environment,
+  reaches only the token step, and the minted token, seen only by the fetch
+  step, expires within an hour and is revoked when the job ends. SECURITY
+  documents the credential and its rotation. The workflow's inline history,
+  badge and alert logic moved to the tested `tools/traffic_export.py`, with
+  byte-identical output
+  ([#147](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/147)).
+
+- CodeQL now also scans the GitHub Actions workflows (the `actions`
+  language), on push, schedule and pull-request runs; pull-request analysis
+  stays read-only. The eligibility job has a timeout like the analysis jobs
+  ([#151](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/151)).
+
+- The Python tooling is now checked by Ruff and strict mypy, configured in
+  `pyproject.toml` and installed in CI from the hash-locked, wheels-only
+  `tools/requirements-lint.txt`, which Dependabot keeps current. The tools
+  gained type annotations, with no behaviour change and no suppressions
+  ([#149](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/149)).
+
+- CI runs the tooling on Python 3.13 instead of 3.10, which reaches end of
+  life in October 2026. The documented minimum is now Python 3.11, and a
+  separate job runs the tooling tests and fixtures on 3.11 so the minimum is
+  tested, not only stated
+  ([#148](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/148)).
 
 - The project license changes from MIT to the
   [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
@@ -227,6 +260,27 @@ Use only the categories needed by a release.
   "byte for byte" wording of the commit that added it).
 
 ### Documentation
+
+- CONTRIBUTING describes the release-branch merge flow: task pull requests
+  into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
+  verification, an integration pull request into `main` with `Refs #N` and a
+  merge commit, and a sync pull request back. Dependabot now targets the
+  active release branch
+  ([#154](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/154)).
+
+- CONTRIBUTING and the pull-request template add a final-head review
+  record: before a merge, the pull request names the reviewed head SHA, the
+  review and the static-checks result for that SHA, and any push sends it back
+  for review. Dependency-bump bot pull requests are exempt and verified by pin
+  and CI instead. The template no longer says that no hosted static gate exists
+  ([#153](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/153)).
+
+- The bug-report and feature-request templates are now issue forms. The
+  core facts are required fields, and every report records a priority, a
+  target end date (`YYYY-MM-DD` or `none`) and its dependencies. The optional
+  subsystem checklists moved unchanged to `docs/BUG_REPORT_DETAILS.md` and
+  `docs/FEATURE_REQUEST_DETAILS.md`, which the forms link to
+  ([#150](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/150)).
 
 - SECURITY now states that `main` can carry merged, unreleased work and that only
   the latest tagged release is the supported source; it previously said `main`

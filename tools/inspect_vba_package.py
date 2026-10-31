@@ -36,14 +36,12 @@ import sys
 import zipfile
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, cast
 from xml.parsers.expat import ExpatError
 
 from _gatelib import git_bytes, git_text, run_gate
 from check_source import ribbon_callback_attributes
-from check_vba_calls import (
-    MANIFEST, KEYWORDS, Module, Proc, merge_environments, parse_module, tokenize,
-)
+from check_vba_calls import KEYWORDS, MANIFEST, Module, Proc, merge_environments, parse_module, tokenize
 from check_vba_conditionals import ENVIRONMENTS, logical_units, reachable_sources
 
 TOOL_NAME = "Packaged VBA startup inspection (diagnostic)"
@@ -119,6 +117,13 @@ UNSUPPORTED = [
 
 class ExtractionError(ValueError):
     """The package or its VBA project could not be read as expected."""
+
+
+class Location(TypedDict):
+    """Where a startup finding sits, as keyword arguments of ``finding``."""
+    module: str
+    procedure: str
+    line: int
 
 
 def finding(code: str, message: str, module: str | None = None, procedure: str | None = None,
@@ -298,7 +303,11 @@ def decompress(data: bytes) -> bytes:
 
 def parse_dir(data: bytes) -> tuple[int, list[dict[str, Any]]]:
     """Read the code page and module records of the decompressed ``dir`` stream."""
-    codepage, expected, modules, current, position = None, None, [], None, 0
+    codepage: int | None = None
+    expected: int | None = None
+    modules: list[tuple[dict[str, Any], dict[str, bytes]]] = []
+    current: dict[str, Any] | None = None
+    position = 0
     raw: dict[str, bytes] = {}
     while position + 6 <= len(data):
         record, size = struct.unpack_from("<HI", data, position)
@@ -388,7 +397,8 @@ def extract_package(path: Path) -> dict[str, Any]:
                     result["failures"].append(finding(
                         "VBA-PKG-090", f"Ribbon part {info.filename} could not be parsed: {error}"))
                     return result
-                result["ribbon"] = {"part": info.filename, "sha256": sha256(xml), "onLoad": onload[0] if onload else None}
+                result["ribbon"] = {"part": info.filename, "sha256": sha256(xml),
+                                    "onLoad": onload[0] if onload else None}
                 break
         info = names.get("xl/vbaproject.bin")
         if info is None:
@@ -420,7 +430,8 @@ def extract_package(path: Path) -> dict[str, Any]:
                                               module=record["name"]))
             module["raw"] = module["text"] = None
         if module["kind"] is None:
-            result["failures"].append(finding("VBA-PKG-091", f"module {record['name']} has no kind in the PROJECT stream.",
+            result["failures"].append(finding("VBA-PKG-091",
+                                              f"module {record['name']} has no kind in the PROJECT stream.",
                                               module=record["name"]))
             module["kind"] = "class"
         result["modules"].append(module)
@@ -433,7 +444,8 @@ def read_export(directory: Path) -> dict[str, Any]:
                               "codepage": None, "modules": [], "failures": []}
     files = sorted(p for p in directory.iterdir() if p.suffix.casefold() in {".bas", ".cls", ".frm"})
     if not files:
-        result["failures"].append(finding("VBA-PKG-090", f"{directory.name} contains no exported .bas/.cls/.frm files."))
+        result["failures"].append(finding("VBA-PKG-090",
+                                          f"{directory.name} contains no exported .bas/.cls/.frm files."))
     for path in files:
         raw = path.read_bytes()
         text = raw.decode("cp1252")
@@ -498,7 +510,8 @@ def read_source(source: Path, revision: str, configuration: dict[str, Any]) -> d
     return result
 
 
-def compare_modules(package: dict[str, Any], source: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def compare_modules(package: dict[str, Any],
+                    source: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows, findings = [], []
     matched = set()
     for module in package["modules"]:
@@ -521,7 +534,8 @@ def compare_modules(package: dict[str, Any], source: dict[str, Any]) -> tuple[li
             if module["kind"] == "document":
                 row["comparison"] = "no-tracked-source"
                 findings.append(finding("VBA-PKG-013", f"{module['name']} ({row['document_object'] or 'document'}) "
-                                        "is workbook/document code with no tracked source file.", module=module["name"]))
+                                        "is workbook/document code with no tracked source file.",
+                                        module=module["name"]))
             else:
                 row["comparison"] = "unexpected"
                 findings.append(finding("VBA-PKG-011", f"{module['name']} is not in the expected source configuration.",
@@ -541,7 +555,7 @@ def compare_modules(package: dict[str, Any], source: dict[str, Any]) -> tuple[li
             old, new = expected.split("\n"), packaged.split("\n")
             diff = [line for line in difflib.unified_diff(old, new, "source", "package", n=0, lineterm="")
                     if not line.startswith(("---", "+++"))]
-            first = next((i for i, (a, b) in enumerate(zip(old, new)) if a != b), min(len(old), len(new)))
+            first = next((i for i, (a, b) in enumerate(zip(old, new, strict=False)) if a != b), min(len(old), len(new)))
             row["difference"] = {
                 "first_line": first + 1,
                 "removed_lines": sum(1 for line in diff if line.startswith("-")),
@@ -555,7 +569,8 @@ def compare_modules(package: dict[str, Any], source: dict[str, Any]) -> tuple[li
             else:
                 row["comparison"] = "changed"
                 findings.append(finding("VBA-PKG-012", f"{module['name']} code differs from {counterpart['path']} "
-                                        f"(first difference at line {first + 1}).", module=module["name"], line=first + 1))
+                                        f"(first difference at line {first + 1}).", module=module["name"],
+                                        line=first + 1))
         rows.append(row)
     for key, counterpart in source["modules"].items():
         if key not in matched:
@@ -603,7 +618,7 @@ class Index:
 
 def calls_in(tokens: list[Any], proc: Proc) -> list[tuple[str, str | None, str | None]]:
     """(kind, qualifier, name) for each call candidate: 'call', or 'dynamic' with an optional literal."""
-    found = []
+    found: list[tuple[str, str | None, str | None]] = []
     address_operands = set()
     for index, token in enumerate(tokens):
         if token.is_kw("addressof"):
@@ -708,6 +723,7 @@ def trace(proc: Proc, module: Module, index: Index, depth: int, seen: set[str]) 
                 site.update(call=f"{qualifier}", literal=name)
                 result["dynamic"].append(site)
                 continue
+            name = cast(str, name)  # calls_in gives every "call" entry a name; only "dynamic" ones may lack one
             callee = index.resolve(name, module, qualifier)
             if name.casefold() == TARGET.casefold():
                 if callee is None:
@@ -810,7 +826,7 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
                 "dynamic_calls": result["dynamic"], "unresolved_calls": result["unresolved"],
                 "calls_beyond_depth": result["truncated"]}
         hooks.append(hook)
-        where = {"module": module.name, "procedure": proc.name, "line": proc.line}
+        where: Location = {"module": module.name, "procedure": proc.name, "line": proc.line}
         if placement == "misplaced":
             findings.append(finding("VBA-PKG-002", f"{proc.name} is in {module.kind} module {module.name}"
                                     f"{' (' + obj + ')' if obj else ''}; Excel calls {label} only from a "
@@ -823,7 +839,8 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
                                     **where))
         for site in result["dynamic"] + result["unresolved"]:
             if "literal" in site:
-                what = f"dynamic call {site['call']}" + (f" with literal {site['literal']!r}" if site["literal"] else "")
+                what = f"dynamic call {site['call']}" + (
+                    f" with literal {site['literal']!r}" if site["literal"] else "")
             elif site["reason"] == "object receiver":
                 what = f"call {site['call']} on an object receiver"
             else:
@@ -833,8 +850,8 @@ def analyze_environment(modules: list[dict[str, Any]], environment: str, pattern
                                     target=site["call"]))
         if result["truncated"]:
             first = result["truncated"][0]
-            findings.append(finding("VBA-PKG-005", f"{label} path: {len(result['truncated'])} call(s) beyond trace depth "
-                                    f"{MAX_TRACE_DEPTH} were not followed, first {first['call']}.",
+            findings.append(finding("VBA-PKG-005", f"{label} path: {len(result['truncated'])} call(s) beyond "
+                                    f"trace depth {MAX_TRACE_DEPTH} were not followed, first {first['call']}.",
                                     module=first["module"], procedure=first["procedure"], line=first["line"],
                                     target=first["call"]))
         for reach in result["reaches"]:
@@ -891,7 +908,12 @@ def inspect(package: Path | None, export_dir: Path | None, source: Path, revisio
     if configuration is None:
         raise ValueError(f"configuration {configuration_name!r} is not in {MANIFEST}")
     patterns = [re.compile(p) for p in manifest.get("project_name_patterns", [])]
-    extracted = extract_package(package) if package is not None else read_export(export_dir)
+    if package is not None:
+        extracted = extract_package(package)
+    elif export_dir is not None:
+        extracted = read_export(export_dir)
+    else:
+        raise TypeError("inspect() needs a package or an export directory")
     evidence = "package-extraction" if package is not None else "manual-export"
     failures = list(extracted["failures"])
     findings: list[dict[str, Any]] = []
@@ -972,7 +994,7 @@ def inspect(package: Path | None, export_dir: Path | None, source: Path, revisio
         "package": None if evidence == "manual-export" else {
             "filename": extracted["filename"], "size": extracted["size"], "sha256": extracted["sha256"],
             "vba_project": extracted["vba_project"], "codepage": extracted["codepage"], "ribbon": extracted["ribbon"]},
-        "manual_export": None if evidence != "manual-export" else {"directory": export_dir.name},
+        "manual_export": None if evidence != "manual-export" else {"directory": cast(Path, export_dir).name},
         "source": {"revision_requested": sourced["revision_requested"], "revision": sourced["revision"],
                    "configuration": configuration_name, "manifest": MANIFEST},
         "modules": rows,
@@ -1002,11 +1024,12 @@ def markdown_report(report: dict[str, Any]) -> str:
                  f"configuration `{source['configuration']}`")
     lines.append(f"- **Tool:** version {report['tool_version']}, revision `{report['tool_revision'] or 'unknown'}`")
     coverage = inspection["coverage"]
-    lines.append(f"- **Coverage:** {coverage['modules_extracted']} of {coverage['modules_in_package']} package modules "
-                 f"extracted; {coverage['source_modules_read']} of {coverage['expected_source_modules']} source modules "
-                 f"read; environments: {', '.join(coverage['environments']) or 'none analyzed'}")
+    lines.append(f"- **Coverage:** {coverage['modules_extracted']} of {coverage['modules_in_package']} package "
+                 f"modules extracted; {coverage['source_modules_read']} of {coverage['expected_source_modules']} "
+                 f"source modules read; environments: {', '.join(coverage['environments']) or 'none analyzed'}")
     for failure in inspection["failures"]:
-        lines.append(f"- **Failure:** {failure['code']} {failure.get('module') or ''} {failure['message']}".replace("  ", " "))
+        lines.append(f"- **Failure:** {failure['code']} {failure.get('module') or ''} {failure['message']}"
+                     .replace("  ", " "))
     if report["modules"]:
         lines += ["", "| Module | Kind | Lines | Source | Comparison |", "| --- | --- | --- | --- | --- |"]
         for row in report["modules"]:
