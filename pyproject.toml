@@ -1,0 +1,18 @@
+# Configuration for the repository's Python quality gates. This file holds
+# tool settings only; the repository is not a Python package.
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+include = ["tools/*.py", ".github/scripts/*.py"]
+
+[tool.ruff.lint]
+# pycodestyle, Pyflakes, isort, bugbear and pyupgrade.
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+mypy_path = "tools"
+files = ["tools", ".github/scripts/check-ribbon-resources.py"]
+warn_unreachable = true

@@ -449,5 +449,7 @@ security matters, use the private channel in [SECURITY.md](SECURITY.md).
 ## Portable checks
 
 Before submitting changes, run `python tools/check.py` from the repository root.
+If you change Python under `tools/` or `.github/scripts/`, also run `ruff check`
+and `mypy`.
 See [tools/README.md](tools/README.md) for requirements, report locations and
 release evidence commands. Static checks do not replace Excel regression runs.
