@@ -8,7 +8,8 @@ python tools/check.py
 ```
 
 This runs source/Ribbon/form integrity, procedure-scoped jump checks, conditional
-declarations, whitespace, label fixtures and the tooling's negative tests.
+declarations, whitespace, Markdown links and anchors, label fixtures and the
+tooling's negative tests.
 Reports and logs go to ignored `test-results/`. Findings return a nonzero exit
 code. CI uses `python tools/check.py --ci`, checking committed whitespace and
 requiring a clean tree; PR runs also supply `--base <base-sha>`.
@@ -18,6 +19,28 @@ record dirty state and cannot be used as clean committed release evidence.
 The static workflow also runs checksum-pinned actionlint. CodeQL analyzes the
 Python and JavaScript tooling, not VBA. PR analysis is read-only. None of these
 checks compiles VBA, executes Excel or proves 32-bit runtime compatibility.
+
+## Markdown links and anchors
+
+```sh
+python tools/check_markdown_links.py --root .             # offline gate
+python tools/check_markdown_links.py --root . --external  # network, weekly
+```
+
+The offline mode is a `check.py` gate. In every tracked `.md` file it resolves
+relative links (inline, reference, `<a href>` and `<img src>`) against the
+tracked tree, and checks each `#anchor` that points into a Markdown file.
+Anchors are heading slugs and explicit `id`/`name` attributes. Slugs follow
+GitHub's rule: lower-case, keep Unicode letters, marks, decimal digits,
+connector punctuation, spaces and hyphens, then turn spaces into hyphens.
+U+FE0F after an emoji is a mark, so it stays. Duplicate headings get `-1`,
+`-2` suffixes. Links inside code and HTML comments are ignored, and anchors
+into non-Markdown files (such as `#L10`) are not checked.
+
+The `--external` mode checks each distinct http(s) URL once. 404, 410 and DNS
+failures fail the run; blocked, rate-limited or unreachable URLs (403, 429,
+5xx, timeouts) are warnings, because they do not prove a link is dead. The
+**External Markdown links** workflow runs it weekly and on demand.
 
 ## Project-wide VBA call resolution (advisory)
 

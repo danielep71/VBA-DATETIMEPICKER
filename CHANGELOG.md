@@ -103,6 +103,12 @@ Use only the categories needed by a release.
 
 ### Added
 
+- Markdown link checking, `tools/check_markdown_links.py`, with fixtures.
+  A new `check.py` gate resolves every relative link and heading anchor in
+  tracked Markdown offline, using GitHub's heading-slug rule. A weekly
+  **External Markdown links** workflow reports dead external links
+  ([#152](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/152)).
+
 - Advisory project-wide VBA call checker, `tools/check_vba_calls.py`, with its
   configuration manifest `tools/vba-projects.json` and fixtures
   (`tools/test_vba_calls.py`). It resolves direct, module-qualified and typed
