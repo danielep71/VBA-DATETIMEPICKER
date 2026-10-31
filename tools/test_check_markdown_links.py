@@ -78,6 +78,19 @@ class OfflineCheckTests(unittest.TestCase):
         (self.root / "generated.md").write_text("# Generated\n", encoding="utf-8")
         self.assertEqual(self.check({"README.md": "[gen](generated.md)\n"}), ["1:generated.md"])
 
+    def test_linked_images_and_parentheses_in_destinations(self) -> None:
+        files = {
+            "README.md": ("[![badge](img/missing.svg)](docs/GUIDE.md) [![ok](img/ok.svg)](docs/GUIDE.md)\n"
+                          "[doc](guide(v2).md) [angle](<docs/GUIDE.md>) ![pic](img/ok.svg \"title\")\n"),
+            "docs/GUIDE.md": "# Guide\n", "guide(v2).md": "# v2\n", "img/ok.svg": "<svg/>",
+        }
+        self.assertEqual(self.check(files), ["1:img/missing.svg"])
+
+    def test_indented_code_outside_lists_is_ignored(self) -> None:
+        text = ("Paragraph.\n\n    [code](missing-a.md)\n\n    still code [x](missing-b.md)\n\n"
+                "- item\n\n    continuation [y](missing-c.md)\n\nBack to prose.\n\n    [z](missing-d.md)\n")
+        self.assertEqual(self.check({"README.md": text}), ["9:missing-c.md"])
+
     def test_links_in_code_and_comments_are_ignored(self) -> None:
         text = "`[a](missing.md)`\n\n```\n[b](missing.md)\n```\n\n<!--\n[c](missing.md)\n-->\n"
         self.assertEqual(self.check({"README.md": text}), [])

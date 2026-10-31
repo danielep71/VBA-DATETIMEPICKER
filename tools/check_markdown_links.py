@@ -17,11 +17,20 @@ from typing import Any
 
 from _gatelib import run_gate, tracked_files
 
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+# Any indentation: fences inside list items are often indented four or more spaces.
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+LIST_ITEM = re.compile(r"^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:\s|$)")
 ATX = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
 SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 HTML_ANCHOR = re.compile(r"<[A-Za-z][^>]*?\s(?:id|name)\s*=\s*[\"']([^\"']+)[\"']", re.I)
-INLINE_LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\[\]]*\])*\]\(\s*<?([^\s)>]*)>?(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
+# A link or image destination: <...>, or a bare destination with one level of
+# balanced parentheses, as in guide(v2).md; then an optional title.
+DESTINATION = (r"\(\s*(?:<([^>\n]*)>|((?:[^\s()\\]|\\.|\((?:[^\s()\\]|\\.)*\))*))"
+               r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)")
+# Images are matched separately, so an image nested in a link's text, as in a
+# linked badge [![alt](image)](target), yields both destinations.
+INLINE_IMAGE = re.compile(r"!\[[^\[\]]*\]" + DESTINATION)
+INLINE_LINK = re.compile(r"(?<!!)\[(?:[^\[\]]|\[[^\[\]]*\])*\]" + DESTINATION)
 REFERENCE_DEF = re.compile(r"^ {0,3}\[[^\]]+\]:\s*<?(\S+?)>?(?:\s+.*)?$")
 HTML_LINK = re.compile(r"<(?:a|img)\b[^>]*?\s(?:href|src)\s*=\s*[\"']([^\"']+)[\"']", re.I)
 AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
@@ -65,19 +74,41 @@ def heading_text(raw: str) -> str:
 
 
 def prose_lines(text: str) -> list[tuple[int, str]]:
-    """Lines outside fenced code blocks and HTML comments, with 1-based numbers."""
+    """Lines outside code blocks and HTML comments, with 1-based numbers.
+
+    Fenced blocks are skipped. So are indented code blocks: a line indented four
+    or more columns after a blank line, outside a list. Inside a list such lines
+    continue the list item and stay prose.
+    """
     text = COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), text)
     result: list[tuple[int, str]] = []
     fence = ""
+    in_list = indented_code = False
+    previous_blank = True
     for number, line in enumerate(text.splitlines(), start=1):
         match = FENCE.match(line)
         if fence:
             if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
                 fence = ""
             continue
+        if not line.strip():
+            previous_blank = True
+            continue
+        indent = len(line.expandtabs(4)) - len(line.expandtabs(4).lstrip(" "))
+        if indent >= 4 and not in_list and (previous_blank or indented_code):
+            indented_code = True
+            previous_blank = False
+            continue
+        indented_code = False
         if match:
             fence = match.group(1)
+            previous_blank = False
             continue
+        if LIST_ITEM.match(line):
+            in_list = True
+        elif indent == 0 and previous_blank:
+            in_list = False
+        previous_blank = False
         result.append((number, line))
     return result
 
@@ -113,7 +144,8 @@ def links(path: str, text: str) -> list[Link]:
     result: list[Link] = []
     for number, line in prose_lines(text):
         line = CODE_SPAN.sub("", line)
-        targets = [m.group(1) for m in INLINE_LINK.finditer(line)]
+        targets = [m.group(1) if m.group(1) is not None else m.group(2)
+                   for pattern in (INLINE_LINK, INLINE_IMAGE) for m in pattern.finditer(line)]
         targets += HTML_LINK.findall(line) + AUTOLINK.findall(line)
         definition = REFERENCE_DEF.match(line)
         if definition:
