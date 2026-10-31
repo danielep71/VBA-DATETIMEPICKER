@@ -25,7 +25,7 @@
 [![P1 issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER/P1?style=flat-square&label=P1&color=B60205)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues?q=is%3Aissue%20is%3Aopen%20label%3AP1)
 [![P2 issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER/P2?style=flat-square&label=P2&color=D93F0B)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues?q=is%3Aissue%20is%3Aopen%20label%3AP2)
 [![P3 issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER/P3?style=flat-square&label=P3&color=FBCA04)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues?q=is%3Aissue%20is%3Aopen%20label%3AP3)
-[![Stars](https://img.shields.io/github/stars/danielep71/VBA-DATETIMEPICKER?style=flat-square&color=bf8700)](https://github.com/danielep71/VBA-DATETIMEPICKER/stargazers)
+[![Stars](https://img.shields.io/github/stars/danielep71/VBA-DATETIMEPICKER?style=flat-square&color=bf8700)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 
 <br>
 
@@ -1266,6 +1266,8 @@ VBA-DATETIMEPICKER/
 ├─ dist/
 │  └─ README.md
 ├─ docs/
+│  ├─ BUG_REPORT_DETAILS.md
+│  ├─ FEATURE_REQUEST_DETAILS.md
 │  └─ RELEASE_CERTIFICATION_TEMPLATE.md
 ├─ images/
 ├─ src/
@@ -1501,7 +1503,7 @@ High-DPI, high-contrast and accessibility behavior should be validated in the ta
 
 ### Release evidence is procedural, not automated
 
-No CI runs the regression pack — the only workflow in the repository is repository traffic analytics ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
+No CI runs the regression pack — the workflows run static checks, CodeQL and repository analytics, never Excel ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
 
 ### Certification environment
 

@@ -24,7 +24,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from _gatelib import parse_report_args, run_gate, tracked_files
 from check_source import ribbon_callbacks
@@ -360,7 +360,7 @@ def add_member(module: Module, member: Member, accessor: str | None = None, proc
         and all(a in {"get", "let", "set"} for a in existing.accessors)
         and proc.accessor not in existing.accessors
     )
-    if property_pair:
+    if property_pair and proc is not None:
         existing.accessors[proc.accessor] = proc
         return
     module.findings.append(finding(
@@ -562,9 +562,11 @@ class Project:
     def is_project_name(self, name: str) -> bool:
         return any(pattern.search(name) for pattern in self.patterns)
 
-    def global_candidates(self, name: str, exclude: Module | None) -> tuple[list[tuple[Module, Member]], list[tuple[Module, Member]]]:
+    def global_candidates(
+            self, name: str, exclude: Module | None) -> tuple[list[tuple[Module, Member]], list[tuple[Module, Member]]]:
         """Public and private declarations of ``name`` outside ``exclude`` that VBA treats as global."""
-        public, private = [], []
+        public: list[tuple[Module, Member]] = []
+        private: list[tuple[Module, Member]] = []
         key = name.casefold()
         for module in self.modules.values():
             if module is exclude:
@@ -588,7 +590,8 @@ class Analyzer:
         self.entry_points: list[dict[str, Any]] = []
 
     # -- helpers ----------------------------------------------------------
-    def report(self, code: str, module: Module, proc: Proc | None, line: int, target: str, message: str, **extra: Any) -> None:
+    def report(self, code: str, module: Module, proc: Proc | None, line: int, target: str, message: str,
+               **extra: Any) -> None:
         item = finding(code, module, proc.name if proc else None, line, target, message, **extra)
         if code in {"VBA-CALL-001", "VBA-CALL-002", "VBA-CALL-030"} and not self.project.complete:
             item.update(severity="unknown", resolution="coverage-incomplete")
@@ -627,7 +630,7 @@ class Analyzer:
     def split_args(self, tokens: list[Tok]) -> list[tuple[str | None, list[Tok]]]:
         if not tokens:
             return []
-        args = []
+        args: list[tuple[str | None, list[Tok]]] = []
         for part in split_top(tokens, ","):
             if len(part) >= 2 and part[0].is_id() and part[1].is_op(":="):
                 args.append((part[0].text, part[2:]))
@@ -646,12 +649,14 @@ class Analyzer:
         for name, tokens in args:
             if name is None:
                 if seen_named:
-                    self.report("VBA-CALL-016", module, proc, line, label, f"{label}: positional argument after a named argument.",
+                    self.report("VBA-CALL-016", module, proc, line, label,
+                                f"{label}: positional argument after a named argument.",
                                 signature=target.signature())
                     return
                 if positional >= len(fixed) and paramarray is None:
                     self.report("VBA-CALL-011", module, proc, line, label,
-                                f"{label} accepts at most {len(fixed)} argument(s); {len([a for a in args if a[0] is None])} supplied.",
+                                f"{label} accepts at most {len(fixed)} argument(s); "
+                                f"{len([a for a in args if a[0] is None])} supplied.",
                                 signature=target.signature())
                     return
                 if positional < len(fixed):
@@ -670,7 +675,8 @@ class Analyzer:
                             signature=target.signature())
                 continue
             if params[index].paramarray:
-                self.report("VBA-CALL-015", module, proc, line, label, f"{label}: ParamArray {name!r} cannot be passed by name.",
+                self.report("VBA-CALL-015", module, proc, line, label,
+                            f"{label}: ParamArray {name!r} cannot be passed by name.",
                             signature=target.signature())
                 continue
             if index in covered:
@@ -694,6 +700,7 @@ class Analyzer:
         self.stats["resolved-calls"] += 1
         if args is None:
             args = []  # A procedure named without parentheses is still called, with no arguments
+        target: Proc | None
         if "sub" in accessors or "function" in accessors or "declare" in accessors:
             target = accessors.get("function") or accessors.get("sub") or accessors["declare"]
             if args is not None:
@@ -727,9 +734,9 @@ class Analyzer:
             if tokens[0].is_id():
                 kind, entity = self.resolve_name(tokens[0].text, module, proc)
                 if kind == "local" and entity[1].startswith("const:"):
-                    return entity[1][6:]
+                    return cast(str, entity[1][6:])
                 if kind == "member" and entity[1].kind == "const" and entity[1].value is not None:
-                    return entity[1].value
+                    return cast(str, entity[1].value)
         if tokens[0].is_id() and tokens[0].text.casefold() in self.project.macro_functions:
             if len(tokens) >= 3 and tokens[1].is_op("(") and matching_paren(tokens, 1) == len(tokens) - 1:
                 return self.literal_target(tokens[2:-1], module, proc)
@@ -767,9 +774,11 @@ class Analyzer:
             self.report("VBA-CALL-031", module, proc, line, value,
                         f"{channel} target {value!r} is Private in {candidates[0][0].name}.", channel=channel)
         self.stats["dynamic-literal"] += 1
-        self.entry_points.append({"channel": channel, "module": module.name, "line": line, "target": value, "status": status})
+        self.entry_points.append({"channel": channel, "module": module.name, "line": line, "target": value,
+                                  "status": status})
 
-    def check_callbyname(self, args: list[tuple[str | None, list[Tok]]], module: Module, proc: Proc | None, line: int) -> None:
+    def check_callbyname(self, args: list[tuple[str | None, list[Tok]]], module: Module, proc: Proc | None,
+                         line: int) -> None:
         if len(args) < 2:
             return
         receiver = self.chain_type(args[0][1], module, proc)
@@ -784,7 +793,8 @@ class Analyzer:
         if member is None:
             if receiver.kind == "class" and not receiver.implements:
                 self.report("VBA-CALL-030", module, proc, line, f"{receiver.name}.{member_name}",
-                            f"CallByName member {member_name!r} is not declared by {receiver.name}.", channel="CallByName")
+                            f"CallByName member {member_name!r} is not declared by {receiver.name}.",
+                            channel="CallByName")
                 status = "missing"
             else:
                 status = "unknown-form-member"
@@ -810,7 +820,7 @@ class Analyzer:
             if kind == "local":
                 return self.type_module(entity[0])
             if kind == "module":
-                return entity
+                return cast(Module, entity)
             if kind == "member" and entity[1].kind == "var":
                 return self.type_module(entity[1].type)
         return None
@@ -840,7 +850,8 @@ class Analyzer:
                     args = tokens[index + 1:close]
                     index = close + 1
             elements.append((name, args))
-            if index < len(tokens) and tokens[index].is_op(".", "!") and index + 1 < len(tokens) and tokens[index + 1].is_id():
+            if (index < len(tokens) and tokens[index].is_op(".", "!") and index + 1 < len(tokens)
+                    and tokens[index + 1].is_id()):
                 index += 1
                 continue
             break
@@ -863,7 +874,8 @@ class Analyzer:
         return index
 
     def resolve_elements(self, elements: list[tuple[str, list[Tok] | None]], leading_dot: bool, module: Module,
-                         proc: Proc | None, line: int, context: str, with_receiver: Module | None, statement: bool) -> None:
+                         proc: Proc | None, line: int, context: str, with_receiver: Module | None,
+                         statement: bool) -> None:
         receiver: Module | None = None
         start = 0
         dynamic_receiver = ""
@@ -893,7 +905,8 @@ class Analyzer:
                 receiver = entity
             elif kind == "ambiguous":
                 self.report("VBA-CALL-004", module, proc, line, name,
-                            f"{name} is public in {', '.join(m.name for m, _ in entity)}; qualify the call with the module name.",
+                            f"{name} is public in {', '.join(m.name for m, _ in entity)}; "
+                            "qualify the call with the module name.",
                             candidates=[{"module": m.name, "path": m.path, "line": mem.line} for m, mem in entity])
                 return
             elif kind == "private":
@@ -975,7 +988,9 @@ class Analyzer:
                 index += 2
                 continue
             chain_start = (token.is_id() and not token.is_kw(*KEYWORDS)) or (
-                token.is_op(".") and (previous is None or previous.is_op("(", ",", "=", "<>", "<", ">", "<=", ">=", "+", "-", "*", "/", "\\", "&", "^", ";")
+                token.is_op(".") and (previous is None
+                                      or previous.is_op("(", ",", "=", "<>", "<", ">", "<=", ">=",
+                                                        "+", "-", "*", "/", "\\", "&", "^", ";")
                                       or previous.is_kw(*KEYWORDS)))
             if chain_start and (previous is None or not previous.is_op(".", "!")):
                 index = self.process_chain(tokens, index, module, proc, line, "read", with_receiver)
@@ -1009,14 +1024,17 @@ class Analyzer:
             status = "missing"
             self.report("VBA-CALL-030", module, proc, line, target, f"AddressOf target {target!r} is not declared.",
                         channel="AddressOf")
-        self.entry_points.append({"channel": "AddressOf", "module": module.name, "line": line, "target": target, "status": status})
+        self.entry_points.append({"channel": "AddressOf", "module": module.name, "line": line, "target": target,
+                                  "status": status})
 
-    def statement(self, tokens: list[Tok], module: Module, proc: Proc, line: int, with_stack: list[Module | None]) -> None:
+    def statement(self, tokens: list[Tok], module: Module, proc: Proc, line: int,
+                  with_stack: list[Module | None]) -> None:
         receiver = with_stack[-1] if with_stack else None
         head = tokens[0]
         low = head.low if head.is_id() else ""
         if low in {"dim", "static", "const", "redim", "erase", "attribute", "exit", "goto", "gosub", "return",
-                   "resume", "stop", "option", "next", "wend", "implements", "rem"} or (head.is_id() and low == "end" and len(tokens) == 1):
+                   "resume", "stop", "option", "next", "wend", "implements", "rem"} or (
+                       head.is_id() and low == "end" and len(tokens) == 1):
             if low == "redim":
                 for part in split_top(tokens[1:], ","):
                     if part and part[0].is_kw("preserve"):
@@ -1067,7 +1085,8 @@ class Analyzer:
             else:
                 equals = next((i for i, t in enumerate(body) if t.is_op("=")), None)
                 if equals is not None:
-                    self.scan_expression([t for t in body[equals + 1:] if not t.is_kw("to", "step")], module, proc, line, receiver)
+                    self.scan_expression([t for t in body[equals + 1:] if not t.is_kw("to", "step")],
+                                         module, proc, line, receiver)
             return
         if low == "with":
             self.scan_expression(tokens[1:], module, proc, line, receiver)
@@ -1153,13 +1172,14 @@ def duplicate_public_names(project: Project) -> list[dict[str, Any]]:
             if member.visibility != "private":
                 owners.setdefault(key, []).append((module, member))
     items = []
-    for key, entries in sorted(owners.items()):
+    for _key, entries in sorted(owners.items()):
         if len(entries) > 1:
             module, member = entries[0]
             items.append(finding("VBA-CALL-040", module, None, member.line, member.name,
                                  f"{member.name} is public in {', '.join(m.name for m, _ in entries)}; "
                                  "unqualified calls from other modules are ambiguous.",
-                                 candidates=[{"module": m.name, "path": m.path, "line": mem.line} for m, mem in entries]))
+                                 candidates=[{"module": m.name, "path": m.path, "line": mem.line}
+                                             for m, mem in entries]))
     return items
 
 
@@ -1215,7 +1235,7 @@ def analyze_configuration(name: str, sources: dict[str, str], patterns: list[str
 
 
 def merge_environments(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    merged: dict[tuple, dict[str, Any]] = {}
+    merged: dict[tuple[Any, ...], dict[str, Any]] = {}
     for run in runs:
         for item in run["findings"] + run["failures"]:
             key = (item["code"], item.get("path"), item.get("line"), item.get("target"), item["message"])
@@ -1276,13 +1296,14 @@ def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: se
                 check_ribbon_callbacks(run, callbacks, ribbon)
         findings = merge_environments(runs)
         for path in missing:
-            findings.append(finding("VBA-CALL-091", None, None, None, path, f"{path} is missing from configuration {name}.",
-                                    path=path))
+            findings.append(finding("VBA-CALL-091", None, None, None, path,
+                                    f"{path} is missing from configuration {name}.", path=path))
         if not config.get("gating", True):
             for item in findings:
                 if item["severity"] == "error":
                     item["severity"] = "warning"
-                    item["resolution"] = "non-gating configuration" + (f" ({config['tracking']})" if config.get("tracking") else "")
+                    item["resolution"] = "non-gating configuration" + (
+                        f" ({config['tracking']})" if config.get("tracking") else "")
         failures = [f for f in findings if f["severity"] == "failure"]
         last = runs[-1]
         results[name] = {
@@ -1345,10 +1366,12 @@ def markdown_report(report: dict[str, Any]) -> str:
         counts = Counter(f["severity"] for f in result["findings"])
         stats = result["stats"]
         lines += ["", f"### {name}{'' if result['gating'] else ' (non-gating)'}", "",
-                  f"- Modules: {len(result['modules_analyzed'])} analyzed of {len(result['modules_expected'])} expected; "
-                  f"complete: {result['complete']}",
-                  f"- Resolved procedure uses: {stats.get('resolved-calls', 0)}; argument checks: {stats.get('argument-checks', 0)}; "
-                  f"literal dynamic targets: {stats.get('dynamic-literal', 0)}; dynamic unknown: {stats.get('dynamic-unknown', 0)}",
+                  f"- Modules: {len(result['modules_analyzed'])} analyzed of "
+                  f"{len(result['modules_expected'])} expected; complete: {result['complete']}",
+                  f"- Resolved procedure uses: {stats.get('resolved-calls', 0)}; "
+                  f"argument checks: {stats.get('argument-checks', 0)}; "
+                  f"literal dynamic targets: {stats.get('dynamic-literal', 0)}; "
+                  f"dynamic unknown: {stats.get('dynamic-unknown', 0)}",
                   f"- Findings: {counts.get('error', 0)} error, {counts.get('warning', 0)} warning, "
                   f"{counts.get('unknown', 0)} unknown, {counts.get('failure', 0)} analysis failure"]
         for reason, count in sorted(result["unknown"].items(), key=lambda kv: -kv[1]):

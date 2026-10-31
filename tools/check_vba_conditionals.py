@@ -30,7 +30,8 @@ CONST_RE = re.compile(r"^\s*#\s*Const\b", re.IGNORECASE)
 TOKEN_RE = re.compile(r"\s*(\(|\)|<>|=|-?\d+|[A-Za-z_]\w*)")
 
 # Microsoft documents Win32=True on both 32-bit and 64-bit development
-# platforms. Mac is explicitly False in these Windows-only models. Win64 is additionally True on 64-bit Office. VBA6 is modeled as
+# platforms. Mac is explicitly False in these Windows-only models. Win64 is
+# additionally True on 64-bit Office. VBA6 is modeled as
 # the legacy pre-VBA7 environment; VBA7 is modeled for both supported bitnesses.
 ENVIRONMENTS: dict[str, dict[str, bool]] = {
     "vba6-win32": {"VBA6": True, "VBA7": False, "WIN32": True, "WIN64": False, "MAC": False},

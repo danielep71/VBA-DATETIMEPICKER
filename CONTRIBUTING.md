@@ -98,7 +98,7 @@ the review artifact.
 | `src/` | Authoritative production modules, classes, UserForm text, `.frx` resources, and RibbonX |
 | `test/` | Regression and host-lifecycle tests |
 | `demo/` | Demo source and deterministic workbook builders |
-| `docs/` | Release certification template |
+| `docs/` | Release certification template; optional detail checklists for the issue forms |
 | `tools/` | Static checks and release/evidence tooling |
 
 The README and current tree are authoritative if a listed optional directory is
@@ -110,7 +110,8 @@ not present.
 
 ## 🌿 Development workflow
 
-1. Fork or clone the repository and start from the current `main`.
+1. Fork or clone the repository and start from the active release branch
+   (`release/vX.Y.Z`, see [Release branches](#release-branches)).
 2. Create a short, focused branch such as `fix/clear-description`,
    `feat/clear-description`, `docs/clear-description`, or
    `test/clear-description`.
@@ -127,6 +128,47 @@ not present.
 Repository maintainers may use the repository's configured direct-push workflow
 where permitted. External contributions and reviewable portfolio changes should
 use branches and pull requests.
+
+<a id="release-branches"></a>
+
+### Release branches and pull-request types
+
+Work for the next release collects on `release/vX.Y.Z` (currently
+`release/v1.2.3`); `main` receives it only through an integration pull request.
+Four kinds of pull request follow from that:
+
+| Pull request | From → into | Issue reference | Merge method |
+|---|---|---|---|
+| Task | topic branch → release branch | `Resolves #N` | Squash |
+| Integration | release branch → `main` | `Refs #N` only | Merge commit |
+| Sync | branch at `main` → release branch | none | Merge commit |
+| Dependabot | Dependabot branch → release branch | none | Merge commit |
+
+- **Task pull requests** carry one focused change. GitHub closes issues only
+  when a closing keyword merges into the default branch, so `Resolves #N` on a
+  release branch closes nothing: the maintainer closes the issue by hand once
+  the change is verified against the original symptom.
+  Keep closing keywords out of commit messages, including the squash commit:
+  GitHub also closes an issue when a commit whose message carries a closing
+  keyword reaches `main`, which the integration merge would do. Commits use
+  `Refs #N`; if a squash message would carry `Resolves`, `Closes` or `Fixes`,
+  edit it before merging.
+- **Integration pull requests** bring the release branch into `main`. They use
+  `Refs #N`, never a closing keyword, so merging them does not close issues
+  whose verification is still pending. Use a merge commit so the task history
+  stays intact. The repository deletes a merged head branch, so recreate the
+  release branch from `main` right after the merge if work continues on it.
+- **Sync pull requests** bring `main` back into the release branch right after
+  each integration, and whenever `main` gains changes the release branch lacks,
+  such as a direct dependency update. Open them from a dedicated branch that
+  points at `main` (for example `chore/sync-main-into-v1.2.3`), not from
+  `main` itself, so that any conflict resolution is committed on that branch and
+  never on `main`.
+- **Dependabot** opens its pull requests against the branch named by
+  `target-branch` in `.github/dependabot.yml`. That value must name the active
+  release branch for every ecosystem. Update it in the same pull request that
+  opens the next release branch; GitHub reads the file from the default branch,
+  so the change takes effect once it is integrated into `main`.
 
 ### Commit discipline
 
@@ -403,6 +445,7 @@ What remains unverified?
 [ ] No confidential, restricted, generated, or accidental binary content is added
 [ ] Unverified environments and skipped checks are stated plainly
 [ ] Final diff contains no unrelated formatting or local artifacts
+[ ] The final head is covered by a recorded review (see Final-head review)
 ```
 
 Reviews may request changes to scope, tests, contracts, compatibility,
@@ -420,6 +463,29 @@ idea does not guarantee acceptance of every implementation detail.
 The maintainer may edit, squash, defer, or decline a contribution to protect the
 coherence and supportability of the project. Contributors will be credited
 through Git history and release notes where appropriate.
+
+<a id="final-head-review"></a>
+
+### Final-head review
+
+A review covers the commit it read, not the pull request. Before merging:
+
+1. Note the pull request's current head SHA.
+2. If no completed review covers that SHA, request a new review. A review of an
+   earlier head does not cover commits pushed after it.
+3. Fix or answer every finding. A finding left open needs a written reason.
+4. After any push, including a fix for a review finding or a merge of the base
+   branch, go back to step 1.
+5. Record in the pull request the reviewed head SHA, a link to the review, and
+   the static-checks result for that SHA, using the **Final-head review** table
+   in the pull-request template.
+
+Merge only when the recorded SHA is the head being merged.
+
+**Exception for bot pull requests.** Dependabot and other automated pull
+requests that only bump a pinned dependency need no review record. Instead,
+check the diff, confirm that each new pin matches its upstream release tag, and
+require CI to pass on the head being merged.
 
 ---
 
@@ -449,5 +515,7 @@ security matters, use the private channel in [SECURITY.md](SECURITY.md).
 ## Portable checks
 
 Before submitting changes, run `python tools/check.py` from the repository root.
+If you change Python under `tools/` or `.github/scripts/`, also run `ruff check`
+and `mypy`.
 See [tools/README.md](tools/README.md) for requirements, report locations and
 release evidence commands. Static checks do not replace Excel regression runs.

@@ -5,7 +5,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
+import check
 import check_release
 import check_source
 import check_vba_conditionals as conditionals
@@ -13,7 +15,7 @@ import check_vba_jumps as jumps
 
 
 class ConditionalTests(unittest.TestCase):
-    def test_alternative_procedure_declarations(self):
+    def test_alternative_procedure_declarations(self) -> None:
         source = ('#If VBA7 Then\nPrivate Sub Test(ByVal p As LongPtr)\n'
                   '#Else\nPrivate Sub Test(ByVal p As Long)\n#End If\n'
                   'On Error GoTo Handler\nHandler:\nEnd Sub\n')
@@ -22,25 +24,29 @@ class ConditionalTests(unittest.TestCase):
         for text in sources.values():
             self.assertEqual(jumps.analyze_component("test.bas", text), [])
 
-    def test_windows_mac_branch_and_bad_reachable_declare(self):
+    def test_windows_mac_branch_and_bad_reachable_declare(self) -> None:
         source = '#If Mac Then\nDeclare Sub MacOnly Lib "x" ()\n#Else\nDeclare Sub Bad Lib "x" ()\n#End If'
         findings = conditionals.analyze_component("test.bas", source)
         self.assertTrue(any(f.get("line") == 4 for f in findings))
         self.assertFalse(any(f.get("line") == 2 for f in findings))
-        self.assertEqual(conditionals.analyze_component("test.bas", source.replace('Declare Sub Bad', 'Declare PtrSafe Sub Bad')), [])
+        self.assertEqual(conditionals.analyze_component(
+            "test.bas", source.replace('Declare Sub Bad', 'Declare PtrSafe Sub Bad')), [])
 
-    def test_cross_procedure_jump_still_fails(self):
+    def test_cross_procedure_jump_still_fails(self) -> None:
         source = 'Sub A()\nGoTo Other\nEnd Sub\nSub B()\nOther:\nEnd Sub'
         self.assertTrue(jumps.analyze_component("test.bas", source))
 
-    def test_ribbon_rejects_dtd(self):
+    def test_ribbon_rejects_dtd(self) -> None:
         with self.assertRaises(ValueError):
             check_source.ribbon_callbacks(b'<!DOCTYPE x [<!ENTITY y "hello">]><x/>')
         self.assertEqual(check_source.ribbon_callbacks(b'<button onAction="Run"/>'), ["Run"])
 
 
 class ReleaseTests(unittest.TestCase):
-    def setUp(self):
+    def test_release_validator_expects_every_static_gate(self) -> None:
+        self.assertEqual(check_release.STATIC_CHECKS, check.gate_names())
+
+    def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
@@ -54,7 +60,7 @@ class ReleaseTests(unittest.TestCase):
         self.sha = self.git("rev-parse", "HEAD").strip()
         self.git("update-ref", "refs/remotes/origin/main", self.sha)
         self.git("tag", "-a", "v1.2.3", "-m", "fixture")
-        self.record = {"schema_version": 1, "candidate_sha": self.sha,
+        self.record: dict[str, Any] = {"schema_version": 1, "candidate_sha": self.sha,
                        "version": "1.2.3", "tag": "v1.2.3", "assets": [],
                        "manual": {name: {"status": "PASS", "detail": "Synthetic fixture"}
                                   for name in check_release.MANUAL}}
@@ -69,18 +75,18 @@ class ReleaseTests(unittest.TestCase):
                 "candidate_sha": self.sha, "compile": "PASS", "standard": pack,
                 "ui_smoke": copy.deepcopy(pack), "environment": {k: "fixture" for k in
                 ("excel", "windows", "bitness", "scaling", "monitors", "load_mode", "other_addins")}})
-        self.static = {"status": "pass", "candidate_sha": self.sha, "dirty": False,
+        self.static: dict[str, Any] = {"status": "pass", "candidate_sha": self.sha, "dirty": False,
                        "mode": "committed", "checks": [{"name": name, "exit_code": 0}
                                                          for name in check_release.STATIC_CHECKS]}
 
-    def git(self, *args):
+    def git(self, *args: str) -> str:
         return subprocess.run(["git", "-C", str(self.root), *args], check=True,
                               capture_output=True, text=True).stdout
 
-    def validate(self):
+    def validate(self) -> dict[str, Any]:
         return check_release.validate(self.root, self.record, self.root, self.static, True)
 
-    def test_valid_and_accepted_gap_are_distinct(self):
+    def test_valid_and_accepted_gap_are_distinct(self) -> None:
         self.assertEqual(self.validate()["status"], "pass")
         item = self.record["manual"]["grid-ownership"]
         item.update(status="NOT RUN", detail="Explicit gap")
@@ -92,30 +98,30 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "failure"):
             self.validate()
 
-    def test_modified_asset_fails(self):
+    def test_modified_asset_fails(self) -> None:
         path = self.root / self.record["assets"][0]["filename"]
         path.write_bytes(b"x" * path.stat().st_size)
         with self.assertRaisesRegex(ValueError, "SHA-256"):
             self.validate()
 
-    def test_preparation_does_not_invent_excel_results(self):
+    def test_preparation_does_not_invent_excel_results(self) -> None:
         record = check_release.prepare(self.root, self.sha, self.root)
         self.assertEqual(record["assets"][0]["compile"], "NOT RUN")
         self.assertEqual(record["assets"][1]["ui_smoke"]["state"], "NOT RUN")
         with self.assertRaisesRegex(ValueError, "compile"):
             check_release.validate(self.root, record, self.root, self.static)
 
-    def test_missing_static_gate_fails(self):
+    def test_missing_static_gate_fails(self) -> None:
         self.static["checks"].pop()
         with self.assertRaisesRegex(ValueError, "incomplete"):
             self.validate()
 
-    def test_incomplete_regression_fails(self):
+    def test_incomplete_regression_fails(self) -> None:
         self.record["assets"][1]["ui_smoke"]["expected_run"] += 1
         with self.assertRaisesRegex(ValueError, "incomplete"):
             self.validate()
 
-    def test_stale_or_dirty_static_report_fails(self):
+    def test_stale_or_dirty_static_report_fails(self) -> None:
         for key, value in (("candidate_sha", "0" * 40), ("dirty", True), ("mode", "working-tree")):
             original = self.static[key]
             self.static[key] = value
@@ -123,13 +129,13 @@ class ReleaseTests(unittest.TestCase):
                 self.validate()
             self.static[key] = original
 
-    def test_wrong_tag_fails(self):
+    def test_wrong_tag_fails(self) -> None:
         self.git("tag", "-d", "v1.2.3")
         self.git("tag", "v1.2.3")
         with self.assertRaisesRegex(ValueError, "Annotated"):
             self.validate()
 
-    def test_unmerged_candidate_fails_even_when_tagged(self):
+    def test_unmerged_candidate_fails_even_when_tagged(self) -> None:
         self.git("commit", "--allow-empty", "-qm", "unmerged candidate")
         unmerged = self.git("rev-parse", "HEAD").strip()
         self.git("tag", "-fa", "v1.2.3", "-m", "unmerged candidate")

@@ -2,6 +2,8 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    # Follow the active release branch; see CONTRIBUTING.md, "Release branches".
+    target-branch: "release/v1.2.3"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -17,3 +19,24 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action*"
+
+  # Hash-locked Python lint tools (tools/requirements-lint.in / .txt).
+  - package-ecosystem: "pip"
+    directory: "/tools"
+    # Follow the active release branch; see CONTRIBUTING.md, "Release branches".
+    target-branch: "release/v1.2.3"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Rome"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(python)"
+    labels:
+      - "ci"
+      - "tests"
+    groups:
+      lint-tools:
+        patterns:
+          - "*"
