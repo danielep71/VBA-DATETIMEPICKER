@@ -206,6 +206,16 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- The advisory VBA call checker misses fewer defects
+  ([#134](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/134)):
+  project-name patterns now match case-insensitively, as VBA names do (also in
+  the package inspector); a literal `Application.Run`-style target qualified by
+  a known standard module is checked whatever the member's name; recursive
+  calls are argument-checked, while a Function's own name used as its return
+  value is not; and a class without a default instance used as a receiver is
+  reported as the new `VBA-CALL-005`. Each fix has positive and negative
+  fixtures. The checker stays advisory and is not a release gate.
+
 - Package inspector review follow-up (#129): trace calls evaluated in `If` and
   `ElseIf` conditions, treat `AddressOf` operands as unknown dispatch rather than
   execution, and report malformed or prohibited Ribbon XML as structured

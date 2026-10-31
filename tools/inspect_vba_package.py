@@ -907,7 +907,8 @@ def inspect(package: Path | None, export_dir: Path | None, source: Path, revisio
     configuration = manifest.get("configurations", {}).get(configuration_name)
     if configuration is None:
         raise ValueError(f"configuration {configuration_name!r} is not in {MANIFEST}")
-    patterns = [re.compile(p) for p in manifest.get("project_name_patterns", [])]
+    # VBA identifiers are case-insensitive, so project-name patterns are too.
+    patterns = [re.compile(p, re.IGNORECASE) for p in manifest.get("project_name_patterns", [])]
     if package is not None:
         extracted = extract_package(package)
     elif export_dir is not None:
