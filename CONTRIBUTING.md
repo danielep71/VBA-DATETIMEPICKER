@@ -158,6 +158,9 @@ Four kinds of pull request follow from that:
   whose verification is still pending. Use a merge commit so the task history
   stays intact. The repository deletes a merged head branch, so recreate the
   release branch from `main` right after the merge if work continues on it.
+  When the release branch is deleted, GitHub moves every open pull request
+  that targeted it to `main`. After recreating it, check open pull requests
+  and set each one's base back to the release branch.
 - **Sync pull requests** bring `main` back into the release branch right after
   each integration, and whenever `main` gains changes the release branch lacks,
   such as a direct dependency update. Open them from a dedicated branch that

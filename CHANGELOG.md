@@ -278,7 +278,9 @@ Use only the categories needed by a release.
   into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
   verification, an integration pull request into `main` with `Refs #N` and a
   merge commit, and a sync pull request back. Dependabot now targets the
-  active release branch
+  active release branch. After an integration deletes and recreates the
+  release branch, open pull requests that GitHub moved to `main` are set back
+  to it
   ([#154](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/154)).
 
 - CONTRIBUTING and the pull-request template add a final-head review
