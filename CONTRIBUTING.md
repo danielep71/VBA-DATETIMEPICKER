@@ -98,7 +98,7 @@ the review artifact.
 | `src/` | Authoritative production modules, classes, UserForm text, `.frx` resources, and RibbonX |
 | `test/` | Regression and host-lifecycle tests |
 | `demo/` | Demo source and deterministic workbook builders |
-| `docs/` | Release certification template |
+| `docs/` | Release certification template; optional detail checklists for the issue forms |
 | `tools/` | Static checks and release/evidence tooling |
 
 The README and current tree are authoritative if a listed optional directory is
@@ -473,5 +473,7 @@ security matters, use the private channel in [SECURITY.md](SECURITY.md).
 ## Portable checks
 
 Before submitting changes, run `python tools/check.py` from the repository root.
+If you change Python under `tools/` or `.github/scripts/`, also run `ruff check`
+and `mypy`.
 See [tools/README.md](tools/README.md) for requirements, report locations and
 release evidence commands. Static checks do not replace Excel regression runs.
