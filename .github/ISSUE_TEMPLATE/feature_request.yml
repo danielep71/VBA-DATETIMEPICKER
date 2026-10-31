@@ -1,0 +1,313 @@
+name: ✨ Feature request
+description: Propose a backward-compatible DatePicker capability, integration, safety, recovery, diagnostic, testing, or deployment enhancement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for proposing an improvement. Start with the problem and the desired behavior; you do not need to design the implementation before the use case is clear.
+
+        If the proposal is really a reproducible defect in current documented behavior, use the **Bug report** form instead. For a vulnerability, credential, malicious release artifact, or security-sensitive disclosure, follow [SECURITY.md](https://github.com/danielep71/VBA-DATETIMEPICKER/security/policy) privately.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: ✨ Problem / real use case
+      description: Describe the workflow, limitation, or recurring friction. What are you trying to achieve that the current DatePicker does not support cleanly?
+      placeholder: |
+        Good: "We distribute three independent workbooks that use different DatePicker preferences. I need each workbook to retain its own settings without changing runtime ownership."
+        Less useful: "Add more settings."
+    validations:
+      required: true
+
+  - type: textarea
+    id: beneficiaries
+    attributes:
+      label: 👤 Who benefits?
+      description: For example a workbook author, end user, add-in deployment, locked-down corporate user, maintainer or tester, or release engineer.
+      value: |
+        Primary user:
+        Typical deployment:
+        Frequency of need:
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 💡 Desired behavior
+      description: Describe the outcome before prescribing the implementation. An illustrative VBA call is welcome; the final API may differ.
+      value: |
+        Requested behavior:
+        Expected scope:
+        Expected default:
+        Expected failure/refusal behavior:
+        Expected result/diagnostics:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: ✅ Acceptance criteria
+      description: What would make the feature complete from the user's perspective? Prefer observable outcomes ("With ShowRightClick=False, the new Ribbon action still opens the picker") over implementation steps ("Add helper M_XYZ").
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 🎚️ Priority
+      description: Your assessment. The maintainer confirms it during triage and applies the matching label.
+      options:
+        - "P1 — Critical release blocker or serious correctness, data, or application-state risk"
+        - "P2 — Material correctness, robustness, or maintainability defect"
+        - "P3 — Non-blocking quality, testing, documentation, or technical-debt improvement"
+        - "Not sure — the maintainer will assess"
+    validations:
+      required: true
+
+  - type: input
+    id: target-date
+    attributes:
+      label: 📅 Target end date
+      description: The date by which you need this, as YYYY-MM-DD, or `none`. The maintainer sets the planned date during triage.
+      placeholder: "YYYY-MM-DD or none"
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 🔗 Dependencies
+      description: Issues, pull requests, releases, or external conditions this depends on or blocks. Write `None known` if there are none.
+      value: "None known"
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: 🚫 Non-goals
+      description: What should this feature not try to solve? This keeps a useful feature from silently becoming an architectural rewrite.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: workaround-kind
+    attributes:
+      label: 🔀 Current workaround
+      description: Select what you do today.
+      multiple: true
+      options:
+        - Call existing DP_... procedures differently
+        - Use a workbook-specific wrapper macro
+        - Use RibbonX
+        - Use the right-click menu
+        - Use the in-grid icon
+        - Use Ctrl + Shift + D
+        - Use a settings namespace
+        - Use DP_RepairRuntime
+        - Restart Excel
+        - Use a separate .xlam
+        - Duplicate / modify DatePicker source
+        - Leave the behavior outside this repository
+        - No practical workaround
+    validations:
+      required: false
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround and alternatives considered
+      value: |
+        Current workaround:
+        Why it is insufficient:
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 🎯 Affected area
+      description: Select all that appear relevant.
+      multiple: true
+      options:
+        - "API: startup / lifecycle — DP_Start, DP_Stop"
+        - "API: picker UI — DP_Show, DP_Close, DP_Preload, DP_Hide"
+        - "API: direct write-back — DP_Today, DP_Now"
+        - "API: explicit Table fill — DP_FillTableColumn"
+        - "API: runtime repair — DP_RepairRuntime"
+        - "API: lease recovery — DP_ForceReleaseProviderLease"
+        - "API: settings namespace — M_Settings_SetNamespace, M_Settings_GetNamespace"
+        - "API: DP_WriteResult"
+        - "API: DP_WindowStyleResult"
+        - "API: public enums / constants"
+        - "API: new supported API"
+        - "Excel: application event manager"
+        - "Excel: keyboard shortcut / Application.OnKey"
+        - "Excel: right-click menu / CommandBars"
+        - "Excel: in-grid worksheet icon"
+        - "Excel: live clock / Application.OnTime"
+        - "Excel: RibbonX"
+        - "Excel: registry-backed settings"
+        - "Excel: runtime-provider lease"
+        - "Project: UserForm / runtime controls"
+        - "Project: WinAPI styling / positioning"
+        - "Project: regression harness"
+        - "Project: demo"
+        - "Project: .xlam / .xlsm packaging"
+        - "Project: release process / provenance"
+        - "Project: GitHub workflow / repository tooling"
+        - "Project: documentation only"
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: api
+    attributes:
+      label: 🔒 Public API / Semantic Versioning
+      description: |
+        If proposing a new public member, explain why the behavior cannot be expressed through the current supported surface (DP_Start, DP_Stop, DP_Show, DP_Close, DP_Preload, DP_Hide, DP_Today, DP_Now, DP_FillTableColumn, DP_RepairRuntime, DP_ForceReleaseProviderLease, M_Settings_SetNamespace, M_Settings_GetNamespace, DP_WriteResult, DP_WindowStyleResult, DP_WriteAction, DP_ClockMode, DP_SizeMode). A procedure that must be technically `Public` for RibbonX, Application.Run, callbacks, or tests is not automatically supported API; say so if the proposal adds one. Also note any change to names, parameter order, optional defaults, enum values, result fields, Table write scope, formula preservation, application-state ownership, settings persistence, provider ownership, recovery semantics, or stable `VBA_DATETIMEPICKER` identifiers.
+      value: |
+        New supported member proposed:
+        Existing supported member changed:
+        Existing calls affected:
+        Backward compatible:             Yes / No / Unsure
+        Migration required:
+        Suggested release:               patch / minor / major / unsure
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: default
+    attributes:
+      label: 🧭 Default behavior
+      description: A convenient automatic behavior can still be the wrong default if it expands write scope, changes caller-owned Excel state, consumes an application-wide resource, or destroys formulas.
+      options:
+        - Enabled by default
+        - Disabled / opt-in by default
+        - Controlled per call
+        - Persisted as a setting
+        - Derived from existing state
+        - Automatic only in a narrowly defined condition
+        - Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: default-reason
+    attributes:
+      label: Why that default is safe and backward compatible
+    validations:
+      required: false
+
+  - type: textarea
+    id: design
+    attributes:
+      label: 🔬 Design details
+      description: Optional. Copy the relevant checklists from [docs/FEATURE_REQUEST_DETAILS.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/docs/FEATURE_REQUEST_DETAILS.md) (write-back scope, formulas, result contract, settings, provider ownership, application state, access paths, grid icon, timer, UserForm, WinAPI, harness, packaging, release automation, security) and fill them in.
+    validations:
+      required: false
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: 🧪 Validation proposal
+      description: Even before implementation, define what evidence would prove the feature works. Consider the normal path, invalid input, partial failure, recovery, Excel restart, VBA reset, protected sheets, multiple and mixed-version providers, and 32- and 64-bit Office.
+      value: |
+        Compile:
+        Regression:
+        UI smoke:
+        Manual scenario:
+        Failure path:
+        Cleanup/recovery:
+        Package test:
+        Environments:
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 🖥️ Platform / environment considerations
+      multiple: true
+      options:
+        - Office 32-bit
+        - Office 64-bit
+        - Different Microsoft 365 channels / builds
+        - Windows versions
+        - Multiple monitors
+        - DPI / display scaling
+        - High contrast / accessibility
+        - Protected worksheets
+        - Excel Tables
+        - Formula cells
+        - Multiple workbooks
+        - Other add-ins
+        - Embedded + .xlam
+        - VBA project reset
+        - Ribbon package
+        - Macro-security / Trusted Location policy
+        - Other
+    validations:
+      required: false
+
+  - type: dropdown
+    id: docs
+    attributes:
+      label: 📖 Documentation impact
+      multiple: true
+      options:
+        - README
+        - INSTALLATION
+        - CONTRIBUTING
+        - SECURITY
+        - CHANGELOG
+        - Wiki
+        - Demo
+        - Code comments / procedure banners
+        - No user-facing documentation impact
+        - Unsure
+    validations:
+      required: false
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 📎 Mockups / pseudocode / references
+      description: A UI mockup, pseudocode, before/after workflow, small VBA example, platform documentation, or related issue. Do not attach confidential or client workbooks or credentials.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 📝 Additional context
+      value: |
+        Related issue/PR:
+        Known limitation:
+        Open design question:
+        Other context:
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: This is not a security-sensitive report (those go through SECURITY.md privately).
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
