@@ -142,6 +142,16 @@ load behaviour are not inspected. Only a fresh Excel session shows that.
 | `VBA-PKG-090` / `091` | failure | extraction failed / analysis incomplete |
 | `VBA-PKG-092` | unknown | manual export, not package evidence |
 
+## Traffic history (repository analytics)
+
+`tools/traffic_export.py` is used only by the **Daily traffic export** workflow.
+`build` merges saved traffic API responses (`views.json`, `clones.json`,
+`referrers.json`, `paths.json`, `repo.json`) into the CSV history and badge
+files of the `traffic-history` branch; `alert` opens one issue per day on a
+traffic spike, a new star or fork, or a new referrer. It never calls the
+traffic API and never receives the App key or token; see SECURITY.md,
+"Repository automation credentials". Its fixtures run in `tool-tests`.
+
 ## Prepare and check one release record
 
 After building the two packages from the exact candidate, prepare one record:

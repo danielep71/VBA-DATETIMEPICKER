@@ -135,6 +135,16 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- The daily traffic export authenticates with a GitHub App instead of a
+  long-lived personal access token. The App has only `Administration: read`
+  on this repository; its private key lives in the `analytics` environment,
+  reaches only the token step, and the minted token, seen only by the fetch
+  step, expires within an hour and is revoked when the job ends. SECURITY
+  documents the credential and its rotation. The workflow's inline history,
+  badge and alert logic moved to the tested `tools/traffic_export.py`, with
+  byte-identical output
+  ([#147](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/147)).
+
 - The project license changes from MIT to the
   [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
   including `v1.2.2` were published under the MIT License, which continues to
