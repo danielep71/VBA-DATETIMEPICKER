@@ -135,6 +135,11 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- CodeQL now also scans the GitHub Actions workflows (the `actions`
+  language), on push, schedule and pull-request runs; pull-request analysis
+  stays read-only. The eligibility job has a timeout like the analysis jobs
+  ([#151](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/151)).
+
 - The Python tooling is now checked by Ruff and strict mypy, configured in
   `pyproject.toml` and installed in CI from the hash-locked, wheels-only
   `tools/requirements-lint.txt`, which Dependabot keeps current. The tools
