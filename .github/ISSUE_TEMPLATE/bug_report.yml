@@ -1,0 +1,342 @@
+name: 🐞 Bug report
+description: Report reproducible DatePicker behavior, write-back, runtime, UI, compatibility, or recovery defects
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a defect. Precision helps much more than volume: record only states and tests you actually observed.
+
+        > [!CAUTION]
+        > Do **not** use this public form for a suspected vulnerability, credential exposure, malicious release artifact, or exploitable trust-boundary issue. Follow [SECURITY.md](https://github.com/danielep71/VBA-DATETIMEPICKER/security/policy) and report privately.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 🐞 Summary
+      description: Describe the defect in one or two paragraphs.
+      placeholder: |
+        Good: "Selecting a formula cell that displays a date and choosing another date replaces the formula even though OverwriteFormulas was not requested."
+        Less useful: "DatePicker broken."
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 💥 Practical impact
+      description: What does this prevent, corrupt, misreport, or make difficult? For example a wrong cell changed, a formula lost, the picker cannot start, another provider disrupted, Excel events changed, or the UI cannot be recovered.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 🎚️ Priority
+      description: Your assessment. The maintainer confirms it during triage and applies the matching label.
+      options:
+        - "P1 — Critical release blocker or serious correctness, data, or application-state risk"
+        - "P2 — Material correctness, robustness, or maintainability defect"
+        - "P3 — Non-blocking quality, testing, documentation, or technical-debt improvement"
+        - "Not sure — the maintainer will assess"
+    validations:
+      required: true
+
+  - type: input
+    id: target-date
+    attributes:
+      label: 📅 Target end date
+      description: The date by which you need a fix, as YYYY-MM-DD, or `none`. The maintainer sets the planned date during triage.
+      placeholder: "YYYY-MM-DD or none"
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 🔗 Dependencies
+      description: Issues, pull requests, releases, or external conditions this depends on or blocks. Write `None known` if there are none.
+      value: "None known"
+    validations:
+      required: true
+
+  - type: textarea
+    id: version
+    attributes:
+      label: 🔖 Exact version and source state
+      description: Identify the exact source you tested. Do not write only "latest", "current" or "main".
+      value: |
+        Release tag:          <e.g. v1.2.2 / N/A>
+        Commit SHA:           <full 40-character SHA if known>
+        Branch:               <main / release/x.y.z / other / N/A>
+        Source obtained from: <official repository / GitHub Release / other>
+        Workbook/add-in filename:
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 📦 Deployment
+      multiple: true
+      options:
+        - Embedded source in workbook
+        - .xlam add-in
+        - Official demo .xlsm
+        - Development / test workbook
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 🎯 Affected area
+      description: Select all that apply.
+      multiple: true
+      options:
+        - "Picker: calendar selection"
+        - "Write-back: DP_Today"
+        - "Write-back: DP_Now"
+        - "Write-back: DP_FillTableColumn"
+        - "Write-back: selected-cell / range scope"
+        - "Write-back: formula preservation / overwrite"
+        - "Write-back: locked / protected cells"
+        - "Write-back: DP_WriteResult"
+        - "Runtime: DP_Start"
+        - "Runtime: DP_Stop"
+        - "Runtime: DP_RepairRuntime"
+        - "Runtime: provider lease / duplicate provider"
+        - "Runtime: settings / namespace"
+        - "Runtime: application event manager"
+        - "Runtime: Ctrl + Shift + D / Application.OnKey"
+        - "Runtime: right-click menu"
+        - "Runtime: in-grid icon / worksheet Shape"
+        - "Runtime: live clock / Application.OnTime"
+        - "Runtime: RibbonX"
+        - "UI: UserForm rendering / controls"
+        - "UI: picker keyboard navigation"
+        - "UI: borderless styling / WinAPI"
+        - "UI: form positioning / monitor behavior"
+        - "UI: DP_WindowStyleResult"
+        - "Project: regression harness"
+        - "Project: demo workbook / source"
+        - "Project: .xlam / .xlsm packaging"
+        - "Project: documentation"
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 🔁 Minimal steps to reproduce
+      description: Reduce the problem to the smallest sequence that still fails.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      options:
+        - Always
+        - Often
+        - Intermittent
+        - Once only
+    validations:
+      required: true
+
+  - type: dropdown
+    id: lifecycle
+    attributes:
+      label: Lifecycle event involved
+      description: Select any event the problem appears only after.
+      multiple: true
+      options:
+        - Workbook open
+        - Workbook close / reopen
+        - Excel restart
+        - VBA project reset
+        - Switching workbooks
+        - Deleting / recreating a worksheet
+        - Protecting / unprotecting a sheet
+        - Starting / stopping another DatePicker provider
+        - Changing DatePicker settings
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: ✅ Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: ❌ Observed behavior
+      description: Include the exact wording of errors and messages where possible.
+      value: |
+        What happened:
+
+        Runtime error number:
+        Runtime error description:
+        Message shown:
+        Immediate Window output:
+    validations:
+      required: true
+
+  - type: textarea
+    id: call
+    attributes:
+      label: 🔢 Smallest exact call
+      description: If the issue can be reproduced from VBA, paste the smallest call that actually reproduced it, not what you think the project intended. For write-back defects, include the DP_WriteResult counts.
+      render: vb
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 🖥️ Environment
+      value: |
+        Excel product:          <Microsoft 365 / Excel 2024 / Excel 2021 / other>
+        Excel version:
+        Excel build:
+        Office bitness:         32-bit / 64-bit
+        Windows version:
+        Workbook type:          .xlsm / .xlsb / .xlam / other
+        Display scaling:        100% / 125% / 150% / 200% / other
+        Monitor count:
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: session
+    attributes:
+      label: Excel session
+      description: For provider or registration problems, the version of every DatePicker copy in the same Excel process matters. `v1.2.0` is the provider-lease boundary; a pre-`v1.2.0` copy does not take part in the lease.
+      value: |
+        Open workbooks:
+        Other add-ins active:
+        Other DatePicker copy:  none / yes
+        Other provider version:
+        Other provider type:    embedded / .xlam / unknown
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 🧪 Regression / compile evidence
+      description: Run what is practical in a controlled workbook. Only `PASS` is a passing run; `FAIL_DIRTY_START` means the harness did not trust the starting environment. Report the assertion count you actually got.
+      value: |
+        Debug → Compile VBAProject   →
+        TST_DP_RunAll                →
+        TST_DP_RunAll_WithUISmoke    →
+        TST_DP_ReportEnvironment     →
+        Harness summary: State=; Run=; Passed=; Failed=; CleanupFailures=
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: recovery
+    attributes:
+      label: 🆘 Recovery result
+      description: |
+        State what restored the session, if anything. `DP_ForceReleaseProviderLease` is an operator-only recovery command: do not run it merely to make a startup refusal disappear. If provider ownership is uncertain, restarting Excel is the safer step. If you did run it, explain how you knew no other live provider owned the session.
+      value: |
+        DP_Close:                    restored / did not restore / not tried / N/A
+        DP_Stop:                     restored / did not restore / refused / not tried / N/A
+        DP_RepairRuntime:            restored / did not restore / refused / not tried / N/A
+        Closing/reopening workbook:  restored / did not restore / not tried / N/A
+        Restarting all of Excel:     restored / did not restore / not tried / N/A
+        DP_ForceReleaseProviderLease run: yes / no
+        Other action:
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: details
+    attributes:
+      label: 🔬 Subsystem details
+      description: Optional. Copy the relevant checklists from [docs/BUG_REPORT_DETAILS.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/docs/BUG_REPORT_DETAILS.md) (write-back scope, formulas and DP_WriteResult, settings, provider lease, events, access paths, grid icon, clock, WinAPI, UserForm, RibbonX, harness, release assets) and fill them in.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 🔀 Scope and interaction
+      description: Select anything that appears necessary for reproduction.
+      multiple: true
+      options:
+        - One workbook only
+        - Multiple workbooks in one Excel process
+        - More than one Excel process
+        - Embedded source only
+        - .xlam only
+        - Embedded + .xlam
+        - Two lease-participating providers
+        - Lease-participating provider + pre-v1.2.0 provider
+        - Another third-party add-in
+        - Protected worksheet
+        - Excel Table
+        - Formula cells
+        - Multi-area selection
+        - VBA project reset
+        - Excel process restart
+        - Multiple monitors
+        - High DPI / scaling
+        - RibbonX
+        - Other
+    validations:
+      required: false
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 📎 Screenshots, logs, or minimal reproduction
+      description: |
+        Sanitized screenshots, a short recording, Immediate Window output, a minimal .bas reproduction, or a sanitized minimal workbook if genuinely necessary. Do not attach client or production data, credentials, personal data, proprietary VBA, connection strings, sensitive paths, or confidential links. Workbooks can carry hidden sheets, names, connections, cached values, VBA, and document properties.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 📝 Anything else
+      description: Label a suspected cause as a hypothesis, not a confirmed cause.
+      value: |
+        Known workaround:
+        Suspected cause (if any):
+        Related issue/PR:
+        Other context:
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: This is not a security-sensitive report (those go through SECURITY.md privately).
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: Attachments and logs contain no confidential or personal data.
+          required: true

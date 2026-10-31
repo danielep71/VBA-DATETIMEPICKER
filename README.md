@@ -1266,6 +1266,8 @@ VBA-DATETIMEPICKER/
 ├─ dist/
 │  └─ README.md
 ├─ docs/
+│  ├─ BUG_REPORT_DETAILS.md
+│  ├─ FEATURE_REQUEST_DETAILS.md
 │  └─ RELEASE_CERTIFICATION_TEMPLATE.md
 ├─ images/
 ├─ src/

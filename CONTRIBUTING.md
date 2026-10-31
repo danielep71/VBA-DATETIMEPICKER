@@ -98,7 +98,7 @@ the review artifact.
 | `src/` | Authoritative production modules, classes, UserForm text, `.frx` resources, and RibbonX |
 | `test/` | Regression and host-lifecycle tests |
 | `demo/` | Demo source and deterministic workbook builders |
-| `docs/` | Release certification template |
+| `docs/` | Release certification template; optional detail checklists for the issue forms |
 | `tools/` | Static checks and release/evidence tooling |
 
 The README and current tree are authoritative if a listed optional directory is

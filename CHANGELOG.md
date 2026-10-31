@@ -261,6 +261,13 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- The bug-report and feature-request templates are now issue forms. The
+  core facts are required fields, and every report records a priority, a
+  target end date (`YYYY-MM-DD` or `none`) and its dependencies. The optional
+  subsystem checklists moved unchanged to `docs/BUG_REPORT_DETAILS.md` and
+  `docs/FEATURE_REQUEST_DETAILS.md`, which the forms link to
+  ([#150](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/150)).
+
 - SECURITY now states that `main` can carry merged, unreleased work and that only
   the latest tagged release is the supported source; it previously said `main`
   always matches the latest tagged release.
