@@ -261,6 +261,13 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- CONTRIBUTING and the pull-request template add a final-head review
+  record: before a merge, the pull request names the reviewed head SHA, the
+  review and the static-checks result for that SHA, and any push sends it back
+  for review. Dependency-bump bot pull requests are exempt and verified by pin
+  and CI instead. The template no longer says that no hosted static gate exists
+  ([#153](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/153)).
+
 - The bug-report and feature-request templates are now issue forms. The
   core facts are required fields, and every report records a priority, a
   target end date (`YYYY-MM-DD` or `none`) and its dependencies. The optional
