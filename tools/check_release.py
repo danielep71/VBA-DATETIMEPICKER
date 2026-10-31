@@ -20,7 +20,8 @@ MANUAL = ("provider-ownership", "clock-lifecycle", "grid-ownership",
           "application-state", "packaged-entry-paths", "ribbon-image-provenance")
 STATIC_CHECKS = {"tool-tests", "check_vba_conditionals-fixtures", "check_vba_jumps-fixtures",
                  "check_committed_whitespace-fixtures", "check_source", "check_vba_conditionals",
-                 "check_vba_jumps", "check_committed_whitespace", "labels-sync", "labels-drift"}
+                 "check_vba_jumps", "check_committed_whitespace", "check_markdown_links",
+                 "labels-sync", "labels-drift"}
 
 
 def require(condition: object, message: str) -> None:

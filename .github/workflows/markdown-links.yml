@@ -1,0 +1,55 @@
+name: External Markdown links
+
+# Weekly check of the http(s) links in tracked Markdown. Dead links (404, 410,
+# DNS failure) fail the run; blocked, rate-limited or unreachable URLs are
+# listed as warnings. Relative links and anchors are checked offline on every
+# pull request by tools/check.py. Read-only: it never changes the repository.
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: markdown-links-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  external:
+    name: Check external links
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Check external links
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/check_markdown_links.py --root . --external \
+            --output test-results/markdown-links-external.json \
+            --summary test-results/markdown-links-external.md
+      - name: Show summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f test-results/markdown-links-external.md ]]; then
+            cat test-results/markdown-links-external.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Retain report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: markdown-links-external-${{ github.run_id }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 30

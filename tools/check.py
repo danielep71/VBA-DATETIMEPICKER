@@ -10,6 +10,17 @@ from typing import Any
 
 from _gatelib import git_text, write_json, write_text
 
+# Gate names as they appear in static-checks.json. check_release.STATIC_CHECKS
+# must list the same set; test_tooling enforces that.
+FIXTURE_GATES = ("check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace")
+REPORT_GATES = ("check_source", "check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace",
+                "check_markdown_links")
+NODE_GATES = ("labels-sync", "labels-drift")
+
+
+def gate_names() -> set[str]:
+    return {"tool-tests", *(name + "-fixtures" for name in FIXTURE_GATES), *REPORT_GATES, *NODE_GATES}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -26,9 +37,9 @@ def main() -> int:
     commands = [
         ("tool-tests", [sys.executable, "-m", "unittest", "discover", "-s", "tools", "-p", "test_*.py"]),
     ]
-    for name in ("check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace"):
+    for name in FIXTURE_GATES:
         commands.append((name + "-fixtures", [sys.executable, f"tools/{name}.py", "--self-test"]))
-    for name in ("check_source", "check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace"):
+    for name in REPORT_GATES:
         command = [sys.executable, f"tools/{name}.py", "--root", str(root),
                    "--output", str(output / f"{name}.json")]
         if name == "check_committed_whitespace":
@@ -36,7 +47,7 @@ def main() -> int:
             if args.ci and args.base:
                 command += ["--base", args.base]
         commands.append((name, command))
-    for name in ("labels-sync", "labels-drift"):
+    for name in NODE_GATES:
         commands.append((name, ["node", f".github/scripts/{name}.mjs", "--policy",
                                 ".github/labels-policy.json", "--self-test"]))
     results = []

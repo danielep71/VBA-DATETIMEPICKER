@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+import check
 import check_release
 import check_source
 import check_vba_conditionals as conditionals
@@ -42,6 +43,9 @@ class ConditionalTests(unittest.TestCase):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_release_validator_expects_every_static_gate(self) -> None:
+        self.assertEqual(check_release.STATIC_CHECKS, check.gate_names())
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
