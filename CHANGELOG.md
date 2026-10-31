@@ -152,7 +152,6 @@ Use only the categories needed by a release.
   tested, not only stated
   ([#148](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/148)).
 
-
 - The project license changes from MIT to the
   [Apache License 2.0](LICENSE), with a [NOTICE](NOTICE) file. Releases up to and
   including `v1.2.2` were published under the MIT License, which continues to
