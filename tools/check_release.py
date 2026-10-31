@@ -12,6 +12,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any, cast
 
 from _gatelib import git_text, write_json
 
@@ -19,7 +20,8 @@ MANUAL = ("provider-ownership", "clock-lifecycle", "grid-ownership",
           "application-state", "packaged-entry-paths", "ribbon-image-provenance")
 STATIC_CHECKS = {"tool-tests", "check_vba_conditionals-fixtures", "check_vba_jumps-fixtures",
                  "check_committed_whitespace-fixtures", "check_source", "check_vba_conditionals",
-                 "check_vba_jumps", "check_committed_whitespace", "labels-sync", "labels-drift"}
+                 "check_vba_jumps", "check_committed_whitespace", "check_markdown_links",
+                 "labels-sync", "labels-drift"}
 
 
 def require(condition: object, message: str) -> None:
@@ -27,18 +29,19 @@ def require(condition: object, message: str) -> None:
         raise ValueError(message)
 
 
-def read_object(path: Path) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"))
+def read_object(path: Path) -> dict[str, Any]:
+    value: object = json.loads(path.read_text(encoding="utf-8"))
     require(isinstance(value, dict), f"{path}: expected an object")
-    return value
+    return cast(dict[str, Any], value)
 
 
-def validate(root: Path, record: dict, assets_dir: Path, static: dict,
-             require_tag: bool = False) -> dict:
+def validate(root: Path, record: dict[str, Any], assets_dir: Path, static: dict[str, Any],
+             require_tag: bool = False) -> dict[str, Any]:
     """Fail closed on missing evidence, stale identity, failures or changed bytes."""
     require(record.get("schema_version") == 1, "Unsupported evidence schema")
     sha = record.get("candidate_sha")
     require(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha), "Full candidate SHA required")
+    sha = cast(str, sha)
     resolved = git_text(root, "rev-parse", "--verify", f"{sha}^{{commit}}", check=True).stdout.strip()
     require(resolved == sha, "Candidate must identify a commit")
     main = git_text(root, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}", check=True).stdout.strip()
@@ -54,7 +57,8 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
     if require_tag:
         ref = "refs/tags/" + record["tag"]
         require(git_text(root, "cat-file", "-t", ref, check=True).stdout.strip() == "tag", "Annotated tag required")
-        require(git_text(root, "rev-parse", ref + "^{commit}", check=True).stdout.strip() == sha, "Tag targets another commit")
+        require(git_text(root, "rev-parse", ref + "^{commit}", check=True).stdout.strip() == sha,
+                "Tag targets another commit")
     require(static.get("status") == "pass" and static.get("candidate_sha") == sha
             and static.get("dirty") is False and static.get("mode") == "committed",
             "Static report must PASS on the clean exact committed candidate")
@@ -62,13 +66,16 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
     require(isinstance(checks, list) and bool(checks)
             and all(isinstance(c, dict) and c.get("exit_code") == 0 for c in checks),
             "Static report has no successful checks")
+    checks = cast(list[dict[str, Any]], checks)
     require(len(checks) == len(STATIC_CHECKS) and {c.get("name") for c in checks} == STATIC_CHECKS,
             "Static report is incomplete or contains duplicate checks")
     assets = record.get("assets")
     require(isinstance(assets, list) and len(assets) == 2, "Exactly two package records required")
+    assets = cast(list[object], assets)
     expected = {"xlam": f"DATETIMEPICKER.v{version}.xlam",
                 "xlsm": f"DATETIMEPICKER-demo-v{version}.xlsm"}
     require(all(isinstance(a, dict) for a in assets), "Invalid package records")
+    assets = cast(list[dict[str, Any]], assets)
     require({a.get("host") for a in assets} == set(expected), "Both xlsm and xlam hosts required")
     for asset in assets:
         host = asset["host"]
@@ -86,12 +93,14 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
         require(asset.get("compile") == "PASS", f"{host}: compile has not passed")
         environment = asset.get("environment")
         require(isinstance(environment, dict), f"{host}: environment required")
+        environment = cast(dict[str, Any], environment)
         for field in ("excel", "windows", "bitness", "scaling", "monitors", "load_mode", "other_addins"):
             require(isinstance(environment.get(field), str) and environment[field].strip(),
                     f"{host}: environment.{field} required")
         for pack in ("standard", "ui_smoke"):
             result = asset.get(pack)
             require(isinstance(result, dict), f"{host}: {pack} result required")
+            result = cast(dict[str, Any], result)
             require(result.get("state") == "PASS", f"{host}: {pack} did not PASS")
             for count in ("run", "passed", "failed", "cleanup_failures", "expected_run", "suites", "expected_suites"):
                 require(type(result.get(count)) is int, f"{host}: {pack}.{count} must be an integer")
@@ -101,6 +110,7 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
                     f"{host}: {pack} is failed, incomplete or has cleanup failures")
     manual = record.get("manual")
     require(isinstance(manual, dict) and set(manual) == set(MANUAL), "All manual matrix records required")
+    manual = cast(dict[str, Any], manual)
     limitations = []
     for name in MANUAL:
         item = manual[name]
@@ -118,7 +128,7 @@ def validate(root: Path, record: dict, assets_dir: Path, static: dict,
             "scope": "Record consistency and local hashes; Excel assertions are maintainer-supplied."}
 
 
-def prepare(root: Path, candidate: str, assets_dir: Path) -> dict:
+def prepare(root: Path, candidate: str, assets_dir: Path) -> dict[str, Any]:
     """Prepare an explicitly untested record; fill results after testing these bytes."""
     require(re.fullmatch(r"[0-9a-f]{40}", candidate), "Full candidate SHA required")
     version = git_text(root, "show", f"{candidate}:VERSION", check=True).stdout.strip()

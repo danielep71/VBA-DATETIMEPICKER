@@ -103,6 +103,12 @@ Use only the categories needed by a release.
 
 ### Added
 
+- Markdown link checking, `tools/check_markdown_links.py`, with fixtures.
+  A new `check.py` gate resolves every relative link and heading anchor in
+  tracked Markdown offline, using GitHub's heading-slug rule. A weekly
+  **External Markdown links** workflow reports dead external links
+  ([#152](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/152)).
+
 - Advisory project-wide VBA call checker, `tools/check_vba_calls.py`, with its
   configuration manifest `tools/vba-projects.json` and fixtures
   (`tools/test_vba_calls.py`). It resolves direct, module-qualified and typed
@@ -144,6 +150,17 @@ Use only the categories needed by a release.
   badge and alert logic moved to the tested `tools/traffic_export.py`, with
   byte-identical output
   ([#147](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/147)).
+
+- CodeQL now also scans the GitHub Actions workflows (the `actions`
+  language), on push, schedule and pull-request runs; pull-request analysis
+  stays read-only. The eligibility job has a timeout like the analysis jobs
+  ([#151](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/151)).
+
+- The Python tooling is now checked by Ruff and strict mypy, configured in
+  `pyproject.toml` and installed in CI from the hash-locked, wheels-only
+  `tools/requirements-lint.txt`, which Dependabot keeps current. The tools
+  gained type annotations, with no behaviour change and no suppressions
+  ([#149](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/149)).
 
 - CI runs the tooling on Python 3.13 instead of 3.10, which reaches end of
   life in October 2026. The documented minimum is now Python 3.11, and a

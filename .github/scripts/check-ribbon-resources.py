@@ -26,12 +26,15 @@ Usage:
     python3 .github/scripts/check-ribbon-resources.py --self-test
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 
 PART_NAMESPACES = {
     "customUI.xml": "http://schemas.microsoft.com/office/2006/01/customui",
@@ -43,7 +46,7 @@ IMAGE_REL_TYPE = (
 )
 
 
-def tracked_files(root):
+def tracked_files(root: str) -> set[str]:
     """Return the set of Git-tracked paths under root, relative to root."""
     result = subprocess.run(
         ["git", "-C", root, "ls-files", "-z", "--", "."],
@@ -51,13 +54,13 @@ def tracked_files(root):
     return {os.path.normpath(p) for p in result.stdout.decode("utf-8").split("\0") if p}
 
 
-def check(root, tracked=None):
+def check(root: str, tracked: set[str] | None = None) -> list[str]:
     """Return a list of error strings for the ribbon source under root.
 
     tracked is the set of Git-tracked paths relative to root; when omitted it is
     read from Git, so only files a clean checkout would contain count.
     """
-    errors = []
+    errors: list[str] = []
     if tracked is None:
         try:
             tracked = tracked_files(root)
@@ -83,21 +86,21 @@ def check(root, tracked=None):
                 f"name; expected {PART_NAMESPACES[part]}"
             )
 
-        referenced = set()
+        referenced: set[str] = set()
         for element in tree.iter():
             image_id = element.get("image")
             if image_id:
                 referenced.add(image_id)
 
         rels_path = os.path.join(root, "_rels", part + ".rels")
-        targets = {}
+        targets: dict[str | None, str] = {}
         if os.path.isfile(rels_path):
             try:
                 rels = ET.parse(rels_path).getroot()
             except ET.ParseError as exc:
                 errors.append(f"_rels/{part}.rels: not well-formed XML: {exc}")
                 continue
-            for rel in rels.iter("{%s}Relationship" % RELS_NAMESPACE):
+            for rel in rels.iter(f"{{{RELS_NAMESPACE}}}Relationship"):
                 if rel.get("Type") == IMAGE_REL_TYPE:
                     targets[rel.get("Id")] = rel.get("Target") or ""
         elif referenced:
@@ -134,13 +137,13 @@ def check(root, tracked=None):
     return errors
 
 
-def _write(path, text):
+def _write(path: str, text: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text)
 
 
-def self_test():
+def self_test() -> int:
     """Exercise the passing case and each failure the check exists to catch."""
     part = (
         '<customUI xmlns="%s"><ribbon><tabs><tab idMso="TabHome">'
@@ -148,40 +151,47 @@ def self_test():
         "</group></tab></tabs></ribbon></customUI>"
     )
     rels = (
-        '<Relationships xmlns="%s"><Relationship Id="icon" Type="%s" '
-        'Target="images/icon.png"/></Relationships>' % (RELS_NAMESPACE, IMAGE_REL_TYPE)
+        f'<Relationships xmlns="{RELS_NAMESPACE}"><Relationship Id="icon" Type="{IMAGE_REL_TYPE}" '
+        'Target="images/icon.png"/></Relationships>'
     )
-    cases = []
+    cases: list[tuple[str, Callable[[str], object], str | None]] = []
 
-    def case(name, build, expect_fragment):
+    def case(name: str, build: Callable[[str], object], expect_fragment: str | None) -> None:
         cases.append((name, build, expect_fragment))
 
-    def valid(root):
+    def valid(root: str) -> None:
         _write(os.path.join(root, "customUI.xml"), part % PART_NAMESPACES["customUI.xml"])
         _write(os.path.join(root, "_rels", "customUI.xml.rels"), rels)
         _write(os.path.join(root, "images", "icon.png"), "png")
 
+    def then(step: Callable[[str], object]) -> Callable[[str], None]:
+        """Build the valid source, then apply one case-specific change."""
+        def build(root: str) -> None:
+            valid(root)
+            step(root)
+        return build
+
     case("complete source passes", valid, None)
     case("missing image file fails",
-         lambda r: (valid(r), os.remove(os.path.join(r, "images", "icon.png"))),
+         then(lambda r: os.remove(os.path.join(r, "images", "icon.png"))),
          "not tracked")
     case("untracked image file fails",
-         lambda r: (valid(r), _write(os.path.join(r, ".untracked"), "images/icon.png")),
+         then(lambda r: _write(os.path.join(r, ".untracked"), "images/icon.png")),
          "not tracked")
     case("target outside the ribbon root fails",
-         lambda r: (valid(r), _write(os.path.join(r, "_rels", "customUI.xml.rels"),
-                    rels.replace('Target="images/icon.png"', 'Target="../../README.md"'))),
+         then(lambda r: _write(os.path.join(r, "_rels", "customUI.xml.rels"),
+                               rels.replace('Target="images/icon.png"', 'Target="../../README.md"'))),
          "outside")
     case("missing relationship file fails",
-         lambda r: (valid(r), os.remove(os.path.join(r, "_rels", "customUI.xml.rels"))),
+         then(lambda r: os.remove(os.path.join(r, "_rels", "customUI.xml.rels"))),
          "is missing")
     case("unmapped image id fails",
-         lambda r: (valid(r), _write(os.path.join(r, "customUI.xml"),
-                    (part % PART_NAMESPACES["customUI.xml"]).replace('image="icon"', 'image="other"'))),
+         then(lambda r: _write(os.path.join(r, "customUI.xml"),
+                               (part % PART_NAMESPACES["customUI.xml"]).replace('image="icon"', 'image="other"'))),
          "has no image relationship")
     case("namespace mismatch fails",
-         lambda r: (valid(r), _write(os.path.join(r, "customUI.xml"),
-                    part % PART_NAMESPACES["customUI14.xml"])),
+         then(lambda r: _write(os.path.join(r, "customUI.xml"),
+                               part % PART_NAMESPACES["customUI14.xml"])),
          "does not match the file name")
     case("no ribbon part fails", lambda r: None, "no Ribbon part")
 
@@ -191,7 +201,7 @@ def self_test():
             build(root)
             # Every file written counts as tracked, except the image a case marks
             # as untracked by writing its path into ".untracked"
-            tracked = set()
+            tracked: set[str] = set()
             for folder, _, files in os.walk(root):
                 for filename in files:
                     tracked.add(os.path.normpath(
@@ -210,7 +220,7 @@ def self_test():
     return failures
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=os.path.join("src", "ribbon"))
     parser.add_argument("--self-test", action="store_true")

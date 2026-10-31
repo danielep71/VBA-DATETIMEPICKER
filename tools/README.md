@@ -10,7 +10,8 @@ python tools/check.py
 ```
 
 This runs source/Ribbon/form integrity, procedure-scoped jump checks, conditional
-declarations, whitespace, label fixtures and the tooling's negative tests.
+declarations, whitespace, Markdown links and anchors, label fixtures and the
+tooling's negative tests.
 Reports and logs go to ignored `test-results/`. Findings return a nonzero exit
 code. CI uses `python tools/check.py --ci`, checking committed whitespace and
 requiring a clean tree; PR runs also supply `--base <base-sha>`.
@@ -18,8 +19,56 @@ Both modes read tracked VBA from the working tree. Local results explicitly
 record dirty state and cannot be used as clean committed release evidence.
 
 The static workflow also runs checksum-pinned actionlint. CodeQL analyzes the
-Python and JavaScript tooling, not VBA. PR analysis is read-only. None of these
-checks compiles VBA, executes Excel or proves 32-bit runtime compatibility.
+Python and JavaScript tooling and the workflow files, not VBA. PR analysis is
+read-only. None of these checks compiles VBA, executes Excel or proves 32-bit
+runtime compatibility.
+
+## Python lint and type checks
+
+Ruff and strict mypy check `tools/` and `.github/scripts/`, configured in
+`pyproject.toml`. The static workflow installs them from the hash-locked
+`tools/requirements-lint.txt` (wheels only) and runs both before the gates.
+`check.py` itself still needs no Python packages. To run them locally:
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-lint.txt
+ruff check
+mypy
+```
+
+To change a version, edit `tools/requirements-lint.in` and regenerate the lock
+with pip-tools from `tools/`, on the CI Python version:
+
+```sh
+pip-compile --generate-hashes --allow-unsafe --strip-extras --no-emit-index-url \
+  --output-file requirements-lint.txt requirements-lint.in
+```
+
+Dependabot proposes updates to the lock weekly. Suppressions must be
+line-scoped (`# type: ignore[code]`, `# noqa: CODE`) with a reason; there are
+none today.
+
+## Markdown links and anchors
+
+```sh
+python tools/check_markdown_links.py --root .             # offline gate
+python tools/check_markdown_links.py --root . --external  # network, weekly
+```
+
+The offline mode is a `check.py` gate. In every tracked `.md` file it resolves
+relative links (inline, reference, `<a href>` and `<img src>`) against the
+tracked tree, and checks each `#anchor` that points into a Markdown file.
+Anchors are heading slugs and explicit `id`/`name` attributes. Slugs follow
+GitHub's rule: lower-case, keep Unicode letters, marks, decimal digits,
+connector punctuation, spaces and hyphens, then turn spaces into hyphens.
+U+FE0F after an emoji is a mark, so it stays. Duplicate headings get `-1`,
+`-2` suffixes. Links inside code and HTML comments are ignored, and anchors
+into non-Markdown files (such as `#L10`) are not checked.
+
+The `--external` mode checks each distinct http(s) URL once. 404, 410 and DNS
+failures fail the run; blocked, rate-limited or unreachable URLs (403, 429,
+5xx, timeouts) are warnings, because they do not prove a link is dead. The
+**External Markdown links** workflow runs it weekly and on demand.
 
 ## Project-wide VBA call resolution (advisory)
 
@@ -211,8 +260,8 @@ re-certify v1.2.2: its accepted limitations, tag and packages remain authoritati
 Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at
 `b903fe44ef6a032c4689870b83745afa1c22490d` under MIT (Daniele Penza):
 
-- `_gatelib.py`: docstrings no longer refer to template-only tools; code
-  unchanged.
+- `_gatelib.py`: docstrings no longer refer to template-only tools;
+  `capture_output=True` replaces the equivalent explicit pipes.
 - `check_committed_whitespace.py`: unchanged.
 - `check_vba_conditionals.py`: Windows environments explicitly set `Mac=False`;
   the unknown-symbol fixture uses a genuinely unknown project symbol.
@@ -220,6 +269,9 @@ Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at
   retaining original line numbers for alternative procedure declarations.
 - CodeQL workflow: unchanged. Action versions and actionlint pin follow the
   template; CodeQL action paths are grouped in Dependabot.
+
+All adopted tools carry the type annotations and line wrapping that the Ruff
+and mypy gates require; their behaviour is unchanged.
 
 `check.py`, `check_source.py`, `check_release.py`, their tests and the static/release
 workflows are DateTimePicker-specific adapters. They preserve `src/`, `demo/`
