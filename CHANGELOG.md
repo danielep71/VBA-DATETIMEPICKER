@@ -228,6 +228,13 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- CONTRIBUTING describes the release-branch merge flow: task pull requests
+  into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
+  verification, an integration pull request into `main` with `Refs #N` and a
+  merge commit, and a sync pull request back. Dependabot now targets the
+  active release branch
+  ([#154](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/154)).
+
 - SECURITY now states that `main` can carry merged, unreleased work and that only
   the latest tagged release is the supported source; it previously said `main`
   always matches the latest tagged release.

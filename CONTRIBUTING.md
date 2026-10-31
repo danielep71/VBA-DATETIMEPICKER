@@ -110,7 +110,8 @@ not present.
 
 ## 🌿 Development workflow
 
-1. Fork or clone the repository and start from the current `main`.
+1. Fork or clone the repository and start from the active release branch
+   (`release/vX.Y.Z`, see [Release branches](#release-branches)).
 2. Create a short, focused branch such as `fix/clear-description`,
    `feat/clear-description`, `docs/clear-description`, or
    `test/clear-description`.
@@ -127,6 +128,42 @@ not present.
 Repository maintainers may use the repository's configured direct-push workflow
 where permitted. External contributions and reviewable portfolio changes should
 use branches and pull requests.
+
+<a id="release-branches"></a>
+
+### Release branches and pull-request types
+
+Work for the next release collects on `release/vX.Y.Z` (currently
+`release/v1.2.3`); `main` receives it only through an integration pull request.
+Four kinds of pull request follow from that:
+
+| Pull request | From → into | Issue reference | Merge method |
+|---|---|---|---|
+| Task | topic branch → release branch | `Resolves #N` | Squash |
+| Integration | release branch → `main` | `Refs #N` only | Merge commit |
+| Sync | branch at `main` → release branch | none | Merge commit |
+| Dependabot | Dependabot branch → release branch | none | Merge commit |
+
+- **Task pull requests** carry one focused change. GitHub closes issues only
+  when a closing keyword merges into the default branch, so `Resolves #N` on a
+  release branch closes nothing: the maintainer closes the issue by hand once
+  the change is verified against the original symptom.
+- **Integration pull requests** bring the release branch into `main`. They use
+  `Refs #N`, never a closing keyword, so merging them does not close issues
+  whose verification is still pending. Use a merge commit so the task history
+  stays intact. The repository deletes a merged head branch, so recreate the
+  release branch from `main` right after the merge if work continues on it.
+- **Sync pull requests** bring `main` back into the release branch right after
+  each integration, and whenever `main` gains changes the release branch lacks,
+  such as a direct dependency update. Open them from a dedicated branch that
+  points at `main` (for example `chore/sync-main-into-v1.2.3`), not from
+  `main` itself, so that any conflict resolution is committed on that branch and
+  never on `main`.
+- **Dependabot** opens its pull requests against the branch named by
+  `target-branch` in `.github/dependabot.yml`. That value must name the active
+  release branch for every ecosystem. Update it in the same pull request that
+  opens the next release branch; GitHub reads the file from the default branch,
+  so the change takes effect once it is integrated into `main`.
 
 ### Commit discipline
 
