@@ -1501,7 +1501,7 @@ High-DPI, high-contrast and accessibility behavior should be validated in the ta
 
 ### Release evidence is procedural, not automated
 
-No CI runs the regression pack — the only workflow in the repository is repository traffic analytics ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
+No CI runs the regression pack — the workflows run static checks, CodeQL and repository analytics, never Excel ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
 
 ### Certification environment
 
