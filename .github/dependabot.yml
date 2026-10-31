@@ -23,6 +23,8 @@ updates:
   # Hash-locked Python lint tools (tools/requirements-lint.in / .txt).
   - package-ecosystem: "pip"
     directory: "/tools"
+    # Follow the active release branch; see CONTRIBUTING.md, "Release branches".
+    target-branch: "release/v1.2.3"
     schedule:
       interval: "weekly"
       day: "monday"
