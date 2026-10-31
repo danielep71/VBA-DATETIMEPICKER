@@ -135,6 +135,12 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- The Python tooling is now checked by Ruff and strict mypy, configured in
+  `pyproject.toml` and installed in CI from the hash-locked, wheels-only
+  `tools/requirements-lint.txt`, which Dependabot keeps current. The tools
+  gained type annotations, with no behaviour change and no suppressions
+  ([#149](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/149)).
+
 - CI runs the tooling on Python 3.13 instead of 3.10, which reaches end of
   life in October 2026. The documented minimum is now Python 3.11, and a
   separate job runs the tooling tests and fixtures on 3.11 so the minimum is

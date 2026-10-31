@@ -6,6 +6,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from _gatelib import git_text, write_json, write_text
 
@@ -51,10 +52,11 @@ def main() -> int:
         if code:
             print(log, flush=True)
     passed = all(r["exit_code"] == 0 for r in results) and (not args.ci or not dirty)
-    report = {"schema_version": 1, "candidate_sha": sha, "dirty": dirty,
-              "mode": "committed" if args.ci else "working-tree",
-              "status": "pass" if passed else "fail", "checks": results,
-              "scope": "Static source and tooling checks only; Excel has not been executed."}
+    report: dict[str, Any] = {
+        "schema_version": 1, "candidate_sha": sha, "dirty": dirty,
+        "mode": "committed" if args.ci else "working-tree",
+        "status": "pass" if passed else "fail", "checks": results,
+        "scope": "Static source and tooling checks only; Excel has not been executed."}
     write_json(output / "static-checks.json", report)
     summary = "# Static checks\n\n" + f"Status: **{report['status'].upper()}**\n\n"
     summary += f"Candidate: `{sha}`; dirty: `{dirty}`\n\n" + report["scope"] + "\n"

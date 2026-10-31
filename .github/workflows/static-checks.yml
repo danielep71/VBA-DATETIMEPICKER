@@ -38,6 +38,16 @@ jobs:
           echo "$ACTIONLINT_SHA256  $archive" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -shellcheck="" -pyflakes=""
+      - name: Install Python lint tools (hash-locked, wheels only)
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-lint.txt
+      - name: Lint Python with Ruff
+        shell: bash
+        run: ruff check --output-format=github
+      - name: Type-check Python with strict mypy
+        shell: bash
+        run: mypy
       - name: Run portable checks
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
