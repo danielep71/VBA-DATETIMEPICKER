@@ -41,6 +41,7 @@ CODES = {
     "VBA-CALL-002": ("error", "Qualified member that the target module or class does not declare"),
     "VBA-CALL-003": ("error", "Private member used from another module"),
     "VBA-CALL-004": ("error", "Ambiguous unqualified name: public in more than one standard module"),
+    "VBA-CALL-005": ("error", "Class name used as an object, but the class has no default instance"),
     "VBA-CALL-010": ("error", "Too few arguments: a required parameter is not supplied"),
     "VBA-CALL-011": ("error", "Too many positional arguments and no ParamArray"),
     "VBA-CALL-012": ("error", "Omitted positional argument for a required parameter"),
@@ -723,6 +724,31 @@ class Analyzer:
             self.check_args(target, params, args, module, proc, line, label)
         return self.type_module(target.return_type)
 
+    def check_recursive_call(self, target: Proc, args: list[tuple[str | None, list[Tok]]] | None, context: str,
+                             statement: bool, module: Module, proc: Proc | None, line: int, label: str) -> None:
+        """Validate a procedure's use of its own name when that use is a recursive call.
+
+        A Sub naming itself always calls itself. Inside a Function or Property Get, the bare name is the
+        return value (assigned or read), so only a statement call, a Call statement or a parenthesised use
+        is a recursive call. A parenthesised use of a parameterless function may index its array result,
+        so it is not checked. Property Let and Set procedures are left alone.
+        """
+        if target.accessor == "sub":
+            recursive = True
+        elif target.accessor in {"function", "get"} and not context.startswith("assign"):
+            recursive = statement or context == "call" or (args is not None and bool(target.params))
+        else:
+            recursive = False
+        if not recursive:
+            return
+        self.stats["resolved-calls"] += 1
+        self.check_args(target, target.params, args or [], module, proc, line, label)
+
+    @staticmethod
+    def lacks_default_instance(entity: Module, name: str) -> bool:
+        """True for a class named directly (not through Me) whose VB_PredeclaredId is False."""
+        return entity.kind == "class" and not entity.predeclared and name.casefold() != "me"
+
     # -- macro and member targets -------------------------------------------
     def literal_target(self, tokens: list[Tok], module: Module, proc: Proc | None) -> str | None:
         if not tokens:
@@ -761,8 +787,12 @@ class Analyzer:
             if member is not None and member.kind == "proc" and ({"sub", "function"} & set(member.accessors)):
                 candidates.append((candidate, member))
         status = "resolved"
+        # A target qualified by a standard module of this project, with no workbook prefix, can only
+        # mean that module, so its member is checked whatever its name.
+        qualifier = self.project.modules.get(parts[-2].casefold()) if len(parts) > 1 else None
+        local_module = qualifier is not None and qualifier.kind == "standard"
         if not candidates:
-            if self.project.is_project_name(name) and "!" not in value:
+            if (self.project.is_project_name(name) or local_module) and "!" not in value:
                 status = "missing"
                 self.report("VBA-CALL-030", module, proc, line, value,
                             f"{channel} target {value!r} is not a procedure of any standard module.", channel=channel)
@@ -820,7 +850,7 @@ class Analyzer:
             if kind == "local":
                 return self.type_module(entity[0])
             if kind == "module":
-                return cast(Module, entity)
+                return None if self.lacks_default_instance(entity, tokens[0].text) else cast(Module, entity)
             if kind == "member" and entity[1].kind == "var":
                 return self.type_module(entity[1].type)
         return None
@@ -893,6 +923,8 @@ class Analyzer:
             if kind == "local":
                 receiver = self.type_module(entity[0])
             elif kind == "self":
+                if last:
+                    self.check_recursive_call(entity, parsed, element_context, statement, module, proc, line, name)
                 return
             elif kind == "member":
                 owner, member = entity
@@ -902,6 +934,11 @@ class Analyzer:
                     self.check_macro("macro name", parsed[0][1], module, proc, line)
                 receiver = self.check_member_call(owner, member, parsed, element_context, module, proc, line, name)
             elif kind == "module":
+                if self.lacks_default_instance(entity, name):
+                    self.report("VBA-CALL-005", module, proc, line, name,
+                                f"{name} is a class without a default instance (VB_PredeclaredId = False); "
+                                "call it through a variable that holds an instance.")
+                    return
                 receiver = entity
             elif kind == "ambiguous":
                 self.report("VBA-CALL-004", module, proc, line, name,
@@ -1107,7 +1144,7 @@ class Analyzer:
         if low == "call":
             if len(tokens) > 1:
                 self.stats["call-statements"] += 1
-                self.process_chain(tokens, 1, module, proc, line, "read", receiver)
+                self.process_chain(tokens, 1, module, proc, line, "call", receiver)
             return
         context = "assign"
         body = tokens
@@ -1201,7 +1238,9 @@ def analyze_configuration(name: str, sources: dict[str, str], patterns: list[str
             failures.append(finding("VBA-CALL-091", module, None, None, module.name,
                                     f"Module name {module.name} is used by {modules[key].path} and {path}."))
         modules[key] = module
-    project = Project(name, modules, [re.compile(p) for p in patterns], {m.casefold() for m in macro_functions},
+    # VBA identifiers are case-insensitive, so project-name patterns are too.
+    project = Project(name, modules, [re.compile(p, re.IGNORECASE) for p in patterns],
+                      {m.casefold() for m in macro_functions},
                       coverage_complete and not failures)
     analyzer = Analyzer(project)
     if not failures:
