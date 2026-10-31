@@ -148,6 +148,11 @@ Four kinds of pull request follow from that:
   when a closing keyword merges into the default branch, so `Resolves #N` on a
   release branch closes nothing: the maintainer closes the issue by hand once
   the change is verified against the original symptom.
+  Keep closing keywords out of commit messages, including the squash commit:
+  GitHub also closes an issue when a commit whose message carries a closing
+  keyword reaches `main`, which the integration merge would do. Commits use
+  `Refs #N`; if a squash message would carry `Resolves`, `Closes` or `Fixes`,
+  edit it before merging.
 - **Integration pull requests** bring the release branch into `main`. They use
   `Refs #N`, never a closing keyword, so merging them does not close issues
   whose verification is still pending. Use a merge commit so the task history
