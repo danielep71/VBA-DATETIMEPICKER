@@ -176,7 +176,7 @@ Write imperative, specific subjects, normally in this form:
 
 ```text
 fix: preserve formulas during write-back
-feat: add explicit tail calculation
+feat: add configurable date bounds
 test: cover cleanup after initialization failure
 docs: clarify supported Office environments
 chore: harden repository validation
