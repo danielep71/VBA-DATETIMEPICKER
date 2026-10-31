@@ -25,7 +25,7 @@
 [![P1 issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER/P1?style=flat-square&label=P1&color=B60205)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues?q=is%3Aissue%20is%3Aopen%20label%3AP1)
 [![P2 issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER/P2?style=flat-square&label=P2&color=D93F0B)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues?q=is%3Aissue%20is%3Aopen%20label%3AP2)
 [![P3 issues](https://img.shields.io/github/issues/danielep71/VBA-DATETIMEPICKER/P3?style=flat-square&label=P3&color=FBCA04)](https://github.com/danielep71/VBA-DATETIMEPICKER/issues?q=is%3Aissue%20is%3Aopen%20label%3AP3)
-[![Stars](https://img.shields.io/github/stars/danielep71/VBA-DATETIMEPICKER?style=flat-square&color=bf8700)](https://github.com/danielep71/VBA-DATETIMEPICKER/stargazers)
+[![Stars](https://img.shields.io/github/stars/danielep71/VBA-DATETIMEPICKER?style=flat-square&color=bf8700)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 
 <br>
 
