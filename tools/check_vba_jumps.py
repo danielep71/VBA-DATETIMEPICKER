@@ -315,8 +315,7 @@ def init_repo(root: Path, source: str) -> None:
     for command in commands:
         completed = subprocess.run(
             ["git", "-C", str(root), *command],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
