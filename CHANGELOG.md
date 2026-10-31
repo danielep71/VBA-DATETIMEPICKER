@@ -261,6 +261,11 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- The README stars badge links to the repository page instead of its
+  stargazers list, which GitHub answers with 404 for signed-out visitors. The
+  new external-link check reported it
+  ([#152](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/152)).
+
 - CONTRIBUTING describes the release-branch merge flow: task pull requests
   into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
   verification, an integration pull request into `main` with `Refs #N` and a
