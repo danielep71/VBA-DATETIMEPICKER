@@ -261,6 +261,12 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- The project website now names the Apache License 2.0 in its page
+  description, hero line, "Can I adapt it?" answer and footer, which still said
+  MIT after the relicensing. The FAQ also mentions keeping the NOTICE file when
+  redistributing
+  ([#144](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/144)).
+
 - The README stars badge links to the repository page instead of its
   stargazers list, which GitHub answers with 404 for signed-out visitors. The
   new external-link check reported it
