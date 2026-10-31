@@ -32,11 +32,11 @@
 ## 🔗 Related issues
 
 ```text
-Closes #
-Related to #
+Resolves #
+Refs #
 ```
 
-Use a closing keyword only when this pull request satisfies the issue's complete acceptance criteria.
+Task pull requests into a release branch use `Resolves #N` only when they satisfy the issue's complete acceptance criteria; the issue is closed by hand after verification. Integration pull requests into `main` use `Refs #N` only. See CONTRIBUTING.md, "Release branches and pull-request types".
 
 ## 🧭 Change classification
 
