@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+from typing import Any
 from xml.parsers import expat
 
 from _gatelib import parse_report_args, run_gate, tracked_files
@@ -44,7 +45,7 @@ def ribbon_callbacks(data: bytes) -> list[str]:
     return [value for _element, _attribute, value in ribbon_callback_attributes(data)]
 
 
-def run_check(root: Path) -> dict:
+def run_check(root: Path) -> dict[str, Any]:
     tracked = tracked_files(root)
     findings = [f"Missing tracked source: {p}" for p in sorted(REQUIRED - tracked)]
     names: dict[str, str] = {}
