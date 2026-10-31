@@ -99,6 +99,7 @@ combined. A finding present in only some environments is reported as
 | `VBA-CALL-002` | `Module.Member` or a typed class receiver naming an undeclared member |
 | `VBA-CALL-003` | Private member used from another module |
 | `VBA-CALL-004` | unqualified name public in two standard modules (VBA "Ambiguous name") |
+| `VBA-CALL-005` | class name used as an object although its `VB_PredeclaredId` is `False` (no default instance) |
 | `VBA-CALL-010`–`016` | too few/many arguments, omitted required, unknown, repeated or ParamArray named arguments, positional after named |
 | `VBA-CALL-017` | property use needing an accessor (Get/Let/Set) that is not declared |
 | `VBA-CALL-020` | conflicting declarations of one name in a module (Get/Let/Set of one property are one family, not a conflict) |
@@ -109,8 +110,18 @@ combined. A finding present in only some environments is reported as
 Resolution follows VBA order: procedure locals and parameters, then the current
 module, then public members of standard modules (`Option Private Module` keeps
 them visible inside the project), then module names. An unresolved name is a
-defect only when it matches `project_name_patterns` in the manifest; anything
-else may be VBA, Excel, Office or MSForms and is counted as unknown.
+defect only when it matches `project_name_patterns` in the manifest, which match
+case-insensitively, as VBA names do; anything else may be VBA, Excel, Office or
+MSForms and is counted as unknown. A literal macro target qualified by a standard
+module of the project (`"M_A.Name"`, no workbook prefix) is checked whatever its
+name; workbook-qualified and computed targets stay unknown.
+
+A procedure's use of its own name is a recursive call, and its arguments are
+checked, when the procedure is a Sub, or when a Function or Property Get uses it
+as a statement call, through `Call`, or with parentheses. Assigning to or reading
+the bare name inside a Function is its return value, not a call. A parenthesised
+use inside a parameterless Function is not checked, because it may index an array
+result: the parser does not record whether a Function returns an array.
 
 **Severities.** `error` is a definite defect in a gating configuration; `warning`
 is advisory or comes from a non-gating configuration; `unknown` could not be

@@ -185,13 +185,15 @@ Use only the categories needed by a release.
   Reset never takes over a lease another provider holds.
 
 - The release procedure and certification template now treat RibbonX as an
-  Open XML package input, separate from VBE/VBA source. `customUI14.xml`, its
-  relationships/package metadata and every custom image it references must come
-  from the candidate; a missing part or resource blocks the build; and the
+  Open XML package input, separate from VBE/VBA source. `src/ribbon/customUI.xml`,
+  its relationships/package metadata and every custom image it references must
+  come from the candidate; a missing part or resource blocks the build; and the
   packaged Ribbon's images and callbacks must be verified directly, because
   **Debug → Compile VBAProject** cannot see Open XML parts
-  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). The repository does not yet track the three custom Ribbon
-  images; that remains [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
+  ([#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). All three
+  custom Ribbon images and their relationship part are now tracked. Evidence
+  that a clean package built from these inputs renders all three images remains
+  outstanding under [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
 
 - Fixed label drift checks for valid label names containing pipes or backticks
   by comparing structured canonical plans instead of parsing Markdown reports
@@ -203,6 +205,16 @@ Use only the categories needed by a release.
   weekly GitHub Actions dependency updates.
 
 ### Fixed
+
+- The advisory VBA call checker misses fewer defects
+  ([#134](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/134)):
+  project-name patterns now match case-insensitively, as VBA names do (also in
+  the package inspector); a literal `Application.Run`-style target qualified by
+  a known standard module is checked whatever the member's name; recursive
+  calls are argument-checked, while a Function's own name used as its return
+  value is not; and a class without a default instance used as a receiver is
+  reported as the new `VBA-CALL-005`. Each fix has positive and negative
+  fixtures. The checker stays advisory and is not a release gate.
 
 - Package inspector review follow-up (#129): trace calls evaluated in `If` and
   `ElseIf` conditions, treat `AddressOf` operands as unknown dispatch rather than
@@ -276,7 +288,9 @@ Use only the categories needed by a release.
   into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
   verification, an integration pull request into `main` with `Refs #N` and a
   merge commit, and a sync pull request back. Dependabot now targets the
-  active release branch
+  active release branch. After an integration deletes and recreates the
+  release branch, open pull requests that GitHub moved to `main` are set back
+  to it
   ([#154](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/154)).
 
 - CONTRIBUTING and the pull-request template add a final-head review

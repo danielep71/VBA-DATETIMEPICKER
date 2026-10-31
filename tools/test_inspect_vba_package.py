@@ -346,9 +346,10 @@ class StartupTests(Fixture):
         self.assertEqual(dynamic["startup"]["verdict"], "not-established")
         self.assertEqual(self.codes(dynamic, "error"), [])
         self.assertEqual(self.codes(dynamic, "unknown"), ["VBA-PKG-001", "VBA-PKG-005"])
-        unresolved = self.inspect("Private Sub Workbook_Open()\n    DP_Missing\nEnd Sub\n")
-        self.assertEqual(unresolved["startup"]["verdict"], "not-established")
-        self.assertIn("VBA-PKG-005", self.codes(unresolved, "unknown"))
+        for name in ("DP_Missing", "dp_missing"):  # project names match case-insensitively (#134)
+            unresolved = self.inspect(f"Private Sub Workbook_Open()\n    {name}\nEnd Sub\n")
+            self.assertEqual(unresolved["startup"]["verdict"], "not-established")
+            self.assertIn("VBA-PKG-005", self.codes(unresolved, "unknown"))
 
     def test_object_receiver_and_depth_limit_are_unknown(self) -> None:
         receiver = self.inspect("Private Sub Workbook_Open()\n    Dim m As Object\n    m.DP_Start\nEnd Sub\n")
