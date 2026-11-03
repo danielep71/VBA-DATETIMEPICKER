@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import string
 import sys
 import unicodedata
 import urllib.error
@@ -37,6 +38,9 @@ AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
 COMMENT = re.compile(r"<!--.*?-->", re.S)
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+# CommonMark backslash escapes: a backslash before ASCII punctuation stands for that character.
+# Any other backslash is literal.
+ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 # Hosts that are placeholders, not links to verify.
 EXTERNAL_SKIP = ("localhost", "127.0.0.1", "example.com", "example.org", "example.invalid")
 
@@ -60,16 +64,34 @@ def github_slug(text: str) -> str:
     return kept.replace(" ", "-")
 
 
+# Literal punctuation (escaped, or inside a code span) is moved to the Private Use Area while markup
+# is stripped, then restored, so it is never mistaken for emphasis, links or tags. Letters and digits
+# are left alone: they must stay word characters for the emphasis rules around them.
+LITERAL = 0xE000
+
+
+def _literal(text: str) -> str:
+    return "".join(chr(LITERAL + ord(ch)) if ch in string.punctuation else ch for ch in text)
+
+
 def heading_text(raw: str) -> str:
     """Reduce inline Markdown in a heading to the text GitHub renders."""
-    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", raw)
+    parts: list[str] = []
+    position = 0
+    for match in CODE_SPAN.finditer(raw):
+        parts.append(ESCAPE.sub(lambda m: _literal(m.group(1)), raw[position:match.start()]))
+        parts.append(_literal(match.group(2).strip()))
+        position = match.end()
+    parts.append(ESCAPE.sub(lambda m: _literal(m.group(1)), raw[position:]))
+    text = "".join(parts)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", text)
-    text = CODE_SPAN.sub(lambda m: m.group(2).strip(), text)
     text = re.sub(r"<[^>]+>", "", text)
     text = text.replace("*", "")
     text = re.sub(r"(?<!\w)_+|_+(?!\w)", "", text)
     text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = "".join(chr(ord(ch) - LITERAL) if LITERAL <= ord(ch) < LITERAL + 128 else ch for ch in text)
     return text.strip()
 
 
@@ -140,16 +162,22 @@ def anchors(text: str) -> set[str]:
     return found
 
 
+def unescape(destination: str) -> str:
+    """Decode Markdown backslash escapes in a link destination, as GitHub does before following it."""
+    return ESCAPE.sub(r"\1", destination)
+
+
 def links(path: str, text: str) -> list[Link]:
     result: list[Link] = []
     for number, line in prose_lines(text):
         line = CODE_SPAN.sub("", line)
-        targets = [m.group(1) if m.group(1) is not None else m.group(2)
+        # Markdown destinations decode backslash escapes; HTML attributes and autolinks do not.
+        targets = [unescape(m.group(1) if m.group(1) is not None else m.group(2))
                    for pattern in (INLINE_LINK, INLINE_IMAGE) for m in pattern.finditer(line)]
         targets += HTML_LINK.findall(line) + AUTOLINK.findall(line)
         definition = REFERENCE_DEF.match(line)
         if definition:
-            targets.append(definition.group(1))
+            targets.append(unescape(definition.group(1)))
         result.extend(Link(path, number, target) for target in targets if target)
     return result
 
