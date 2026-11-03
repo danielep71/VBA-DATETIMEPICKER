@@ -34,6 +34,12 @@ class SlugTests(unittest.TestCase):
         # Literal text next to an underscore keeps it a word character (#173 review).
         self.assertEqual(links.github_slug(links.heading_text("`foo`_bar")), "foo_bar")
         self.assertEqual(links.github_slug(links.heading_text("`a_b` and DP\\_Start")), "a_b-and-dp_start")
+        # Escaped backticks are literal, so they open no code span (#174 review); a code span closes only
+        # at a backtick run of its own length; an unclosed run is plain text.
+        for heading, slug in (("\\`_foo_\\`", "foo"), ("``a`b`` c", "ab-c"), ("\\\\`code` x", "code-x"),
+                              ("`unclosed _x_", "unclosed-x")):
+            with self.subTest(heading=heading):
+                self.assertEqual(links.github_slug(links.heading_text(heading)), slug)
 
     def test_duplicates_html_anchors_setext_and_fences(self) -> None:
         text = ("# Setup\n\n## Setup\n\n### Setup\n\n<a id=\"custom-anchor\"></a>\n"
@@ -110,6 +116,10 @@ class OfflineCheckTests(unittest.TestCase):
         text = "[x](https://example.net/a\\_b) <https://example.net/c\\_d>\n"
         self.assertEqual([link.target for link in links.links("README.md", text)],
                          ["https://example.net/a_b", "https://example.net/c\\_d"])
+
+    def test_escaped_backticks_do_not_hide_links(self) -> None:
+        text = "# \\`_foo_\\`\n\nSee \\`[real](missing.md)\\` and `[code](gone.md)` and [anchor](#foo)\n"
+        self.assertEqual(self.check({"README.md": text}), ["3:missing.md"])
 
     def test_links_in_code_and_comments_are_ignored(self) -> None:
         text = "`[a](missing.md)`\n\n```\n[b](missing.md)\n```\n\n<!--\n[c](missing.md)\n-->\n"
