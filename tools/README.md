@@ -63,7 +63,10 @@ GitHub's rule: lower-case, keep Unicode letters, marks, decimal digits,
 connector punctuation, spaces and hyphens, then turn spaces into hyphens.
 U+FE0F after an emoji is a mark, so it stays. Duplicate headings get `-1`,
 `-2` suffixes. Links inside code and HTML comments are ignored, and anchors
-into non-Markdown files (such as `#L10`) are not checked.
+into non-Markdown files (such as `#L10`) are not checked. Markdown backslash
+escapes (`guide\(v2\).md`, `#dp\_start`) are decoded in Markdown link and
+reference destinations and in headings, as GitHub does; HTML attributes and
+autolinks are taken literally.
 
 The `--external` mode checks each distinct http(s) URL once. 404, 410 and DNS
 failures fail the run; blocked, rate-limited or unreachable URLs (403, 429,

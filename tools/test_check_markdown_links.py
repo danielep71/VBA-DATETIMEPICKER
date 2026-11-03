@@ -91,6 +91,23 @@ class OfflineCheckTests(unittest.TestCase):
                 "- item\n\n    continuation [y](missing-c.md)\n\nBack to prose.\n\n    [z](missing-d.md)\n")
         self.assertEqual(self.check({"README.md": text}), ["9:missing-c.md"])
 
+    def test_markdown_escapes_are_decoded_in_destinations_and_headings(self) -> None:
+        files = {
+            "README.md": ("# Run DP\\_Start\n\n"
+                          "[esc](guide\\(v2\\).md) [plain](guide(v2).md) [ref] [lit](a\\b.md)\n"
+                          "[gone](missing\\(v3\\).md) [a1](#run-dp_start) [a2](#run-dp\\_start) [a3](#run-dpstart)\n"
+                          "<a href=\"guide\\(v2\\).md\">html</a>\n\n[ref]: docs/GUIDE\\_X.md#usage\n"),
+            "guide(v2).md": "# v2\n", "a\\b.md": "x", "docs/GUIDE_X.md": "## Usage\n",
+        }
+        # Escaped parentheses, underscores and reference definitions resolve; a backslash that is not an
+        # escape stays literal; HTML attributes are not Markdown, so their backslashes stay.
+        self.assertEqual(self.check(files), ["4:missing(v3).md", "4:#run-dpstart", "5:guide\\(v2\\).md"])
+
+    def test_escapes_in_external_destinations_and_autolinks(self) -> None:
+        text = "[x](https://example.net/a\\_b) <https://example.net/c\\_d>\n"
+        self.assertEqual([link.target for link in links.links("README.md", text)],
+                         ["https://example.net/a_b", "https://example.net/c\\_d"])
+
     def test_links_in_code_and_comments_are_ignored(self) -> None:
         text = "`[a](missing.md)`\n\n```\n[b](missing.md)\n```\n\n<!--\n[c](missing.md)\n-->\n"
         self.assertEqual(self.check({"README.md": text}), [])
