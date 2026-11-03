@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import string
 import sys
 import unicodedata
 import urllib.error
@@ -63,13 +64,14 @@ def github_slug(text: str) -> str:
     return kept.replace(" ", "-")
 
 
-# Literal characters (escaped punctuation, code-span text) are moved to the Private Use Area while
-# markup is stripped, then restored, so they are never mistaken for emphasis, links or tags.
+# Literal punctuation (escaped, or inside a code span) is moved to the Private Use Area while markup
+# is stripped, then restored, so it is never mistaken for emphasis, links or tags. Letters and digits
+# are left alone: they must stay word characters for the emphasis rules around them.
 LITERAL = 0xE000
 
 
 def _literal(text: str) -> str:
-    return "".join(chr(LITERAL + ord(ch)) if ord(ch) < 128 else ch for ch in text)
+    return "".join(chr(LITERAL + ord(ch)) if ch in string.punctuation else ch for ch in text)
 
 
 def heading_text(raw: str) -> str:

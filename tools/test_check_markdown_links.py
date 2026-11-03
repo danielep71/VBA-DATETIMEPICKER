@@ -31,6 +31,9 @@ class SlugTests(unittest.TestCase):
         self.assertEqual(links.heading_text("`DP_Show` and **bold** [link](x.md) <sup>1</sup>"),
                          "DP_Show and bold link 1")
         self.assertEqual(links.heading_text("_emphasis_ keeps DP_WriteResult"), "emphasis keeps DP_WriteResult")
+        # Literal text next to an underscore keeps it a word character (#173 review).
+        self.assertEqual(links.github_slug(links.heading_text("`foo`_bar")), "foo_bar")
+        self.assertEqual(links.github_slug(links.heading_text("`a_b` and DP\\_Start")), "a_b-and-dp_start")
 
     def test_duplicates_html_anchors_setext_and_fences(self) -> None:
         text = ("# Setup\n\n## Setup\n\n### Setup\n\n<a id=\"custom-anchor\"></a>\n"
