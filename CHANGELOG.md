@@ -206,6 +206,12 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- The Markdown link gate decodes backslash escapes, as GitHub does. A valid
+  link such as `[guide](guide\(v2\).md)` was reported as missing, and an
+  escaped character in a heading, as in `DP\_Start`, produced the wrong anchor.
+  HTML attributes and autolinks are still taken literally
+  ([#171](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/171)).
+
 - The advisory VBA call checker misses fewer defects
   ([#134](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/134)):
   project-name patterns now match case-insensitively, as VBA names do (also in

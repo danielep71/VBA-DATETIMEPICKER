@@ -31,6 +31,15 @@ class SlugTests(unittest.TestCase):
         self.assertEqual(links.heading_text("`DP_Show` and **bold** [link](x.md) <sup>1</sup>"),
                          "DP_Show and bold link 1")
         self.assertEqual(links.heading_text("_emphasis_ keeps DP_WriteResult"), "emphasis keeps DP_WriteResult")
+        # Literal text next to an underscore keeps it a word character (#173 review).
+        self.assertEqual(links.github_slug(links.heading_text("`foo`_bar")), "foo_bar")
+        self.assertEqual(links.github_slug(links.heading_text("`a_b` and DP\\_Start")), "a_b-and-dp_start")
+        # Escaped backticks are literal, so they open no code span (#174 review); a code span closes only
+        # at a backtick run of its own length; an unclosed run is plain text.
+        for heading, slug in (("\\`_foo_\\`", "foo"), ("``a`b`` c", "ab-c"), ("\\\\`code` x", "code-x"),
+                              ("`unclosed _x_", "unclosed-x")):
+            with self.subTest(heading=heading):
+                self.assertEqual(links.github_slug(links.heading_text(heading)), slug)
 
     def test_duplicates_html_anchors_setext_and_fences(self) -> None:
         text = ("# Setup\n\n## Setup\n\n### Setup\n\n<a id=\"custom-anchor\"></a>\n"
@@ -90,6 +99,27 @@ class OfflineCheckTests(unittest.TestCase):
         text = ("Paragraph.\n\n    [code](missing-a.md)\n\n    still code [x](missing-b.md)\n\n"
                 "- item\n\n    continuation [y](missing-c.md)\n\nBack to prose.\n\n    [z](missing-d.md)\n")
         self.assertEqual(self.check({"README.md": text}), ["9:missing-c.md"])
+
+    def test_markdown_escapes_are_decoded_in_destinations_and_headings(self) -> None:
+        files = {
+            "README.md": ("# Run DP\\_Start\n\n"
+                          "[esc](guide\\(v2\\).md) [plain](guide(v2).md) [ref] [lit](a\\b.md)\n"
+                          "[gone](missing\\(v3\\).md) [a1](#run-dp_start) [a2](#run-dp\\_start) [a3](#run-dpstart)\n"
+                          "<a href=\"guide\\(v2\\).md\">html</a>\n\n[ref]: docs/GUIDE\\_X.md#usage\n"),
+            "guide(v2).md": "# v2\n", "a\\b.md": "x", "docs/GUIDE_X.md": "## Usage\n",
+        }
+        # Escaped parentheses, underscores and reference definitions resolve; a backslash that is not an
+        # escape stays literal; HTML attributes are not Markdown, so their backslashes stay.
+        self.assertEqual(self.check(files), ["4:missing(v3).md", "4:#run-dpstart", "5:guide\\(v2\\).md"])
+
+    def test_escapes_in_external_destinations_and_autolinks(self) -> None:
+        text = "[x](https://example.net/a\\_b) <https://example.net/c\\_d>\n"
+        self.assertEqual([link.target for link in links.links("README.md", text)],
+                         ["https://example.net/a_b", "https://example.net/c\\_d"])
+
+    def test_escaped_backticks_do_not_hide_links(self) -> None:
+        text = "# \\`_foo_\\`\n\nSee \\`[real](missing.md)\\` and `[code](gone.md)` and [anchor](#foo)\n"
+        self.assertEqual(self.check({"README.md": text}), ["3:missing.md"])
 
     def test_links_in_code_and_comments_are_ignored(self) -> None:
         text = "`[a](missing.md)`\n\n```\n[b](missing.md)\n```\n\n<!--\n[c](missing.md)\n-->\n"
