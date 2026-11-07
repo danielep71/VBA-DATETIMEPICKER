@@ -195,10 +195,6 @@ Use only the categories needed by a release.
   that a clean package built from these inputs renders all three images remains
   outstanding under [#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90).
 
-- Fixed label drift checks for valid label names containing pipes or backticks
-  by comparing structured canonical plans instead of parsing Markdown reports
-  (PR #116 follow-up). Added clean, drift and failure regression fixtures.
-
 - Aligned core issue labels with the Excel VBA repository template, preserved
   DateTimePicker labels, and added automatic label sync and drift detection.
   Standardized traffic workflow permissions, runner and action pin; enabled
@@ -206,9 +202,16 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Fixed label drift checks for valid label names containing pipes or backticks
+  by comparing structured canonical plans instead of parsing Markdown reports
+  (PR #119). Added clean, drift and failure regression fixtures.
+
+
 - The Markdown link gate decodes backslash escapes, as GitHub does. A valid
   link such as `[guide](guide\(v2\).md)` was reported as missing, and an
   escaped character in a heading, as in `DP\_Start`, produced the wrong anchor.
+  Escaped backticks are also handled when identifying inline code spans
+  (PR #175), so links outside code remain checked and code examples stay excluded.
   HTML attributes and autolinks are still taken literally
   ([#171](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/171)).
 
@@ -222,7 +225,7 @@ Use only the categories needed by a release.
   reported as the new `VBA-CALL-005`. Each fix has positive and negative
   fixtures. The checker stays advisory and is not a release gate.
 
-- Package inspector review follow-up (#129): trace calls evaluated in `If` and
+- Package inspector review corrections (PR #131, following #129): trace calls evaluated in `If` and
   `ElseIf` conditions, treat `AddressOf` operands as unknown dispatch rather than
   execution, and report malformed or prohibited Ribbon XML as structured
   extraction failures. Added regression fixtures for all three cases.
@@ -279,6 +282,16 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- Added the GitHub Pages project website (`index.html` and `.nojekyll`), with
+  installation guidance, feature descriptions and repository links (PR #136,
+  following #135).
+
+- Reconciled contribution rules, issue-form branch names, traffic credentials
+  and Dependabot scope; CI pins Node.js 24 LTS (issue #179).
+- Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
+  label-policy defaults and workflow/documentation mismatches (issue #180).
+- Reconciled superseded Unreleased claims, categories and references (issue #181).
+
 - The project website now names the Apache License 2.0 in its page
   description, hero line, "Can I adapt it?" answer and footer, which still said
   MIT after the relicensing. The FAQ also mentions keeping the NOTICE file when
@@ -293,7 +306,8 @@ Use only the categories needed by a release.
 - CONTRIBUTING describes the release-branch merge flow: task pull requests
   into `release/vX.Y.Z` with `Resolves #N`, issues closed by hand after
   verification, an integration pull request into `main` with `Refs #N` and a
-  merge commit, and a sync pull request back. Dependabot now targets the
+  merge commit. Sync PRs apply only when the release branch lacks main commits;
+  recreation at main already synchronizes it. Dependabot now targets the
   active release branch. After an integration deletes and recreates the
   release branch, open pull requests that GitHub moved to `main` are set back
   to it
@@ -323,20 +337,12 @@ Use only the categories needed by a release.
   certification evidence in [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63).
   This documentation-only follow-up does not change the published tag or assets.
 
-- Reconciled the repository documentation with the published `v1.2.2` state.
-  README: the Quick start lists the two `demo/` modules `M_DatePicker` needs to
-  compile ([#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86)) and the three custom Ribbon images the RibbonX part
-  references ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)); the `DP_WriteResult` field order matches the
-  source; the repository tree lists `docs/`, `RELEASING.md` and `VERSION`; the
-  Wiki stamps read `v1.2.2` / `029d3d4`; the open `Ribbon_Reset` limitation
-  ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)) is listed. INSTALLATION names the **DateTime Picker** Ribbon
-  group, quotes the real provider-refusal message and the Windows unblock
-  wording. SECURITY describes `main` as the latest release and `release/*` as
-  development code. The bug-report template lists the `TechnicalFailure*`
-  fields of `DP_WriteResult`. The certification template records GitHub's
-  space-to-dot asset rename. The `1.2.2` Validation note saying the
-  `src/` → `demo/` compile dependency "predates `v1.2.0`" is corrected: it was
-  introduced during the `v1.2.0` cycle and is absent at `v1.1.1`.
+- The README Quick start lists the two `demo/` modules needed to compile,
+  the three custom Ribbon images and the correct `DP_WriteResult` field order.
+  INSTALLATION quotes the provider-refusal message and Windows unblock wording.
+  The optional bug-report details document the `TechnicalFailure*` fields.
+  The historical compile dependency is identified as introduced in the `v1.2.0`
+  cycle, not present at `v1.1.1`.
 
 - Recorded the administrative closure of the `v1.2.2` certification issue ([#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63), 2026-10-01) in the
   README release status and the `[1.2.2]` notes. Issue #63 was administratively closed with
