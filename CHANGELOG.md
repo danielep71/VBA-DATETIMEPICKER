@@ -202,6 +202,9 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
+  label-policy defaults and workflow/documentation mismatches (issue #180).
+
 - Fixed label drift checks for valid label names containing pipes or backticks
   by comparing structured canonical plans instead of parsing Markdown reports
   (PR #119). Added clean, drift and failure regression fixtures.
@@ -282,14 +285,17 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- Aligned the release procedure and certification template with the evidence
+  validator: certify the integrated main SHA, record both required packages,
+  per-host environments, harness totals and six manual records, and retain a
+  separate mandatory Ribbon-resource result (issue #178).
+
 - Added the GitHub Pages project website (`index.html` and `.nojekyll`), with
-  installation guidance, feature descriptions and repository links (PR #136,
-  following #135).
+  installation guidance, feature descriptions and repository links (PR #135,
+  integrated by PR #136).
 
 - Reconciled contribution rules, issue-form branch names, traffic credentials
   and Dependabot scope; CI pins Node.js 24 LTS (issue #179).
-- Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
-  label-policy defaults and workflow/documentation mismatches (issue #180).
 - Reconciled superseded Unreleased claims, categories and references (issue #181).
 
 - The project website now names the Apache License 2.0 in its page
