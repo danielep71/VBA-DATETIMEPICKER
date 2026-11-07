@@ -70,7 +70,7 @@ body:
       value: |
         Release tag:          <e.g. v1.2.2 / N/A>
         Commit SHA:           <full 40-character SHA if known>
-        Branch:               <main / release/x.y.z / other / N/A>
+        Branch:               <main / release/vX.Y.Z / other / N/A>
         Source obtained from: <official repository / GitHub Release / other>
         Workbook/add-in filename:
       render: text
