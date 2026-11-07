@@ -303,7 +303,9 @@ Keep for visible UI or native-window changes.
 
 - [ ] `UF_DatePicker.frm` and `.frx` remain synchronized.
 - [ ] Label hooks and dynamically created controls are wired and released safely.
-- [ ] Ribbon callback names, `customUI.xml`, its `_rels` mapping, and every custom image it references remain synchronized (`check-ribbon-resources.py` passes).
+- [ ] Ribbon callback names, `customUI.xml`, its `_rels` mapping, and every custom image it references remain synchronized (`check-ribbon-resources.py` passes). For release certification, retain its
+  exact-candidate output separately from the eleven-check static report; a
+  path-filtered workflow without a run is not evidence.
 - [ ] 32-bit and 64-bit declarations and valid-zero WinAPI returns are handled correctly.
 - [ ] Positioning, borders, drag, scaling, multi-monitor, and modeless interaction are checked as applicable.
 - [ ] No unsolicited production `MsgBox` or persistent worksheet artifact is introduced.

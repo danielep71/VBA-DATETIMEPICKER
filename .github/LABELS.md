@@ -19,7 +19,7 @@ clean and drift outcomes, invalid input and canonical/local disagreement.
 - Daily drift detection is read-only and uploads its comparison as an artifact.
 - `prune: true` removes labels absent from the selected catalogue. Add any
   new project labels to the overlay before merging; review the plan first.
-- Weekly Dependabot PRs maintain pinned GitHub Actions versions.
+- Weekly Dependabot PRs maintain pinned GitHub Actions and hash-locked pip tools.
 - Traffic export retains its analytics environment and history branch, with
   write permissions scoped to its job. It does not run repository test code.
 

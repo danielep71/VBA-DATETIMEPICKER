@@ -673,7 +673,8 @@ Contributor-controlled code executed:
 
 The repository-level `analytics` environment is not a workflow-identity
 boundary. No job that executes repository build/test/release code should
-declare it or receive `TRAFFIC_TOKEN`.
+declare it or receive the `TRAFFIC_APP_PRIVATE_KEY` secret or the short-lived
+App token (passed as `TRAFFIC_TOKEN` only to the traffic API fetch step).
 
 </details>
 

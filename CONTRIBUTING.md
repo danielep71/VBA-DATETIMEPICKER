@@ -125,9 +125,8 @@ not present.
 8. Update documentation and release notes required by the change.
 9. Push the branch and open a pull request with evidence and limitations.
 
-Repository maintainers may use the repository's configured direct-push workflow
-where permitted. External contributions and reviewable portfolio changes should
-use branches and pull requests.
+Use topic branches and reviewed pull requests for changes. `main` receives
+release work only through an integration pull request.
 
 <a id="release-branches"></a>
 
@@ -161,9 +160,10 @@ Four kinds of pull request follow from that:
   When the release branch is deleted, GitHub moves every open pull request
   that targeted it to `main`. After recreating it, check open pull requests
   and set each one's base back to the release branch.
-- **Sync pull requests** bring `main` back into the release branch right after
-  each integration, and whenever `main` gains changes the release branch lacks,
-  such as a direct dependency update. Open them from a dedicated branch that
+- **Sync pull requests** are needed only when `main` contains commits the
+  release branch lacks. Recreating the release branch at the integrated `main`
+  SHA already synchronizes it; do not open an empty sync PR. If a later
+  integration leaves a surviving release branch behind, open a sync PR from a dedicated branch that
   points at `main` (for example `chore/sync-main-into-v1.2.3`), not from
   `main` itself, so that any conflict resolution is committed on that branch and
   never on `main`.

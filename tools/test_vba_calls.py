@@ -40,6 +40,17 @@ def codes(report: dict[str, Any], severity: str = "error") -> list[str]:
     return sorted(f["code"] for f in report["configurations"]["fixture"]["findings"] if f["severity"] == severity)
 
 
+class AdvisoryCompleteness(unittest.TestCase):
+    def test_non_gating_parse_failure_is_incomplete(self) -> None:
+        report = analyze({"M_A.bas": mod("M_A", "Public Sub DP_Broken()\n")}, gating=False)
+        self.assertEqual(report["status"], "incomplete")
+        self.assertFalse(report["configurations"]["fixture"]["complete"])
+
+    def test_non_gating_complete_source_still_passes(self) -> None:
+        report = analyze({"M_A.bas": mod("M_A", "Public Sub DP_OK()\nEnd Sub\n")}, gating=False)
+        self.assertEqual(report["status"], "pass")
+
+
 class ResolutionTests(unittest.TestCase):
     def test_valid_local_and_cross_module_calls(self) -> None:
         report = analyze({

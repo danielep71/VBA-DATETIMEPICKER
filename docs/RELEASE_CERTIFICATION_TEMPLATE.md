@@ -1,326 +1,185 @@
 # 🧾 Release Certification Record
 
-**Version:** `vX.Y.Z`
 **Certified by:** <!-- name -->
 **Date:** <!-- YYYY-MM-DD -->
 
-Fill this in as you certify, not afterwards from memory. Every field is a fact
-someone else must be able to check without asking you. A blank is better than a
-guess — a blank is visible, a guess is not.
+Use this human-readable record alongside `release-evidence.json`, not instead
+of it. Generate the JSON with `tools/check_release.py --prepare` after testing
+and hashing the final packages. Fill it from actual logs; never invent results.
+An incomplete record is a blocker, not evidence of success.
 
-Procedure and rules live in
-[RELEASING.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/RELEASING.md);
-this file records what that procedure produced.
+## 1. Identity and order
 
----
-
-## 1. Identity
-
-| Field | Value |
+| JSON field / identity | Recorded value |
 | --- | --- |
-| Reviewed source SHA | <!-- full 40-character SHA of the source the evidence describes --> |
-| Tag name | <!-- e.g. vX.Y.Z --> |
-| Annotated tag object SHA | <!-- `git rev-parse vX.Y.Z` --> |
-| Tag target SHA | <!-- `git rev-parse vX.Y.Z^{commit}` --> |
-| Previous release tag | <!-- e.g. vX.Y.Z-1 --> |
-| `VERSION` file contents | <!-- must equal the version above --> |
-| Branch | <!-- e.g. release/vX.Y.Z --> |
+| `schema_version` | `1` |
+| `candidate_sha` | <!-- full 40-character main commit after integration --> |
+| `version` | <!-- exact VERSION contents, X.Y.Z --> |
+| `tag` | <!-- vX.Y.Z --> |
+| Integration PR | <!-- link --> |
+| Previous release tag | <!-- tag --> |
+| Annotated tag object SHA | <!-- git rev-parse vX.Y.Z --> |
+| Tag target SHA | <!-- git rev-parse vX.Y.Z^{commit}; must equal candidate_sha --> |
 
-> [!IMPORTANT]
-> An annotated tag is its own git object. `git rev-parse vX.Y.Z` returns the tag
-> object; `git rev-parse vX.Y.Z^{commit}` returns the commit it targets. Both are
-> recorded because only the target can be compared against the reviewed source,
-> and quoting the tag object SHA as though it were the commit is wrong in a way
-> nothing surfaces.
->
-> The reviewed source SHA and the tag target SHA are also recorded separately.
-> They are usually the same. When they are not — because documentation-only
-> commits landed after the last executable change — say which commit the
-> regression figures actually describe. Figures quoted against a commit that did
-> not produce them look like evidence and are not.
+- [ ] Open the release branch at cycle start; collect reviewed task PRs.
+- [ ] Freeze scope; finish version, dated changelog and documentation preparation.
+- [ ] Integrate into main; record the resulting main commit as the candidate.
+- [ ] Run static checks on the clean exact candidate; retain its successful main push run.
+- [ ] Compile and exercise embedded candidate source in Excel.
+- [ ] Build both packages from that SHA; include the required packaged harness.
+- [ ] Reopen and compile each final package; run standard and UI-smoke packs.
+- [ ] Complete the manual records; compute final sizes and hashes.
+- [ ] Prepare and complete JSON; validate before tagging.
+- [ ] Tag that exact certified commit; upload those same bytes without rebuilding.
+- [ ] Verify published packages, tag and evidence with the release-check workflow.
 
-If the reviewed source SHA and the tag target SHA differ, state why:
+The tag object and target are different identities. The target, source,
+static report and both asset `candidate_sha` fields must all name the same
+commit. Even a documentation-only new commit requires renewed candidate evidence.
 
-```text
-<!-- e.g. documentation-only commits between the reviewed source and the tag -->
-```
+## 2. Static evidence
 
----
+Run `python tools/check.py --ci` on the clean candidate. Retain
+`test-results/static-checks.json` and `.md`, complete output and workflow URL.
+The JSON must have `status: pass`, exact `candidate_sha`, `dirty: false`,
+`mode: committed`, and exactly these eleven checks, each with `exit_code: 0`:
 
-## 2. Environment
-
-Record only what you actually ran on.
-
-```text
-Excel product, version, build:
-Office bitness:                    32-bit / 64-bit
-Windows edition, version, build:
-Display scaling / monitors:
-Other add-ins loaded in the process:
-Clean VM or developer workstation:
-```
-
-> [!NOTE]
-> A developer workstation with other add-ins loaded is an acceptable environment
-> if it is recorded as one. What is not acceptable is leaving the reader to
-> assume a clean machine.
-
----
-
-## 3. Required order
-
-Tick these in sequence as you go. The order is the guarantee: certifying a
-candidate that was built before it was frozen proves nothing about the artifacts
-that ship, and hashing before the package is tested means the hash may belong to
-a file that fails.
-
-- [ ] 1. Freeze the candidate and record its SHA.
-- [ ] 2. Static gates pass on that exact SHA.
-- [ ] 3. Certify in Excel on that exact SHA — embedded host.
-- [ ] 4. Build the release artifacts **from that same SHA**.
-- [ ] 5. Package-test the built artifacts — packaged host.
-- [ ] 6. Hash the tested artifacts, not earlier files.
-- [ ] 7. Tag the certified commit.
-- [ ] 8. Upload the already-hashed artifacts. Do not rebuild.
-- [ ] 9. Re-read the published release and verify it.
-
-If any step sends you backwards, every later step is void and must be redone.
-Record what was redone in **Deviations**.
-
----
-
-## 4. Static gates
-
-| Gate | Result |
+| Required check | Result / evidence |
 | --- | --- |
-| `Debug → Compile VBAProject` | <!-- PASS / FAIL --> |
-| Encoding: source files are ASCII | <!-- PASS / FAIL --> |
-| Line endings match `.gitattributes` | <!-- PASS / FAIL --> |
-| No test-only or temporary instrumentation in the candidate | <!-- PASS / FAIL --> |
-| VBE/VBA source companions complete (`.frm` + required `.frx`) | <!-- PASS / FAIL --> |
-| Ribbon/Open XML package-input inventory complete | <!-- PASS / FAIL / N/A --> |
-| Every RibbonX custom image/resource resolves to tracked candidate source | <!-- PASS / FAIL / N/A --> |
-| Working tree clean at the reviewed SHA | <!-- PASS / FAIL --> |
+| `tool-tests` | <!-- --> |
+| `check_vba_conditionals-fixtures` | <!-- --> |
+| `check_vba_jumps-fixtures` | <!-- --> |
+| `check_committed_whitespace-fixtures` | <!-- --> |
+| `check_source` | <!-- --> |
+| `check_vba_conditionals` | <!-- --> |
+| `check_vba_jumps` | <!-- --> |
+| `check_committed_whitespace` | <!-- --> |
+| `check_markdown_links` | <!-- --> |
+| `labels-sync` | <!-- --> |
+| `labels-drift` | <!-- --> |
 
-Commands run and their output:
+**Successful static-checks push run on main at candidate SHA:** <!-- URL -->
 
-```text
-<!-- e.g. git status --short ; git grep for probe markers -->
-```
-
----
-
-## 5. Regression evidence — embedded `.xlsm`
-
-Paste the runner's own summary line, verbatim. Do not retype the counts into
-prose: the line is the evidence, a transcription is a claim about it.
-
-```text
-Host workbook:     <!-- filename, IsAddin=False -->
-
-TST_DP_RunAll
-<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
-
-TST_DP_RunAll_WithUISmoke
-<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
-
-Suite topology:    <!-- ## standard / ## with UI smoke -->
-```
-
----
-
-## 6. Regression evidence — packaged `.xlam`
-
-**This section is required.** It has no default and is not satisfied by the
-embedded results above.
+**Required separate Ribbon record:** run
+`python .github/scripts/check-ribbon-resources.py --root src/ribbon` on the
+same clean candidate and retain SHA, command, exit code and output here.
+This is not an additional member of the eleven-check JSON set. A missing
+path-filtered workflow run is not a pass; the local recorded result is required.
+Missing Ribbon parts/resources block release.
 
 ```text
-Package filename:  <!-- exact name as it will be published; GitHub replaces spaces with dots on upload, so also record the local build name if it differs -->
-
-TST_DP_RunAll
-<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
-
-TST_DP_RunAll_WithUISmoke
-<!-- INFO | Harness | Summary | State=PASS; Run=###; Passed=###; Failed=0; CleanupFailures=0 -->
-
-Suite topology:    <!-- ## standard / ## with UI smoke -->
+Candidate SHA:
+Command / Python version / timestamp:
+Exit code and output:
 ```
 
-### Packaged Ribbon / Open XML verification
+## 3. Assets and per-host environments
 
-VBE compilation is not evidence that RibbonX was packaged. Record the actual
-packaged result:
+Both records are required in `assets`; store final files in `release-assets/`.
 
-| Check | Result |
+| Field | Add-in | Demo |
+| --- | --- | --- |
+| `host` | `xlam` | `xlsm` |
+| `filename` | `DATETIMEPICKER.vX.Y.Z.xlam` | `DATETIMEPICKER-demo-vX.Y.Z.xlsm` |
+| `candidate_sha` | <!-- same candidate --> | <!-- same candidate --> |
+| `size` | <!-- integer bytes > 0 --> | <!-- integer bytes > 0 --> |
+| `sha256` | <!-- final file digest --> | <!-- final file digest --> |
+| `compile` | <!-- PASS required --> | <!-- PASS required --> |
+| `environment.excel` | <!-- product/version/build --> | <!-- --> |
+| `environment.windows` | <!-- edition/version/build --> | <!-- --> |
+| `environment.bitness` | <!-- --> | <!-- --> |
+| `environment.scaling` | <!-- --> | <!-- --> |
+| `environment.monitors` | <!-- --> | <!-- --> |
+| `environment.load_mode` | <!-- actual load/startup route --> | <!-- --> |
+| `environment.other_addins` | <!-- explicit none or list --> | <!-- --> |
+
+Record source import and package construction steps, including the `.frm/.frx`
+pair, Ribbon XML, relationships and custom images. The packaged harness includes
+`test/M_cDP_Test.bas` as specified in `tools/vba-projects.json`; its absence
+cannot be replaced by a different smoke test. Remove no harness after testing.
+
+## 4. Packaged regression evidence
+
+Complete all four results. `standard` means `TST_DP_RunAll`; `ui_smoke` means
+`TST_DP_RunAll_WithUISmoke` in an interactive desktop session. Expected totals
+come from the candidate's suite topology, not by copying observed totals.
+
+| JSON field | xlam standard | xlam ui_smoke | xlsm standard | xlsm ui_smoke |
+| --- | --- | --- | --- | --- |
+| `state` | <!-- PASS --> | <!-- PASS --> | <!-- PASS --> | <!-- PASS --> |
+| `run` | <!-- integer --> | <!-- --> | <!-- --> | <!-- --> |
+| `passed` | <!-- integer --> | <!-- --> | <!-- --> | <!-- --> |
+| `failed` | <!-- 0 --> | <!-- 0 --> | <!-- 0 --> | <!-- 0 --> |
+| `cleanup_failures` | <!-- 0 --> | <!-- 0 --> | <!-- 0 --> | <!-- 0 --> |
+| `expected_run` | <!-- positive integer --> | <!-- --> | <!-- --> | <!-- --> |
+| `suites` | <!-- positive integer --> | <!-- --> | <!-- --> | <!-- --> |
+| `expected_suites` | <!-- positive integer --> | <!-- --> | <!-- --> | <!-- --> |
+
+`run == passed == expected_run > 0` and `suites == expected_suites > 0` are
+required for each pack. Paste all four runner summaries verbatim, plus logs,
+timestamps and the source of expected counts. Compile/harness NOT RUN is blocking.
+
+```text
+xlam standard:
+xlam ui_smoke:
+xlsm standard:
+xlsm ui_smoke:
+Expected counts / topology evidence:
+```
+
+## 5. Manual records
+
+The `manual` object must contain exactly these six names. Each needs `status`
+(`PASS` or `NOT RUN`) and nonempty `detail`. For NOT RUN, also fill `accepted_by`
+with the reviewer who explicitly accepted that gap. A failure is blocking;
+never recast a failed test as NOT RUN. Accepted gaps yield `pass_with_limitations`.
+
+| Name | Scenarios / evidence to describe | status | detail | accepted_by |
+| --- | --- | --- | --- | --- |
+| `provider-ownership` | second-provider refusal, owner teardown, clean-session DP_Show/DP_Close | <!-- --> | <!-- --> | <!-- --> |
+| `clock-lifecycle` | real OnTime delivery, rename/requalification, close and restart | <!-- --> | <!-- --> | <!-- --> |
+| `grid-ownership` | grid creation/removal, caller shapes preserved | <!-- --> | <!-- --> | <!-- --> |
+| `application-state` | events/settings restored; write-back, tables, formulas, protection/array refusal | <!-- --> | <!-- --> | <!-- --> |
+| `packaged-entry-paths` | keyboard, context menu, grid, Ribbon, startup; visuals/images and callbacks in both packages | <!-- --> | <!-- --> | <!-- --> |
+| `ribbon-image-provenance` | tracked image sources and redistribution evidence, distinct from visual rendering | <!-- --> | <!-- --> | <!-- --> |
+
+## 6. Validation and publication
+
+```sh
+python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output release-evidence.json
+# Fill the prepared record from the evidence above, then validate:
+python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
+# After the annotated tag exists:
+python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json --require-tag
+```
+
+| Record | Value |
 | --- | --- |
-| Expected Ribbon group/controls are present | <!-- PASS / FAIL / N/A --> |
-| `customUI/customUI.xml` is present in the Office package when advertised | <!-- PASS / FAIL / N/A --> |
-| Required Ribbon relationships/package metadata resolve | <!-- PASS / FAIL / N/A --> |
-| Every intended custom Ribbon image renders | <!-- PASS / FAIL / N/A --> |
-| Each enabled Ribbon callback dispatches correctly | <!-- PASS / FAIL / N/A --> |
+| Validator output / status / limitations | <!-- --> |
+| Published Release URL | <!-- --> |
+| Published-package release-check workflow URL and result | <!-- --> |
+| Downloaded filenames, sizes and SHA-256 comparison | <!-- --> |
+| Installation / packaged entry-path verification | <!-- --> |
+| Deviations and explicitly accepting reviewer | <!-- none or details --> |
 
-Candidate-controlled Ribbon inputs used:
+The validator checks record consistency and file hashes; it does not execute
+Excel, prove binary/source provenance or certify untested environments.
+Retain source/build logs and disclose these boundaries in the release notes.
 
-```text
-<!-- src/ribbon/customUI.xml, _rels/customUI.xml.rels, images/*.png -->
-```
+## 7. Sign-off
 
-If the harness is not present in the package, say so here and record how the
-package was exercised instead:
+- [ ] All required JSON fields are filled from evidence; both hosts are present.
+- [ ] The static report and separate Ribbon check describe the exact candidate.
+- [ ] Every manual gap has an explicit acceptance and is disclosed.
+- [ ] Tag target, tested sources, packages and evidence have one candidate identity.
+- [ ] Published downloads match the tested bytes; no post-test rebuild occurred.
+- [ ] Remaining limitations and deviations are recorded.
 
-```text
-<!-- N/A if the harness ran; otherwise describe what was run -->
-```
-
-> [!IMPORTANT]
-> The embedded workbook and the packaged add-in are different artifacts and have
-> failed differently in this project's history, and a packaged run has found
-> defects an embedded run did not. An unqualified "PASS" that does not name its
-> host is not evidence.
-
----
-
-## 7. Manual validation
-
-Record what you exercised and what happened. "Worked" is not a result.
-
-| Scenario | Result |
-| --- | --- |
-| `DP_Show` / `DP_Close` in a clean session | <!-- --> |
-| Single-cell write-back | <!-- --> |
-| Table-column fill | <!-- --> |
-| Formula preservation | <!-- --> |
-| Protected sheet / array-formula refusal | <!-- --> |
-| Each enabled entry path (keyboard, context menu, grid icon, Ribbon) | <!-- --> |
-| Packaged Ribbon visuals/resources (not merely callback execution) | <!-- --> |
-| Second-provider refusal | <!-- --> |
-| `DP_Stop` leaves no registration behind | <!-- --> |
-
-Checks the regression pack cannot make, because they need a real Excel session
-or a real file:
-
-```text
-<!-- e.g. live OnTime delivery; workbook rename requalification; install path -->
-```
-
----
-
-## 8. Artifacts
-
-| Artifact | Filename | SHA-256 | Size |
-| --- | --- | --- | --- |
-| Add-in | <!-- --> | <!-- --> | <!-- --> |
-| Demo workbook | <!-- --> | <!-- --> | <!-- --> |
-
-Built from SHA: <!-- must equal the reviewed source SHA above -->
-
-Package-input inventory:
-
-```text
-VBE/VBA source:
-<!-- .bas/.cls/.frm + required .frx -->
-
-Open XML/Ribbon source:
-<!-- customUI.xml, _rels/customUI.xml.rels, images/*.png; N/A only if no Ribbon ships -->
-```
-
-```text
-certutil -hashfile "<filename>" SHA256
-```
-
-### Source-identity discipline
-
-- [ ] No candidate source changed after these artifacts were built.
-- [ ] If it did: artifacts were rebuilt from the new SHA, package-tested again,
-      and re-hashed — and the prior package-test and hash evidence was discarded.
-- [ ] Nothing was rebuilt between tagging and upload.
-
-> [!CAUTION]
-> A rebuild after hashing silently invalidates the published digest. The file
-> people download then does not match the hash they are told to verify, and
-> nothing in the release surfaces the mismatch.
-
----
-
-## 9. Deviations
-
-Anything that did not go to plan, was skipped, or was accepted as a known
-limitation. Write it here rather than leaving it out.
-
-```text
-<!-- none, or an itemized list with rationale and owning issue -->
-```
-
----
-
-## 10. Post-publication verification
-
-Performed after the release is public, by re-reading GitHub rather than trusting
-what was uploaded.
-
-| Check | Result |
-| --- | --- |
-| `git rev-parse vX.Y.Z` matches the recorded tag object SHA | <!-- --> |
-| `git rev-parse vX.Y.Z^{commit}` matches the recorded tag target SHA | <!-- --> |
-| Release points at that tag | <!-- --> |
-| `VERSION` and the dated changelog section match the tag | <!-- --> |
-| Asset filenames match what was hashed (any GitHub space-to-dot rename recorded) | <!-- --> |
-| Each asset downloads, and its SHA-256 matches the published digest | <!-- --> |
-| Packaged artifact opens from the downloaded copy and passes its smoke test | <!-- --> |
-| Source archive contains expected VBA and Open XML/Ribbon source inputs | <!-- --> |
-| Installation links and examples in the release notes resolve | <!-- --> |
-| Default branch is ready for the next Unreleased cycle | <!-- --> |
-
-Re-hash the **downloaded** files, not the local build outputs:
-
-```text
-certutil -hashfile "<downloaded filename>" SHA256
-```
-
-> [!CAUTION]
-> Never delete and recreate a public tag to correct a mistake. Anyone who already
-> fetched it keeps the old object. Correct forward instead, and record the
-> correction here.
-
----
-
-## 11. Provenance limits
-
-State these plainly in the release rather than letting a reader infer stronger
-guarantees than exist.
-
-- [ ] No CI runs the regression pack. Every figure in this record was produced by
-      a human on a named host
-      ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15) remains
-      open).
-- [ ] Artifact hashes establish file identity only. They are not cryptographic
-      source-to-binary provenance: nothing here proves the published binary was
-      built from the recorded source
-      ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16) remains
-      open).
-- [ ] The `Public` surface is larger than the supported API, and formal
-      classification is outstanding
-      ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25) remains
-      open).
-
----
-
-## 12. Sign-off
-
-- [ ] Every field above is filled or explicitly marked N/A with a reason.
-- [ ] Every figure was pasted from a run, not transcribed.
-- [ ] Both hosts are recorded.
-- [ ] Artifact hashes were computed from the exact published files.
-- [ ] Deviations are recorded, including any this certification chose to accept.
-- [ ] The required order was followed, or every departure is recorded.
-- [ ] Post-publication verification was performed against the live release.
-
-**Certified:** <!-- name, date -->
-
----
+**Certified:** <!-- name, date; qualified by any disclosed limitations -->
 
 ## Related
 
-- [RELEASING.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/RELEASING.md) — the procedure this record documents
-- [CONTRIBUTING.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/CONTRIBUTING.md) — engineering contracts
-- [INSTALLATION.md](https://github.com/danielep71/VBA-DATETIMEPICKER/blob/main/INSTALLATION.md) — install and validation paths
+- [Release procedure](../RELEASING.md)
+- [Contribution rules](../CONTRIBUTING.md)
+- [Installation](../INSTALLATION.md)
+- [Tooling and validation limits](../tools/README.md)
