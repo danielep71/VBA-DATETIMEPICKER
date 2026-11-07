@@ -2,8 +2,8 @@ name: External Markdown links
 
 # Weekly check of the http(s) links in tracked Markdown. Dead links (404, 410,
 # DNS failure) fail the run; blocked, rate-limited or unreachable URLs are
-# listed as warnings. Relative links and anchors are checked offline on every
-# pull request by tools/check.py. Read-only: it never changes the repository.
+# listed as warnings. Relative links and anchors are checked offline on
+# pull requests targeting main or release/** by tools/check.py. Read-only: it never changes the repository.
 
 on:
   schedule:

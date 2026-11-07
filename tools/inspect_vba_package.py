@@ -388,7 +388,11 @@ def extract_package(path: Path) -> dict[str, Any]:
         names = {info.filename.casefold(): info for info in archive.infolist()}
         for part in ("customui/customui14.xml", "customui/customui.xml"):
             info = names.get(part)
-            if info is not None and info.file_size <= 1_000_000:
+            if info is not None and info.file_size > 1_000_000:
+                result["failures"].append(finding(
+                    "VBA-PKG-090", f"Ribbon part {info.filename} is too large to inspect."))
+                return result
+            if info is not None:
                 xml = archive.read(info)
                 try:
                     onload = [value for element, attribute, value in ribbon_callback_attributes(xml)

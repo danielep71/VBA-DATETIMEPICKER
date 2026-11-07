@@ -171,6 +171,11 @@ class Fixture(unittest.TestCase):
                          "commit", "-q", "-m", "fixture"]):
             subprocess.run(["git", "-C", str(self.repo), *command], check=True, capture_output=True)
 
+    def test_oversized_ribbon_fails_closed(self) -> None:
+        report = self.inspect(ribbon=b" " * 1_000_001)
+        self.assertIn("VBA-PKG-090", str(report))
+        self.assertIn("too large to inspect", str(report))
+
     def tearDown(self) -> None:
         self.temp.cleanup()
 
