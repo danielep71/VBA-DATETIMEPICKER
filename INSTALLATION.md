@@ -191,7 +191,9 @@ from source you imported.
 
 ### Validate
 
-1. Confirm the **Date / Time Picker** Ribbon group appears.
+1. Confirm the picker's Ribbon group appears on the **Home** tab. In `v1.2.2`,
+   the published add-in, it is labelled **DateTime Picker**; the current source
+   (unreleased `v1.2.3`) labels it **Date / Time Picker**.
 2. Select a date-formatted cell and confirm the entry path you expect —
    grid icon, context menu, keyboard shortcut or Ribbon — opens the picker.
 3. Write a date back and confirm the target cell receives it.

@@ -356,6 +356,18 @@ Use only the categories needed by a release.
   was still to be reconciled is replaced; the published tag and assets are
   unchanged.
 
+- The README and project website no longer describe `Ctrl + Shift + D` as
+  opt-in: it is enabled by default, and the README shows how to turn it off
+  with `M_Settings_SetEnableKeyboardShortcut False`. The footer button is named
+  **Time**, not Now; normal write-back is described as writing the current
+  selection, not a single cell; the regression badge and figures name the
+  version or commit they were measured at, and the README says the current
+  source has 32 standard suites. INSTALLATION names the `v1.2.2` Ribbon group
+  `DateTime Picker`. The README lists the registry sections apart from the
+  panel tabs, describes `DP_Click` as an Excel callback, completes the
+  repository tree and no longer promises `v1.1.x` upgrade paths
+  ([#177](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/177)).
+
 ### Validation
 
 - Pre-certification development run at `69a94d0` on the embedded `.xlsm` with
