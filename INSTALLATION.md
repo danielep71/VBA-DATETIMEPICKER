@@ -196,7 +196,7 @@ from source you imported.
    grid icon, context menu, keyboard shortcut or Ribbon — opens the picker.
 3. Write a date back and confirm the target cell receives it.
 4. Confirm no second provider is already active: a refusal message saying that
-   another copy of the DatePicker is already active, or that its ownership could
+   another copy of the Date / Time Picker is already active, or that its ownership could
    not be verified, means another copy owns the Excel process.
 
 Do not assume anything about what a published `.xlam` contains. Package contents
