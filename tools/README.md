@@ -1,6 +1,6 @@
 # DateTimePicker tooling
 
-Requirements: Git, Python 3.11+ and Node.js 20+ on PATH. No Python packages or
+Requirements: Git, Python 3.11+ and Node.js 24 LTS on PATH. No Python packages or
 Excel installation are needed for these checks. CI runs them on Python 3.13
 and runs the tooling tests on 3.11, the documented minimum. Run from the
 repository root:

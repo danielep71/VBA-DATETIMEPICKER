@@ -1360,7 +1360,7 @@ def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: se
         }
     errors = [f for r in results.values() for f in r["findings"] if f["severity"] == "error"] + \
         [f for f in coverage if f["severity"] == "error"]
-    incomplete = bool(coverage) or any(not r["complete"] for r in results.values() if r["gating"])
+    incomplete = bool(coverage) or any(not r["complete"] for r in results.values())
     status = "fail" if errors else "incomplete" if incomplete else "pass"
     return {
         "schema_version": 1,

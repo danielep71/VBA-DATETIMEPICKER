@@ -36,7 +36,8 @@ A release is valid only when all of these statements are true:
 
 1. The candidate is identified by its full SHA and is reachable from protected `main`.
 2. Release scope is frozen; unrelated work is deferred.
-3. `VERSION`, changelog, source headers, package metadata, and documentation agree.
+3. `VERSION`, changelog, package metadata, and current-version documentation agree.
+   Module implementation-history headers are not release-version fields.
 4. Static checks pass on the exact candidate.
 5. VBA compiles and project-specific certification passes on that candidate.
 6. Every binary artifact is built from that candidate, then tested as packaged.
@@ -87,19 +88,27 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 
 Test both embedded-source and add-in consumption if both are advertised for the release.
 
-## 1. Freeze and identify the candidate
+## 1. Open the release branch, then freeze the candidate
 
-1. Update refs and start from current protected `main`.
-2. Create the release-preparation branch required by repository policy.
-   Release work follows the pull-request types in
-   [CONTRIBUTING.md](CONTRIBUTING.md#release-branches): task pull requests into
-   the release branch, one integration pull request into `main`, and a sync
-   pull request back. Point Dependabot's `target-branch` at the new release
-   branch in the same change.
-3. Record the base and candidate full commit SHAs.
-4. Stop feature work on that branch.
-5. Review the complete diff from the previous release tag.
-6. Confirm that generated and binary changes are intentional.
+### Start of the release cycle
+
+Create `release/vX.Y.Z` from current protected `main` at the start of the cycle.
+Collect reviewed task PRs there, following
+[CONTRIBUTING.md](CONTRIBUTING.md#release-branches). Update every Dependabot
+`target-branch` for the new cycle; it takes effect when integrated into `main`.
+
+### Freeze and integrate
+
+1. Stop feature work and review the complete delta from the previous release tag.
+2. Complete version, changelog and documentation preparation (sections 2–4).
+3. Pass PR checks and record final-head review, then integrate into `main` with
+   a merge commit. Recreate the release branch at `main` if it was deleted;
+   restore open task PR bases. No sync PR is needed after recreation at that SHA.
+4. Fetch `origin/main`, check out the exact integration commit and record its
+   full SHA as `candidate_sha`. This **main commit after integration** is the
+   candidate to certify, build, test and tag; the pre-merge SHA is not interchangeable.
+5. Run sections 5–7 on that clean candidate. Require a successful static-checks
+   **push run on main** for this exact SHA, as `release-check.yml` requires.
 
 ```bash
 git fetch --tags --prune
@@ -122,7 +131,9 @@ Update every applicable surface in one reviewable change:
 
 - `VERSION`
 - `CHANGELOG.md`
-- production VBA module headers
+- current-version package metadata (production module headers are not versioned)
+- demo builder header only if its implementation version actually changes; its
+  existing `VERSION 1.3.0` is implementation history, not the release version
 - README compatibility and installation examples
 - Ribbon XML or package metadata when changed
 
@@ -177,12 +188,16 @@ closed v1.2.2 evidence is not reopened.
   ```
 
 - When the Ribbon is shipped, run
-  `python3 .github/scripts/check-ribbon-resources.py`. It proves that every
+  `python .github/scripts/check-ribbon-resources.py --root src/ribbon`. It proves that every
   custom `image` dependency has a tracked file and an explicit package mapping,
   and that the part's namespace matches its file name. The **Check Ribbon
   resources** workflow runs it on every pull request and release-branch push
   that touches `src/ribbon/`. Missing Ribbon XML, relationships, or referenced
   custom resources are a **blocking package-source failure**.
+  This is a required separate release record, not one of the eleven
+  `static-checks.json` gates. Run it locally on the exact clean candidate and
+  retain the command, SHA and successful output even when the path-filtered
+  workflow has no run. Do not infer success from a skipped workflow.
 - Do not treat **Debug → Compile VBAProject** as proof of Ribbon/package
   completeness. VBE compilation cannot see Open XML Ribbon parts.
 - Check 32-bit and 64-bit declarations and scan for credentials or generated noise.
@@ -215,8 +230,8 @@ Certification rules:
 
 Planned outputs:
 
-- DateTimePicker `.xlam` add-in
-- Demo `.xlsm` workbook, when published
+- `release-assets/DATETIMEPICKER.vX.Y.Z.xlam` add-in (required)
+- `release-assets/DATETIMEPICKER-demo-vX.Y.Z.xlsm` demo (required)
 - Source archive created by GitHub from the tag
 
 For each artifact:
@@ -243,11 +258,14 @@ For each artifact:
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
    VBA, **not** Open XML package completeness.
-7. Exclude developer-only tests unless the artifact promises them.
+7. Include the packaged harness required by `tools/vba-projects.json`, including
+   `test/M_cDP_Test.bas`, in both packages. Removing it or substituting another
+   smoke test does not satisfy `check_release.py`.
 8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
    group/controls are present, all intended custom images render, and each
    enabled Ribbon action dispatches correctly.
-9. Run the packaged smoke or regression test.
+9. Run both `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke` on each package.
+   Record expected and actual run/suite totals, failures and cleanup failures.
 10. Record filename, size, and SHA-256.
 11. Never edit the artifact after hashing.
 
@@ -257,31 +275,36 @@ that no release had shipped, and none of the images or the relationship part.
 This guide must not encode private/local resource locations as a workaround.
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\dist\<artifact>
+Get-FileHash -Algorithm SHA256 .\release-assets\<artifact>
 ```
 
 ```bash
-sha256sum dist/<artifact>
+sha256sum release-assets/<artifact>
 ```
 
 Publish only artifacts promised by the installation guide.
 
-## 8. Review and merge
+## 8. Validate the evidence before tagging
 
-Where policy requires a pull request, make these items easy to verify:
+Integration already happened in section 1. Do not merge or edit the candidate
+between final certification and tagging. Prepare the machine-readable record
+from the exact tested package bytes, then fill it from the retained logs:
 
-- intended version, previous tag, and candidate SHA;
-- changelog and version synchronization;
-- static and Excel results;
-- artifact manifest and hashes;
-- compatibility, migration, and security notes;
-- remaining limitations.
+```sh
+python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output release-evidence.json
+python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
+```
 
-Require configured checks and record the resulting `main` SHA. If the merge
-changes source identity, do not carry pre-merge artifacts, package results or
-hashes forward. Return to the exact-candidate certification/build sequence:
-compile and certify the merged source, rebuild both release artifacts from that
-SHA, package-test the rebuilt files, and re-hash them before tagging.
+Use [the certification template](docs/RELEASE_CERTIFICATION_TEMPLATE.md) alongside
+that JSON. Record both per-host environments, standard/UI-smoke counts and all
+six manual records. Blank or NOT RUN compile/harness fields block validation.
+A manual NOT RUN requires a nonempty reason and named accepting reviewer; it
+produces `pass_with_limitations`, not an unqualified pass. Unresolved failures
+cannot be accepted as gaps. The validator checks consistency and local hashes,
+not whether Excel was actually run or the binary was built from the asserted SHA.
+
+A new commit, including documentation changes, requires a new candidate and
+renewed exact-source evidence; package changes invalidate test and hash evidence.
 
 ## 9. Create the annotated tag
 
@@ -297,7 +320,7 @@ vX.Y.Z - <short release title>
 Certified at <full 40-character SHA>.
 Embedded .xlsm: standard <passed>/<run>, UI smoke <passed>/<run>, Failed=0, CleanupFailures=0.
 Packaged .xlam: standard <passed>/<run>, UI smoke <passed>/<run>, Failed=0, CleanupFailures=0.
-Fixes #<n>, #<n>.
+Refs #<n>, #<n>.
 Deviations: none.
 Evidence: #<certification issue>.
 ```
@@ -313,9 +336,9 @@ Evidence: #<certification issue>.
 
 ```bash
 git switch main
-git pull --ff-only
-git rev-parse HEAD
-git tag -a vX.Y.Z -F ../tag-message-vX.Y.Z.txt
+git fetch origin main --tags
+git rev-parse <certified-main-sha>
+git tag -a vX.Y.Z <certified-main-sha> -F ../tag-message-vX.Y.Z.txt
 git show --no-patch --decorate vX.Y.Z
 git push origin vX.Y.Z
 ```
@@ -334,7 +357,14 @@ tag to hide a mistake.
 Retain at least:
 
 - candidate commit SHA
-- static-check result
+- `release-evidence.json` and the validator output
+- exact-candidate `static-checks.json` with all eleven gates and successful main push-run URL
+- separate Ribbon-resource command, candidate SHA and successful output
+- all six named manual records: `provider-ownership`, `clock-lifecycle`,
+  `grid-ownership`, `application-state`, `packaged-entry-paths`,
+  `ribbon-image-provenance`; status, detail and accepting reviewer for every gap
+- all seven environment fields for each package host: `excel`, `windows`,
+  `bitness`, `scaling`, `monitors`, `load_mode`, `other_addins`
 - supported Excel versions and bitness
 - core and UI-smoke results
 - artifact SHA-256 hashes
@@ -361,6 +391,10 @@ Create the release from the annotated tag and include:
 8. Security-reporting link.
 
 Upload the already-hashed artifacts. Do not rebuild between tagging and upload.
+After publication, dispatch `release-check.yml` with `candidate_sha` and the
+completed JSON. It retrieves the successful main push-run static report and
+both published packages, then validates the annotated tag and downloaded hashes.
+Retain its report and disclose any accepted manual limitations.
 
 ## 11. Verify after publication
 
@@ -401,7 +435,7 @@ Do not silently replace assets or move the tag.
 
 | # | Gate | Done |
 | ---: | --- | :---: |
-| 1 | Scope frozen and diff reviewed | ☐ |
+| 1 | Scope frozen, diff reviewed and preparation integrated into main | ☐ |
 | 2 | Version surfaces synchronized | ☐ |
 | 3 | Changelog finalized | ☐ |
 | 4 | Installation verified cleanly | ☐ |
@@ -409,7 +443,7 @@ Do not silently replace assets or move the tag.
 | 6 | Excel certification passes | ☐ |
 | 7 | Artifacts built and packaged-tested | ☐ |
 | 8 | Hashes and evidence recorded | ☐ |
-| 9 | Required pull request merged | ☐ |
+| 9 | Evidence validated against the exact certified main SHA | ☐ |
 | 10 | Annotated tag targets certified main SHA | ☐ |
 | 11 | GitHub Release published | ☐ |
 | 12 | Post-publication checks pass | ☐ |

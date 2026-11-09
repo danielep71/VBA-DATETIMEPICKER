@@ -91,8 +91,8 @@ def run_gate(
     ``self_test_error_prefix``.
 
     Gates whose output contract differs keep their own ``main``: here that is
-    ``check_release.py`` (atomic writes and a console rendering distinct from
-    its Markdown summary) and ``check.py`` (the aggregate runner).
+    ``check_release.py`` (evidence preparation/validation and JSON console output)
+    and ``check.py`` (the aggregate runner).
     """
     if self_test is not None and options.self_test:
         try:
