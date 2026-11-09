@@ -41,13 +41,13 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '     are grouped separately so the public surface is easier to navigate.
 '
 ' UPDATED
-'   2026-04-24
+'   2026-11-09
 '
 ' AUTHOR
 '   Daniele Penza
 '
 ' VERSION
-'   1.3.0
+'   Versioned with the project. See the VERSION file at the repository root
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------

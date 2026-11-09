@@ -14,9 +14,9 @@ Option Explicit
 '   The demo sheet was previously hand-built and lived only inside
 '   demo/DATEPICKER.xlsm. That had two consequences:
 '
-'     - Ribbon_Demo resolves the sheet from ThisWorkbook, so the Ribbon demo
-'       button works when the code is embedded in the demo workbook and fails
-'       in the .xlam, which has no worksheets at all
+'     - Ribbon_Demo resolved the sheet from ThisWorkbook, so the Ribbon demo
+'       button worked when the code was embedded in the demo workbook and
+'       failed in the .xlam, which has no worksheets at all
 '
 '     - the demo had no reviewable source. A change to it appeared in a pull
 '       request as a binary diff and nothing else
@@ -28,6 +28,7 @@ Option Explicit
 ' PUBLIC SURFACE
 '   - DP_Demo_CreateDemoSheet
 '   - DP_Demo_EnsureDemoSheet
+'   - DP_Demo_FillTableColumn
 '
 ' EXPECTED DEMO SHEET
 '   - Worksheet name: DATE PICKER DEMO
@@ -64,7 +65,7 @@ Option Explicit
 '   That is intentional: it demonstrates the UseLocalNames setting
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -225,8 +226,8 @@ Public Sub DP_Demo_CreateDemoSheet( _
     'Build or rebuild the standard demo template
         HandlerStep = "Build sheet template"
     'Named arguments are used so only the values that differ from the builder
-    'defaults appear here. Passing all twenty-five positionally exceeds the VBA
-    'limit of twenty-five line continuations in a single statement
+    'defaults appear here. Passing all twenty-six positionally, one per line,
+    'exceeds the VBA limit of twenty-five line continuations in one statement
         DEMO_Sheet_BuildTemplate _
             WS_Name:=DEMO_SHEET_NAME, Title:=DEMO_TITLE, SubTitle:=DEMO_SUBTITLE, _
             TargetWorkbook:=Wb, _
@@ -918,8 +919,10 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
 '
 ' WHY THIS EXISTS
 '   Write-back scope is the highest-risk behaviour in the component. The section
-'   gives a tester contiguous and non-contiguous ranges to select so the written
-'   scope can be observed directly
+'   is meant to give a tester contiguous and non-contiguous ranges to select so
+'   the written scope can be observed directly. Its second scenario row is
+'   labelled as a discontiguous selection but names D25:D27, which is
+'   contiguous. That row text is code and is left to a separate fix (#182)
 '
 ' INPUTS
 '   WS
@@ -946,7 +949,7 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
 '   to build a multi-cell selection with
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -981,7 +984,8 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
         WS.Range("C23").Value = "Multi-cell write-back"
         WS.Range("E23").Value = "Positive"
         WS.Range("F23").Value = "All selected cells should receive the picked date."
-    'Non-contiguous selection
+    'Scenario row labelled as a discontiguous selection. The range it names,
+    'D25:D27, is contiguous, so the row does not yet exercise that case (#182)
         WS.Range("C24").Value = "Select D25:D27 together"
         WS.Range("E24").Value = "Negative"
         WS.Range("F24").Value = "Discontiguous selection is not a single target."
@@ -1027,9 +1031,10 @@ Private Sub DP_Demo_BuildTableSection(ByVal WS As Worksheet)
 '   Builds the Excel Table demo section as a real ListObject
 '
 ' WHY THIS EXISTS
-'   Write-back into a structured table is the scenario behind the current
-'   table-column write-scope defect. The section must be a genuine ListObject,
-'   not a formatted range, or it does not exercise that path at all
+'   Write-back into a structured table is the scenario behind the former
+'   table-column write-scope defect, where picking a date in one table cell
+'   wrote the whole column (#13). The section must be a genuine ListObject, not
+'   a formatted range, or it does not exercise that path at all
 '
 ' INPUTS
 '   WS
@@ -1056,7 +1061,7 @@ Private Sub DP_Demo_BuildTableSection(ByVal WS As Worksheet)
 '   reporting how many cells it would affect
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------

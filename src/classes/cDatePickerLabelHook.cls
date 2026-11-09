@@ -118,7 +118,7 @@ Option Explicit
     Private Const DP_ERR_NO_OWNER       As Long = 513           'OwnerForm is Nothing
     Private Const DP_ERR_NO_LABEL       As Long = 514           'TargetLabel is Nothing
     Private Const DP_ERR_BAD_HOVER      As Long = 515           'Unsupported hover mode
-    Private Const DP_ERR_BAD_METHOD     As Long = 516           'Owner form missing required method
+    Private Const DP_ERR_BAD_METHOD     As Long = 516           'Blank ClickHandlerName
     Private Const DP_ERR_CLICK_UNINIT   As Long = 520           'Click fired before initialization
     Private Const DP_ERR_CLICK_NO_OWNER As Long = 521           'OwnerForm lost during click
 
@@ -356,6 +356,10 @@ Public Sub Initialize( _
 '     Optional name of the public method on OwnerForm that receives click
 '     actions. Defaults to UF_PickerPanel_HandleAction
 '
+'   DragEnabled
+'     Optional. True makes a left-button MouseDown on the label start a
+'     UserForm drag through OwnerForm.UF_Form_BeginDrag. Defaults to False
+'
 ' RETURNS
 '   Nothing
 '
@@ -363,7 +367,7 @@ Public Sub Initialize( _
 '   Rejects re-initialization of an already-live hook, clears state, validates
 '   supplied references and supported hover modes, normalizes all routing names,
 '   and stores the owner form, target label, action, hover, click-handler, and
-'   optional leave-handler state
+'   drag-enabled state
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if:
@@ -372,6 +376,9 @@ Public Sub Initialize( _
 '     - TargetLabel is Nothing
 '     - HoverMode is unsupported
 '     - ActionName is supplied but ClickHandlerName is blank
+'
+'   The blank-handler case is the only use of DP_ERR_BAD_METHOD. Whether
+'   OwnerForm actually exposes the named method is not checked here (see NOTES)
 '
 ' DEPENDENCIES
 '   MSForms.Label
@@ -394,7 +401,7 @@ Public Sub Initialize( _
 '   event routing
 '
 ' UPDATED
-'   2026-05-04
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
