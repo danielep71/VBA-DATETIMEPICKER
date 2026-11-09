@@ -202,6 +202,15 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Demo builder buttons: `DEMO_Btn_AddGrid` passed a fill colour into
+  `DEMO_Btn_Add`'s `IsPrimary` parameter, so every grid button came out
+  primary whatever its specification. Grid specifications now take an
+  optional `IsPrimary` Boolean in place of the colour, and any other value
+  raises instead of being silently converted. Buttons created without an
+  action no longer point at a missing macro: the new placeholder
+  `DEMO_DEMOButton_NotAssigned` says that the button has no action yet
+  ([#183](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/183)).
+
 - Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
   label-policy defaults and workflow/documentation mismatches (issue #180).
 
