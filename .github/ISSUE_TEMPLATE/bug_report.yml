@@ -200,7 +200,7 @@ body:
     id: call
     attributes:
       label: 🔢 Smallest exact call
-      description: If the issue can be reproduced from VBA, paste the smallest call that actually reproduced it, not what you think the project intended. For write-back defects, include the DP_WriteResult counts.
+      description: If the issue can be reproduced from VBA, paste the smallest call that actually reproduced it, not what you think the project intended. For write-back defects, include the DP_WriteResult counts from DP_FillTableColumn, or the exact shortfall message for calendar selection, DP_Today or DP_Now.
       render: vb
     validations:
       required: false
@@ -226,7 +226,7 @@ body:
     id: session
     attributes:
       label: Excel session
-      description: For provider or registration problems, the version of every DatePicker copy in the same Excel process matters. `v1.2.0` is the provider-lease boundary; a pre-`v1.2.0` copy does not take part in the lease.
+      description: For provider or registration problems, the version of every DatePicker copy in the same Excel process matters. `v1.2.0` introduced the provider lease but checked it only in `DP_Start`; every entry path checks it from `v1.2.1`. A pre-`v1.2.0` copy does not take part in the lease.
       value: |
         Open workbooks:
         Other add-ins active:
@@ -292,6 +292,7 @@ body:
         - .xlam only
         - Embedded + .xlam
         - Two lease-participating providers
+        - v1.2.1+ provider + v1.2.0 provider
         - Lease-participating provider + pre-v1.2.0 provider
         - Another third-party add-in
         - Protected worksheet
