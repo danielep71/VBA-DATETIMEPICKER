@@ -1,10 +1,12 @@
 # dist/
 
 This folder is where the packaged build output of the add-in is written locally.
-It is empty in a fresh clone.
+In a fresh clone it holds only this README.
 
-The add-in is generated from the VBA source under [`../src`](../src) and is
-intentionally **not tracked in git** — it's a binary build artifact, so it's
+The add-in is built from the VBA source under [`../src`](../src), together with
+the two [`../demo`](../demo) modules it needs to compile and the
+[`../test`](../test) harness that every package carries (see
+[`../RELEASING.md`](../RELEASING.md)). It is intentionally **not tracked in git** — it's a binary build artifact, so it's
 excluded via `.gitignore`.
 
 To get the add-in, download the latest release asset from the

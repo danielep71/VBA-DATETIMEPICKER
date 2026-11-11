@@ -281,8 +281,10 @@ Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at
   the unknown-symbol fixture uses a genuinely unknown project symbol.
 - `check_vba_jumps.py`: evaluates each reachable conditional source separately,
   retaining original line numbers for alternative procedure declarations.
-- CodeQL workflow: unchanged. Action versions and actionlint pin follow the
-  template; CodeQL action paths are grouped in Dependabot.
+- CodeQL workflow: adds the `actions` language and a timeout on the eligibility
+  job (#151). Dependabot keeps the action pins current, so they can be newer
+  than the template's; the actionlint pin matches it. CodeQL action paths are
+  grouped in Dependabot.
 
 All adopted tools carry the type annotations and line wrapping that the Ruff
 and mypy gates require; their behaviour is unchanged.

@@ -164,8 +164,7 @@ Import:
 src/modules/M_DatePicker.bas
 src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
-src/forms/UF_DatePicker.frm
-src/forms/UF_DatePicker.frx
+src/forms/UF_DatePicker.frm      (keep UF_DatePicker.frx beside it)
 demo/M_DP_DEMO.bas
 demo/M_DEMO_BUILDER.bas
 ```
@@ -194,7 +193,8 @@ VBA Editor → Debug → Compile VBAProject
 
 > [!IMPORTANT]
 > Keep `UF_DatePicker.frm` and `UF_DatePicker.frx` together. The `.frx` contains
-> the binary form resources referenced by the exported `.frm`.
+> the binary form resources referenced by the exported `.frm`; import the `.frm`
+> only, never the `.frx` on its own.
 
 ## 2. Start and stop the component with the workbook
 
@@ -842,6 +842,14 @@ open the picker for the active cell through `DP_Show`; call `DP_Show` instead.
 [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25) will classify
 this surface.
 
+Each persisted setting also has a `Public` setter and getter pair,
+`M_Settings_Set<Name>` / `M_Settings_Get<Name>`, for example
+`M_Settings_SetEnableKeyboardShortcut` (see
+[Open from Excel](#open-from-excel)) and `M_Settings_SetShowRightClick`.
+A setter saves the value and applies it at once. The setters that change the
+shortcut, right-click entry or grid icons do not currently check the provider
+lease ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
+
 A normal host usually needs only:
 
 ```vb
@@ -921,6 +929,9 @@ Ribbon_Reset
 Ribbon_Demo
 ```
 
+`Ribbon_HideDemo` has the same callback signature but is not wired in
+`customUI.xml`; it is currently unused.
+
 Ribbon layout belongs in:
 
 ```text
@@ -948,21 +959,29 @@ will classify this surface and hide what does not need to be reachable.
 
 ### Internal test seams — not supported API
 
-Some procedures are `Public` solely so the regression harness can reach them:
+Some procedures are `Public` solely so the regression harness can reach them.
+They follow the `<Area>_Test_*` naming pattern:
 
 ```text
-M_Lease_Test_SilenceRefusalReport
-M_Lease_Test_RefusalReportCount
-M_Settings_ResolveKeyboardShortcutOnSave
+M_Lease_Test_*        ClearOwnerToken, SilenceRefusalReport, RefusalReportCount
+M_Lifecycle_Test_*    fault arming, reset and the Last* trace accessors (15)
+M_Timer_Test_*        ArmScheduleFault, LastRegistration, IsUnresolved,
+                      IsRunning, ExpireRegistration, Reset
 M_WriteBack_Test_SetFaultInjection
+M_Window_Test_SetFaultInjection
 ```
+
+`M_Settings_ResolveKeyboardShortcutOnSave` is also `Public`, but the settings
+panel calls it in production; the harness tests it directly.
 
 They are internal infrastructure, may change or disappear without notice, and are to be classified `internal` under [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). Do not call them from host code.
 
 Being `Public` is a consequence of the harness living in a separate module, not a
-decision that these belong on the callable surface. Several newer seams take
-arguments, which keeps them out of the macro dialog; that is a mitigation while
-#25 is open, not the intended end state. #25 will move this surface behind
+decision that these belong on the callable surface. Most seams take arguments
+or are functions, which keeps them out of the macro dialog. Three parameterless
+`Sub` seams do appear in Alt+F8: `M_Lease_Test_ClearOwnerToken`,
+`M_Timer_Test_ExpireRegistration` and `M_Timer_Test_Reset`. Keeping seams out of
+the dialog is a mitigation while #25 is open, not the intended end state. #25 will move this surface behind
 `Option Private Module` boundaries or make it `Private` wherever the harness does
 not genuinely require reach.
 
@@ -1074,7 +1093,7 @@ is attempted.
 
 The outcome is represented by `DP_WindowStyleResult`.
 
-Critical invariant:
+Critical invariant, once the style change has committed (`Committed=True`):
 
 ```text
 Applied=True
@@ -1083,6 +1102,9 @@ RolledBack=True
 or
 RecoveryRequired=True
 ```
+
+A result that was never attempted, or that failed before committing, has all
+three `False` and needs no recovery.
 
 Since `v1.2.1` the component no longer treats a partially committed native style as a successful borderless window. Through `v1.2.0` the `RecoveryRequired` outcome was produced and then discarded at both call sites ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
 
@@ -1322,7 +1344,7 @@ VBA-DATETIMEPICKER/
 ├─ tools/
 │  ├─ README.md
 │  ├─ check.py
-│  └─ check_*.py gates, test_*.py, vba-projects.json, lint requirements, helpers
+│  └─ check_*.py gates and advisory checkers, test_*.py, vba-projects.json, lint requirements, helpers
 ├─ .editorconfig
 ├─ .gitattributes
 ├─ .gitignore
@@ -1547,7 +1569,7 @@ High-DPI, high-contrast and accessibility behavior should be validated in the ta
 
 ### Release evidence is procedural, not automated
 
-No CI runs the regression pack — the workflows run static checks, CodeQL and repository analytics, never Excel ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
+No CI runs the regression pack — the workflows run static checks, CodeQL, Ribbon-resource, label and link checks, release-evidence validation and repository analytics, never Excel ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
 
 ### Certification environment
 
@@ -1613,7 +1635,10 @@ success only from the recorded outcome of the operation it ran, and starts the
 runtime when no provider holds the lease ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)). The right-click entry appears
 in every worksheet view, including Page Layout ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)). `DP_Stop` no longer
 shows the "another copy is already active" message for a copy that never
-started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)). The repository now holds the complete Ribbon source as it
+started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)). A right-click restores a
+missing context-menu entry, and a copy that still holds its owner token
+reclaims a lease whose bar vanished, at right-click and at `DP_Stop`
+([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). The repository now holds the complete Ribbon source as it
 ships, `customUI.xml` with its relationship part and images, and CI checks it
 ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90), [#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). No supported API name, signature or default changed.
 

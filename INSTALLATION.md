@@ -77,7 +77,7 @@ required to compile or to test the project as it currently stands:
 
 | Source | Purpose |
 |---|---|
-| `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder |
+| `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder, and point the package's root relationship at `customUI/customUI.xml` with the Office 2007 extensibility type (see [RELEASING.md](RELEASING.md#7-build-release-artifacts)) |
 | `test/M_cDP_Test.bas` | Regression harness |
 | `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
@@ -126,6 +126,9 @@ required to compile or to test the project as it currently stands:
    Import `demo/M_DP_DEMO.bas` and `demo/M_DEMO_BUILDER.bas` as well — the
    project does not compile without them.
 3. Compile the complete VBA project.
+   If the package ships the Ribbon, add the `src/ribbon/` parts to the saved
+   package as the RibbonX row above describes; VBA compilation does not check
+   them.
 4. Wire `DP_Start` and `DP_Stop` into the workbook lifecycle if the component must start automatically.
 5. Set any deployment-specific settings namespace before the runtime loads.
 6. Save, close, reopen, and exercise `DP_Show` and `DP_Close` in a clean Excel session.
@@ -161,7 +164,8 @@ from source you imported.
    and choose the release you intend to run.
 2. Download the `.xlam` asset. Take the exact filename from the Release page.
 3. Verify its SHA-256 against the value published on that release before
-   enabling macros:
+   enabling macros. Releases from `v1.2.0` onward publish one; for earlier
+   releases, compare against the digest GitHub shows for the asset:
 
    ~~~text
    certutil -hashfile "<asset filename>" SHA256
