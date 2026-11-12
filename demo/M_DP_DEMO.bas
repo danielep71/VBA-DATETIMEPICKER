@@ -485,6 +485,7 @@ Public Sub DP_Demo_FillTableColumn()
 '
 ' DEPENDENCIES
 '   DP_FillTableColumn
+'   DP_MSGBOX_TITLE
 '
 ' NOTES
 '   A selection outside a table data body is handled by DP_FillTableColumn
@@ -494,13 +495,8 @@ Public Sub DP_Demo_FillTableColumn()
 '   point being demonstrated is write scope, not date selection
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "M_DP_DEMO.DP_Demo_FillTableColumn"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -527,7 +523,7 @@ ErrorHandler:
             "The table column could not be filled." & VBA.vbCrLf & VBA.vbCrLf & _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description, _
             vbExclamation, _
-            PROC_NAME
+            DP_MSGBOX_TITLE
 
 End Sub
 

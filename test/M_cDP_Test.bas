@@ -5924,8 +5924,8 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '
 ' WHY THIS EXISTS
 '   DP_Stop runs from Workbook_BeforeClose. A copy that never started used to
-'   show "Another copy of the DatePicker is already active" at every Excel exit,
-'   although no other copy existed (#115)
+'   show "Another copy of the Date / Time Picker is already active" at every
+'   Excel exit, although no other copy existed (#115)
 '
 ' INPUTS
 '   None

@@ -202,6 +202,13 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Two messages still used the old "DatePicker" name: the provider-conflict
+  refusal now reads "Another copy of the Date / Time Picker is already
+  active", and the demo-sheet error names the Date / Time Picker demo sheet.
+  The demo's **Fill Table Column** error box is titled "Date / Time Picker"
+  like every other message, instead of the internal procedure name
+  ([#182](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/182)).
+
 - Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
   label-policy defaults and workflow/documentation mismatches
   ([#180](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/180)).
@@ -254,9 +261,9 @@ Use only the categories needed by a release.
   cover every bar named `Cell` or `List Range Popup`
   ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)).
 
-- `DP_Stop` never shows "Another copy of the DatePicker is already active" at
-  Excel exit. A stop by a copy that cannot prove ownership touches nothing and
-  writes one Immediate Window line; a copy whose lease bar vanished while it
+- `DP_Stop` never shows "Another copy of the Date / Time Picker is already
+  active" at Excel exit. A stop by a copy that cannot prove ownership touches
+  nothing and writes one Immediate Window line; a copy whose lease bar vanished while it
   held its token reclaims the free lease and stops as the owner
   ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115), [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)).
   Provider conflicts are still reported when a copy starts or opens the picker.
