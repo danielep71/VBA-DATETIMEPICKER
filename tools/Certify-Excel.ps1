@@ -481,6 +481,8 @@ try {
         Write-Session "Workbook saved as $workbookPath"
     }
     catch {
+        # Evidence without its workbook is incomplete, so it cannot pass.
+        $summary.reasons += ("The workbook could not be saved: " + $_.Exception.Message)
         Write-Session ("The workbook could not be saved: " + $_.Exception.Message)
     }
 }
