@@ -1052,7 +1052,7 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "RibbonDemo"
     'Run the Ribbon Reset outcome checks
         TST_DP_RunSuiteSafe "RibbonReset"
-    'Run demo builder fast-mode transaction checks
+    'Run demo builder fast-mode transaction and button-grid checks
         TST_DP_RunSuiteSafe "DemoFastMode"
 
     'Run the application-state suite
@@ -8384,7 +8384,8 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '                           DEMO FAST MODE SUITE
 '==============================================================================
 ' PURPOSE
-'   Validates the demo builder's fast-mode entry and exit as a transaction
+'   Validates the demo builder's fast-mode entry and exit as a transaction, and
+'   the button-grid specification contract of DEMO_Btn_AddGrid
 '
 ' WHY THIS EXISTS
 '   DEMO_FastMode_Begin captured and mutated four Application properties in
@@ -8394,6 +8395,11 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '
 '   Losing EnableEvents that way is invisible: the caller sees no error, only a
 '   workbook that has silently stopped reacting
+'
+'   DEMO_Btn_AddGrid passed a fill colour into the IsPrimary parameter of
+'   DEMO_Btn_Add, so every grid button came out primary whatever its
+'   specification said, and a button created without an action pointed at a
+'   macro that did not exist (#183)
 '
 ' INPUTS
 '   None
@@ -8405,15 +8411,24 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '   Drives DEMO_FastMode_Begin and DEMO_FastMode_End against real Application
 '   state, with faults injected at entry and restoration boundaries
 '
+'   Builds a button grid on the scratch sheet and asserts each button's fill
+'   colour and action, then asserts that a specification element of any other
+'   type raises before its button is created
+'
 ' ERROR POLICY
 '   Records suite-level failures and continues. Restores the harness's own
-'   Application state on every path
+'   Application state and deletes every grid button on every path
 '
 ' DEPENDENCIES
 '   DEMO_FastMode_Begin
 '   DEMO_FastMode_End
 '   DEMO_FastMode_Test_ArmFault
 '   tDEMOFastModeState
+'   DEMO_Btn_AddGrid
+'   DEMO_DEMOButton_NotAssigned
+'   UI_COLOR_PRIMARY_BG
+'   UI_COLOR_NEUTRAL_200
+'   mTST_DP_ScratchSheet
 '
 ' NOTES
 '   These cases mutate real Application state deliberately: the contract is about
@@ -8428,14 +8443,25 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '   tDEMOFastModeState, so no observation seam is needed and an abandoned record
 '   can never lock out a later run
 '
+'   The button-grid cases share this suite because it is the harness's one
+'   demo-builder suite, and they move with it under #35 and #62
+'
+'   DEMO_DEMOButton_NotAssigned shows a message box, so it is never run here.
+'   It is named only in a branch that never executes, which still makes the
+'   project fail to compile if the placeholder is removed or renamed
+'
 ' UPDATED
-'   2026-09-17
+'   2026-11-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const INJECTED_ERROR As Long = vbObjectError + 2850
+    Const SPEC_ERROR    As Long = vbObjectError + 2162      'Error DEMO_Btn_AddGrid raises for a bad element
+    Const GRID_PREFIX   As String = "TST_DP_GRID_"          'Name prefix of every grid button the suite creates
+    Const GRID_MACRO    As String = "TST_DP_GridSpecMacro"  'Action named by a specification; read back, never run
+    Const PLACEHOLDER   As String = "DEMO_DEMOButton_NotAssigned" 'Action of a button created without one
 
     Dim State           As tDEMOFastModeState   'Record under test
     Dim Inert           As tDEMOFastModeState   'Record that never entered fast mode
@@ -8471,6 +8497,11 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
     Dim RollbackNamed   As Boolean       'The rollback detail names the property
     Dim RollbackOthersRan As Boolean     'Rollback steps after the failure still ran
     Dim CompoundResolved As String       'Resolver text for the compound failure
+
+    Dim GridAnchor      As Excel.Range  'Scratch cell the button grid is anchored to
+    Dim GridSpecs       As Variant      'Button specifications under test
+    Dim GridErrNumber   As Long         'Error a rejected specification raised
+    Dim ActionText      As String       'OnAction text read back from a grid button
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -8800,6 +8831,91 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
             VBA.InStr(1, ResolvedText, "EnableEvents", vbBinaryCompare) > 0
 
 '------------------------------------------------------------------------------
+' GRID BUTTONS ARE STYLED AS THEIR SPECIFICATIONS ASK
+'------------------------------------------------------------------------------
+    'One specification of each accepted form: name and caption only, IsPrimary
+    'alone, ActionMacro followed by IsPrimary, and IsPrimary True stated. Before
+    '#183 all four came out primary, because the colour reached IsPrimary
+        Set GridAnchor = mTST_DP_ScratchSheet.Range("X40")
+        GridSpecs = VBA.Array( _
+            VBA.Array(GRID_PREFIX & "N1", "Default"), _
+            VBA.Array(GRID_PREFIX & "N2", "Secondary", False), _
+            VBA.Array(GRID_PREFIX & "N3", "Secondary with action", GRID_MACRO, False), _
+            VBA.Array(GRID_PREFIX & "N4", "Primary", True))
+        DEMO_Btn_AddGrid mTST_DP_ScratchSheet, GridAnchor, GridSpecs
+
+    'Compare against the design tokens DEMO_Btn_Add applies for each style
+        TST_DP_AssertEqualsLong "Grid button without a style option is primary", _
+            UI_COLOR_PRIMARY_BG, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N1").Fill.ForeColor.RGB
+        TST_DP_AssertEqualsLong "Grid button with IsPrimary False is secondary", _
+            UI_COLOR_NEUTRAL_200, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N2").Fill.ForeColor.RGB
+        TST_DP_AssertEqualsLong "Grid button with an action and IsPrimary False is secondary", _
+            UI_COLOR_NEUTRAL_200, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N3").Fill.ForeColor.RGB
+        TST_DP_AssertEqualsLong "Grid button with IsPrimary True is primary", _
+            UI_COLOR_PRIMARY_BG, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N4").Fill.ForeColor.RGB
+
+'------------------------------------------------------------------------------
+' GRID BUTTONS POINT AT A MACRO THAT EXISTS
+'------------------------------------------------------------------------------
+    'OnAction is workbook-qualified as 'Book'!Macro, so the macro name is the text
+    'after the last "!". Comparing only that part keeps the assertion independent
+    'of the host workbook's name
+        ActionText = mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N1").OnAction
+        TST_DP_AssertEqualsString "Grid button without an action gets the placeholder", _
+            PLACEHOLDER, VBA.Mid$(ActionText, VBA.InStrRev(ActionText, "!") + 1)
+        ActionText = mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N2").OnAction
+        TST_DP_AssertEqualsString "Grid button with only IsPrimary gets the placeholder", _
+            PLACEHOLDER, VBA.Mid$(ActionText, VBA.InStrRev(ActionText, "!") + 1)
+        ActionText = mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N3").OnAction
+        TST_DP_AssertEqualsString "Grid button keeps the action its specification names", _
+            GRID_MACRO, VBA.Mid$(ActionText, VBA.InStrRev(ActionText, "!") + 1)
+
+    'The placeholder shows a message box, so running it would stop an unattended
+    'run. Naming it in a branch that never executes proves at compile time that
+    'the macro the buttons above point at exists
+        If False Then DEMO_DEMOButton_NotAssigned
+
+'------------------------------------------------------------------------------
+' ANY OTHER SPECIFICATION ELEMENT IS REJECTED BEFORE A BUTTON IS CREATED
+'------------------------------------------------------------------------------
+    'A legacy numeric fill colour in the 3rd element used to be converted
+    'silently. It must now raise, and no button may be left for that item
+        GridSpecs = VBA.Array( _
+            VBA.Array(GRID_PREFIX & "E3", "Colour as 3rd element", 13145700))
+        On Error Resume Next
+        Err.Clear
+        DEMO_Btn_AddGrid mTST_DP_ScratchSheet, GridAnchor, GridSpecs
+        GridErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "A numeric 3rd grid element raises the specification error", _
+            SPEC_ERROR, GridErrNumber
+        TST_DP_AssertFalse "A rejected 3rd grid element creates no button", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, GRID_PREFIX & "E3")
+
+    'The 4th element accepts only IsPrimary
+        GridSpecs = VBA.Array( _
+            VBA.Array(GRID_PREFIX & "E4", "Colour as 4th element", GRID_MACRO, 13145700))
+        On Error Resume Next
+        Err.Clear
+        DEMO_Btn_AddGrid mTST_DP_ScratchSheet, GridAnchor, GridSpecs
+        GridErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "A non-Boolean 4th grid element raises the specification error", _
+            SPEC_ERROR, GridErrNumber
+        TST_DP_AssertFalse "A rejected 4th grid element creates no button", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, GRID_PREFIX & "E4")
+
+'------------------------------------------------------------------------------
 ' SUITE EXIT
 '------------------------------------------------------------------------------
 SuiteExit:
@@ -8810,6 +8926,15 @@ SuiteExit:
         Excel.Application.DisplayAlerts = RunAlerts
         Excel.Application.EnableEvents = RunEvents
         Excel.Application.ScreenUpdating = RunScreen
+    'Delete every grid button the suite may have created, including the ones a
+    'regression would leave behind for the rejected specifications
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N1").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N2").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N3").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N4").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "E3").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "E4").Delete
+        Set GridAnchor = Nothing
         Err.Clear
         On Error GoTo 0
     'Exit after the suite completes

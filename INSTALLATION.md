@@ -97,10 +97,12 @@ required to compile or to test the project as it currently stands:
 >
 > So a compilable project needs both demo modules, and the regression harness
 > additionally needs `M_DEMO_BUILDER.bas` in its own right: it builds its result
-> sheet through `DEMO_Sheet_BuildTemplate` and exercises the fast-mode
+> sheet through `DEMO_Sheet_BuildTemplate`, exercises the fast-mode
 > transaction through `DEMO_FastMode_Begin`, `DEMO_FastMode_End`,
 > `DEMO_FastMode_Test_ArmFault`, `DEMO_FastMode_ResolveFailure` and
-> `tDEMOFastModeState`. The harness makes no reference to `M_DP_DEMO`.
+> `tDEMOFastModeState`, and checks the button grid through `DEMO_Btn_AddGrid`,
+> `DEMO_DEMOButton_NotAssigned`, `UI_COLOR_PRIMARY_BG` and
+> `UI_COLOR_NEUTRAL_200`. The harness makes no reference to `M_DP_DEMO`.
 >
 > This is recorded as current fact, not as intended architecture. Production
 > source depending on demonstration source is a boundary problem: it was introduced in
