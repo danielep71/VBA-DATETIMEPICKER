@@ -103,6 +103,17 @@ Use only the categories needed by a release.
 
 ### Added
 
+- One-command Excel regression run, `tools/Certify-Excel.cmd` with
+  `tools/Certify-Excel.ps1`, for Windows hosts. From a clean checkout it starts
+  its own Excel instance, imports the `packaged-hosts` modules of
+  `tools/vba-projects.json` into a new workbook, compiles the project, runs
+  `TST_DP_RunAll` (or the UI-smoke variant) through a generated error-handling
+  wrapper, and writes an evidence folder outside the checkout with the commit
+  SHA, the host, the harness summary line verbatim and every result row. It
+  reads the Trust Center settings and never changes them. It does not replace
+  the manual matrices of a release certification
+  ([#196](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/196)).
+
 - Markdown link checking, `tools/check_markdown_links.py`, with fixtures.
   A new `check.py` gate resolves every relative link and heading anchor in
   tracked Markdown offline, using GitHub's heading-slug rule. A weekly

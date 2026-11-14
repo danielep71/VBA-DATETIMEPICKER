@@ -207,6 +207,54 @@ load behaviour are not inspected. Only a fresh Excel session shows that.
 | `VBA-PKG-090` / `091` | failure | extraction failed / analysis incomplete |
 | `VBA-PKG-092` | unknown | manual export, not package evidence |
 
+## Run the regression pack in Excel (Windows)
+
+`tools/Certify-Excel.cmd` (double click) or `tools/Certify-Excel.ps1` builds,
+compiles and runs the regression pack of the checked-out commit in desktop
+Excel, without manual imports. It needs Windows, desktop Excel, Git on the
+`PATH`, and **Trust access to the VBA project object model** already turned on
+(Excel → File → Options → Trust Center → Trust Center Settings → Macro
+Settings). It reads the Trust Center settings and never changes them. Close
+other Excel work first, and do not use Excel until the run ends.
+
+```powershell
+git switch <branch-or-sha>
+git status                     # must show no changes to tracked files
+.\tools\Certify-Excel.cmd      # or: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-Excel.ps1
+```
+
+The run:
+
+1. reads the full SHA and refuses changes to tracked files (`-AllowDirty` runs
+   anyway and records the run as not certification-grade);
+2. starts its own visible Excel instance, adds a new workbook and imports the
+   `packaged-hosts` modules of `tools/vba-projects.json` in their listed order
+   (`-Configuration` picks another), checking that each keeps its name;
+3. adds a generated `CertificationRunner` module, not part of the source, that
+   calls the harness under an error handler, so a raised error is recorded
+   instead of opening a modal **Run-time error** window;
+4. compiles with **Debug → Compile VBAProject**; if the VBE does not show the
+   result, it asks you to compile and answer Y or N;
+5. runs `TST_DP_RunAll` (`-WithUISmoke` runs `TST_DP_RunAll_WithUISmoke`);
+6. reads the summary and every row of `TST_DP_RESULTS`, saves the workbook,
+   closes Excel and opens the evidence folder.
+
+The evidence folder, `DATETIMEPICKER-excel-<sha12>-<yyyyMMdd-HHmmss>` next to
+the checkout (or `-BundleDir`), holds:
+
+| File | Content |
+| --- | --- |
+| `certification.txt` | Verdict, commit, host and the harness summary line verbatim |
+| `summary.json` | The same, machine-readable, with the reasons for a FAIL |
+| `results.tsv` | Every row of `TST_DP_RESULTS` |
+| `session.log` | Each step with its time |
+| `DATETIMEPICKER-regression.xlsm` | The workbook as the run left it |
+
+The exit code is 0 only when import and compile pass, the harness reports
+`State=PASS` with no cleanup failure, and the tree was clean. The run covers
+compilation and the regression pack; the manual matrices of a release
+certification (RELEASING §6) and package tests are still separate.
+
 ## Traffic history (repository analytics)
 
 `tools/traffic_export.py` is used only by the **Daily traffic export** workflow.
