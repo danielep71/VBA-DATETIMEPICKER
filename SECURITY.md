@@ -83,12 +83,13 @@ Do **not** disclose a suspected vulnerability in a public issue, discussion,
 pull request, commit message, Wiki page, sample workbook, screenshot, or release
 thread.
 
-Use either private channel:
+Use a private channel:
 
-1. On the repository **Security** page, select **Report a vulnerability** when
-   GitHub private vulnerability reporting is available.
-2. Otherwise email **danielep71@gmail.com** with the subject:
+1. Email **danielep71@gmail.com** with the subject:
    **Private security report — VBA-DATETIMEPICKER**.
+2. If the repository **Security** page offers **Report a vulnerability**, you
+   may use it instead. GitHub private vulnerability reporting is not currently
+   enabled for this repository, so email is the channel that always works.
 
 Include the smallest amount of information needed to reproduce and assess the
 issue:

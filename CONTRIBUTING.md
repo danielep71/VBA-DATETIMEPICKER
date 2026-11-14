@@ -138,7 +138,7 @@ Four kinds of pull request follow from that:
 
 | Pull request | From → into | Issue reference | Merge method |
 |---|---|---|---|
-| Task | topic branch → release branch | `Resolves #N` | Squash |
+| Task | topic branch → release branch | `Resolves #N` when the PR meets all the issue's acceptance criteria, otherwise `Refs #N` | Squash |
 | Integration | release branch → `main` | `Refs #N` only | Merge commit |
 | Sync | branch at `main` → release branch | none | Merge commit |
 | Dependabot | Dependabot branch → release branch | none | Merge commit |

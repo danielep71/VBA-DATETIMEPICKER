@@ -131,9 +131,8 @@ Update every applicable surface in one reviewable change:
 
 - `VERSION`
 - `CHANGELOG.md`
-- current-version package metadata (production module headers are not versioned)
-- demo builder header only if its implementation version actually changes; its
-  existing `VERSION 1.3.0` is implementation history, not the release version
+- current-version package metadata (module headers carry no version; the demo
+  builder header points to `VERSION`)
 - README compatibility and installation examples
 - Ribbon XML or package metadata when changed
 
@@ -191,8 +190,9 @@ closed v1.2.2 evidence is not reopened.
   `python .github/scripts/check-ribbon-resources.py --root src/ribbon`. It proves that every
   custom `image` dependency has a tracked file and an explicit package mapping,
   and that the part's namespace matches its file name. The **Check Ribbon
-  resources** workflow runs it on every pull request and release-branch push
-  that touches `src/ribbon/`. Missing Ribbon XML, relationships, or referenced
+  resources** workflow runs it on pull requests into `main` or `release/**` and
+  on pushes to those branches when `src/ribbon/`, the script or the workflow
+  changes. Missing Ribbon XML, relationships, or referenced
   custom resources are a **blocking package-source failure**.
   This is a required separate release record, not one of the eleven
   `static-checks.json` gates. Run it locally on the exact clean candidate and
@@ -260,7 +260,9 @@ For each artifact:
    VBA, **not** Open XML package completeness.
 7. Include the packaged harness required by `tools/vba-projects.json`, including
    `test/M_cDP_Test.bas`, in both packages. Removing it or substituting another
-   smoke test does not satisfy `check_release.py`.
+   smoke test breaks the certification rule. `check_release.py` cannot detect
+   it: the validator checks package names, sizes and hashes and the recorded
+   results, not the package contents.
 8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
    group/controls are present, all intended custom images render, and each
    enabled Ribbon action dispatches correctly.
@@ -291,8 +293,8 @@ between final certification and tagging. Prepare the machine-readable record
 from the exact tested package bytes, then fill it from the retained logs:
 
 ```sh
-python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output release-evidence.json
-python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
+python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output test-results/release-evidence.json
+python tools/check_release.py --evidence test-results/release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
 ```
 
 Use [the certification template](docs/RELEASE_CERTIFICATION_TEMPLATE.md) alongside

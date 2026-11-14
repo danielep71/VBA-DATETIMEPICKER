@@ -81,7 +81,10 @@ Formula after:
 Displayed value after:
 ```
 
-Paste the result:
+Paste the result. Only `DP_FillTableColumn` returns a `DP_WriteResult` through
+the supported API. For calendar selection, `DP_Today` or `DP_Now`, paste the
+exact shortfall message instead; it appears only when cells were skipped or
+failed.
 
 ```text
 AttemptedCount:
@@ -114,7 +117,7 @@ AttemptedCount =
     FailedCount
 ```
 
-A result with `TechnicalFailureOccurred = True` does not obey that identity; the
+A result with `TechnicalFailureOccurred = True` need not obey that identity; the
 `TechnicalFailure` fields carry the cause. If any result does not balance, paste
 the exact values rather than correcting them manually.
 
@@ -187,12 +190,17 @@ Check what you observed:
 - [ ] Second lease-participating provider was not refused
 - [ ] Refused provider altered owner state
 - [ ] Refused provider removed owner state during teardown
-- [ ] Stale lease remained after VBA reset
 - [ ] Lease remained after **full Excel process restart**
+- [ ] `v1.2.1`+ provider + `v1.2.0` provider interference (`v1.2.0` checked the lease only in `DP_Start`)
 - [ ] Lease-participating provider + pre-`v1.2.0` provider interference
 - [ ] Other
 
 The temporary lease should disappear when the Excel process actually exits.
+
+A VBA project reset does not release it: the lease survives while the owner
+token in module state is lost, so every entry point then refuses. That is the
+documented behaviour, not a defect. Restart Excel, or run
+`DP_ForceReleaseProviderLease` only when no other copy owns the session.
 
 If Excel still had a background process alive, note that.
 
@@ -441,8 +449,6 @@ Run:
 Passed:
 Failed:
 CleanupFailures:
-Suites dispatched:
-Suites completed:
 TST_DP_SCRATCH existed before run:
 TST_DP_SCRATCH exists after run:
 TST_DP_RESULTS existed before run:

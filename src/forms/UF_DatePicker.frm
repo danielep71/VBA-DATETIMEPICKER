@@ -10670,9 +10670,9 @@ Private Sub UF_SettingsPanel_Save()
 '
 ' BEHAVIOR
 '   Reads Display, Behavior, and Integration settings from the runtime MultiPage,
-'   updates the canonical DatePicker settings state, prevents a dead access
-'   configuration, persists the settings once, and applies immediate side
-'   effects that are safe to apply without reopening the picker
+'   updates the canonical DatePicker settings state, carries the keyboard
+'   shortcut setting forward unchanged, persists the settings once, and applies
+'   immediate side effects that are safe to apply without reopening the picker
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if controls cannot be resolved, if the
@@ -10682,6 +10682,7 @@ Private Sub UF_SettingsPanel_Save()
 '   in-memory settings are restored before the error is re-raised
 '
 ' DEPENDENCIES
+'   M_Settings_ResolveKeyboardShortcutOnSave
 '   M_Settings_Save
 '   M_ContextMenu_Update
 '   M_KeyboardShortcut_Update
@@ -10700,12 +10701,14 @@ Private Sub UF_SettingsPanel_Save()
 '   title bar can only be restored by reopening the UserForm because the current
 '   window helper intentionally exposes removal only
 '
-'   If right-click menu and in-grid icon are both disabled, the keyboard shortcut
-'   fallback is kept enabled to avoid a configuration with no visible/manual
-'   DatePicker entry point
+'   Disabling both right-click menu and in-grid icon access does not re-enable
+'   the keyboard shortcut. The panel has no keyboard checkbox, and the value is
+'   resolved through M_Settings_ResolveKeyboardShortcutOnSave, which preserves
+'   an explicitly disabled shortcut. Zero built-in entry points is a valid
+'   configuration (#42)
 '
 ' UPDATED
-'   2026-05-02
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -10744,7 +10747,7 @@ Private Sub UF_SettingsPanel_Save()
     Dim NewShowRightClick       As Boolean                      'New right-click setting
     Dim NewShowGridIcon         As Boolean                      'New grid-icon setting
     Dim NewUseWinAPI            As Boolean                      'New WinAPI setting
-    Dim NewEnableKeyboard       As Boolean                      'New keyboard shortcut fallback setting
+    Dim NewEnableKeyboard       As Boolean                      'New keyboard shortcut setting
 
     Dim OldFirstDay             As Long                         'Previous first-day setting
     Dim OldUseLocalNames        As Boolean                      'Previous local-name setting
@@ -10756,7 +10759,7 @@ Private Sub UF_SettingsPanel_Save()
     Dim OldShowRightClick       As Boolean                      'Previous right-click setting
     Dim OldShowGridIcon         As Boolean                      'Previous grid-icon setting
     Dim OldUseWinAPI            As Boolean                      'Previous WinAPI setting
-    Dim OldEnableKeyboard       As Boolean                      'Previous keyboard shortcut fallback setting
+    Dim OldEnableKeyboard       As Boolean                      'Previous keyboard shortcut setting
 
     Dim FirstDayChanged         As Boolean                      'True when first-day setting changed
     Dim LocalNamesChanged       As Boolean                      'True when local-name setting changed

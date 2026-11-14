@@ -210,18 +210,19 @@ Use only the categories needed by a release.
   ([#182](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/182)).
 
 - Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
-  label-policy defaults and workflow/documentation mismatches (issue #180).
+  label-policy defaults and workflow/documentation mismatches
+  ([#180](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/180)).
 
 - Fixed label drift checks for valid label names containing pipes or backticks
   by comparing structured canonical plans instead of parsing Markdown reports
-  (PR #119). Added clean, drift and failure regression fixtures.
-
+  ([#119](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/119)). Added clean, drift and failure regression fixtures.
 
 - The Markdown link gate decodes backslash escapes, as GitHub does. A valid
   link such as `[guide](guide\(v2\).md)` was reported as missing, and an
   escaped character in a heading, as in `DP\_Start`, produced the wrong anchor.
   Escaped backticks are also handled when identifying inline code spans
-  (PR #175), so links outside code remain checked and code examples stay excluded.
+  ([#175](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/175)), so links outside code remain checked and code examples stay
+  excluded.
   HTML attributes and autolinks are still taken literally
   ([#171](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/171)).
 
@@ -235,7 +236,8 @@ Use only the categories needed by a release.
   reported as the new `VBA-CALL-005`. Each fix has positive and negative
   fixtures. The checker stays advisory and is not a release gate.
 
-- Package inspector review corrections (PR #131, following #129): trace calls evaluated in `If` and
+- Package inspector review corrections ([#131](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/131), following
+  [#129](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/129)): trace calls evaluated in `If` and
   `ElseIf` conditions, treat `AddressOf` operands as unknown dispatch rather than
   execution, and report malformed or prohibited Ribbon XML as structured
   extraction failures. Added regression fixtures for all three cases.
@@ -295,15 +297,20 @@ Use only the categories needed by a release.
 - Aligned the release procedure and certification template with the evidence
   validator: certify the integrated main SHA, record both required packages,
   per-host environments, harness totals and six manual records, and retain a
-  separate mandatory Ribbon-resource result (issue #178).
+  separate mandatory Ribbon-resource result
+  ([#178](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/178)).
 
 - Added the GitHub Pages project website (`index.html` and `.nojekyll`), with
-  installation guidance, feature descriptions and repository links (PR #135,
-  integrated by PR #136).
+  installation guidance, feature descriptions and repository links
+  ([#135](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/135), merged into `main` and brought into `release/v1.2.3` by
+  [#140](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/140)).
 
 - Reconciled contribution rules, issue-form branch names, traffic credentials
-  and Dependabot scope; CI pins Node.js 24 LTS (issue #179).
-- Reconciled superseded Unreleased claims, categories and references (issue #181).
+  and Dependabot scope; CI pins Node.js 24 LTS
+  ([#179](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/179)).
+
+- Reconciled superseded Unreleased claims, categories and references
+  ([#181](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/181)).
 
 - The project website now names the Apache License 2.0 in its page
   description, hero line, "Can I adapt it?" answer and footer, which still said
@@ -363,6 +370,31 @@ Use only the categories needed by a release.
   was still to be reconciled is replaced; the published tag and assets are
   unchanged.
 
+- The README and project website no longer describe `Ctrl + Shift + D` as
+  opt-in: it is enabled by default, and the README shows how to turn it off
+  with `M_Settings_SetEnableKeyboardShortcut False`. The footer button is named
+  **Time**, not Now; normal write-back is described as writing the current
+  selection, not a single cell; the regression badge and figures name the
+  version or commit they were measured at, and the README says the current
+  source has 32 standard suites. INSTALLATION names the `v1.2.2` Ribbon group
+  `DateTime Picker`. The README lists the registry sections apart from the
+  panel tabs, describes `DP_Click` as an Excel callback, completes the
+  repository tree and no longer promises `v1.1.x` upgrade paths
+  ([#177](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/177)).
+
+- Corrected Markdown documents, issue forms and the certification template
+  that disagreed with the source, tools or releases. The release procedure and
+  certification template write `test-results/release-evidence.json`, which Git
+  ignores, and no longer claim that `check_release.py` inspects package
+  contents. The README no longer calls production-called procedures
+  harness-only, scopes the WinAPI invariant to committed changes, lists the
+  harness seams and settings setters, and summarizes the #113 fix. The bug
+  form and checklists place the full provider-lease boundary at `v1.2.1`, ask
+  for `DP_WriteResult` only where the API returns it, and describe a lease left
+  after a VBA reset as expected. SECURITY names email as the working private
+  channel, and the Code of Conduct credits the Contributor Covenant licence
+  ([#193](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/193)).
+
 ### Validation
 
 - Pre-certification development run at `69a94d0` on the embedded `.xlsm` with
@@ -394,8 +426,8 @@ Use only the categories needed by a release.
   keeps its old title band until it is rebuilt.
 
 - New technically public routines `M_Ribbon_ResetShouldStart` and
-  `M_Ribbon_LifecycleSucceeded` exist only for the regression harness; they are
-  not supported API. The same applies to `M_ContextMenu_EnsureForRightClick`,
+  `M_Ribbon_LifecycleSucceeded` are called by `Ribbon_Reset` and are public so
+  the regression harness can test them; they are not supported API. The same applies to `M_ContextMenu_EnsureForRightClick`,
   which the manager calls from `SheetBeforeRightClick`. The harness gains the
   `ContextMenuCoverage`, `ContextMenuResync`, `StopWithoutOwnership` and
   `RibbonReset` suites.
