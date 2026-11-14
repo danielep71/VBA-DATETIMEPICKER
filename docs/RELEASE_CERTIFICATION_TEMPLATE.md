@@ -146,11 +146,11 @@ never recast a failed test as NOT RUN. Accepted gaps yield `pass_with_limitation
 ## 6. Validation and publication
 
 ```sh
-python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output release-evidence.json
+python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output test-results/release-evidence.json
 # Fill the prepared record from the evidence above, then validate:
-python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
+python tools/check_release.py --evidence test-results/release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
 # After the annotated tag exists:
-python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json --require-tag
+python tools/check_release.py --evidence test-results/release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json --require-tag
 ```
 
 | Record | Value |

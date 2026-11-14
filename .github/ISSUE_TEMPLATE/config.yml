@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 📚 Documentation (Wiki)
-    url: https://github.com/danielep71/vba-datetimepicker/wiki
+    url: https://github.com/danielep71/VBA-DATETIMEPICKER/wiki
     about: Check the wiki first — installation, public API, troubleshooting, and more.
   - name: 🔒 Report a security issue
-    url: https://github.com/danielep71/vba-datetimepicker/security/policy
+    url: https://github.com/danielep71/VBA-DATETIMEPICKER/security/policy
     about: Please report vulnerabilities privately, not as a public issue.

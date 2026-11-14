@@ -1091,7 +1091,7 @@ CleanExit:
 
     'Reset DatePicker UI artifacts after testing. Each operation is checked on its
     'own, because a composite step that suppresses its own errors cannot report
-    'which of five operations failed, or that any of them did
+    'which of the operations below failed, or that any of them did
         M_Timer_Stop
         TST_DP_CheckCleanupStep "StopTimer"
 

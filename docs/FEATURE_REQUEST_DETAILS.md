@@ -266,6 +266,7 @@ How should the feature behave with:
 
 ```text
 new version + current release
+new version + v1.2.0 (lease checked only in DP_Start)
 new version + pre-v1.2.0
 ```
 

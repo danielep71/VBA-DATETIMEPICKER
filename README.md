@@ -11,7 +11,7 @@
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
 [![Source](https://img.shields.io/badge/Source-v1.2.2-6f42c1?style=for-the-badge)](#release-status)
-[![Tests](https://img.shields.io/badge/Regression-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
+[![Tests](https://img.shields.io/badge/Regression_v1.2.2-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-Apache_2.0-2ea44f?style=for-the-badge)](LICENSE)
 
 <br>
@@ -81,7 +81,7 @@
 It is designed for real workbook workflows rather than an isolated UserForm demo:
 
 - a **modeless** Date / Time Picker that leaves Excel usable while open;
-- date-only and date-time write-back through calendar selection, **Today** and **Now**;
+- date-only and date-time write-back through calendar selection and the **Today** and **Time** footer buttons;
 - smart date-cell eligibility and initialization from existing worksheet values;
 - configurable **right-click**, **in-grid icon**, **keyboard** and **Ribbon** entry points;
 - full keyboard navigation inside the picker;
@@ -129,13 +129,13 @@ It is especially useful when:
 |---|---|---|
 | Picker UX | Modeless Date / Time Picker | Excel remains interactive while the form is open |
 | Calendar | Fixed 6 × 7 grid | Month/year navigation, outside-month dates and keyboard focus |
-| Write-back | Calendar, Today, Now | Safe selected-cell default |
+| Write-back | Calendar, Today, Time | Safe default: the current selection only |
 | Excel Tables | Explicit whole-column fill | `DP_FillTableColumn` with scope confirmation |
 | Formula safety | Preserve formulas by default | Formula skips are reported, not silently overwritten |
 | Partial writes | Structured result | `DP_WriteResult` reports attempted, written, skipped, failed and technical-failure detail for every cell that produced an outcome |
 | Right-click | Cell and Table context-menu entry, in every worksheet view | Independently configurable |
 | In-grid icon | Contextual worksheet Shape | Independently configurable |
-| Keyboard | `Ctrl + Shift + D` | Registered only when explicitly enabled |
+| Keyboard | `Ctrl + Shift + D` | On by default; turn off with `M_Settings_SetEnableKeyboardShortcut False` |
 | Ribbon | RibbonX callbacks | Optional `customUI.xml` integration |
 | Settings | Registry-backed | Legacy global scope or explicit deployment namespace |
 | Runtime ownership | One current-version provider | Second current-version provider is refused on every entry path, before shared registration |
@@ -164,8 +164,7 @@ Import:
 src/modules/M_DatePicker.bas
 src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
-src/forms/UF_DatePicker.frm
-src/forms/UF_DatePicker.frx
+src/forms/UF_DatePicker.frm      (keep UF_DatePicker.frx beside it)
 demo/M_DP_DEMO.bas
 demo/M_DEMO_BUILDER.bas
 ```
@@ -194,7 +193,8 @@ VBA Editor → Debug → Compile VBAProject
 
 > [!IMPORTANT]
 > Keep `UF_DatePicker.frm` and `UF_DatePicker.frx` together. The `.frx` contains
-> the binary form resources referenced by the exported `.frm`.
+> the binary form resources referenced by the exported `.frm`; import the `.frm`
+> only, never the `.frx` on its own.
 
 ## 2. Start and stop the component with the workbook
 
@@ -260,7 +260,7 @@ DP_Stop
 
 ## 4. Fill one Excel Table data column deliberately
 
-Normal calendar selection, `DP_Today` and `DP_Now` write the **selected cell only**.
+Normal calendar selection, `DP_Today` and `DP_Now` write the **current selection only**: the selected cell, or each cell of a multi-cell selection. A single selected Excel Table cell is not expanded to its column.
 
 The explicit broad-write command is:
 
@@ -281,8 +281,9 @@ Result = DP_FillTableColumn( _
 # 🛠️ Installation
 
 The three options below are the short form. For step-by-step import instructions,
-upgrade paths from `v1.1.x`, deployment-model comparison and troubleshooting, see
-**[INSTALLATION.md](INSTALLATION.md)**.
+general upgrade steps, deployment-model comparison and troubleshooting, see
+**[INSTALLATION.md](INSTALLATION.md)**. Version-specific upgrade effects are in the
+**Compatibility** notes of [CHANGELOG.md](CHANGELOG.md) (from `1.1.1` onward).
 
 ## Option 1 — embed the source in a workbook
 
@@ -371,7 +372,8 @@ calendar selection
 DP_Today
 DP_Now
     ↓
-selected cell only
+current selection only
+(never expanded to the table column)
 ```
 
 Whole-column fill is still supported, but must be requested deliberately:
@@ -531,7 +533,17 @@ That is valid configuration, not a state the component silently "repairs" by tak
 Ctrl + Shift + D
 ```
 
-The shortcut is registered **only when explicitly enabled**.
+The shortcut is **enabled by default** (`DP_DEFAULT_ENABLE_KEYBOARD = True`) and
+is registered when the runtime starts. The settings panel has no control for it;
+turn it off, or back on, from code:
+
+```vb
+M_Settings_SetEnableKeyboardShortcut False   ' True turns it back on
+```
+
+The choice is saved as `EnableKeyboardShortcut` in the active settings scope and
+takes effect at once. From an add-in host, run it with
+`Application.Run "'<add-in file name>'!M_Settings_SetEnableKeyboardShortcut", False`.
 
 ### Navigate inside the picker
 
@@ -555,7 +567,7 @@ Letter shortcuts are ignored when Ctrl or Alt is pressed so the form does not un
 
 `Application.OnKey` is application-wide and Excel exposes no getter for the assignment it replaces.
 
-Therefore, if you explicitly enable `Ctrl + Shift + D`:
+Therefore, while `Ctrl + Shift + D` is enabled (the default):
 
 ```text
 third-party binding
@@ -569,7 +581,7 @@ The DatePicker cannot read, save or later restore that predecessor.
 
 Removing the DatePicker shortcut restores **Excel default handling**, not an unknown prior macro.
 
-If the key matters to another workbook/add-in, leave the DatePicker shortcut disabled and use `DP_Show`, the Ribbon, or your own button.
+If the key matters to another workbook/add-in, turn the DatePicker shortcut off (`M_Settings_SetEnableKeyboardShortcut False`) and use `DP_Show`, the Ribbon, or your own button.
 
 ---
 
@@ -655,6 +667,19 @@ Those choices keep persistence stable across rename, move, Save As and upgrades.
 | Behavior | Close after selection, allow outside-month selection |
 | Integration | Right-click, in-grid icon, keyboard shortcut (programmatic only — the panel has no control for it), WinAPI styling |
 | Advanced | Holiday callback |
+
+The first three areas follow the settings panel tabs; the holiday callback and the
+keyboard shortcut have no panel control. The registry sections are grouped
+differently:
+
+| Registry section | Values |
+|---|---|
+| `Display` | `FirstDayOfWeek`, `UseLocalNames`, `HighlightWeekends` |
+| `Behavior` | `AllowOutsideMonth`, `CloseAfterSelection`, `ClockMode` (live clock), `SizeMode` (compact mode) |
+| `Features` | `ShowRightClick`, `ShowGridIcon`, `EnableKeyboardShortcut` |
+| `Advanced` | `UseWinAPI`, `HolidayCallback` |
+
+When a `Behavior` value is missing, it is read from the legacy `Display` section.
 
 The persisted namespace is a **configuration scope**. It is not the runtime-provider identity described below.
 
@@ -810,6 +835,21 @@ The project deliberately keeps the normal consumer surface small even though VBA
 | `M_Settings_SetNamespace` | `Sub` | Select an isolated persisted settings namespace before first settings load |
 | `M_Settings_GetNamespace` | `Function → String` | Return configured namespace; empty means the legacy scope |
 
+`DP_Click` and `DP_OpenForActiveCell` are also `Public`, but only as Excel
+callbacks: `DP_Click` is the macro assigned to the right-click entry and the
+in-grid icon, and `DP_OpenForActiveCell` is the `Ctrl + Shift + D` target. Both
+open the picker for the active cell through `DP_Show`; call `DP_Show` instead.
+[#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25) will classify
+this surface.
+
+Each persisted setting also has a `Public` setter and getter pair,
+`M_Settings_Set<Name>` / `M_Settings_Get<Name>`, for example
+`M_Settings_SetEnableKeyboardShortcut` (see
+[Open from Excel](#open-from-excel)) and `M_Settings_SetShowRightClick`.
+A setter saves the value and applies it at once. The setters that change the
+shortcut, right-click entry or grid icons do not currently check the provider
+lease ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
+
 A normal host usually needs only:
 
 ```vb
@@ -889,6 +929,9 @@ Ribbon_Reset
 Ribbon_Demo
 ```
 
+`Ribbon_HideDemo` has the same callback signature but is not wired in
+`customUI.xml`; it is currently unused.
+
 Ribbon layout belongs in:
 
 ```text
@@ -916,21 +959,29 @@ will classify this surface and hide what does not need to be reachable.
 
 ### Internal test seams — not supported API
 
-Some procedures are `Public` solely so the regression harness can reach them:
+Some procedures are `Public` solely so the regression harness can reach them.
+They follow the `<Area>_Test_*` naming pattern:
 
 ```text
-M_Lease_Test_SilenceRefusalReport
-M_Lease_Test_RefusalReportCount
-M_Settings_ResolveKeyboardShortcutOnSave
+M_Lease_Test_*        ClearOwnerToken, SilenceRefusalReport, RefusalReportCount
+M_Lifecycle_Test_*    fault arming, reset and the Last* trace accessors (15)
+M_Timer_Test_*        ArmScheduleFault, LastRegistration, IsUnresolved,
+                      IsRunning, ExpireRegistration, Reset
 M_WriteBack_Test_SetFaultInjection
+M_Window_Test_SetFaultInjection
 ```
+
+`M_Settings_ResolveKeyboardShortcutOnSave` is also `Public`, but the settings
+panel calls it in production; the harness tests it directly.
 
 They are internal infrastructure, may change or disappear without notice, and are to be classified `internal` under [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). Do not call them from host code.
 
 Being `Public` is a consequence of the harness living in a separate module, not a
-decision that these belong on the callable surface. Several newer seams take
-arguments, which keeps them out of the macro dialog; that is a mitigation while
-#25 is open, not the intended end state. #25 will move this surface behind
+decision that these belong on the callable surface. Most seams take arguments
+or are functions, which keeps them out of the macro dialog. Three parameterless
+`Sub` seams do appear in Alt+F8: `M_Lease_Test_ClearOwnerToken`,
+`M_Timer_Test_ExpireRegistration` and `M_Timer_Test_Reset`. Keeping seams out of
+the dialog is a mitigation while #25 is open, not the intended end state. #25 will move this surface behind
 `Option Private Module` boundaries or make it `Private` wherever the harness does
 not genuinely require reach.
 
@@ -1042,7 +1093,7 @@ is attempted.
 
 The outcome is represented by `DP_WindowStyleResult`.
 
-Critical invariant:
+Critical invariant, once the style change has committed (`Committed=True`):
 
 ```text
 Applied=True
@@ -1051,6 +1102,9 @@ RolledBack=True
 or
 RecoveryRequired=True
 ```
+
+A result that was never attempted, or that failed before committing, has all
+three `False` and needs no recovery.
 
 Since `v1.2.1` the component no longer treats a partially committed native style as a successful borderless window. Through `v1.2.0` the `RecoveryRequired` outcome was produced and then discarded at both call sites ([#47](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/47)).
 
@@ -1200,7 +1254,7 @@ It does not blindly retry `Worksheets.Add`.
 State=PASS; Run=911; Passed=911; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack** for the current source, the unreleased `v1.2.3` work: 31 standard suites, 32 with UI smoke. It was observed at [`69a94d0`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/69a94d0a00d35f33bcb0ace7ca98a6b6399d94f2) on the embedded macro-enabled workbook; the UI smoke total was not observed at that commit. Release certification of a tagged commit on both packaged hosts will be recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+This is the latest recorded **standard regression pack**, 911/911 at [`69a94d0`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/69a94d0a00d35f33bcb0ace7ca98a6b6399d94f2), during the unreleased `v1.2.3` work, on the embedded macro-enabled workbook. At that commit the harness had 31 standard suites, 32 with UI smoke; the UI smoke total was not observed. The current source has 32 standard suites, 33 with UI smoke: `ContextMenuResync` was added after `69a94d0`, so 911 is not its total. The current source's totals are re-measured at release certification, which for a tagged commit on both packaged hosts will be recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 For `v1.2.2` the pack recorded 879 standard and 882 with UI smoke (28 and 29 suites).
 
@@ -1270,6 +1324,8 @@ VBA-DATETIMEPICKER/
 │  ├─ FEATURE_REQUEST_DETAILS.md
 │  └─ RELEASE_CERTIFICATION_TEMPLATE.md
 ├─ images/
+│  ├─ vba-datetimepicker-home.png
+│  └─ vba-datetimepicker-social-preview.png
 ├─ src/
 │  ├─ classes/
 │  │  ├─ cDatePickerManager.cls
@@ -1285,6 +1341,14 @@ VBA-DATETIMEPICKER/
 │     └─ images/ (DP_GridIcon_64, reset, demo)
 ├─ test/
 │  └─ M_cDP_Test.bas
+├─ tools/
+│  ├─ README.md
+│  ├─ check.py
+│  └─ check_*.py gates and advisory checkers, test_*.py, vba-projects.json, lint requirements, helpers
+├─ .editorconfig
+├─ .gitattributes
+├─ .gitignore
+├─ .nojekyll
 ├─ CHANGELOG.md
 ├─ CODE_OF_CONDUCT.md
 ├─ CONTRIBUTING.md
@@ -1294,7 +1358,9 @@ VBA-DATETIMEPICKER/
 ├─ README.md
 ├─ RELEASING.md
 ├─ SECURITY.md
-└─ VERSION
+├─ VERSION
+├─ index.html
+└─ pyproject.toml
 ```
 
 The repository intentionally keeps source reviewable. Generated demo binaries belong in Releases rather than as opaque versioned workbook changes.
@@ -1458,7 +1524,7 @@ is protected from interference.
 
 ### `Application.OnKey` cannot restore an unknown predecessor
 
-If you explicitly enable `Ctrl + Shift + D`, it may displace another application-wide assignment. Excel does not expose the previous binding, so the DatePicker cannot restore it later.
+While `Ctrl + Shift + D` is enabled (the default), it may displace another application-wide assignment. Excel does not expose the previous binding, so the DatePicker cannot restore it later. Turn the shortcut off with `M_Settings_SetEnableKeyboardShortcut False` if another tool owns that key.
 
 ### Default settings scope is user-global
 
@@ -1503,7 +1569,7 @@ High-DPI, high-contrast and accessibility behavior should be validated in the ta
 
 ### Release evidence is procedural, not automated
 
-No CI runs the regression pack — the workflows run static checks, CodeQL and repository analytics, never Excel ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
+No CI runs the regression pack — the workflows run static checks, CodeQL, Ribbon-resource, label and link checks, release-evidence validation and repository analytics, never Excel ([#15](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/15)). Artifact hashes establish file identity, not cryptographic source-to-binary provenance ([#16](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/16)). The `Public` surface is larger than the supported API, and formal classification is outstanding ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)).
 
 ### Certification environment
 
@@ -1569,7 +1635,10 @@ success only from the recorded outcome of the operation it ran, and starts the
 runtime when no provider holds the lease ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)). The right-click entry appears
 in every worksheet view, including Page Layout ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)). `DP_Stop` no longer
 shows the "another copy is already active" message for a copy that never
-started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)). The repository now holds the complete Ribbon source as it
+started ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115)). A right-click restores a
+missing context-menu entry, and a copy that still holds its owner token
+reclaims a lease whose bar vanished, at right-click and at `DP_Stop`
+([#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)). The repository now holds the complete Ribbon source as it
 ships, `customUI.xml` with its relationship part and images, and CI checks it
 ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90), [#91](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/91)). No supported API name, signature or default changed.
 
