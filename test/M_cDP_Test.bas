@@ -6161,6 +6161,12 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '   cannot prove it owns it - then drives each entry path and asserts that no
 '   manager, form or shared registration appeared, and that the path refused
 '
+'   Drives the keyboard shortcut, right-click and grid-icon setters the same
+'   way: under the foreign lease each one stores and saves its value, refuses,
+'   and leaves the owner's right-click entries, grid icon and lease untouched.
+'   With no lease at all they save silently and take nothing. As the owner they
+'   still apply at once (#194)
+'
 ' NOTES
 '   Refusal reporting is silenced for the duration. Application.DisplayAlerts
 '   does not suppress VBA.MsgBox, so without this the run would block on a modal
@@ -6169,8 +6175,15 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '   Silencing is restored in both exit paths. A run that left it enabled would
 '   hide genuine provider conflicts from the operator
 '
+'   Excel exposes no getter for Application.OnKey, so the keyboard setter's
+'   binding cannot be read back (#42). Its refusal is asserted instead: the
+'   refusal is reported only on the branch that skips the OnKey update
+'
+'   The three integration settings are captured on entry and restored, as the
+'   owner, in both exit paths
+'
 ' UPDATED
-'   2026-08-27
+'   2026-11-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6183,6 +6196,11 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
     Dim FormAfter           As Boolean      'True when the picker form is loaded after a refused path
     Dim GuardHeld           As Boolean      'True when the direct-admission backstop raised
     Dim OwnerSurvived       As Boolean      'True when the owner's lease outlived a refused teardown
+    Dim SavedShowRightClick As Boolean      'Right-click setting before the suite
+    Dim SavedShowGridIcon   As Boolean      'Grid-icon setting before the suite
+    Dim SavedKeyboard       As Boolean      'Keyboard shortcut setting before the suite
+    Dim MenuBefore          As Long         'Right-click controls before a setter runs
+    Dim IconsBefore         As Long         'Grid icons before a setter runs
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6197,6 +6215,10 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
         M_Lease_Test_SilenceRefusalReport True
     'Record the caller's Excel event state so the preservation check is honest
         EventsBefore = Excel.Application.EnableEvents
+    'Capture the integration settings so the suite leaves them as it found them
+        SavedShowRightClick = M_Settings_GetShowRightClick()
+        SavedShowGridIcon = M_Settings_GetShowGridIcon()
+        SavedKeyboard = M_Settings_GetEnableKeyboardShortcut()
     'Begin from a defined position
         TST_DP_ForceClearLeaseForTest
         Set gDP_Manager = Nothing
@@ -6304,6 +6326,125 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
             Not (gDP_Manager Is Nothing)
 
 '------------------------------------------------------------------------------
+' FOREIGN LEASE + RIGHT-CLICK SETTER
+'------------------------------------------------------------------------------
+    'Enabling from a copy that does not own the runtime stores the value and
+    'refuses, without adding an entry
+        M_ContextMenu_Remove
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick True
+        TST_DP_AssertTrue "SetShowRightClick True refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue "SetShowRightClick True is stored under a foreign lease", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertEqualsLong _
+            "SetShowRightClick True adds no entry under a foreign lease", _
+            0, TST_DP_ContextMenuControlCount()
+    'Give the owner its registered entries. The direct update stands in for the
+    'owner's own registration; it is not the path under test
+        M_ContextMenu_Update
+        MenuBefore = TST_DP_ContextMenuControlCount()
+        TST_DP_AssertTrue "Setter setup: the owner's right-click entries exist", _
+            (MenuBefore > 0)
+    'Disabling from that copy must not remove the owner's entries
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick False
+        TST_DP_AssertTrue "SetShowRightClick False refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse "SetShowRightClick False is stored under a foreign lease", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertEqualsLong _
+            "SetShowRightClick False keeps the owner's entries under a foreign lease", _
+            MenuBefore, TST_DP_ContextMenuControlCount()
+    'Repeating the unchanged value takes the resync branch; it must not either
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick False
+        TST_DP_AssertTrue _
+            "Unchanged SetShowRightClick refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsLong _
+            "Unchanged SetShowRightClick keeps the owner's entries", _
+            MenuBefore, TST_DP_ContextMenuControlCount()
+    'Remove the stand-in entries
+        M_ContextMenu_Remove
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + GRID-ICON SETTER
+'------------------------------------------------------------------------------
+    'Enabling stores the value and refuses; it creates nothing by itself
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowGridIcon True
+        TST_DP_AssertTrue "SetShowGridIcon True refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue "SetShowGridIcon True is stored under a foreign lease", _
+            M_Settings_GetShowGridIcon()
+    'Give the owner a grid icon, standing in for the one its runtime holds
+        IconsBefore = TST_DP_PlantGridIconForTest()
+        TST_DP_AssertEqualsLong "Setter setup: the owner's grid icon exists", _
+            1, IconsBefore
+    'Disabling from that copy must not delete the owner's icon
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowGridIcon False
+        TST_DP_AssertTrue "SetShowGridIcon False refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse "SetShowGridIcon False is stored under a foreign lease", _
+            M_Settings_GetShowGridIcon()
+        TST_DP_AssertEqualsLong _
+            "SetShowGridIcon False keeps the owner's icon under a foreign lease", _
+            IconsBefore, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+    'Repeating the unchanged value takes the stale-icon branch; it must not either
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowGridIcon False
+        TST_DP_AssertTrue _
+            "Unchanged SetShowGridIcon refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsLong _
+            "Unchanged SetShowGridIcon keeps the owner's icon", _
+            IconsBefore, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+    'Remove the stand-in icon
+        M_GridIcon_PurgeAll
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + KEYBOARD SHORTCUT SETTER
+'------------------------------------------------------------------------------
+    'Application.OnKey has no getter, so the binding cannot be read back (#42).
+    'The refusal is reported only on the branch that skips the OnKey update,
+    'which is what these assertions prove, together with the stored value
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetEnableKeyboardShortcut False
+        TST_DP_AssertTrue _
+            "SetEnableKeyboardShortcut False refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse _
+            "SetEnableKeyboardShortcut False is stored under a foreign lease", _
+            M_Settings_GetEnableKeyboardShortcut()
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetEnableKeyboardShortcut True
+        TST_DP_AssertTrue _
+            "SetEnableKeyboardShortcut True refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue _
+            "SetEnableKeyboardShortcut True is stored under a foreign lease", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE: SETTER VALUES ARE SAVED AND THE LEASE IS UNTOUCHED
+'------------------------------------------------------------------------------
+    'Reload from persisted storage: a refused setter still saves the preference
+        M_Settings_Load
+        TST_DP_AssertTrue "Right-click value set under a foreign lease was saved", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertFalse "Grid-icon value set under a foreign lease was saved", _
+            M_Settings_GetShowGridIcon()
+        TST_DP_AssertTrue "Keyboard value set under a foreign lease was saved", _
+            M_Settings_GetEnableKeyboardShortcut()
+    'No setter may take, rewrite or release the owner's lease
+        TST_DP_AssertEqualsString "Refused setters do not disturb the owner's lease", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
 ' A REFUSED COPY CANNOT TEAR DOWN THE OWNER
 '------------------------------------------------------------------------------
     'DP_Stop and DP_RepairRuntime already gate on ownership. This proves the
@@ -6325,6 +6466,30 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
             (Excel.Application.EnableEvents = EventsBefore)
 
 '------------------------------------------------------------------------------
+' NO LEASE + SETTERS SAVE SILENTLY AND TAKE NOTHING
+'------------------------------------------------------------------------------
+    'Before any copy starts, a setter is an ordinary preference write. It must
+    'not report a refusal, take the free lease or register anything
+        TST_DP_ForceClearLeaseForTest
+        M_ContextMenu_Remove
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick False
+        M_Settings_SetShowRightClick True
+        M_Settings_SetShowGridIcon True
+        M_Settings_SetEnableKeyboardShortcut True
+        TST_DP_AssertEqualsLong "Setters report no refusal while no lease is held", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
+        TST_DP_AssertEqualsLong "Setters take no lease while none is held", _
+            0, VBA.LenB(TST_DP_ReadLeaseOwnerForTest())
+        TST_DP_AssertEqualsLong _
+            "SetShowRightClick adds no entry while no lease is held", _
+            0, TST_DP_ContextMenuControlCount()
+        TST_DP_AssertTrue "SetShowRightClick is stored while no lease is held", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertTrue "SetShowGridIcon is stored while no lease is held", _
+            M_Settings_GetShowGridIcon()
+
+'------------------------------------------------------------------------------
 ' OWNER LEASE + SUPPORTED PATHS SUCCEED IDEMPOTENTLY
 '------------------------------------------------------------------------------
     'Reclaim the lease the only way a project can once its token is gone
@@ -6344,6 +6509,20 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
         M_Picker_EnsureManager
         TST_DP_AssertTrue "Direct admission succeeds for the owner", _
             Not (gDP_Manager Is Nothing)
+    'The owner's setters still apply at once (#194)
+        M_Settings_SetShowRightClick False
+        TST_DP_AssertEqualsLong "SetShowRightClick False removes the owner's entries", _
+            0, TST_DP_ContextMenuControlCount()
+        M_Settings_SetShowRightClick True
+        TST_DP_AssertTrue "SetShowRightClick True registers the owner's entries", _
+            (TST_DP_ContextMenuControlCount() > 0)
+        M_Settings_SetShowGridIcon True
+        IconsBefore = TST_DP_PlantGridIconForTest()
+        TST_DP_AssertEqualsLong "Owner setup: the owner's grid icon exists", _
+            1, IconsBefore
+        M_Settings_SetShowGridIcon False
+        TST_DP_AssertEqualsLong "SetShowGridIcon False removes the owner's icon", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
         TST_DP_AssertEqualsString "No owner path reported a refusal", _
             VBA.CStr(RefusalsBefore), _
             VBA.CStr(M_Lease_Test_RefusalReportCount())
@@ -6360,11 +6539,22 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 ' SUITE EXIT
 '------------------------------------------------------------------------------
 SuiteExit:
-    'Restore reporting so a genuine conflict is never hidden from the operator
-        M_Lease_Test_SilenceRefusalReport False
+    'Never let restoration raise back into the suite handler
+        On Error Resume Next
     'Leave the run owning the lease, as it did before this suite
         TST_DP_ForceClearLeaseForTest
         M_Lease_TryAcquire
+    'Restore the integration settings as the owner, so their registrations
+    'follow. Reporting is still silenced, so no setter can block on a modal
+        M_Settings_SetShowRightClick SavedShowRightClick
+        M_Settings_SetShowGridIcon SavedShowGridIcon
+        M_Settings_SetEnableKeyboardShortcut SavedKeyboard
+    'Restore reporting so a genuine conflict is never hidden from the operator
+        M_Lease_Test_SilenceRefusalReport False
+    'Clear any suppressed restoration error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
     'Exit after the suite completes
         Exit Sub
 
@@ -6376,10 +6566,43 @@ SuiteFail:
         TST_DP_RecordFail "Runtime admission suite", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
         Err.Clear
-    'Restore reporting and lease state regardless
+    'Restore reporting, settings and lease state regardless
         Resume SuiteExit
 
 End Sub
+
+Private Function TST_DP_PlantGridIconForTest() As Long
+
+'
+'==============================================================================
+'                         PLANT GRID ICON FOR TEST
+'==============================================================================
+'   Leaves exactly one tracked, hidden DatePicker grid icon on the scratch sheet
+'   and returns how many grid icons the host workbook holds.
+'
+'   It stands in for the icon an owning runtime already has, so a suite can
+'   prove whether a later call removed it. It uses the component's own
+'   pre-creation path, which creates nothing while the grid-icon setting is
+'   disabled; the caller enables the setting first.
+'
+'   ScreenUpdating is raised around creation for the reason the PreCreateHidden
+'   suite records, then returned to the harness run state.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' PLANT
+'------------------------------------------------------------------------------
+    'Start from no icon anywhere, so the count below is this helper's alone
+        M_GridIcon_PurgeAll
+    'Create through the normal cold path with screen updating on
+        Excel.Application.ScreenUpdating = True
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        Excel.Application.ScreenUpdating = False
+    'Report what the host workbook now holds
+        TST_DP_PlantGridIconForTest = _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+End Function
 
 Private Function TST_DP_IsPickerFormLoadedForTest() As Boolean
 

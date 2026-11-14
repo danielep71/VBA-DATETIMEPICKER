@@ -213,6 +213,19 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- The keyboard shortcut, right-click and grid-icon setters
+  (`M_Settings_SetEnableKeyboardShortcut`, `M_Settings_SetShowRightClick` and
+  `M_Settings_SetShowGridIcon`) no longer change shared Excel state from a copy
+  that does not own the runtime. Such a copy could rebind `Ctrl + Shift + D`,
+  or add and remove the owner's right-click entry and grid icons. The setters
+  still validate, store and save the value in every copy; only the owning copy
+  applies it. Under another copy's lease they report the provider-conflict
+  refusal, as the entry points do. While no copy holds the lease they show
+  nothing, write one Immediate Window line, and `DP_Start` applies the saved
+  value. The `RuntimeAdmission` suite drives all three setters under a foreign
+  lease, with no lease and as the owner
+  ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
+
 - Two messages still used the old "DatePicker" name: the provider-conflict
   refusal now reads "Another copy of the Date / Time Picker is already
   active", and the demo-sheet error names the Date / Time Picker demo sheet.
@@ -459,6 +472,12 @@ Use only the categories needed by a release.
 - Code that relied on `DP_Stop` showing the refusal for a copy that never
   started will no longer see it. `M_Lifecycle_Test_LastSucceeded` is still
   `False` after such a stop.
+
+- Code that called the shortcut, right-click or grid-icon setter in a copy
+  that was never started, and relied on the call registering or removing the
+  shortcut, right-click entry or grid icon at once, must call `DP_Start`; the
+  saved value is applied there
+  ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
 
 ### Known limitations
 
