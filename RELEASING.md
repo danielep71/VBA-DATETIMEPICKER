@@ -208,6 +208,9 @@ Capture commands, tool versions, timestamps, and complete results. Rerun affecte
 
 - Run **Debug → Compile VBAProject** on the exact candidate.
 - Run `TST_DP_RunAll`.
+  `tools/Certify-Excel.cmd` does both from a clean checkout in one step and
+  writes an evidence folder naming the commit and host
+  ([tools/README.md](tools/README.md#run-the-regression-pack-in-excel-windows)).
 - Run `TST_DP_RunAll_WithUISmoke` in an interactive desktop session.
 - Exercise `DP_Show` and `DP_Close`, including provider, write-back, and formula scenarios.
 

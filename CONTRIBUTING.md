@@ -317,7 +317,10 @@ Validation must be proportional to risk and reproducible from the exact source
 under review.
 
 - Compile the complete VBA project.
-- Run `TST_DP_RunAll` for production changes.
+- Run `TST_DP_RunAll` for production changes. On Windows,
+  `tools/Certify-Excel.cmd` builds a workbook from the checkout, compiles it
+  and runs the pack in one step, and writes an evidence folder you can attach
+  ([tools/README.md](tools/README.md#run-the-regression-pack-in-excel-windows)).
 - Run `TST_DP_RunAll_WithUISmoke`, `DP_Show`, and `DP_Close` for form/UI changes.
 - Exercise affected provider-lease, write-back, formula, keyboard, timer, settings, and recovery paths.
 - For native-window changes, test a real supported Windows host and the applicable 32/64-bit behavior.
