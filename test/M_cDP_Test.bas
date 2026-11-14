@@ -3226,7 +3226,8 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
 '==============================================================================
 ' PURPOSE
 '   Proves a discontiguous write returns one complete DP_WriteResult whose totals
-'   do not depend on the order Excel enumerates Target.Areas
+'   do not depend on the order Excel enumerates Target.Areas, writes every area
+'   and leaves the cells between the areas untouched
 '
 ' WHY THIS EXISTS
 '   At v1.2.0 M_WriteBack_PopulateRange raised before accumulating whenever an
@@ -3240,21 +3241,27 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
 '   M_WriteBack_Apply, then repeats it with the areas swapped and asserts the
 '   totals are identical
 '
+'   Selects D25 and D27, the cells the demo's discontiguous scenario names, and
+'   asserts both receive the date while D26 keeps its value (#182)
+'
 ' NOTES
 '   M_WriteBack_Apply resolves its target from Application.Selection and emits no
 '   message box. Shortfall reporting belongs to its callers, so this suite drives
 '   the engine without modal interruption
 '
 '   The suite works in column M, away from the ranges the other write-back suites
-'   use, and restores sheet protection in both exit paths
+'   use, and restores sheet protection in both exit paths. The gap case uses
+'   D25:D27 to mirror the demo layout; no other suite writes there
 '
 ' UPDATED
-'   2026-08-25
+'   2026-11-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const GAP_SENTINEL  As String = "Gap sentinel"  'Value the cell between the areas holds
+
     Dim ForwardResult   As DP_WriteResult   'Result with the writable area first
     Dim ReverseResult   As DP_WriteResult   'Result with the writable area last
     Dim ZeroResult      As DP_WriteResult   'Result for an all-zero-write target
@@ -3269,6 +3276,8 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
     Dim Raised          As Boolean          'True if technical-failure case raised
     Dim RaisedNumber    As Long             'Raised number for technical-failure case
     Dim WasProtected    As Boolean          'Sheet protection state on entry
+    Dim GapUnion        As Excel.Range      'Two single-cell areas with one cell between them
+    Dim GapResult       As DP_WriteResult   'Result for the two-area target with a gap
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3376,6 +3385,39 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
         TST_DP_AssertTrue "Zero-write target still names the resolved target", _
             (VBA.LenB(ZeroResult.ResolvedTargetAddress) > 0)
         TST_DP_AssertWriteResultBalances "Zero-write result balances", ZeroResult
+
+'------------------------------------------------------------------------------
+' EVERY AREA IS WRITTEN AND THE CELL BETWEEN THEM IS NOT
+'------------------------------------------------------------------------------
+    'The demo's discontiguous scenario selects D25 and D27 with Ctrl+click and
+    'promises that D26 is unchanged (#182). D26 holds a sentinel rather than
+    'staying blank, so a write that cleared it would be caught as well as one
+    'that wrote the date into it. The sheet is still unprotected here
+        mTST_DP_ScratchSheet.Range("D25:D27").ClearContents
+        mTST_DP_ScratchSheet.Range("D26").Value = GAP_SENTINEL
+        gDP_WriteValue = VBA.DateSerial(2026, 11, 14)
+    'Select the two areas, because the engine resolves its target from the
+    'selection, exactly as it does when the picker writes
+        Set GapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("D25"), _
+            mTST_DP_ScratchSheet.Range("D27"))
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+        GapUnion.Select
+        GapResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+
+        TST_DP_AssertEqualsLong "Two areas with a gap count both areas", _
+            2, GapResult.AreasCount
+        TST_DP_AssertEqualsLong "Two areas with a gap write 2 cells", _
+            2, VBA.CLng(GapResult.WrittenCount)
+        TST_DP_AssertCellDateEquals "Two areas with a gap write the first area D25", _
+            VBA.DateSerial(2026, 11, 14), _
+            mTST_DP_ScratchSheet.Range("D25")
+        TST_DP_AssertCellDateEquals "Two areas with a gap write the second area D27", _
+            VBA.DateSerial(2026, 11, 14), _
+            mTST_DP_ScratchSheet.Range("D27")
+        TST_DP_AssertEqualsString "Two areas with a gap leave D26 unchanged", _
+            GAP_SENTINEL, VBA.CStr(mTST_DP_ScratchSheet.Range("D26").Value)
+        TST_DP_AssertWriteResultBalances "Two areas with a gap balance", GapResult
 
 '------------------------------------------------------------------------------
 ' WRITABLE THEN LOCKED-ONLY, AND THE REVERSE
@@ -3578,7 +3620,9 @@ SuiteExit:
         mTST_DP_ScratchSheet.Range("M5:M12").Locked = True
         mTST_DP_ScratchSheet.Range("R20:T123").Clear
         mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        mTST_DP_ScratchSheet.Range("D25:D27").ClearContents
         Set CapUnion = Nothing
+        Set GapUnion = Nothing
         If WasProtected Then
             mTST_DP_ScratchSheet.Protect
         End If
@@ -5924,8 +5968,8 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '
 ' WHY THIS EXISTS
 '   DP_Stop runs from Workbook_BeforeClose. A copy that never started used to
-'   show "Another copy of the DatePicker is already active" at every Excel exit,
-'   although no other copy existed (#115)
+'   show "Another copy of the Date / Time Picker is already active" at every
+'   Excel exit, although no other copy existed (#115)
 '
 ' INPUTS
 '   None

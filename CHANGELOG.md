@@ -103,6 +103,17 @@ Use only the categories needed by a release.
 
 ### Added
 
+- One-command Excel regression run, `tools/Certify-Excel.cmd` with
+  `tools/Certify-Excel.ps1`, for Windows hosts. From a clean checkout it starts
+  its own Excel instance, imports the `packaged-hosts` modules of
+  `tools/vba-projects.json` into a new workbook, compiles the project, runs
+  `TST_DP_RunAll` (or the UI-smoke variant) through a generated error-handling
+  wrapper, and writes an evidence folder outside the checkout with the commit
+  SHA, the host, the harness summary line verbatim and every result row. It
+  reads the Trust Center settings and never changes them. It does not replace
+  the manual matrices of a release certification
+  ([#196](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/196)).
+
 - Markdown link checking, `tools/check_markdown_links.py`, with fixtures.
   A new `check.py` gate resolves every relative link and heading anchor in
   tracked Markdown offline, using GitHub's heading-slug rule. A weekly
@@ -202,6 +213,17 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Two messages still used the old "DatePicker" name: the provider-conflict
+  refusal now reads "Another copy of the Date / Time Picker is already
+  active", and the demo-sheet error names the Date / Time Picker demo sheet.
+  The demo's **Fill Table Column** error box is titled "Date / Time Picker"
+  like every other message, instead of the internal procedure name. The demo
+  sheet's second multi-cell scenario named a contiguous range (D25:D27) as a
+  discontiguous selection and expected it to be refused; it now asks for D25
+  and D27 with Ctrl+click and expects both areas written and D26 unchanged,
+  which is how write-back treats a multi-area selection
+  ([#182](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/182)).
+
 - Demo builder buttons: `DEMO_Btn_AddGrid` passed a fill colour into
   `DEMO_Btn_Add`'s `IsPrimary` parameter, so every grid button came out
   primary whatever its specification. Grid specifications now take an
@@ -263,9 +285,9 @@ Use only the categories needed by a release.
   cover every bar named `Cell` or `List Range Popup`
   ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)).
 
-- `DP_Stop` never shows "Another copy of the DatePicker is already active" at
-  Excel exit. A stop by a copy that cannot prove ownership touches nothing and
-  writes one Immediate Window line; a copy whose lease bar vanished while it
+- `DP_Stop` never shows "Another copy of the Date / Time Picker is already
+  active" at Excel exit. A stop by a copy that cannot prove ownership touches
+  nothing and writes one Immediate Window line; a copy whose lease bar vanished while it
   held its token reclaims the free lease and stops as the owner
   ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115), [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)).
   Provider conflicts are still reported when a copy starts or opens the picker.
