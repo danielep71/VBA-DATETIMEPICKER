@@ -206,7 +206,11 @@ Use only the categories needed by a release.
   refusal now reads "Another copy of the Date / Time Picker is already
   active", and the demo-sheet error names the Date / Time Picker demo sheet.
   The demo's **Fill Table Column** error box is titled "Date / Time Picker"
-  like every other message, instead of the internal procedure name
+  like every other message, instead of the internal procedure name. The demo
+  sheet's second multi-cell scenario named a contiguous range (D25:D27) as a
+  discontiguous selection and expected it to be refused; it now asks for D25
+  and D27 with Ctrl+click and expects both areas written and D26 unchanged,
+  which is how write-back treats a multi-area selection
   ([#182](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/182)).
 
 - Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
