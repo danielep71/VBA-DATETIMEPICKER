@@ -485,6 +485,7 @@ Public Sub DP_Demo_FillTableColumn()
 '
 ' DEPENDENCIES
 '   DP_FillTableColumn
+'   DP_MSGBOX_TITLE
 '
 ' NOTES
 '   A selection outside a table data body is handled by DP_FillTableColumn
@@ -494,13 +495,8 @@ Public Sub DP_Demo_FillTableColumn()
 '   point being demonstrated is write scope, not date selection
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "M_DP_DEMO.DP_Demo_FillTableColumn"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -527,7 +523,7 @@ ErrorHandler:
             "The table column could not be filled." & VBA.vbCrLf & VBA.vbCrLf & _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description, _
             vbExclamation, _
-            PROC_NAME
+            DP_MSGBOX_TITLE
 
 End Sub
 
@@ -919,10 +915,9 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
 '
 ' WHY THIS EXISTS
 '   Write-back scope is the highest-risk behaviour in the component. The section
-'   is meant to give a tester contiguous and non-contiguous ranges to select so
-'   the written scope can be observed directly. Its second scenario row is
-'   labelled as a discontiguous selection but names D25:D27, which is
-'   contiguous. That row text is code and is left to a separate fix (#182)
+'   gives a tester a contiguous and a discontiguous selection, so the written
+'   scope can be observed directly. Write-back writes every area of a
+'   discontiguous selection, so both scenarios are positive
 '
 ' INPUTS
 '   WS
@@ -949,7 +944,7 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
 '   to build a multi-cell selection with
 '
 ' UPDATED
-'   2026-11-09
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -984,11 +979,11 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
         WS.Range("C23").Value = "Multi-cell write-back"
         WS.Range("E23").Value = "Positive"
         WS.Range("F23").Value = "All selected cells should receive the picked date."
-    'Scenario row labelled as a discontiguous selection. The range it names,
-    'D25:D27, is contiguous, so the row does not yet exercise that case (#182)
-        WS.Range("C24").Value = "Select D25:D27 together"
-        WS.Range("E24").Value = "Negative"
-        WS.Range("F24").Value = "Discontiguous selection is not a single target."
+    'Discontiguous multi-area write-back. D26 between the two areas must stay
+    'untouched (#182)
+        WS.Range("C24").Value = "Select D25 and D27 (Ctrl+click)"
+        WS.Range("E24").Value = "Positive"
+        WS.Range("F24").Value = "Each area receives the date; D26 is unchanged."
 
 '------------------------------------------------------------------------------
 ' APPLY NUMBER FORMATS

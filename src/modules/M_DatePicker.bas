@@ -6151,7 +6151,7 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
         End If
     'Tell the operator, because nothing else in the session will
         MsgBox _
-            "Another copy of the DatePicker is already active in this Excel " & _
+            "Another copy of the Date / Time Picker is already active in this Excel " & _
             "session, or its ownership could not be verified." & VBA.vbCrLf & VBA.vbCrLf & _
             "Running two copies at once is not supported: they share the same " & _
             "keyboard shortcut, right-click entry and grid icons, and either " & _
@@ -23644,7 +23644,7 @@ Public Sub DP_DemoSheet_Show()
 ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, _
-            "Unable to show the DatePicker demo sheet '" & DP_DEMO_SHEET_NAME & "'. " & Err.Description
+            "Unable to show the Date / Time Picker demo sheet '" & DP_DEMO_SHEET_NAME & "'. " & Err.Description
 
 End Sub
 
