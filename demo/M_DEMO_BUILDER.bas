@@ -4241,10 +4241,14 @@ Public Sub DEMO_Btn_Add( _
 '     Button height.
 '
 '   ActionMacro (optional)
-'     Macro name to assign to the shape's OnAction property.
+'     Macro name to assign to the shape's OnAction property. A blank value or
+'     the default assigns DEMO_DEMOButton_NotAssigned, a placeholder that says
+'     the button has no action yet.
 '
-'   FillColor (optional)
-'     Fill color to apply to the button shape.
+'   IsPrimary (optional)
+'     True (default) styles the button as primary (UI_COLOR_PRIMARY_BG fill,
+'     UI_COLOR_PRIMARY_FG caption); False styles it as secondary
+'     (UI_COLOR_NEUTRAL_200 fill, UI_COLOR_NEUTRAL_900 caption).
 '
 ' RETURNS
 '   None
@@ -4252,8 +4256,7 @@ Public Sub DEMO_Btn_Add( _
 ' BEHAVIOR
 '   - Deletes an existing same-name shape on the target sheet when present
 '   - Creates a rounded-rectangle shape
-'   - Applies button styling
-'   - Uses FillColor when provided, otherwise defaults to COLOR_BUTTON
+'   - Applies primary or secondary button styling from IsPrimary
 '   - Writes the requested caption
 '   - Assigns the requested action macro
 '
@@ -4261,7 +4264,7 @@ Public Sub DEMO_Btn_Add( _
 '   Raises errors normally
 '
 ' UPDATED
-'   2026-04-24
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -4362,7 +4365,7 @@ Public Sub DEMO_Btn_AddGrid( _
 '     - button name
 '     - button caption
 '     - optional action macro
-'     - optional fill color
+'     - optional primary / secondary style
 '     - grid position
 '
 ' INPUTS
@@ -4378,13 +4381,16 @@ Public Sub DEMO_Btn_AddGrid( _
 '
 '         Array(ButtonName, ButtonCaption)
 '         Array(ButtonName, ButtonCaption, ActionMacro)
-'         Array(ButtonName, ButtonCaption, FillColor)
-'         Array(ButtonName, ButtonCaption, ActionMacro, FillColor)
+'         Array(ButtonName, ButtonCaption, IsPrimary)
+'         Array(ButtonName, ButtonCaption, ActionMacro, IsPrimary)
 '
 '     Notes
 '       - When the 3rd element is text, it is treated as ActionMacro
-'       - When the 3rd element is numeric, it is treated as FillColor
-'       - When the 4th element is present, it is treated as FillColor
+'       - When the 3rd element is Boolean, it is treated as IsPrimary
+'       - When the 4th element is present, it must be Boolean (IsPrimary)
+'       - Any other element type raises; numeric fill colors are not
+'         supported, because DEMO_Btn_Add styles buttons by IsPrimary
+'       - Without IsPrimary, the button is primary, as in DEMO_Btn_Add
 '
 '   ButtonsPerRow (optional)
 '     Number of buttons to place on each grid row.
@@ -4413,7 +4419,7 @@ Public Sub DEMO_Btn_AddGrid( _
 ' BEHAVIOR
 '   - Computes a regular button grid from AnchorCell
 '   - Resolves an optional action macro per button
-'   - Resolves an optional fill color per button
+'   - Resolves an optional primary / secondary style per button
 '   - Creates each button through DEMO_Btn_Add
 '
 ' ERROR POLICY
@@ -4423,7 +4429,7 @@ Public Sub DEMO_Btn_AddGrid( _
 '   - DEMO_Btn_Add
 '
 ' UPDATED
-'   2026-04-24
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -4435,7 +4441,7 @@ Public Sub DEMO_Btn_AddGrid( _
     Dim ButtonLeft          As Double    'Computed button left position
     Dim ButtonTop           As Double    'Computed button top position
     Dim ActionMacro         As String    'Resolved button action macro
-    Dim FillColor           As Long      'Resolved button fill color
+    Dim IsPrimary           As Boolean   'Resolved primary / secondary style
     Dim SpecItem            As Variant   'Current button specification item
     Dim SpecUBound          As Long      'Upper bound of the current spec item
 
@@ -4544,13 +4550,13 @@ Public Sub DEMO_Btn_AddGrid( _
                 ButtonTop = AnchorCell.Top + OffsetTop + (GridRow * (ButtonHeight + GapY))
 
 '------------------------------------------------------------------------------
-' RESOLVE OPTIONAL ACTION MACRO / FILL COLOR
+' RESOLVE OPTIONAL ACTION MACRO / PRIMARY STYLE
 '------------------------------------------------------------------------------
             'Initialize the default action macro
                 ActionMacro = "DEMO_DEMOButton_NotAssigned"
 
-            'Initialize the default fill color
-                FillColor = COLOR_BUTTON
+            'Initialize the default style, matching DEMO_Btn_Add
+                IsPrimary = True
 
             'Resolve the optional 3rd element
                 If SpecUBound >= 2 Then
@@ -4559,24 +4565,34 @@ Public Sub DEMO_Btn_AddGrid( _
                         If VarType(SpecItem(2)) = vbString Then
                             ActionMacro = CStr(SpecItem(2))
 
-                    'Treat numeric values as FillColor
-                        ElseIf IsNumeric(SpecItem(2)) Then
-                            FillColor = CLng(SpecItem(2))
+                    'Treat a Boolean as IsPrimary
+                        ElseIf VarType(SpecItem(2)) = vbBoolean Then
+                            IsPrimary = CBool(SpecItem(2))
+
+                    'Reject anything else, including a legacy numeric fill color
+                        Else
+                            Err.Raise vbObjectError + 2162, _
+                                      "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                                      "The 3rd ButtonSpecs element must be an ActionMacro string or an IsPrimary Boolean."
                         End If
 
                 End If
 
-            'Resolve the optional 4th element as FillColor
+            'Resolve the optional 4th element as IsPrimary
                 If SpecUBound >= 3 Then
-                    If IsNumeric(SpecItem(3)) Then
-                        FillColor = CLng(SpecItem(3))
+                    If VarType(SpecItem(3)) = vbBoolean Then
+                        IsPrimary = CBool(SpecItem(3))
+                    Else
+                        Err.Raise vbObjectError + 2162, _
+                                  "M_DEMO_BUILDER.DEMO_Btn_AddGrid", _
+                                  "The 4th ButtonSpecs element must be an IsPrimary Boolean."
                     End If
                 End If
 
 '------------------------------------------------------------------------------
 ' CREATE CURRENT BUTTON
 '------------------------------------------------------------------------------
-            'Create the current button with the resolved action macro and fill color
+            'Create the current button with the resolved action macro and style
                 DEMO_Btn_Add _
                     WS, _
                     CStr(SpecItem(0)), _
@@ -4586,9 +4602,54 @@ Public Sub DEMO_Btn_AddGrid( _
                     ButtonWidth, _
                     ButtonHeight, _
                     ActionMacro, _
-                    FillColor
+                    IsPrimary
 
         Next i
+
+End Sub
+
+Public Sub DEMO_DEMOButton_NotAssigned()
+'
+'------------------------------------------------------------------------------
+'                       PLACEHOLDER BUTTON ACTION
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Default OnAction target for DEMO buttons created without an action macro.
+'
+' WHY THIS EXISTS
+'   DEMO_Btn_Add, DEMO_Btn_AddGrid and DEMO_BuildOnActionText fall back to
+'   this name when no macro is supplied. Without this procedure, clicking such
+'   a button raises Excel's "macro not found" error (#183).
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   None
+'
+' BEHAVIOR
+'   - Tells the user that the button has no action assigned yet
+'   - Changes nothing in the workbook
+'
+' NOTES
+'   - Public, as a Shape.OnAction target. Option Private Module keeps it out
+'     of the Macros dialog.
+'
+' ERROR POLICY
+'   None expected
+'
+' UPDATED
+'   2026-11-09
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Explain the placeholder instead of failing silently
+        VBA.MsgBox _
+            "This button has no action assigned yet.", _
+            vbInformation, _
+            "Demo button"
 
 End Sub
 
