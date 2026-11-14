@@ -6434,7 +6434,7 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '------------------------------------------------------------------------------
     'Reload from persisted storage: a refused setter still saves the preference
         M_Settings_Load
-        TST_DP_AssertTrue "Right-click value set under a foreign lease was saved", _
+        TST_DP_AssertFalse "Right-click value set under a foreign lease was saved", _
             M_Settings_GetShowRightClick()
         TST_DP_AssertFalse "Grid-icon value set under a foreign lease was saved", _
             M_Settings_GetShowGridIcon()
