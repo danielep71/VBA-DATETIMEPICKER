@@ -91,6 +91,18 @@ class PackageRunTests(unittest.TestCase):
         self.assertNotIn("Set-ItemProperty", self.code)
         self.assertNotIn("New-ItemProperty", self.code)
 
+    def test_host_records_what_release_evidence_needs(self) -> None:
+        # check_release.py requires scaling, monitors, load_mode and
+        # other_addins for each package; they come from the run, not by hand.
+        for key in ("monitors", "scaling", "other_addins", "load_mode"):
+            self.assertRegex(self.code, rf"\n        {key} +=")
+
+    def test_other_addin_names_stay_out_of_the_evidence(self) -> None:
+        body = function_body(self.code, "Get-OtherAddIns")
+        returns = re.findall(r"return (.+)", body)
+        self.assertEqual(returns, ['"unknown"', '"unknown"', '"none"', '"$($names.Count) (names in session.log)"'])
+        self.assertIn('Write-Session ("Other add-ins open: " + ($names -join "; "))', body)
+
     def test_package_runs_refuse_source_only_switches(self) -> None:
         self.assertIn("-WithUISmoke applies to a source run", self.code)
 

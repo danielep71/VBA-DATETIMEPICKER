@@ -277,7 +277,9 @@ package read-only (an add-in also gets a blank workbook,
 which receives `TST_DP_RESULTS`), adds the generated runner to the open package
 in memory, compiles, runs the pack, reads the results and closes everything
 without saving. After each session it checks that the package's SHA-256 has not
-changed. `-WithUISmoke` and `-Configuration` do not apply.
+changed. It also records the monitor count, the primary display's scaling, the
+load mode, and how many other add-ins the instance has open; their names go to
+`session.log` only, because they can identify the operator's environment. `-WithUISmoke` and `-Configuration` do not apply.
 
 The evidence folder is `DATETIMEPICKER-package-<sha12>-<yyyyMMdd-HHmmss>`, with
 `certification.txt`, `summary.json`, `session.log`, `results-standard.tsv` and

@@ -257,6 +257,63 @@ function New-HarnessRecord {
     }
 }
 
+function Get-DisplayInfo {
+    # The monitor count and the primary display's scaling, as Windows applies
+    # them to this user. Either is "unknown" when it cannot be read.
+    $monitors = "unknown"
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $monitors = [string]([System.Windows.Forms.Screen]::AllScreens.Count)
+    }
+    catch {
+    }
+    $scaling = "unknown"
+    $dpi = Get-RegistryValue -Path "HKCU:\Control Panel\Desktop\WindowMetrics" -Name "AppliedDPI"
+    if ($null -ne $dpi) {
+        $scaling = "{0}%" -f [int][math]::Round(([int]$dpi) * 100 / 96)
+    }
+    return [pscustomobject]@{ monitors = $monitors; scaling = $scaling }
+}
+
+function Get-OtherAddIns {
+    # The add-ins open or connected in this Excel instance before the package
+    # is opened. Only their number goes into the evidence; the names, which
+    # can identify the operator's environment, go to session.log only.
+    param([object]$Excel)
+    $names = @()
+    try {
+        foreach ($addIn in $Excel.AddIns2) {
+            try {
+                if ($addIn.IsOpen) { $names += [string]$addIn.Name }
+            }
+            catch {
+            }
+        }
+    }
+    catch {
+        Write-Session ("The Excel add-ins could not be listed: " + $_.Exception.Message)
+        return "unknown"
+    }
+    try {
+        foreach ($comAddIn in $Excel.COMAddIns) {
+            try {
+                if ($comAddIn.Connect) { $names += [string]$comAddIn.ProgId }
+            }
+            catch {
+            }
+        }
+    }
+    catch {
+        Write-Session ("The COM add-ins could not be listed: " + $_.Exception.Message)
+        return "unknown"
+    }
+    if ($names.Count -eq 0) {
+        return "none"
+    }
+    Write-Session ("Other add-ins open: " + ($names -join "; "))
+    return "$($names.Count) (names in session.log)"
+}
+
 function Start-Excel {
     # A visible instance of our own. The host is recorded from the first one;
     # the run stops when the VBA project cannot be reached.
@@ -274,8 +331,10 @@ function Start-Excel {
         }
         $summary.host.macro_policy = Get-MacroPolicy -OfficeVersion $officeVersion
         $summary.host.vba_project_access = Get-VbaProjectAccess -OfficeVersion $officeVersion
+        $summary.host.other_addins = Get-OtherAddIns -Excel $excel
         Write-Session "Excel: $($summary.host.excel_build), $officeBitness"
         Write-Session "Macro setting: $($summary.host.macro_policy); VBA project access: $($summary.host.vba_project_access)"
+        Write-Session "Other add-ins in this instance: $($summary.host.other_addins)"
     }
     return $excel
 }
@@ -584,7 +643,9 @@ $officeBitness = switch ($platform) {
     default { "unknown" }
 }
 $versionToReport = Get-RegistryValue -Path $clickToRun -Name "VersionToReport"
+$display = Get-DisplayInfo
 Write-Session "Windows: $osText"
+Write-Session "Display: $($display.monitors) monitor(s), primary scaling $($display.scaling)"
 
 $summary = [ordered]@{
     tool               = "tools/Certify-Excel.ps1"
@@ -605,6 +666,12 @@ $summary = [ordered]@{
         macro_policy       = "unknown"
         vba_project_access = "unknown"
         package_macros     = $null
+        monitors           = $display.monitors
+        scaling            = $display.scaling
+        other_addins       = "unknown"
+        load_mode          = $(if ($packageMode) {
+                "$packageHost opened read-only by tools/Certify-Excel.ps1 in an Excel instance it started (no add-ins load at startup)" } else {
+                "source imported into a new workbook by tools/Certify-Excel.ps1" })
     }
     import             = [ordered]@{ status = "NOT_RUN"; components = @() }
     compile            = [ordered]@{ status = "NOT_RUN"; detail = "Not run" }
@@ -780,6 +847,9 @@ $report = @(
     "Excel:           $($summary.host.excel_build), $officeBitness",
     "Windows:         $osText",
     "Macro setting:   $($summary.host.macro_policy)",
+    "Display:         $($summary.host.monitors) monitor(s), primary scaling $($summary.host.scaling)",
+    "Other add-ins:   $($summary.host.other_addins)",
+    "Load mode:       $($summary.host.load_mode)",
     "Excel cleanup:   $($summary.cleanup.status)",
     "")
 if ($packageMode) {
