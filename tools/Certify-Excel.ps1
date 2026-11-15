@@ -178,6 +178,14 @@ function Invoke-Macro {
     }
 }
 
+function Get-WorkbookQualifier {
+    # The workbook part of an Application.Run name. An apostrophe in the
+    # workbook name is doubled, as in a formula reference: Owner's demo.xlsm
+    # becomes 'Owner''s demo.xlsm'!
+    param([object]$Workbook)
+    return "'" + ([string]$Workbook.Name).Replace("'", "''") + "'!"
+}
+
 function ConvertTo-CellText {
     # One worksheet value as single-line text for a tab-separated file.
     param([object]$Value)
@@ -730,7 +738,7 @@ try {
                     $hostBook = $excel.Workbooks.Add()
                 }
                 Write-Session "Opened $packageName read-only$(if ($null -ne $hostBook) { ', with a blank workbook for the results' } else { '' })"
-                $qualified = "'" + $workbook.Name + "'!"
+                $qualified = Get-WorkbookQualifier -Workbook $workbook
                 Add-Runner -Project $workbook.VBProject -EntryPoint $pack.entry_point
                 $pack.compile = Invoke-Compile -Excel $excel -Project $workbook.VBProject
                 if ($pack.compile.status -ne "PASS") {
@@ -759,7 +767,7 @@ try {
         $excel = Start-Excel
         Assert-VbaProjectAccess
         $workbook = $excel.Workbooks.Add()
-        $qualified = "'" + $workbook.Name + "'!"
+        $qualified = Get-WorkbookQualifier -Workbook $workbook
         $project = $workbook.VBProject
         $imported = @()
         foreach ($component in $components) {

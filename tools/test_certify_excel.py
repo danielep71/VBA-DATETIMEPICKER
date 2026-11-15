@@ -103,6 +103,12 @@ class PackageRunTests(unittest.TestCase):
         self.assertEqual(returns, ['"unknown"', '"unknown"', '"none"', '"$($names.Count) (names in session.log)"'])
         self.assertIn('Write-Session ("Other add-ins open: " + ($names -join "; "))', body)
 
+    def test_workbook_qualifier_escapes_apostrophes(self) -> None:
+        body = function_body(self.code, "Get-WorkbookQualifier")
+        self.assertIn("""return "'" + ([string]$Workbook.Name).Replace("'", "''") + "'!\"""", body)
+        self.assertEqual(self.code.count("$qualified = Get-WorkbookQualifier -Workbook $workbook"), 2)
+        self.assertNotRegex(self.code, r"\$qualified = \"'\" \+")
+
     def test_package_runs_refuse_source_only_switches(self) -> None:
         self.assertIn("-WithUISmoke applies to a source run", self.code)
 
