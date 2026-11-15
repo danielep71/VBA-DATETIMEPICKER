@@ -1,5 +1,10 @@
 name: Verify published release evidence
+# Runs on its own when a GitHub Release is published (#222): the candidate is
+# the commit the release tag points to, and the evidence is the release's own
+# release-evidence.json asset. It can also be run by hand with both inputs.
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       candidate_sha:
@@ -18,11 +23,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Validate candidate input
-        env:
-          CANDIDATE: ${{ inputs.candidate_sha }}
-        shell: bash
-        run: '[[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]]'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
@@ -31,10 +31,32 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
+      - name: Resolve the candidate and the evidence record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG_INPUT: ${{ github.event.release.tag_name }}
+          CANDIDATE_INPUT: ${{ inputs.candidate_sha }}
+          EVIDENCE_JSON: ${{ inputs.evidence_json }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            [[ "$RELEASE_TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release tag"; exit 1; }
+            git fetch --force origin "refs/tags/$RELEASE_TAG_INPUT:refs/tags/$RELEASE_TAG_INPUT"
+            candidate="$(git rev-parse "refs/tags/$RELEASE_TAG_INPUT^{commit}")"
+            gh release download "$RELEASE_TAG_INPUT" --repo "$GITHUB_REPOSITORY" \
+              --pattern release-evidence.json --dir "$RUNNER_TEMP/published-evidence"
+            cp "$RUNNER_TEMP/published-evidence/release-evidence.json" "$RUNNER_TEMP/evidence-input.json"
+          else
+            candidate="$CANDIDATE_INPUT"
+            printf '%s' "$EVIDENCE_JSON" > "$RUNNER_TEMP/evidence-input.json"
+          fi
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid candidate SHA"; exit 1; }
+          echo "CANDIDATE=$candidate" >> "$GITHUB_ENV"
       - name: Retrieve exact-candidate static evidence without executing candidate code
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE: ${{ inputs.candidate_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -57,15 +79,12 @@ jobs:
           gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
             --name "static-checks-$CANDIDATE" --dir "$RUNNER_TEMP/static-evidence"
       - name: Save evidence and resolve download identity
-        env:
-          EVIDENCE_JSON: ${{ inputs.evidence_json }}
-          CANDIDATE: ${{ inputs.candidate_sha }}
         shell: bash
         run: |
           python - <<'PY'
           import json, os, re
           from pathlib import Path
-          record = json.loads(os.environ["EVIDENCE_JSON"])
+          record = json.loads(Path(os.environ["RUNNER_TEMP"], "evidence-input.json").read_text())
           if record.get("candidate_sha") != os.environ["CANDIDATE"]:
               raise SystemExit("Evidence candidate mismatch")
           tag = record.get("tag", "")
@@ -88,6 +107,7 @@ jobs:
       - name: Verify evidence, annotated tag and downloaded hashes
         shell: bash
         run: |
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
           python tools/check_release.py \
             --evidence "$RUNNER_TEMP/release-evidence.json" \
             --assets-dir "$RUNNER_TEMP/release-assets" \
@@ -96,7 +116,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-check-${{ inputs.candidate_sha }}
+          name: release-check-${{ env.CANDIDATE || github.run_id }}
           path: |
             test-results/
             ${{ runner.temp }}/release-evidence.json

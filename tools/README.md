@@ -615,6 +615,53 @@ one:
 A manual check `NOT RUN` with a named `accepted_by` becomes a deviation in the
 tag message and the notes. The tool tags nothing and publishes nothing.
 
+## Run the whole release (Windows)
+
+`tools/Release.cmd` (or `tools/Release.ps1`) runs RELEASING sections 5 to 11
+from one command, on a clean checkout of the exact `origin/main` commit
+([RELEASING](../RELEASING.md#one-command),
+[#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It needs
+everything the other Windows tools need, plus GitHub CLI (`gh`, signed in),
+Node.js, Python-Markdown and pypdf (`tools/requirements-docs.txt`) and Chrome,
+Edge or Chromium.
+
+```powershell
+.\tools\Release.cmd -DryRun -Title "<short title>" -Refs 88,89 -EvidenceIssue 122
+```
+
+`-Title` and `-EvidenceIssue` are asked for when missing; `-Refs` takes issue
+numbers separated by commas. Each step runs the existing tool in its own
+PowerShell process in the same console, so you answer the Ribbon questions
+there, and its exit code decides. The release folder,
+`DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>` next to the checkout,
+holds:
+
+| Path | Content |
+| --- | --- |
+| `static/` | `static-checks.json` and the logs of `tools/check.py --ci`, and `ribbon-resources.txt` |
+| `source-standard/`, `source-ui_smoke/` | The two source runs of `Certify-Excel.ps1` |
+| `addin-build/`, `demo-build/` | The builds, with the release file names |
+| `addin-run/`, `demo-run/` | The package runs of `Certify-Excel.ps1 -Package` |
+| `manual/`, `manual-checks.json` | The manual's HTML, and your answers to the six manual checks |
+| `release-assets/` | The two packages, the PDF and `release-evidence.json`, as published |
+| `evidence/` | The output of `tools/assemble_release.py` |
+| `published/`, `published-check.json` | The release downloaded again, and its validation with the tag |
+| `release.txt`, `release.json`, `session.log` | Each step with its result, and the reason it stopped |
+
+The preflight refuses a commit that is not `origin/main`, a tree that is not
+clean, a `VERSION` without a dated CHANGELOG section, an existing tag or
+release, and a commit without a successful static-checks push run on `main`.
+`-DryRun` stops after the final confirmation step, before anything is tagged or
+published. `-Rehearse` tries the command on any clean checkout, such as a pull
+request branch: it skips the release-state checks (main, `VERSION`,
+CHANGELOG, tag, release, static run), runs steps 2 to 7 and stops before the
+evidence, so its result is never release evidence. Without it, you type the tag to confirm. The command then checks that
+`origin/main` has not moved and pushes the annotated tag. It creates the
+release, downloads it again and compares every file with the tested one, then
+runs `check_release.py --require-tag`. If the release cannot be created after
+the tag was pushed, it says so and leaves the tag: RELEASING's
+[Recovery](../RELEASING.md#-recovery) applies.
+
 ## Template origin and adaptations
 
 Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at

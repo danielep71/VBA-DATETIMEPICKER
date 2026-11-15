@@ -88,6 +88,57 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 
 Test both embedded-source and add-in consumption if both are advertised for the release.
 
+<a id="one-command"></a>
+
+## ⚡ One command: `tools/Release.cmd`
+
+Sections 5 to 11 are run by one command on the Windows host
+([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). Prepare
+sections 1 to 4 as before: integrate into `main`, then check out the exact
+integration commit with a clean tree. Run a dry run first:
+
+```powershell
+git fetch origin main --tags
+git switch --detach origin/main
+.\tools\Release.cmd -DryRun -Title "<short title>" -Refs 88,89 -EvidenceIssue <n>
+.\tools\Release.cmd -Title "<short title>" -Refs 88,89 -EvidenceIssue <n>
+```
+
+It stops at the first failure and runs, in order:
+
+1. **preflight**. The checkout must be exactly `origin/main` with a clean tree,
+   and `VERSION` must have a dated CHANGELOG section. The tag and the GitHub
+   Release must not exist yet, and the static-checks workflow must have a
+   successful push run on `main` for this commit. GitHub CLI must be signed in,
+   and Python with the documentation packages and Node.js must be available;
+2. the static gates (`tools/check.py --ci`) and the Ribbon check, with its
+   output kept (section 5);
+3. both source runs, `tools/Certify-Excel.ps1` standard and `-WithUISmoke`
+   (section 6);
+4. the add-in and demo builds with the release file names; you answer their
+   Ribbon questions (section 7);
+5. both packs inside each package, `Certify-Excel.ps1 -Package` (section 7,
+   step 10);
+6. the user manual PDF, which you check page by page;
+7. the six manual checks, asked one by one: PASS, NOT RUN with the name of whoever
+   accepts the gap, or FAIL, which stops;
+8. the evidence, with `tools/assemble_release.py`: `release-evidence.json`
+   validated by `check_release.py`, the tag message and the release notes
+   (sections 8 and 9);
+9. a final confirmation: you type the tag;
+10. the annotated tag, pushed, and the GitHub Release with the two packages, the
+    PDF and `release-evidence.json` (sections 9 and 10). The published files
+    are downloaded again and validated with `--require-tag`, and the
+    **Verify published release evidence** workflow runs on its own (section 11).
+
+`-DryRun` does steps 1 to 9 and stops before the tag; `-Rehearse` tries steps
+2 to 7 on a checkout that is not a release candidate yet. Everything goes into one
+folder next to the checkout, `DATETIMEPICKER-release-vX.Y.Z-<sha12>-<stamp>`,
+ending with `release.txt` and `release.json`
+([tools/README.md](tools/README.md#run-the-whole-release-windows)). The sections
+below remain the reference for what each step checks and for doing a step by
+hand.
+
 ## 1. Open the release branch, then freeze the candidate
 
 ### Start of the release cycle
@@ -340,6 +391,10 @@ python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha
 python tools/check_release.py --evidence test-results/release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
 ```
 
+`tools/assemble_release.py` fills the record from the evidence folders instead
+([tools/README.md](tools/README.md#assemble-the-record-from-the-evidence-folders));
+`tools/Release.cmd` runs it (step 8 of [One command](#one-command)).
+
 Use [the certification template](docs/RELEASE_CERTIFICATION_TEMPLATE.md) alongside
 that JSON. Record both per-host environments, standard/UI-smoke counts and all
 six manual records. Blank or NOT RUN compile/harness fields block validation.
@@ -356,8 +411,10 @@ renewed exact-source evidence; package changes invalidate test and hash evidence
 Tag only the certified commit on `main`.
 
 The tag message is the release's permanent, offline record: it travels with every
-clone, while Release pages and issues can be edited later. Write it from the
-evidence record into a file outside the repository, using this template:
+clone, while Release pages and issues can be edited later. `tools/assemble_release.py`
+writes it from the evidence record as `tag-message.txt`, and `tools/Release.cmd`
+creates and pushes the tag from it. By hand, write it into a file outside the
+repository, using this template:
 
 ```text
 vX.Y.Z - <short release title>
@@ -435,11 +492,19 @@ Create the release from the annotated tag and include:
 7. Full changelog comparison link.
 8. Security-reporting link.
 
-Upload the already-hashed artifacts. Do not rebuild between tagging and upload.
-After publication, dispatch `release-check.yml` with `candidate_sha` and the
-completed JSON. It retrieves the successful main push-run static report and
-both published packages, then validates the annotated tag and downloaded hashes.
-Retain its report and disclose any accepted manual limitations.
+Upload the already-hashed artifacts and `release-evidence.json`. Do not rebuild
+between tagging and upload. `tools/assemble_release.py` writes the notes
+(`release-notes.md`): the dated CHANGELOG section, the downloads with SHA-256,
+both packs on both packages, the environment, the manual checks and the
+deviations. Add any upgrade notes or highlights by editing the CHANGELOG section
+before the candidate is frozen, not the generated file.
+
+Publishing the release starts `release-check.yml` on its own. It takes the
+candidate from the tag and the record from the `release-evidence.json` asset,
+retrieves the successful main push-run static report and both published
+packages, then validates the annotated tag and downloaded hashes. It can also be
+dispatched by hand with `candidate_sha` and the completed JSON. Retain its
+report and disclose any accepted manual limitations.
 
 ## 11. Verify after publication
 
