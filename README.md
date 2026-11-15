@@ -1285,7 +1285,7 @@ The `v1.2.2` figures are historical development-host figures at `d99fefa`, taken
 
 <p align="center">
   <img width="100%"
-       alt="VBA Date / Time Picker demo worksheet"
+       alt="Date / Time Picker demo worksheet: instructions, single-cell, format, multi-cell and Excel Table scenarios, with the Fill Table Column button"
        src="assets/datepicker-demosheet.png">
 </p>
 

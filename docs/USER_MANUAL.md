@@ -389,6 +389,12 @@ The demo sheet lets you try the picker on prepared cells. Open it with
 The sheet is named `DATE PICKER DEMO`. Its title band reads
 **Date / Time Picker** / **Demo**. It has four sections:
 
+<p align="center">
+  <img width="100%"
+       alt="The DATE PICKER DEMO sheet: title band, instructions, Basic Single-Cell Scenarios, Format Showcase, Multi-Cell Selection and the Excel Table Demo with its Fill Table Column button"
+       src="../assets/datepicker-demosheet.png">
+</p>
+
 | Section | What it shows |
 |---|---|
 | **Basic Single-Cell Scenarios** | Cells that should and should not get the icon: an empty date cell, a date, a date and time, a General cell, a text cell, a formula `=TODAY()`, an empty date-and-time cell. The **Expected** column says what should happen. |

@@ -380,6 +380,13 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- The demo-sheet screenshot, `assets/datepicker-demosheet.png`, shows the
+  current sheet ([#214](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/214)).
+  The old one showed the `DATETIME PICKER` title, a removed diagnostics step,
+  and a multi-cell scenario expected to be refused, which #191 corrected. The
+  new one shows the Date / Time Picker title and instructions, the D25/D27
+  scenario and the **Fill Table Column** button. README, the project website
+  and the user manual show it.
 - A user manual for people who use the picker in Excel, not for developers:
   [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) ([#209](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/209)). It covers:
   - installing the add-in;
