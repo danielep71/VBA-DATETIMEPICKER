@@ -1314,7 +1314,10 @@ def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: se
     configurations = manifest.get("configurations", {})
     coverage: list[dict[str, Any]] = []
     vba_files = {p for p in files if Path(p).suffix.casefold() in VBA_SUFFIXES}
-    listed = {m for c in configurations.values() for m in c.get("modules", [])}
+    # document_modules holds exported workbook or worksheet module code that a build writes into the
+    # package's own document module. It counts as assigned, but is not analyzed: a project class named
+    # ThisWorkbook would hide the Workbook members that other modules reach through ThisWorkbook.
+    listed = {m for c in configurations.values() for m in c.get("modules", []) + c.get("document_modules", [])}
     for path in sorted(vba_files - listed):
         coverage.append(finding("VBA-CALL-091", None, None, None, path,
                                 f"{path} is not assigned to any configuration in {MANIFEST}.", path=path))
@@ -1325,7 +1328,7 @@ def analyze_project(files: dict[str, str], manifest: dict[str, Any], tracked: se
     results: dict[str, Any] = {}
     for name, config in configurations.items():
         sources = {p: files[p] for p in config.get("modules", []) if p in files}
-        missing = [p for p in config.get("modules", []) if p not in files]
+        missing = [p for p in config.get("modules", []) + config.get("document_modules", []) if p not in files]
         complete = not missing
         runs = [analyze_configuration(name, sources, patterns, macro_functions, env, complete) for env in ENVIRONMENTS]
         ribbon = config.get("ribbon")

@@ -255,6 +255,73 @@ The exit code is 0 only when import and compile pass, the harness reports
 compilation and the regression pack; the manual matrices of a release
 certification (RELEASING §6) and package tests are still separate.
 
+## Build the add-in and check its Ribbon (Windows)
+
+`tools/Build-Addin.cmd` (double click) or `tools/Build-Addin.ps1` builds the
+add-in package of the checked-out commit with its Ribbon, reopens it in Excel,
+and asks you to confirm that the Ribbon renders (RELEASING §7). It needs:
+- Windows, desktop Excel, Git, and Python 3.11 or later on the `PATH`
+  (`python`, or the `py` launcher);
+- **Trust access to the VBA project object model** already turned on. The tool
+  never changes it.
+
+Close other Excel work first.
+
+```powershell
+git switch <branch-or-sha>
+git status                     # must show no changes to tracked files
+.\tools\Build-Addin.cmd        # or: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Build-Addin.ps1
+```
+
+The run:
+
+1. reads the full SHA and refuses changes to tracked files (`-AllowDirty`
+   builds anyway and records the build as not release-grade);
+2. runs `.github/scripts/check-ribbon-resources.py` on `src/ribbon`, so a
+   missing Ribbon part or image stops the build;
+3. imports the `packaged-hosts` modules of `tools/vba-projects.json` into a new
+   workbook, as Certify-Excel does. The harness is included, as RELEASING §7
+   requires for both packages;
+4. writes the add-in's tracked `ThisWorkbook` code into the workbook's own
+   `ThisWorkbook` module. The code lives in `src/addin/ThisWorkbook.cls`,
+   listed under `document_modules` in `tools/vba-projects.json`, and the file's
+   SHA-256 is recorded. A document module cannot be imported as a component, so
+   the code after the export header is copied in. Its `Workbook_Open` hides the
+   demo sheet and starts and preloads the picker; `Workbook_BeforeClose` stops
+   it; and `Workbook_BeforePrint` closes the picker and purges grid icons;
+5. compiles with **Debug → Compile VBAProject** and saves an `.xlam`;
+6. injects `src/ribbon/` with `tools/build_ribbon_package.py`. That tool:
+   - copies the parts into `customUI/` byte for byte;
+   - adds the Office 2007 extensibility relationship to `_rels/.rels`, and a
+     PNG content type when the package has none;
+   - verifies the result before replacing the file;
+   - refuses a package that already has a Ribbon;
+7. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
+   on it. The inspection is advisory and its verdict does not decide the build;
+8. opens the package read-only in a fresh Excel instance with a blank workbook,
+   and asks three questions:
+   - Does Show Picker show its icon?
+   - Do Reset and Demo show theirs?
+   - Does Show Picker open the picker?
+9. closes without saving and checks that the package hash is unchanged.
+
+The evidence folder, `DATETIMEPICKER-addin-<sha12>-<yyyyMMdd-HHmmss>` next to
+the checkout (or `-BundleDir`), holds:
+
+| File | Content |
+| --- | --- |
+| `build.txt` | Verdict, commit, host, package hash and the Ribbon answers |
+| `summary.json` | The same, machine-readable, with the reasons for a FAIL |
+| `DATETIMEPICKER-build-<sha12>.xlam` | The package (`-PackageName` sets another name) |
+| `ribbon-injection.json` | Each injected part with its size and SHA-256, and the root relationship |
+| `package-inspection.json`, `.md` | The advisory package inspection |
+| `session.log` | Each step with its time |
+
+The exit code is 0 only when every step passes, all three answers are yes, the
+hash is unchanged after reopening, and the tree was clean. The tool does not run
+the regression pack on the package (RELEASING §7 step 9) and builds no demo
+workbook.
+
 ## Traffic history (repository analytics)
 
 `tools/traffic_export.py` is used only by the **Daily traffic export** workflow.

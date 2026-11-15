@@ -78,6 +78,7 @@ required to compile or to test the project as it currently stands:
 | Source | Purpose |
 |---|---|
 | `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder, and point the package's root relationship at `customUI/customUI.xml` with the Office 2007 extensibility type (see [RELEASING.md](RELEASING.md#7-build-release-artifacts)) |
+| `src/addin/ThisWorkbook.cls` | The published add-in's `ThisWorkbook` code: hides the demo sheet, starts and preloads the picker on open, stops it before close, and clears the picker and grid icons before printing. A build input for the add-in package, copied into the workbook's own `ThisWorkbook` module by `tools/Build-Addin.cmd`. Do not import it: **File → Import** would create a class named `ThisWorkbook1`. For your own workbook, use the lifecycle hooks shown in README instead |
 | `test/M_cDP_Test.bas` | Regression harness |
 | `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
