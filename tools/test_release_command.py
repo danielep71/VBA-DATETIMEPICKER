@@ -82,8 +82,10 @@ class ReleaseScriptTests(unittest.TestCase):
         for needle in (
             '"Certify-Excel.ps1" @("-BundleDir", $folders.source_standard, "-NoOpen")',
             '"Certify-Excel.ps1" @("-WithUISmoke", "-BundleDir", $folders.source_ui_smoke, "-NoOpen")',
-            '"Build-Addin.ps1" @("-PackageName", $addinName, "-BundleDir", $folders.addin_build, "-NoOpen")',
-            '"Build-Addin.ps1" @("-Demo", "-PackageName", $demoName, "-BundleDir", $folders.demo_build, "-NoOpen")',
+            '"Build-Addin.ps1" @("-PackageName", $addinName, "-BundleDir", $folders.addin_build, "-NoOpen", '
+            '"-NoRibbonCheck")',
+            '"Build-Addin.ps1" @("-Demo", "-PackageName", $demoName, "-BundleDir", $folders.demo_build, "-NoOpen", '
+            '"-NoRibbonCheck")',
             '"Certify-Excel.ps1" @("-Package", $addinPath, "-BundleDir", $folders.addin_run, "-NoOpen")',
             '"Certify-Excel.ps1" @("-Package", $demoPath, "-BundleDir", $folders.demo_run, "-NoOpen")',
             '$addinName = "DATETIMEPICKER.$tag.xlam"',
@@ -112,9 +114,18 @@ class ReleaseScriptTests(unittest.TestCase):
         start = self.code.index("$manualChecks = [ordered]@{")
         block = self.code[start:self.code.index("}", start)]
         self.assertEqual(tuple(re.findall(r'^\s+"([a-z-]+)"\s+=', block, flags=re.M)), check_release.MANUAL)
-        self.assertIn('Stop-Release $step "$name failed; an unresolved failure cannot be accepted as a gap."',
-                      self.code)
-        self.assertIn('$record.accepted_by = Read-Required "  Gap accepted by (name)"', self.code)
+        self.assertIn('status      = "NOT RUN"', self.code)
+        self.assertIn("accepted_by = $maintainer", self.code)
+        self.assertIn("$maintainer = (& git -C $RepoRoot config user.name | Out-String).Trim()", self.code)
+
+    def test_nothing_is_asked_but_the_tag(self) -> None:
+        # A release asks only for the tag; -Title and -EvidenceIssue when missing.
+        asked = re.findall(r"Read-Host[^\n]*", self.code)
+        self.assertEqual(len(asked), 2, asked)
+        self.assertIn('Read-Host "Type $tag to tag $sha and publish the release', self.code)
+        self.assertEqual(self.code.count("Read-Required"), 3)
+        self.assertNotIn("Read-YesNo", self.code)
+        self.assertNotIn("Invoke-Item", self.code)
 
     def test_published_files_are_downloaded_and_validated_with_the_tag(self) -> None:
         after = self.code[self.code.index('@("release", "create", $tag'):]
@@ -157,9 +168,9 @@ class ManualAndResumeTests(unittest.TestCase):
         self.assertNotIn("render_manual", self.code)
         self.assertNotIn("import markdown", self.code)
 
-    def test_operator_still_checks_every_page(self) -> None:
-        self.assertIn('Read-YesNo "The PDF is open. Did you check every page, and is every page right?"',
-                      self.step6)
+    def test_pdf_is_not_opened_or_asked_about(self) -> None:
+        self.assertNotIn("Read-", self.step6)
+        self.assertNotIn("Invoke-Item", self.step6)
 
     def test_a_release_resumes_only_at_the_same_commit(self) -> None:
         self.assertIn('if (-not $Rehearse) {\n            throw "-Resume: that run was at', self.code)

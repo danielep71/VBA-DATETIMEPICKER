@@ -22,9 +22,29 @@ with status PASS or FAIL, and one reason per failure. Both scripts give a PASS
 verdict only when the summary has no reason, so a failed cleanup always gives
 FAIL and exit code 1.
 
+One case is not a failure: a call refused because the Excel process has
+already exited (RPC server unavailable, the remote procedure call failed, or
+the object disconnected from its client). Nothing can still be open or locked
+then, so it is logged and not counted. It happens when Excel ends by itself
+while the last workbook closes, after every test has run.
+
 tools/Test-ExcelCleanup.ps1 checks both functions without Excel.
 #>
 Set-StrictMode -Version Latest
+
+# RPC_S_SERVER_UNAVAILABLE, RPC_S_CALL_FAILED and RPC_E_DISCONNECTED: the
+# Excel process the call was for no longer exists.
+$script:ExcelExitedCodes = @(-2147023174, -2147023170, -2147417848)
+
+function Test-ExcelExited {
+    param([System.Exception]$Exception)
+    for ($current = $Exception; $null -ne $current; $current = $current.InnerException) {
+        if ($script:ExcelExitedCodes -contains $current.HResult) {
+            return $true
+        }
+    }
+    return $false
+}
 
 function Close-ExcelInstance {
     [CmdletBinding()]
@@ -43,7 +63,14 @@ function Close-ExcelInstance {
             [void]$book.Close($false)
         }
         catch {
-            $failures.Add("${Label}: a workbook could not be closed: " + $_.Exception.Message)
+            if (Test-ExcelExited $_.Exception) {
+                if ($null -ne $Log) {
+                    & $Log "${Label}: Excel had already exited; nothing is left open"
+                }
+            }
+            else {
+                $failures.Add("${Label}: a workbook could not be closed: " + $_.Exception.Message)
+            }
         }
         try {
             if ([System.Runtime.InteropServices.Marshal]::IsComObject($book)) {
@@ -62,7 +89,14 @@ function Close-ExcelInstance {
             }
         }
         catch {
-            $failures.Add("${Label}: Excel could not be asked to quit: " + $_.Exception.Message)
+            if (Test-ExcelExited $_.Exception) {
+                if ($null -ne $Log) {
+                    & $Log "${Label}: Excel had already exited"
+                }
+            }
+            else {
+                $failures.Add("${Label}: Excel could not be asked to quit: " + $_.Exception.Message)
+            }
         }
         try {
             if ([System.Runtime.InteropServices.Marshal]::IsComObject($Excel)) {

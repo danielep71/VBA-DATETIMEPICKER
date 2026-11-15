@@ -44,13 +44,15 @@ For the commit checked out in this repository:
     icon, the Reset and Demo icons, and whether Show Picker opens the picker.
     With -Demo it asks two more: whether the workbook opens on its Start sheet,
     and whether Demo shows the demo sheet with a working Fill Table Column
-    button. It closes without saving and checks
+    button. -NoRibbonCheck asks nothing (tools\Release.ps1 passes it: its
+    package runs exercise each package). It closes without saving and checks
     that the package hash has not changed. Each Excel instance is closed with
     tools\ExcelCleanup.psm1: every close step is tried even when an earlier one
     fails, and each failure is recorded;
 11. writes summary.json and build.txt, and opens the folder.
 
-The exit code is 0 only when every step passed, all three answers were yes,
+The exit code is 0 only when every step passed, every answer was yes (or the
+check was skipped with -NoRibbonCheck),
 the package hash was unchanged after reopening, Excel accepted every close
 request, and the working tree was clean. Everything else exits 1, and the
 evidence says why.
@@ -90,7 +92,8 @@ param(
     [string]$RepoRoot,
     [switch]$Demo,
     [switch]$AllowDirty,
-    [switch]$NoOpen
+    [switch]$NoOpen,
+    [switch]$NoRibbonCheck
 )
 
 Set-StrictMode -Version Latest
@@ -703,21 +706,29 @@ try {
     catch {
     }
     Write-Session "Reopened $PackageName read-only in a new Excel instance$(if ($null -ne $blank) { ', with a blank workbook' } else { '' })"
-    Write-Host ""
-    Write-Host "Switch to the new Excel window and open its Home tab."
-    $summary.ribbon_check.show_picker_icon = Read-YesNo "1. The 'Date / Time Picker' group shows a large 'Show Picker' button with its calendar-grid icon?"
-    $summary.ribbon_check.menu_icons = Read-YesNo "2. The arrow under 'Show Picker' opens a menu where 'Reset' and 'Demo' each show their own icon?"
-    $summary.ribbon_check.show_picker_opens = Read-YesNo "3. Clicking 'Show Picker' opens the Date / Time Picker? (close it again before answering)"
-    if ($Demo) {
-        $summary.ribbon_check.opens_on_start = Read-YesNo "4. The workbook opened on its 'Start' sheet, with its instructions?"
-        $summary.ribbon_check.demo_sheet_works = Read-YesNo "5. 'Demo' in that menu shows the demo sheet, and its 'Fill Table Column' button responds? (cancel its prompt)"
+    if ($NoRibbonCheck) {
+        # tools/Release.ps1 asks nothing: the package runs open each package
+        # and run the harness in it, and the hash is still checked below.
+        $summary.ribbon_check.status = "SKIPPED"
+        Write-Session "Ribbon check skipped (-NoRibbonCheck)"
     }
-    $summary.ribbon_check.status = "ANSWERED"
-    Write-Session ("Ribbon check: Show Picker icon=" + $summary.ribbon_check.show_picker_icon +
-                   "; Reset and Demo icons=" + $summary.ribbon_check.menu_icons +
-                   "; Show Picker opens the picker=" + $summary.ribbon_check.show_picker_opens +
-                   $(if ($Demo) { "; opens on Start=" + $summary.ribbon_check.opens_on_start +
-                           "; demo sheet works=" + $summary.ribbon_check.demo_sheet_works } else { "" }))
+    else {
+        Write-Host ""
+        Write-Host "Switch to the new Excel window and open its Home tab."
+        $summary.ribbon_check.show_picker_icon = Read-YesNo "1. The 'Date / Time Picker' group shows a large 'Show Picker' button with its calendar-grid icon?"
+        $summary.ribbon_check.menu_icons = Read-YesNo "2. The arrow under 'Show Picker' opens a menu where 'Reset' and 'Demo' each show their own icon?"
+        $summary.ribbon_check.show_picker_opens = Read-YesNo "3. Clicking 'Show Picker' opens the Date / Time Picker? (close it again before answering)"
+        if ($Demo) {
+            $summary.ribbon_check.opens_on_start = Read-YesNo "4. The workbook opened on its 'Start' sheet, with its instructions?"
+            $summary.ribbon_check.demo_sheet_works = Read-YesNo "5. 'Demo' in that menu shows the demo sheet, and its 'Fill Table Column' button responds? (cancel its prompt)"
+        }
+        $summary.ribbon_check.status = "ANSWERED"
+        Write-Session ("Ribbon check: Show Picker icon=" + $summary.ribbon_check.show_picker_icon +
+                       "; Reset and Demo icons=" + $summary.ribbon_check.menu_icons +
+                       "; Show Picker opens the picker=" + $summary.ribbon_check.show_picker_opens +
+                       $(if ($Demo) { "; opens on Start=" + $summary.ribbon_check.opens_on_start +
+                               "; demo sheet works=" + $summary.ribbon_check.demo_sheet_works } else { "" }))
+    }
     Close-Excel -Excel $excel -Workbooks @($blank, $addin) -Label "Check"
     $excel = $null
     $summary.package.sha256_after_reopen = (Get-FileHash -Algorithm SHA256 -LiteralPath $packagePath).Hash.ToLowerInvariant()
@@ -759,7 +770,9 @@ if ($Demo -and $summary.demo_content.status -ne "PASS") { $summary.reasons += "D
 if ($summary.save.status -ne "PASS") { $summary.reasons += "Save as ${extension}: $($summary.save.status)" }
 if ($summary.ribbon_injection.status -ne "PASS") { $summary.reasons += "Ribbon injection: $($summary.ribbon_injection.status)" }
 if ($summary.metadata.status -ne "PASS") { $summary.reasons += "Metadata removal: $($summary.metadata.status)" }
-if ($summary.ribbon_check.status -ne "ANSWERED") {
+if ($summary.ribbon_check.status -eq "SKIPPED") {
+}
+elseif ($summary.ribbon_check.status -ne "ANSWERED") {
     $summary.reasons += "Ribbon check: $($summary.ribbon_check.status)"
 }
 else {
@@ -815,7 +828,7 @@ $report = @(
     "After reopening: $($summary.package.sha256_after_reopen)",
     "Inspection:      $($summary.package_inspection.status) (advisory, exit code $($summary.package_inspection.exit_code))",
     "",
-    "Ribbon check, as the operator saw it:",
+    "Ribbon check, as the operator saw it$(if ($summary.ribbon_check.status -eq 'SKIPPED') { ' (skipped, -NoRibbonCheck)' } else { '' }):",
     "  Show Picker shows its icon:        $(Format-Answer $summary.ribbon_check.show_picker_icon)",
     "  Reset and Demo show their icons:   $(Format-Answer $summary.ribbon_check.menu_icons)",
     "  Show Picker opens the picker:      $(Format-Answer $summary.ribbon_check.show_picker_opens)",

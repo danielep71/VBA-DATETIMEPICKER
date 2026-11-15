@@ -91,6 +91,14 @@ class DemoBuildTests(unittest.TestCase):
             self.assertIn(f"if ($Demo -and -not $summary.ribbon_check.{field})", verdict)
         self.assertIn('if ($Demo -and $summary.demo_content.status -ne "PASS")', verdict)
 
+    def test_no_ribbon_check_asks_nothing_and_still_checks_the_hash(self) -> None:
+        skip = self.code.index("if ($NoRibbonCheck) {")
+        self.assertLess(skip, self.code.index('Read-YesNo "1. The'))
+        self.assertIn('$summary.ribbon_check.status = "SKIPPED"', self.code)
+        verdict = self.code[self.code.index("Add-CleanupResult -Summary $summary"):]
+        self.assertIn('if ($summary.ribbon_check.status -eq "SKIPPED") {', verdict)
+        self.assertIn("$summary.package.sha256_after_reopen -ne $summary.package.sha256", verdict)
+
     def test_summary_names_the_kind(self) -> None:
         self.assertIn('$kind = $(if ($Demo) { "demo" } else { "addin" })', self.code)
         self.assertIn("    kind               = $kind", self.code)

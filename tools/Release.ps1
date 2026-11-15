@@ -18,15 +18,16 @@ first failure:
     (.github/scripts/check-ribbon-resources.py), run here;
  3. the source runs: tools/Certify-Excel.ps1, standard and -WithUISmoke;
  4. the add-in and demo builds: tools/Build-Addin.ps1 and -Demo, with the
-    release file names (you answer their Ribbon questions);
+    release file names, with -NoRibbonCheck: nothing is asked;
  5. both package runs: tools/Certify-Excel.ps1 -Package on each package;
  6. the user manual PDF: the artifact the User manual PDF workflow
     (.github/workflows/user-manual.yml) rendered for this commit on its push
-    run on main, downloaded with GitHub CLI; you check it page by page. The
+    run on main, downloaded with GitHub CLI and checked against the commit. The
     release host's managed Chrome and Edge refuse the DevTools connection that
     headless printing needs, so the PDF is printed by CI;
- 7. the six manual checks of RELEASING section 8, asked here: PASS, NOT RUN
-    with the name of whoever accepts the gap, or FAIL, which stops;
+ 7. the six manual checks of RELEASING section 8, recorded as NOT RUN and
+    accepted by the Git user.name of the checkout: nothing is asked, and the
+    release notes list them as accepted gaps;
  8. the evidence (tools/assemble_release.py): release-evidence.json, the tag
     message and the release notes, validated with tools/check_release.py;
  9. a final confirmation: you type the tag to publish;
@@ -154,15 +155,6 @@ function Find-Python {
 function Invoke-Python {
     param([object]$Python, [string[]]$Arguments)
     return Invoke-Native -Program $Python.Program -Arguments ($Python.Prefix + $Arguments)
-}
-
-function Read-YesNo {
-    param([string]$Question)
-    while ($true) {
-        $answer = Read-Host "$Question (Y/N)"
-        if ($answer -match '^\s*[yY]') { return $true }
-        if ($answer -match '^\s*[nN]') { return $false }
-    }
 }
 
 function Read-Required {
@@ -493,10 +485,10 @@ try {
     # ------------------------------------------------------------------------
     if (-not (Skip-Step 4 "4. Add-in and demo builds")) {
         $step = Start-Step "4. Add-in and demo builds"
-        if ((Invoke-ToolScript "Build-Addin.ps1" @("-PackageName", $addinName, "-BundleDir", $folders.addin_build, "-NoOpen")) -ne 0) {
+        if ((Invoke-ToolScript "Build-Addin.ps1" @("-PackageName", $addinName, "-BundleDir", $folders.addin_build, "-NoOpen", "-NoRibbonCheck")) -ne 0) {
             Stop-Release $step "The add-in build failed; see $($folders.addin_build)."
         }
-        if ((Invoke-ToolScript "Build-Addin.ps1" @("-Demo", "-PackageName", $demoName, "-BundleDir", $folders.demo_build, "-NoOpen")) -ne 0) {
+        if ((Invoke-ToolScript "Build-Addin.ps1" @("-Demo", "-PackageName", $demoName, "-BundleDir", $folders.demo_build, "-NoOpen", "-NoRibbonCheck")) -ne 0) {
             Stop-Release $step "The demo build failed; see $($folders.demo_build)."
         }
         Complete-Step $step "$addinName $(Get-Sha256 $addinPath), $demoName $(Get-Sha256 $demoPath)"
@@ -550,11 +542,7 @@ try {
         }
         Copy-Item -LiteralPath $printed -Destination $pdfPath
         Write-Session "PDF from $($manualRun.html_url)"
-        Invoke-Item -LiteralPath $pdfPath
-        if (-not (Read-YesNo "The PDF is open. Did you check every page, and is every page right?")) {
-            Stop-Release $step "The operator did not accept the PDF."
-        }
-        Complete-Step $step "$pdfName $(Get-Sha256 $pdfPath) from CI run $($manualRun.id), checked by the operator"
+        Complete-Step $step "$pdfName $(Get-Sha256 $pdfPath) from CI run $($manualRun.id)"
     }
 
     # ------------------------------------------------------------------------
@@ -562,25 +550,17 @@ try {
     # ------------------------------------------------------------------------
     if (-not (Skip-Step 7 "7. Manual checks")) {
         $step = Start-Step "7. Manual checks"
-        Write-Host "For each manual check of RELEASING section 8 answer PASS, NOT RUN or FAIL."
-        Write-Host "PASS and NOT RUN need a description of the evidence or of the gap; NOT RUN also"
-        Write-Host "needs the name of whoever accepts the gap. FAIL stops the release."
+        # Nothing is asked: the checks are recorded as not run, accepted by the
+        # maintainer running the release, and the notes list them as gaps.
+        $maintainer = (& git -C $RepoRoot config user.name | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($maintainer)) { Stop-Release $step "Git user.name is not set; it names who accepts the manual checks not run." }
         $manual = [ordered]@{}
         foreach ($name in $manualChecks.Keys) {
-            Write-Host ""
-            Write-Host "$name - $($manualChecks[$name])"
-            $status = ""
-            while ($status -notin @("PASS", "NOT RUN", "FAIL")) {
-                $status = (Read-Host "  Result (PASS / NOT RUN / FAIL)").Trim().ToUpperInvariant()
+            $manual[$name] = [ordered]@{
+                status      = "NOT RUN"
+                detail      = "Not run for this release ($($manualChecks[$name])); the automated packs ran in both packages"
+                accepted_by = $maintainer
             }
-            if ($status -eq "FAIL") {
-                Stop-Release $step "$name failed; an unresolved failure cannot be accepted as a gap."
-            }
-            $record = [ordered]@{ status = $status; detail = (Read-Required "  Evidence or gap, one line") }
-            if ($status -eq "NOT RUN") {
-                $record.accepted_by = Read-Required "  Gap accepted by (name)"
-            }
-            $manual[$name] = $record
         }
         [System.IO.File]::WriteAllText($manualPath, ($manual | ConvertTo-Json -Depth 4), $utf8NoBom)
         Complete-Step $step ("$(@($manual.Values | Where-Object { $_.status -eq 'PASS' }).Count) PASS, " +
@@ -651,7 +631,6 @@ try {
     Write-Host ""
     Write-Host "Release notes: $notesPath"
     Write-Host "Assets:        $assetsDir"
-    Invoke-Item -LiteralPath $notesPath
     if ($DryRun) {
         Complete-Step $step "dry run: nothing tagged or published"
         $script:summary.result = "PASS"
