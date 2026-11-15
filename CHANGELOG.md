@@ -152,6 +152,14 @@ Use only the categories needed by a release.
 
 ### Changed
 
+- Static repository checks and CodeQL now run on pull requests to any base, so
+  a pull request stacked on another task branch is checked too. Pushes still
+  run only on `main`, the release branches and `v*` tags, which is where the
+  release check reads the static-checks run. A new tooling test fails if either
+  workflow's push filter drops `main` or a release branch, if `pull_request`
+  regains a branch filter, or if static checks skip a job by event
+  ([#199](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/199)).
+
 - The daily traffic export authenticates with a GitHub App instead of a
   long-lived personal access token. The App has only `Administration: read`
   on this repository; its private key lives in the `analytics` environment,
