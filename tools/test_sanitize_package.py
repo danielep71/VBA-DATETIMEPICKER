@@ -216,6 +216,46 @@ class SanitizeTests(unittest.TestCase):
                 self.assertRaisesRegex(sanitizer.SanitizeError, "text content changed"):
             sanitizer.sanitize_package(self.dirty, self.folder / "out.xlam")
 
+    def test_other_prefixes_are_found_and_removed(self) -> None:
+        parts = dict(CLEAN_PARTS)
+        parts["docProps/core.xml"] = str(parts["docProps/core.xml"]).replace(
+            "<dcterms:created",
+            '<d:creator xmlns:d="http://purl.org/dc/elements/1.1/">Private Person</d:creator>'
+            '<lastModifiedBy xmlns="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">'
+            "Private Person</lastModifiedBy><dcterms:created")
+        parts["xl/workbook.xml"] = str(parts["xl/workbook.xml"]).replace(
+            "<sheets>",
+            '<m:AlternateContent xmlns:m="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+            '<m:Choice Requires="x15"><p:absPath url="C:\\Private\\" '
+            'xmlns:p="http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac"/></m:Choice>'
+            "</m:AlternateContent><sheets>")
+        write(self.clean, parts)
+        findings = sanitizer.check_package(self.clean)
+        for expected in ("dc:creator", "cp:lastModifiedBy", "x15ac:absPath"):
+            self.assertTrue(any(expected in f for f in findings), f"{expected} not reported: {findings}")
+        output = self.folder / "out.xlam"
+        sanitizer.sanitize_package(self.clean, output)
+        self.assertEqual(sanitizer.check_package(output), [])
+        joined = b"".join(read(output).values())
+        self.assertNotIn(b"Private", joined)
+
+    def test_relationship_id_with_another_prefix_is_removed(self) -> None:
+        parts = dirty_parts()
+        parts["xl/worksheets/sheet1.xml"] = str(parts["xl/worksheets/sheet1.xml"]).replace(
+            '<pageSetup orientation="portrait" r:id="rId1"/>',
+            '<pageSetup xmlns:x="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+            'orientation="portrait" x:id="rId1"/>')
+        parts["xl/worksheets/_rels/sheet1.xml.rels"] = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<pr:Relationships xmlns:pr="{RELS_NS}"><pr:Relationship Id="rId1" Type="{DOC_REL}/printerSettings" '
+            'Target="../printerSettings/printerSettings1.bin"/></pr:Relationships>')
+        write(self.dirty, parts)
+        output = self.folder / "out.xlam"
+        sanitizer.sanitize_package(self.dirty, output)
+        result = read(output)
+        self.assertNotIn(b'x:id="rId1"', result["xl/worksheets/sheet1.xml"])
+        self.assertNotIn(b"printerSettings", result["xl/worksheets/_rels/sheet1.xml.rels"])
+
     def test_untouched_parts_keep_their_bytes_and_order(self) -> None:
         output = self.folder / "out.xlam"
         sanitizer.sanitize_package(self.dirty, output)

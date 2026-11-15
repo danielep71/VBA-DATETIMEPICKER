@@ -384,6 +384,8 @@ How it changes the package:
   `r:id` references, and removes the elements and values.
 - Every other part keeps identical content, in the same order. That includes
   `xl/vbaProject.bin`, the cell data and the Ribbon parts.
+- Elements and attributes are recognised by namespace and local name, so a part
+  that binds another prefix (or none) is handled the same way.
 
 Before replacing anything, it checks the result:
 - the copy reads back;

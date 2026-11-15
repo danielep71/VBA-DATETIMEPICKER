@@ -14,7 +14,8 @@ account that saved it. None of them belong in a published package:
 ``--check`` reports what a package carries and exits 1 when it carries any of
 it. Otherwise the tool writes a sanitized copy: it drops those parts with their
 relationships, content types and ``r:id`` references, and removes those
-elements and values. Every other part is copied with identical content, in the
+elements and values. Elements and attributes are recognised by namespace and
+local name, whatever prefix a part uses. Every other part is copied with identical content, in the
 same order. ``xl/vbaProject.bin``, the worksheets' cell data and the Ribbon
 parts are never edited. The copy is checked before it replaces anything: it
 must be a readable package, carry none of the metadata, keep every untouched
@@ -42,16 +43,27 @@ CORE = "docProps/core.xml"
 APP = "docProps/app.xml"
 VBA_PROJECT = "xl/vbaProject.bin"
 
-ABS_PATH_BLOCK = re.compile(
-    r"<mc:AlternateContent\b[^>]*>(?:(?!</mc:AlternateContent>).)*?<x15ac:absPath\b"
-    r"(?:(?!</mc:AlternateContent>).)*?</mc:AlternateContent>", re.S)
-ABS_PATH_BARE = re.compile(r"<x15ac:absPath\b[^>]*/>")
-CORE_PEOPLE = re.compile(r"<(dc:creator|cp:lastModifiedBy)\b[^>]*>[^<]*</\1>|<(dc:creator|cp:lastModifiedBy)\b[^>]*/>")
-APP_PEOPLE = re.compile(r"<(Company|Manager)>([^<]*)</\1>")
-RELATIONSHIP = re.compile(r"<Relationship\b[^>]*/>")
+NS_DC = "http://purl.org/dc/elements/1.1/"
+NS_CP = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+NS_EP = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+NS_X15AC = "http://schemas.microsoft.com/office/spreadsheetml/2010/11/ac"
+NS_MC = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
+NS_TYPES = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+# Metadata elements are recognised by namespace and local name, never by prefix.
+PEOPLE = {CORE: ((NS_DC, "creator", "dc:creator"), (NS_CP, "lastModifiedBy", "cp:lastModifiedBy")),
+          APP: ((NS_EP, "Company", "Company"), (NS_EP, "Manager", "Manager"))}
+ABS_PATH = (NS_X15AC, "absPath")
+ALTERNATE = (NS_MC, "AlternateContent")
+RELATION_ID = (NS_REL, "id")
+
+QNAME = r"(?:[A-Za-z_][\w.-]*:)?"
+RELATIONSHIP = re.compile(r"<" + QNAME + r"Relationship\b[^>]*?(?:/>|>\s*</" + QNAME + r"Relationship\s*>)")
+OVERRIDE = re.compile(r"<" + QNAME + r"Override\b[^>]*?(?:/>|>\s*</" + QNAME + r"Override\s*>)")
 START_TAG = re.compile(r"""<[A-Za-z_][\w.:-]*(?:\s+[^\s=/>"']+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*/?>""")
 TAG_ATTRIBUTE = re.compile(r"""(\s+)([^\s=/>"']+)(\s*=\s*)("[^"]*"|'[^']*')""")
-OVERRIDE = re.compile(r"<Override\b[^>]*/>")
 
 
 class SanitizeError(Exception):
@@ -63,12 +75,74 @@ class Result:
     findings: list[str] = field(default_factory=list)
     removed_parts: list[str] = field(default_factory=list)
     edited_parts: list[str] = field(default_factory=list)
-    references: dict[str, set[str]] = field(default_factory=dict)
+    references: dict[str, tuple[set[str], set[str]]] = field(default_factory=dict)
 
 
-def attribute(element: str, name: str) -> str | None:
-    match = re.search(r"\b" + re.escape(name) + r'="([^"]*)"', element)
-    return match.group(1) if match else None
+@dataclass
+class Element:
+    uri: str
+    local: str
+    qname: str
+    attributes: dict[tuple[str, str], tuple[str, str]]   # (uri, local) -> (qname, value)
+    text: str = ""
+
+
+def parse(part: str, content: bytes) -> list[Element]:
+    """Every element of an XML part with its namespace, qualified name, attributes and own text.
+
+    Namespace processing is on, with prefixes reported, so a name is matched by
+    URI and local name whatever prefix the part binds. A DOCTYPE is refused.
+    """
+    elements: list[Element] = []
+    stack: list[Element] = []
+    parser = expat.ParserCreate(namespace_separator=" ")
+    parser.namespace_prefixes = True
+
+    def split(name: str) -> tuple[str, str, str]:
+        pieces = name.split(" ")
+        if len(pieces) == 1:
+            return "", pieces[0], pieces[0]
+        uri, local = pieces[0], pieces[1]
+        return uri, local, f"{pieces[2]}:{local}" if len(pieces) == 3 else local
+
+    def start(name: str, attrs: dict[str, str]) -> None:
+        uri, local, qname = split(name)
+        named: dict[tuple[str, str], tuple[str, str]] = {}
+        for key, value in attrs.items():
+            a_uri, a_local, a_qname = split(key)
+            named[(a_uri, a_local)] = (a_qname, value)
+        element = Element(uri, local, qname, named)
+        elements.append(element)
+        stack.append(element)
+
+    def end(_name: str) -> None:
+        stack.pop()
+
+    def data(chunk: str) -> None:
+        if stack:
+            stack[-1].text += chunk
+
+    def refuse(*_args: object) -> None:
+        raise SanitizeError(f"{part}: DOCTYPE is not allowed")
+
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    parser.CharacterDataHandler = data
+    parser.StartDoctypeDeclHandler = refuse
+    try:
+        parser.Parse(content, True)
+    except expat.ExpatError as error:
+        raise SanitizeError(f"{part}: not well-formed XML ({error})") from error
+    return elements
+
+
+def qualified_names(elements: list[Element], uri: str, local: str) -> set[str]:
+    return {e.qname for e in elements if (e.uri, e.local) == (uri, local)}
+
+
+def tag_attributes(element: str) -> dict[str, str]:
+    """Unprefixed attributes of one tag, as written (for Relationship and Override)."""
+    return {a.group(2): a.group(4)[1:-1] for a in TAG_ATTRIBUTE.finditer(element.split(">", 1)[0])}
 
 
 def is_removed(part: str) -> bool:
@@ -116,17 +190,15 @@ def inspect_parts(data: dict[str, bytes]) -> list[str]:
         parts = sorted(p for p in data if p.startswith(prefix))
         if parts:
             findings.append(f"{label}: {len(parts)} part(s)")
-    workbook = text(data, WORKBOOK)
-    if ABS_PATH_BLOCK.search(workbook) or ABS_PATH_BARE.search(workbook):
+    if qualified_names(parse(WORKBOOK, data[WORKBOOK]), *ABS_PATH):
         findings.append(f"save folder (x15ac:absPath in {WORKBOOK})")
-    if CORE in data:
-        for match in CORE_PEOPLE.finditer(text(data, CORE)):
-            if match.group(1) and re.search(r">\s*[^<\s]", match.group(0)):
-                findings.append(f"{match.group(1)} in {CORE}")
-    if APP in data:
-        for match in APP_PEOPLE.finditer(text(data, APP)):
-            if match.group(2).strip():
-                findings.append(f"{match.group(1)} in {APP}")
+    for part, fields in PEOPLE.items():
+        if part not in data:
+            continue
+        elements = parse(part, data[part])
+        for uri, local, label in fields:
+            if any((e.uri, e.local) == (uri, local) and e.text.strip() for e in elements):
+                findings.append(f"{label} in {part}")
     return findings
 
 
@@ -135,29 +207,37 @@ def check_package(path: Path) -> list[str]:
     return inspect_parts(data)
 
 
-def well_formed(part: str, content: bytes) -> None:
-    parser = expat.ParserCreate()
-
-    def refuse(*_args: object) -> None:
-        raise SanitizeError(f"{part}: DOCTYPE is not allowed")
-
-    parser.StartDoctypeDeclHandler = refuse
-    try:
-        parser.Parse(content, True)
-    except expat.ExpatError as error:
-        raise SanitizeError(f"{part}: not well-formed after editing ({error})") from error
+def remove_elements(content: str, qnames: set[str], *, keep_empty: bool) -> str:
+    """Remove (or empty) every element with one of these qualified names; its text has no markup."""
+    for qname in sorted(qnames):
+        name = re.escape(qname)
+        pattern = re.compile(r"<" + name + r"((?:\s[^>]*?)?)\s*(?:/>|>[^<]*</" + name + r"\s*>)")
+        content = pattern.sub((lambda m, q=qname: f"<{q}{m.group(1)}></{q}>") if keep_empty else "", content)
+    return content
 
 
-def remove_references(content: str, ids: set[str]) -> str:
-    """Drop the ``r:id`` attributes whose value is a removed relationship ID.
+def remove_abs_path(content: str) -> str:
+    elements = parse(WORKBOOK, content.encode("utf-8"))
+    for alternate in sorted(qualified_names(elements, *ALTERNATE)):
+        for path in sorted(qualified_names(elements, *ABS_PATH)):
+            a, p = re.escape(alternate), re.escape(path)
+            content = re.sub(r"<" + a + r"\b[^>]*>(?:(?!</" + a + r"\s*>).)*?<" + p + r"\b"
+                             r"(?:(?!</" + a + r"\s*>).)*?</" + a + r"\s*>", "", content, flags=re.S)
+    return remove_elements(content, qualified_names(elements, *ABS_PATH), keep_empty=False)
 
-    Each start tag is split into whole attributes, so text inside another
-    attribute's value, or in character data, is never touched: a tooltip, a cell
-    or a formula may contain the same characters.
+
+def remove_references(content: str, qnames: set[str], ids: set[str]) -> str:
+    """Drop the relationship-ID attributes whose value is a removed relationship ID.
+
+    ``qnames`` are the qualified names this part uses for the relationships
+    namespace's ``id`` attribute (normally ``r:id``). Each start tag is split into
+    whole attributes, so text inside another attribute's value, or in character
+    data, is never touched: a tooltip, a cell or a formula may contain the same
+    characters.
     """
     def attributes(tag: re.Match[str]) -> str:
         return TAG_ATTRIBUTE.sub(
-            lambda a: "" if a.group(2) == "r:id" and a.group(4)[1:-1] in ids else a.group(0), tag.group(0))
+            lambda a: "" if a.group(2) in qnames and a.group(4)[1:-1] in ids else a.group(0), tag.group(0))
 
     return START_TAG.sub(attributes, content)
 
@@ -165,34 +245,24 @@ def remove_references(content: str, ids: set[str]) -> str:
 Event = tuple[str, str, tuple[tuple[str, str], ...]]
 
 
-def events(content: bytes, drop_ids: set[str] | None = None) -> list[Event]:
-    """Elements, attributes and text of an XML part, in order; optionally without some ``r:id``."""
+def events(part: str, content: bytes, drop_ids: set[str] | None = None) -> list[Event]:
+    """Elements, attributes and text in order, by namespace; optionally without some relationship IDs."""
     found: list[Event] = []
-    parser = expat.ParserCreate()
-
-    def start(name: str, attrs: dict[str, str]) -> None:
-        kept = {k: v for k, v in attrs.items() if not (drop_ids and k == "r:id" and v in drop_ids)}
-        found.append(("start", name, tuple(sorted(kept.items()))))
-
-    def end(name: str) -> None:
-        found.append(("end", name, ()))
-
-    def data(chunk: str) -> None:
-        if found and found[-1][0] == "text":
-            found[-1] = ("text", found[-1][1] + chunk, ())
-        else:
-            found.append(("text", chunk, ()))
-
-    parser.StartElementHandler = start
-    parser.EndElementHandler = end
-    parser.CharacterDataHandler = data
-    parser.Parse(content, True)
+    for element in parse(part, content):
+        kept = {f"{uri} {local}": value for (uri, local), (_qname, value) in element.attributes.items()
+                if not (drop_ids and (uri, local) == RELATION_ID and value in drop_ids)}
+        found.append((f"{element.uri} {element.local}", element.text, tuple(sorted(kept.items()))))
     return found
 
 
-def character_data(content: bytes) -> str:
+def character_data(part: str, content: bytes) -> str:
     """The text content of an XML part, in document order."""
-    return "".join(value for kind, value, _attrs in events(content) if kind == "text")
+    return "".join(element.text for element in parse(part, content))
+
+
+def relationships(part: str, content: bytes) -> list[dict[str, str]]:
+    return [{local: value for (_uri, local), (_qname, value) in e.attributes.items()}
+            for e in parse(part, content) if (e.uri, e.local) == (NS_PKG_REL, "Relationship")]
 
 
 def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
@@ -201,22 +271,21 @@ def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
     result.removed_parts = sorted(part for part in data if is_removed(part))
     edited: dict[str, str] = {}
 
-    # Relationships that point at a removed part, and the r:id each source part used.
+    # Relationships that point at a removed part, and the IDs each source part used.
     dropped_ids: dict[str, set[str]] = {}
     for part in [p for p in out if p.endswith(".rels")]:
         original = text(out, part)
 
         def keep(match: re.Match[str], rels_part: str = part) -> str:
-            element = match.group(0)
-            target = attribute(element, "Target")
-            if attribute(element, "TargetMode") == "External" or target is None:
-                return element
+            attrs = tag_attributes(match.group(0))
+            target = attrs.get("Target")
+            if attrs.get("TargetMode") == "External" or target is None:
+                return match.group(0)
             if is_removed(resolve(rels_part, target)):
-                rel_id = attribute(element, "Id")
-                if rel_id:
-                    dropped_ids.setdefault(rels_source(rels_part), set()).add(rel_id)
+                if attrs.get("Id"):
+                    dropped_ids.setdefault(rels_source(rels_part), set()).add(attrs["Id"])
                 return ""
-            return element
+            return match.group(0)
 
         updated = RELATIONSHIP.sub(keep, original)
         if updated != original:
@@ -225,39 +294,46 @@ def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
     for source, ids in dropped_ids.items():
         if source in out and source.endswith(".xml"):
             before = edited.get(source, text(out, source))
-            content = remove_references(before, ids)
+            qnames = qualified_attribute_names(source, before.encode("utf-8"), *RELATION_ID)
+            content = remove_references(before, qnames, ids)
             if content != before:
                 edited[source] = content
-                result.references[source] = ids
+                result.references[source] = (qnames, ids)
 
     types = text(out, CONTENT_TYPES)
     updated_types = OVERRIDE.sub(
-        lambda m: "" if is_removed((attribute(m.group(0), "PartName") or "").lstrip("/")) else m.group(0), types)
+        lambda m: "" if is_removed(tag_attributes(m.group(0)).get("PartName", "").lstrip("/")) else m.group(0),
+        types)
     if updated_types != types:
         edited[CONTENT_TYPES] = updated_types
 
     workbook = edited.get(WORKBOOK, text(out, WORKBOOK))
-    updated_workbook = ABS_PATH_BARE.sub("", ABS_PATH_BLOCK.sub("", workbook))
+    updated_workbook = remove_abs_path(workbook)
     if updated_workbook != text(out, WORKBOOK):
         edited[WORKBOOK] = updated_workbook
 
-    if CORE in out:
-        core = text(out, CORE)
-        updated_core = CORE_PEOPLE.sub("", core)
-        if updated_core != core:
-            edited[CORE] = updated_core
-    if APP in out:
-        app = text(out, APP)
-        updated_app = APP_PEOPLE.sub(lambda m: f"<{m.group(1)}></{m.group(1)}>", app)
-        if updated_app != app:
-            edited[APP] = updated_app
+    for part, fields in PEOPLE.items():
+        if part not in out:
+            continue
+        before = text(out, part)
+        elements = parse(part, out[part])
+        updated = before
+        for uri, local, _label in fields:
+            updated = remove_elements(updated, qualified_names(elements, uri, local), keep_empty=part == APP)
+        if updated != before:
+            edited[part] = updated
 
     for part, content in edited.items():
         encoded = content.encode("utf-8")
-        well_formed(part, encoded)
+        parse(part, encoded)
         out[part] = encoded
     result.edited_parts = sorted(edited)
     return out, result
+
+
+def qualified_attribute_names(part: str, content: bytes, uri: str, local: str) -> set[str]:
+    return {qname for e in parse(part, content) for (a_uri, a_local), (qname, _value) in e.attributes.items()
+            if (a_uri, a_local) == (uri, local)}
 
 
 def verify(original: dict[str, bytes], sanitized: dict[str, bytes], result: Result) -> None:
@@ -267,34 +343,35 @@ def verify(original: dict[str, bytes], sanitized: dict[str, bytes], result: Resu
     if VBA_PROJECT in original and sanitized.get(VBA_PROJECT) != original[VBA_PROJECT]:
         raise SanitizeError(f"{VBA_PROJECT} changed")
     for part in result.edited_parts:
-        if part.endswith(".xml") and part not in (CORE, APP) \
-                and character_data(original[part]) != character_data(sanitized[part]):
+        if part.endswith(".xml") and part not in PEOPLE \
+                and character_data(part, original[part]) != character_data(part, sanitized[part]):
             raise SanitizeError(f"{part}: text content changed")
-    for part, ids in result.references.items():
-        # Only the r:id attributes may differ; every other element, attribute and
-        # text must match. The workbook may also lose its absPath element.
+    for part, (_qnames, ids) in result.references.items():
+        # Only the relationship-ID attributes may differ; every other element,
+        # attribute and text must match. The workbook may also lose its absPath.
         before = original[part]
         if part == WORKBOOK:
-            before = ABS_PATH_BARE.sub("", ABS_PATH_BLOCK.sub("", before.decode("utf-8"))).encode("utf-8")
-        if events(before, ids) != events(sanitized[part]):
-            raise SanitizeError(f"{part}: more than the removed r:id references changed")
+            before = remove_abs_path(before.decode("utf-8")).encode("utf-8")
+        if events(part, before, ids) != events(part, sanitized[part]):
+            raise SanitizeError(f"{part}: more than the removed relationship references changed")
     for part, content in original.items():
         if part in result.removed_parts or part in result.edited_parts:
             continue
         if sanitized.get(part) != content:
             raise SanitizeError(f"{part} changed although it needed no edit")
     for part in [p for p in sanitized if p.endswith(".rels")]:
-        for element in RELATIONSHIP.findall(text(sanitized, part)):
-            target = attribute(element, "Target")
-            if attribute(element, "TargetMode") == "External" or target is None:
+        for attrs in relationships(part, sanitized[part]):
+            target = attrs.get("Target")
+            if attrs.get("TargetMode") == "External" or target is None:
                 continue
             resolved = resolve(part, target)
             if resolved not in sanitized:
                 raise SanitizeError(f"{part}: relationship to missing part {resolved}")
-    for element in OVERRIDE.findall(text(sanitized, CONTENT_TYPES)):
-        name = (attribute(element, "PartName") or "").lstrip("/")
-        if name not in sanitized:
-            raise SanitizeError(f"{CONTENT_TYPES}: override for missing part {name}")
+    for element in parse(CONTENT_TYPES, sanitized[CONTENT_TYPES]):
+        if (element.uri, element.local) == (NS_TYPES, "Override"):
+            name = next((v for (_u, local), (_q, v) in element.attributes.items() if local == "PartName"), "")
+            if name.lstrip("/") not in sanitized:
+                raise SanitizeError(f"{CONTENT_TYPES}: override for missing part {name.lstrip('/')}")
 
 
 def write_package(infos: list[zipfile.ZipInfo], data: dict[str, bytes], destination: Path) -> None:
