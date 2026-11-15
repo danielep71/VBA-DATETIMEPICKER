@@ -1324,7 +1324,10 @@ VBA-DATETIMEPICKER/
 │  ├─ datepicker-ingrid.png
 │  ├─ datepicker-monthnavigation.png
 │  ├─ datepicker-yearnavigation.png
-│  └─ datepicker-demosheet.png
+│  ├─ datepicker-demosheet.png
+│  ├─ social-preview.svg
+│  ├─ social-preview.png
+│  └─ README.md
 ├─ demo/
 │  ├─ M_DEMO_BUILDER.bas
 │  └─ M_DP_DEMO.bas
@@ -1334,9 +1337,6 @@ VBA-DATETIMEPICKER/
 │  ├─ BUG_REPORT_DETAILS.md
 │  ├─ FEATURE_REQUEST_DETAILS.md
 │  └─ RELEASE_CERTIFICATION_TEMPLATE.md
-├─ images/
-│  ├─ vba-datetimepicker-home.png
-│  └─ vba-datetimepicker-social-preview.png
 ├─ src/
 │  ├─ classes/
 │  │  ├─ cDatePickerManager.cls

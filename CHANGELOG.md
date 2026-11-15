@@ -346,6 +346,13 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- The social preview now has an editable source, `assets/social-preview.svg`,
+  rendered to `assets/social-preview.png` (1280×640). The old PNG had no source
+  and still showed `v1.0`. The new artwork follows the README's, draws the month
+  view after the real form and carries no version number. `assets/README.md`
+  documents the fonts and the render command. The landing page's `og:image`
+  points to the new file. `images/`, which held only the old preview and an
+  unused older copy of the README's hero image, is removed.
 - CONTRIBUTING's final-head review rule lets an unchanged sync pull request
   name the integration's review instead of requesting a new one: its head is
   the integration merge commit, its diff against the release branch is empty,

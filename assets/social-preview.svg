@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">VBA-DATETIMEPICKER</title>
+  <desc id="description">Social preview: a modeless, worksheet-friendly Date and Time Picker for Excel VBA, shown next to its month view.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafd"/>
+      <stop offset="1" stop-color="#e2e8f1"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0d1b33" flood-opacity="0.18"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0d1b33" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <circle cx="1180" cy="-40" r="300" fill="#cfdcf0" opacity="0.45"/>
+  <circle cx="-60" cy="660" r="260" fill="#d6e0ee" opacity="0.45"/>
+
+  <!-- Icon -->
+  <g filter="url(#soft)">
+    <rect x="64" y="56" width="112" height="112" rx="24" fill="#ffffff"/>
+  </g>
+  <rect x="86" y="82" width="68" height="64" rx="9" fill="#e8eef8"/>
+  <path d="M86 91a9 9 0 0 1 9-9h50a9 9 0 0 1 9 9v12h-68z" fill="#1d4fb8"/>
+  <rect x="100" y="73" width="7" height="18" rx="3.5" fill="#1d4fb8" stroke="#ffffff" stroke-width="2"/>
+  <rect x="133" y="73" width="7" height="18" rx="3.5" fill="#1d4fb8" stroke="#ffffff" stroke-width="2"/>
+  <g fill="#9fb2cf">
+    <rect x="93" y="110" width="10" height="8" rx="1.5"/>
+    <rect x="107" y="110" width="10" height="8" rx="1.5"/>
+    <rect x="121" y="110" width="10" height="8" rx="1.5"/>
+    <rect x="135" y="110" width="10" height="8" rx="1.5"/>
+    <rect x="93" y="121" width="10" height="8" rx="1.5"/>
+    <rect x="107" y="121" width="10" height="8" rx="1.5"/>
+    <rect x="121" y="121" width="10" height="8" rx="1.5"/>
+    <rect x="135" y="121" width="10" height="8" rx="1.5"/>
+    <rect x="93" y="132" width="10" height="8" rx="1.5"/>
+    <rect x="107" y="132" width="10" height="8" rx="1.5"/>
+    <rect x="121" y="132" width="10" height="8" rx="1.5"/>
+  </g>
+
+  <!-- Title -->
+  <text x="198" y="138" font-family="Oswald, 'Arial Narrow', 'Segoe UI', sans-serif" font-size="62" font-weight="700" letter-spacing="0.5"><tspan fill="#0d1b33">VBA-</tspan><tspan fill="#1d4fb8">DATETIMEPICKER</tspan></text>
+  <rect x="200" y="158" width="56" height="5" rx="2.5" fill="#1d4fb8"/>
+
+  <text font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="31" fill="#1b2433">
+    <tspan x="64" y="236">Modern, smart and worksheet-friendly</tspan>
+    <tspan x="64" y="278"><tspan fill="#1d4fb8" font-weight="700">Date &amp; Time Picker</tspan> for Excel VBA</tspan>
+  </text>
+  <text font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20" fill="#4a5568">
+    <tspan x="64" y="326">A modeless, configurable and reusable component</tspan>
+    <tspan x="64" y="354">for date and time input in Excel worksheets.</tspan>
+  </text>
+
+  <!-- Feature cards -->
+  <g transform="translate(64 400)">
+    <rect width="300" height="76" rx="14" fill="#ffffff" fill-opacity="0.92" stroke="#d9e1ec" filter="url(#soft)"/>
+    <g transform="translate(22 20)" fill="none" stroke="#1d4fb8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1" y="3" width="34" height="28" rx="4"/>
+      <path d="M1 11h34M6 7h1M11 7h1"/>
+    </g>
+    <text x="76" y="34" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" fill="#1d4fb8">Modeless</text>
+    <text x="76" y="58" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="16" fill="#4a5568">Excel stays usable</text>
+  </g>
+  <g transform="translate(380 400)">
+    <rect width="300" height="76" rx="14" fill="#ffffff" fill-opacity="0.92" stroke="#d9e1ec" filter="url(#soft)"/>
+    <g transform="translate(22 20)" fill="none" stroke="#1d4fb8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 1l15 6v10c0 9-7 15-15 18C10 32 3 26 3 17V7z"/>
+      <path d="M11 17l5 5 9-10"/>
+    </g>
+    <text x="76" y="34" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" fill="#1d4fb8">Safe write-back</text>
+    <text x="76" y="58" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="16" fill="#4a5568">Formulas preserved</text>
+  </g>
+  <g transform="translate(64 492)">
+    <rect width="300" height="76" rx="14" fill="#ffffff" fill-opacity="0.92" stroke="#d9e1ec" filter="url(#soft)"/>
+    <g transform="translate(22 20)" fill="none" stroke="#1d4fb8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 2l11 28 4-11 11-4z"/>
+      <path d="M21 21l9 9"/>
+    </g>
+    <text x="76" y="34" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" fill="#1d4fb8">Right-click &amp; in-grid</text>
+    <text x="76" y="58" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="16" fill="#4a5568">One-click access</text>
+  </g>
+  <g transform="translate(380 492)">
+    <rect width="300" height="76" rx="14" fill="#ffffff" fill-opacity="0.92" stroke="#d9e1ec" filter="url(#soft)"/>
+    <g transform="translate(22 20)" fill="none" stroke="#1d4fb8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="18" r="16"/>
+      <path d="M10 18l6 6 11-12"/>
+    </g>
+    <text x="76" y="34" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20" font-weight="700" fill="#1d4fb8">Regression-tested</text>
+    <text x="76" y="58" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="16" fill="#4a5568">Harness and demo</text>
+  </g>
+
+  <!-- Picker month view -->
+  <g filter="url(#shadow)"><rect x="790" y="56" width="426" height="528" rx="6" fill="#ffffff"/></g>
+  <path d="M790 62a6 6 0 0 1 6-6h414a6 6 0 0 1 6 6v98h-426z" fill="#225a9c"/>
+  <path d="M820 92l14-9v18z" fill="#ffffff"/>
+  <rect x="852" y="73" width="136" height="38" fill="#2a67b0" stroke="#8fb2dc" stroke-width="1.5"/>
+  <text x="920" y="100" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="22" font-weight="600" fill="#ffffff">APRIL</text>
+  <path d="M1020 92l-14-9v18z" fill="#ffffff"/>
+  <text x="1120" y="101" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="24" font-weight="600" fill="#ffffff">2026</text>
+  <path d="M1180 76l7 9h-14zM1180 108l7-9h-14z" fill="#ffffff"/>
+  <g font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="16" font-weight="600" fill="#ffffff" text-anchor="middle">
+    <text x="820.4" y="146">MON</text>
+    <text x="881.3" y="146">TUE</text>
+    <text x="942.1" y="146">WED</text>
+    <text x="1003.0" y="146">THU</text>
+    <text x="1063.9" y="146">FRI</text>
+    <text x="1124.7" y="146">SAT</text>
+    <text x="1185.6" y="146">SUN</text>
+  </g>
+  <rect x="855.3" y="266" width="52" height="42" fill="#225a9c"/>
+  <g font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" text-anchor="middle">
+    <text x="820.4" y="194" fill="#9aa3ae">30</text>
+    <text x="881.3" y="194" fill="#9aa3ae">31</text>
+    <text x="942.1" y="194" fill="#1b2433">1</text>
+    <text x="1003.0" y="194" fill="#1b2433">2</text>
+    <text x="1063.9" y="194" fill="#1b2433">3</text>
+    <text x="1124.7" y="194" fill="#1b2433" font-weight="700">4</text>
+    <text x="1185.6" y="194" fill="#1b2433" font-weight="700">5</text>
+    <text x="820.4" y="244" fill="#1b2433">6</text>
+    <text x="881.3" y="244" fill="#1b2433">7</text>
+    <text x="942.1" y="244" fill="#1b2433">8</text>
+    <text x="1003.0" y="244" fill="#1b2433">9</text>
+    <text x="1063.9" y="244" fill="#1b2433">10</text>
+    <text x="1124.7" y="244" fill="#1b2433" font-weight="700">11</text>
+    <text x="1185.6" y="244" fill="#1b2433" font-weight="700">12</text>
+    <text x="820.4" y="294" fill="#1b2433">13</text>
+    <text x="881.3" y="294" fill="#ffffff" font-weight="700">14</text>
+    <text x="942.1" y="294" fill="#1b2433">15</text>
+    <text x="1003.0" y="294" fill="#1b2433">16</text>
+    <text x="1063.9" y="294" fill="#1b2433">17</text>
+    <text x="1124.7" y="294" fill="#1b2433" font-weight="700">18</text>
+    <text x="1185.6" y="294" fill="#1b2433" font-weight="700">19</text>
+    <text x="820.4" y="344" fill="#1b2433">20</text>
+    <text x="881.3" y="344" fill="#1b2433">21</text>
+    <text x="942.1" y="344" fill="#1b2433">22</text>
+    <text x="1003.0" y="344" fill="#1b2433">23</text>
+    <text x="1063.9" y="344" fill="#1b2433">24</text>
+    <text x="1124.7" y="344" fill="#1b2433" font-weight="700">25</text>
+    <text x="1185.6" y="344" fill="#1b2433" font-weight="700">26</text>
+    <text x="820.4" y="394" fill="#1b2433">27</text>
+    <text x="881.3" y="394" fill="#1b2433">28</text>
+    <text x="942.1" y="394" fill="#1b2433">29</text>
+    <text x="1003.0" y="394" fill="#1b2433">30</text>
+    <text x="1063.9" y="394" fill="#9aa3ae">1</text>
+    <text x="1124.7" y="394" fill="#9aa3ae">2</text>
+    <text x="1185.6" y="394" fill="#9aa3ae">3</text>
+    <text x="820.4" y="444" fill="#9aa3ae">4</text>
+    <text x="881.3" y="444" fill="#9aa3ae">5</text>
+    <text x="942.1" y="444" fill="#9aa3ae">6</text>
+    <text x="1003.0" y="444" fill="#9aa3ae">7</text>
+    <text x="1063.9" y="444" fill="#9aa3ae">8</text>
+    <text x="1124.7" y="444" fill="#9aa3ae">9</text>
+    <text x="1185.6" y="444" fill="#9aa3ae">10</text>
+  </g>
+  <rect x="790" y="470" width="426" height="4" fill="#e3e6ea"/>
+  <path d="M790 474h426v104a6 6 0 0 1-6 6h-414a6 6 0 0 1-6-6z" fill="#f3f4f6"/>
+  <g fill="none" stroke="#1f8a96" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="816" y="510" width="30" height="28" rx="3"/>
+    <path d="M816 519h30M823 505v8M839 505v8M822 526h18v6h-18z"/>
+    <circle cx="986" cy="526" r="14"/>
+    <path d="M986 518v9l6 4"/>
+    <path d="M1130 494v62"/>
+  </g>
+  <g fill="none" stroke="#1f8a96">
+    <circle cx="1174" cy="526" r="13" stroke-width="5" stroke-dasharray="3.4 3.4"/>
+    <circle cx="1174" cy="526" r="10" stroke-width="2.4"/>
+    <circle cx="1174" cy="526" r="4.5" stroke-width="2.4"/>
+  </g>
+  <g font-family="Inter, 'Segoe UI', Arial, sans-serif" text-anchor="middle" fill="#1b2433">
+    <text x="910" y="516" font-size="20" font-weight="700">Today</text>
+    <text x="910" y="548" font-size="16">14-APR-2026</text>
+    <text x="1062" y="516" font-size="20" font-weight="700">Time</text>
+    <text x="1062" y="548" font-size="16">14:56:19</text>
+  </g>
+  <text x="64" y="612" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="15" font-weight="600" letter-spacing="1.5" fill="#6b7a90">WINDOWS  ·  EXCEL  ·  VBA  ·  OPEN SOURCE</text>
+</svg>
