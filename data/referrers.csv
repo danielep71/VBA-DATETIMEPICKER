@@ -320,3 +320,7 @@ snapshot_date,rank,referrer,count,uniques
 2026-11-14,1,aocr.org,103,103
 2026-11-14,2,Google,16,7
 2026-11-14,3,github.com,12,8
+2026-11-15,1,aocr.org,103,103
+2026-11-15,2,Google,15,6
+2026-11-15,3,github.com,13,9
+2026-11-15,4,search.brave.com,2,1
