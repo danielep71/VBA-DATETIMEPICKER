@@ -257,6 +257,26 @@ Use only the categories needed by a release.
   `tools/Build-Addin.cmd` runs it before reopening and hashing the add-in, and
   `tools/check_release.py` refuses a package that still carries any of it
   ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
+- The nine packages already published for v1.1.0 to v1.2.2 were replaced on
+  2026-11-15 by copies cleaned with `tools/sanitize_package.py`. Asset names,
+  tags and `xl/vbaProject.bin` are unchanged, so the code is the same; only
+  the SHA-256 of each file changed. A hash quoted before that date, in an
+  issue, a pull request or certification evidence, is the hash of the original
+  file. Each release's notes list both values
+  ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)):
+
+  | Release | Asset | SHA-256 before | SHA-256 now |
+  | --- | --- | --- | --- |
+  | v1.1.0 | `DATETIMEPICKER.xlam` | `05df5410…c91c` | `26d2c71d5eaa1844dd7d2cf63914ba9563d0aae614d25347faf9698fa8fbcf24` |
+  | v1.1.1 | `DATETIMEPICKER.v1.1.1.xlam` | `ee6c003a…a35b` | `830306942fb56228d0fe4b2e1d1f9a8b7c5ee592e973a2d5af1307e3a39a2688` |
+  | v1.1.1 | `DATETIMEPICKER.demo.-.v1.1.1.xlsm` | `36a1bd1d…4a0d` | `4d9655e419ff7d14d896da5fbfac79d769ae826b6b9811f01464a73cad01749a` |
+  | v1.2.0 | `DATETIMEPICKER.v1.2.0.xlam` | `69d83687…ef66` | `9023e94b727e05072a735ae8292cb627ba078382a1d5b0d1468cb7dfba9e961e` |
+  | v1.2.0 | `DATETIMEPICKER-demo-v1.2.0.xlsm` | `a7163ab8…9f8f` | `5321104469a130f594b3008ec3a5c598aa7424ba41c7f7ec6aa37b9802781fb9` |
+  | v1.2.1 | `DATETIMEPICKER.v1.2.1.xlam` | `f8e6a812…db78` | `59b17a47f832ad161fd1bc042b0d8b382c399b2f303f3c651363f2da9bf79e7e` |
+  | v1.2.1 | `DATETIMEPICKER-demo-v1.2.1.xlsm` | `26f112cc…4bb6` | `3b7ba05335cf220d05676a96b2f86b756d536d2d42836e45c5ca462a777499df` |
+  | v1.2.2 | `DATETIMEPICKER.v1.2.2.xlam` | `e7b26ba6…510b` | `eec4217e4f6333661fc35c16922fb19f4f06409bb6dae0a31c9c4a5eccee59e1` |
+  | v1.2.2 | `DATETIMEPICKER-demo-v1.2.2.xlsm` | `5e0b97f3…8e7c` | `ab376ca659392a185bd33f42e26c4068568fb07b0be59f553a8d88b44edbb935` |
+
 - `tools/Certify-Excel.ps1` and `tools/Build-Addin.ps1` no longer report PASS
   when Excel cannot be closed. A workbook `Close` or an Excel `Quit` that
   failed was only written to `session.log`, so a run could pass while Excel
