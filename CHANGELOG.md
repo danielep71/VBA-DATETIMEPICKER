@@ -111,6 +111,11 @@ Use only the categories needed by a release.
   package runs, and the manual PDF. It then asks the six
   manual checks, assembles the evidence, asks for confirmation, tags, publishes
   and validates the downloaded release. `-DryRun` stops before the tag.
+  The user manual PDF comes from the new **User manual PDF** workflow, which
+  renders it for every push to `main` and the release branches and every pull
+  request: the release host's managed Chrome and Edge refuse the DevTools
+  connection that headless printing needs. `-Resume <folder>` continues a
+  run that stopped, keeping the steps that passed.
   `release-check.yml` now also runs on its own when a release is published,
   reading the candidate from the tag and the record from the release's
   `release-evidence.json` asset.

@@ -121,7 +121,9 @@ It stops at the first failure and runs, in order:
    Ribbon questions (section 7);
 5. both packs inside each package, `Certify-Excel.ps1 -Package` (section 7,
    step 10);
-6. the user manual PDF, which you check page by page;
+6. the user manual PDF that the **User manual PDF** workflow rendered for this
+   commit on its push run on `main`, downloaded from CI; you check it page by
+   page;
 7. the six manual checks, asked one by one: PASS, NOT RUN with the name of whoever
    accepts the gap, or FAIL, which stops;
 8. the evidence, with `tools/assemble_release.py`: `release-evidence.json`
@@ -134,7 +136,9 @@ It stops at the first failure and runs, in order:
     **Verify published release evidence** workflow runs on its own (section 11).
 
 `-DryRun` does steps 1 to 9 and stops before the tag; `-Rehearse` tries steps
-2 to 7 on a checkout that is not a release candidate yet. Everything goes into one
+2 to 7 on a checkout that is not a release candidate yet. `-Resume <folder>`
+continues a run that stopped: the preflight runs again, the steps that passed
+are kept, and the run continues from the first one that did not. Everything goes into one
 folder next to the checkout, `DATETIMEPICKER-release-vX.Y.Z-<sha12>-<stamp>`,
 ending with `release.txt` and `release.json`
 ([tools/README.md](tools/README.md#run-the-whole-release-windows)). The sections
@@ -355,8 +359,13 @@ For each artifact:
 The user manual PDF is rendered from `docs/USER_MANUAL.md` at the exact
 candidate. Its links to other repository files point at that commit. It has
 page numbers, bookmarks, and a table of contents with the page of each section.
-Install Python-Markdown and pypdf from the hash-locked
-`tools/requirements-docs.txt` first, then render with headless Chrome or Edge:
+The **User manual PDF** workflow (`.github/workflows/user-manual.yml`) renders
+it on every push to `main` and the release branches and on every pull request,
+and keeps it as the artifact `user-manual-<sha>` for 90 days; `tools/Release.cmd`
+publishes the one of the push run on `main` for the candidate. A host whose
+browser allows headless printing can also render it locally. Install
+Python-Markdown and pypdf from the hash-locked `tools/requirements-docs.txt`
+first, then render with headless Chrome or Edge:
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt

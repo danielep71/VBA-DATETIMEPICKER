@@ -143,6 +143,62 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertIn('-File "%SCRIPT%" %*', launcher)
 
 
+class ManualAndResumeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.code = "\n".join(code_lines(SCRIPT.read_text(encoding="ascii")))
+        start = self.code.index('$step = Start-Step "6. User manual PDF"')
+        self.step6 = self.code[start:self.code.index('$step = Start-Step "7.', start)]
+
+    def test_pdf_comes_from_the_ci_run_of_the_commit(self) -> None:
+        self.assertIn('"repos/$Repository/actions/workflows/user-manual.yml/runs"', self.step6)
+        self.assertIn('($Rehearse -or ($_.event -eq "push" -and $_.head_branch -eq "main"))', self.step6)
+        self.assertIn('"--name", "user-manual-$sha"', self.step6)
+        self.assertIn('if ((Get-Content -LiteralPath $commitFile -Raw).Trim() -ne $sha) {', self.step6)
+        self.assertNotIn("render_manual", self.code)
+        self.assertNotIn("import markdown", self.code)
+
+    def test_operator_still_checks_every_page(self) -> None:
+        self.assertIn('Read-YesNo "The PDF is open. Did you check every page, and is every page right?"',
+                      self.step6)
+
+    def test_a_release_resumes_only_at_the_same_commit(self) -> None:
+        self.assertIn('if (-not $Rehearse) {\n            throw "-Resume: that run was at', self.code)
+        self.assertIn('if ($previous.tag -ne $tag) {', self.code)
+        self.assertIn('if ([bool]$previous.rehearsal -ne [bool]$Rehearse) {', self.code)
+        self.assertIn('throw "-Resume: that run already published $tag."', self.code)
+
+    def test_only_a_row_of_passed_steps_is_kept(self) -> None:
+        self.assertIn("for ($number = 2; $number -le 8 -and $passed.ContainsKey($number); $number++) {", self.code)
+        for number in range(2, 9):
+            with self.subTest(step=number):
+                self.assertRegex(self.code, rf'if \(-not \(Skip-Step {number} "{number}\. [^"]+"\)\) {{\n'
+                                            rf'        \$step = Start-Step "{number}\.')
+                self.assertRegex(self.code, rf"(?m)^    {number} = @\(")
+        self.assertNotIn("Skip-Step 1 ", self.code)
+        self.assertNotIn("Skip-Step 9 ", self.code)
+
+    def test_a_step_that_runs_again_moves_its_outputs_aside(self) -> None:
+        self.assertIn('$aside = $path + ".failed-" + $stamp', self.code)
+        self.assertIn("Move-Item -LiteralPath $path -Destination $aside", self.code)
+
+
+class UserManualWorkflowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.text = (ROOT / ".github" / "workflows" / "user-manual.yml").read_text(encoding="utf-8")
+
+    def test_runs_where_release_and_rehearsal_look(self) -> None:
+        self.assertRegex(self.text, r'(?m)^  push:\n    branches:\n      - main\n      - "release/\*\*"$')
+        self.assertRegex(self.text, r"(?m)^  pull_request:$")
+
+    def test_renders_and_names_the_exact_commit(self) -> None:
+        self.assertIn("COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}", self.text)
+        self.assertIn("ref: ${{ env.COMMIT }}", self.text)
+        self.assertIn('[[ "$(git rev-parse HEAD)" == "$COMMIT" ]]', self.text)
+        self.assertIn('python tools/render_manual.py --ref "$COMMIT"', self.text)
+        self.assertIn("name: user-manual-${{ env.COMMIT }}", self.text)
+        self.assertIn("--require-hashes --only-binary=:all: -r tools/requirements-docs.txt", self.text)
+
+
 class ReleaseCheckWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.text = WORKFLOW.read_text(encoding="utf-8")

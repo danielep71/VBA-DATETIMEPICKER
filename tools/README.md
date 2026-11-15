@@ -470,6 +470,14 @@ python -m pip install --require-hashes --only-binary=:all: -r tools/requirements
 python tools/render_manual.py --html test-results/USER_MANUAL.html --pdf test-results/USER_MANUAL.pdf
 ```
 
+The **User manual PDF** workflow (`.github/workflows/user-manual.yml`) runs the
+same command on Ubuntu with Chrome for every push to `main` and the release
+branches and every pull request. It renders the pushed commit, or the pull
+request's head commit, and keeps the PDF, the HTML and a `COMMIT` file as the
+artifact `user-manual-<sha>` for 90 days. The released PDF is that artifact
+(see [Run the whole release](#run-the-whole-release-windows)): a managed Chrome
+or Edge that refuses DevTools cannot print headless.
+
 The HTML:
 - embeds every image as a data URI, and accepts only images inside the
   repository;
@@ -621,11 +629,12 @@ tag message and the notes. The tool tags nothing and publishes nothing.
 from one command, on a clean checkout of the exact `origin/main` commit
 ([RELEASING](../RELEASING.md#one-command),
 [#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It needs
-everything the other Windows tools need, plus GitHub CLI (`gh`, signed in),
-Python-Markdown and pypdf (`tools/requirements-docs.txt`) and Chrome, Edge or
-Chromium. It does not need Node.js: it does not run `tools/check.py` locally,
-but downloads the `static-checks.json` that CI wrote on the push run of the
-same commit.
+everything the other Windows tools need, plus GitHub CLI (`gh`, signed in).
+It needs neither Node.js nor a browser that can print headless: it downloads,
+for the same commit, the `static-checks.json` that CI wrote on the push run of
+`main`, and the PDF that the **User manual PDF** workflow rendered. A managed
+Chrome or Edge that refuses DevTools ("DevTools remote debugging is disallowed
+by the system admin") cannot print the manual locally.
 
 ```powershell
 .\tools\Release.cmd -DryRun -Title "<short title>" -Refs 88,89 -EvidenceIssue 122
@@ -644,7 +653,7 @@ holds:
 | `source-standard/`, `source-ui_smoke/` | The two source runs of `Certify-Excel.ps1` |
 | `addin-build/`, `demo-build/` | The builds, with the release file names |
 | `addin-run/`, `demo-run/` | The package runs of `Certify-Excel.ps1 -Package` |
-| `manual/`, `manual-checks.json` | The manual's HTML, and your answers to the six manual checks |
+| `manual/`, `manual-checks.json` | The PDF as downloaded from CI with the commit it was rendered from, and your answers to the six manual checks |
 | `release-assets/` | The two packages, the PDF and `release-evidence.json`, as published |
 | `evidence/` | The output of `tools/assemble_release.py` |
 | `published/`, `published-check.json` | The release downloaded again, and its validation with the tag |
@@ -656,8 +665,23 @@ release, and a commit without a successful static-checks push run on `main`.
 `-DryRun` stops after the final confirmation step, before anything is tagged or
 published. `-Rehearse` tries the command on any clean checkout, such as a pull
 request branch: it skips the release-state checks (main, `VERSION`,
-CHANGELOG, tag, release, static run), runs steps 2 to 7 and stops before the
-evidence, so its result is never release evidence. Without it, you type the tag to confirm. The command then checks that
+CHANGELOG, tag, release, static run), takes the PDF of any successful run for
+the commit (the pull request's, for a branch), runs steps 2 to 7 and stops
+before the evidence, so its result is never release evidence.
+
+`-Resume <release folder>` continues a run that stopped, in the same folder:
+
+```powershell
+.\tools\Release.cmd -Resume ..\DATETIMEPICKER-release-v1.2.3-<sha12>-<stamp>
+```
+
+The title, references and certification issue are taken from that run. The
+preflight runs again. The steps from 2 that passed, in a row, are kept, and
+the run continues from the first one that did not. A step that runs again
+first moves its earlier folders aside as `<name>.failed-<yyyyMMdd-HHmmss>`,
+because the tools never write into a folder that is not empty. A release
+resumes only at the same commit; a rehearsal may keep steps that ran at an
+earlier commit of the tools, and `release.txt` says so. Without it, you type the tag to confirm. The command then checks that
 `origin/main` has not moved and pushes the annotated tag. It creates the
 release, downloads it again and compares every file with the tested one, then
 runs `check_release.py --require-tag`. If the release cannot be created after

@@ -20,8 +20,11 @@ first failure:
  4. the add-in and demo builds: tools/Build-Addin.ps1 and -Demo, with the
     release file names (you answer their Ribbon questions);
  5. both package runs: tools/Certify-Excel.ps1 -Package on each package;
- 6. the user manual PDF (tools/render_manual.py), which you check page by
-    page;
+ 6. the user manual PDF: the artifact the User manual PDF workflow
+    (.github/workflows/user-manual.yml) rendered for this commit on its push
+    run on main, downloaded with GitHub CLI; you check it page by page. The
+    release host's managed Chrome and Edge refuse the DevTools connection that
+    headless printing needs, so the PDF is printed by CI;
  7. the six manual checks of RELEASING section 8, asked here: PASS, NOT RUN
     with the name of whoever accepts the gap, or FAIL, which stops;
  8. the evidence (tools/assemble_release.py): release-evidence.json, the tag
@@ -37,8 +40,16 @@ pushed or published.
 
 -Rehearse tries the command on any clean checkout, such as a pull request
 branch, before a release is prepared. It skips the release-state checks of
-the preflight (main, VERSION, CHANGELOG, tag, release, static run), runs steps
-2 to 7 and stops before the evidence: its result is never release evidence. Every step writes into one release folder next to the
+the preflight (main, VERSION, CHANGELOG, tag, release, static run), takes the
+PDF from any successful run for the commit, runs steps 2 to 7 and stops
+before the evidence: its result is never release evidence.
+
+-Resume <release folder> continues a run that stopped, in the same folder.
+The commit, tag and mode must be the same. The preflight runs again; the
+steps from 2 that passed before, in a row, are kept, and the run continues
+from the first one that did not. A step that runs again moves its earlier
+folders aside (.failed-<time>), because the tools never overwrite evidence.
+tools/assemble_release.py then cross-checks everything that was kept. Every step writes into one release folder next to the
 checkout, DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>, which ends
 with release.txt and release.json.
 
@@ -46,9 +57,6 @@ with release.txt and release.json.
 - Windows with desktop Excel, Git, Python 3.11 or later and GitHub CLI (gh,
   signed in with access to the repository) on the PATH. Node.js is not
   needed: the static report comes from CI.
-- Python-Markdown and pypdf: python -m pip install --require-hashes
-  --only-binary=:all: -r tools/requirements-docs.txt
-- Chrome, Edge or Chromium for the PDF.
 - "Trust access to the VBA project object model" already on. This script
   never changes it.
 - Close other Excel work first, and do not use Excel while a step runs.
@@ -68,6 +76,7 @@ param(
     [string]$Repository = "danielep71/VBA-DATETIMEPICKER",
     [Parameter(Mandatory = $false)]
     [string]$RepoRoot,
+    [string]$Resume,
     [switch]$DryRun,
     [switch]$Rehearse
 )
@@ -209,6 +218,49 @@ function Invoke-ToolScript {
 # ----------------------------------------------------------------------------
 # Inputs and release folder
 # ----------------------------------------------------------------------------
+$sha = (& git -C $RepoRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') {
+    throw "Cannot read the checked-out commit of $RepoRoot. Is Git on the PATH?"
+}
+$version = (Get-Content -LiteralPath (Join-Path $RepoRoot "VERSION") -Raw).Trim()
+$tag = "v$version"
+$stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
+$previous = $null
+$script:resumedFrom = $null
+if (-not [string]::IsNullOrWhiteSpace($Resume)) {
+    # Continue a run that stopped: same folder, same commit, tag and mode.
+    $releaseDir = (Resolve-Path -LiteralPath $Resume).Path
+    $previousFile = Join-Path $releaseDir "release.json"
+    if (-not (Test-Path -LiteralPath $previousFile)) {
+        throw "-Resume needs a release folder with release.json: $releaseDir"
+    }
+    $previous = Get-Content -LiteralPath $previousFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ([bool]$previous.rehearsal -ne [bool]$Rehearse) {
+        throw "-Resume: that run $(if ($previous.rehearsal) { 'was' } else { 'was not' }) a rehearsal; resume it the same way."
+    }
+    if ($previous.tag -ne $tag) {
+        throw "-Resume: that run was for $($previous.tag), not $tag."
+    }
+    if ($previous.candidate_sha -ne $sha) {
+        # Release evidence is bound to one commit. A rehearsal is never
+        # evidence, so it may keep steps run at an earlier commit of the tools.
+        if (-not $Rehearse) {
+            throw "-Resume: that run was at $($previous.candidate_sha), not $sha; a release resumes only at the same commit."
+        }
+        $script:resumedFrom = [string]$previous.candidate_sha
+    }
+    if ($previous.published) {
+        throw "-Resume: that run already published $tag."
+    }
+    if ([string]::IsNullOrWhiteSpace($Title)) { $Title = [string]$previous.title }
+    if ($EvidenceIssue -le 0) { $EvidenceIssue = [int]$previous.evidence }
+    if ([string]::IsNullOrWhiteSpace($Refs)) { $Refs = (@($previous.refs) -join ",") }
+}
+else {
+    $releaseDir = Join-Path (Split-Path -Parent $RepoRoot) ("DATETIMEPICKER-release-$tag-" + $sha.Substring(0, 12) + "-" + $stamp)
+    New-Item -ItemType Directory -Path $releaseDir | Out-Null
+    $releaseDir = (Resolve-Path -LiteralPath $releaseDir).Path
+}
 if ([string]::IsNullOrWhiteSpace($Title)) {
     $Title = Read-Required "Release title, one line (for example: User-facing consistency and Ribbon source patch)"
 }
@@ -227,22 +279,14 @@ foreach ($item in ($Refs -split '[,\s]+' | Where-Object { $_ })) {
 if ($EvidenceIssue -le 0) {
     $EvidenceIssue = [int](Read-Required "Number of the certification issue (for example 122)")
 }
-$sha = (& git -C $RepoRoot rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') {
-    throw "Cannot read the checked-out commit of $RepoRoot. Is Git on the PATH?"
-}
-$version = (Get-Content -LiteralPath (Join-Path $RepoRoot "VERSION") -Raw).Trim()
-$tag = "v$version"
-$stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
-$releaseDir = Join-Path (Split-Path -Parent $RepoRoot) ("DATETIMEPICKER-release-$tag-" + $sha.Substring(0, 12) + "-" + $stamp)
-New-Item -ItemType Directory -Path $releaseDir | Out-Null
-$releaseDir = (Resolve-Path -LiteralPath $releaseDir).Path
 $assetsDir = Join-Path $releaseDir "release-assets"
-New-Item -ItemType Directory -Path $assetsDir | Out-Null
+New-Item -ItemType Directory -Path $assetsDir -Force | Out-Null
 $script:sessionLog = Join-Path $releaseDir "session.log"
 $addinName = "DATETIMEPICKER.$tag.xlam"
 $demoName = "DATETIMEPICKER-demo-$tag.xlsm"
 $pdfName = "DATETIMEPICKER-user-manual-$tag.pdf"
+$manualPath = Join-Path $releaseDir "manual-checks.json"
+$pdfPath = Join-Path $assetsDir $pdfName
 $folders = [ordered]@{
     static          = Join-Path $releaseDir "static"
     source_standard = Join-Path $releaseDir "source-standard"
@@ -254,6 +298,18 @@ $folders = [ordered]@{
     manual          = Join-Path $releaseDir "manual"
     evidence        = Join-Path $releaseDir "evidence"
     published       = Join-Path $releaseDir "published"
+}
+$addinPath = Join-Path $folders.addin_build $addinName
+$demoPath = Join-Path $folders.demo_build $demoName
+# What each step writes; a step that runs again on -Resume moves these aside.
+$stepOutputs = @{
+    2 = @($folders.static)
+    3 = @($folders.source_standard, $folders.source_ui_smoke)
+    4 = @($folders.addin_build, $folders.demo_build)
+    5 = @($folders.addin_run, $folders.demo_run)
+    6 = @($folders.manual, $pdfPath)
+    7 = @($manualPath)
+    8 = @($folders.evidence)
 }
 
 $script:summary = [ordered]@{
@@ -273,6 +329,9 @@ $script:summary = [ordered]@{
     published     = $false
     result        = "FAIL"
     reason        = $null
+    resumed       = ($null -ne $previous)
+    resumed_from  = $script:resumedFrom
+    kept_steps    = @()
 }
 if ($Rehearse) {
     $DryRun = $true
@@ -282,6 +341,48 @@ Write-Session ("Release $tag of $sha" + $(if ($Rehearse) { " (REHEARSAL: steps 2
         elseif ($DryRun) { " (dry run: no tag, no release)" } else { "" }))
 Write-Session "Release folder: $releaseDir"
 
+# The steps from 2 that passed in the earlier run, in a row, are kept.
+$kept = @()
+if ($null -ne $previous) {
+    $passed = @{}
+    foreach ($item in @($previous.steps)) {
+        if ([string]$item.status -eq "PASS" -and [string]$item.name -match '^(\d+)\.') {
+            $passed[[int]$Matches[1]] = [string]$item.detail
+        }
+    }
+    for ($number = 2; $number -le 8 -and $passed.ContainsKey($number); $number++) {
+        $kept += $number
+    }
+    $script:previousDetails = $passed
+    Write-Session "Resuming: steps kept from the earlier run: $(if ($kept.Count) { $kept -join ', ' } else { 'none' })"
+    if ($script:resumedFrom) {
+        Write-Session "Rehearsal: the kept steps ran at $($script:resumedFrom), not at $sha"
+    }
+}
+
+function Skip-Step {
+    # True when the step is kept from the earlier run. Otherwise, on -Resume,
+    # its earlier outputs are moved aside so that the tools can write afresh.
+    param([int]$Number, [string]$Name)
+    if ($kept -contains $Number) {
+        $script:summary.steps += [ordered]@{ name = $Name; status = "PASS"; started_at = $null; finished_at = $null
+            detail = "kept from the earlier run: $($script:previousDetails[$Number])" }
+        $script:summary.kept_steps += $Number
+        Write-Session "Kept: $Name"
+        return $true
+    }
+    if ($null -ne $previous) {
+        foreach ($path in $stepOutputs[$Number]) {
+            if (Test-Path -LiteralPath $path) {
+                $aside = $path + ".failed-" + $stamp
+                Move-Item -LiteralPath $path -Destination $aside
+                Write-Session "Moved the earlier $([System.IO.Path]::GetFileName($path)) aside to $([System.IO.Path]::GetFileName($aside))"
+            }
+        }
+    }
+    return $false
+}
+
 $python = $null
 try {
     # ------------------------------------------------------------------------
@@ -290,6 +391,9 @@ try {
     $step = Start-Step "1. Preflight"
     $changes = (& git -C $RepoRoot status --porcelain --untracked-files=normal | Out-String).Trim()
     if ($changes.Length -gt 0) { Stop-Release $step "The working tree is not clean: $changes" }
+    if ($null -eq (Get-Command gh -ErrorAction SilentlyContinue)) { Stop-Release $step "GitHub CLI (gh) is not on the PATH." }
+    $auth = Invoke-Native -Program "gh" -Arguments @("auth", "status")
+    if ($auth.Code -ne 0) { Stop-Release $step "GitHub CLI is not signed in: run gh auth login." }
     if (-not $Rehearse) {
         $fetch = Invoke-Native -Program "git" -Arguments @("-C", $RepoRoot, "fetch", "origin", "main", "--tags")
         if ($fetch.Code -ne 0) { Stop-Release $step "git fetch origin main failed: $($fetch.Output -join ' ')" }
@@ -308,9 +412,6 @@ try {
         if ($remoteTag.Code -ne 0 -or ($remoteTag.Output -join "").Trim().Length -gt 0) {
             Stop-Release $step "The tag $tag exists on origin, or origin could not be read."
         }
-        if ($null -eq (Get-Command gh -ErrorAction SilentlyContinue)) { Stop-Release $step "GitHub CLI (gh) is not on the PATH." }
-        $auth = Invoke-Native -Program "gh" -Arguments @("auth", "status")
-        if ($auth.Code -ne 0) { Stop-Release $step "GitHub CLI is not signed in: run gh auth login." }
         $existing = Invoke-Native -Program "gh" -Arguments @("release", "view", $tag, "--repo", $Repository)
         if ($existing.Code -eq 0) { Stop-Release $step "A GitHub Release $tag already exists." }
         # The JSON is filtered here: a --jq filter would need double quotes, which
@@ -335,126 +436,153 @@ try {
     }
     $python = Find-Python
     if ($null -eq $python) { Stop-Release $step "Python 3.11 or later was not found (python or py -3)." }
-    $docs = Invoke-Python -Python $python -Arguments @("-c", "import markdown, pypdf")
-    if ($docs.Code -ne 0) {
-        Stop-Release $step ("Python-Markdown or pypdf is missing: python -m pip install --require-hashes " +
-                            "--only-binary=:all: -r tools/requirements-docs.txt")
-    }
-    Complete-Step $step $(if ($Rehearse) { "rehearsal: clean tree, $($python.Version); release state not checked" }
+    Complete-Step $step $(if ($Rehearse) { "rehearsal: clean tree, gh signed in, $($python.Version); release state not checked" }
         else { "main $sha, clean, $tag new, static run $($script:summary.static_run), $($python.Version)" })
 
     # ------------------------------------------------------------------------
     # 2. Static gates and the Ribbon check
     # ------------------------------------------------------------------------
-    $step = Start-Step "2. Static gates and Ribbon check"
-    New-Item -ItemType Directory -Path $folders.static | Out-Null
-    $staticDetail = "rehearsal: static report not retrieved"
-    if (-not $Rehearse) {
-        # The report CI wrote on the push run of this exact commit, as
-        # release-check.yml reads it after publication.
-        $download = Invoke-Native -Program "gh" -Arguments @("run", "download", $script:staticRunId,
-            "--repo", $Repository, "--name", "static-checks-$sha", "--dir", $folders.static)
-        $staticReport = Join-Path $folders.static "static-checks.json"
-        if ($download.Code -ne 0 -or -not (Test-Path -LiteralPath $staticReport)) {
-            Stop-Release $step "The static-checks report of run $($script:staticRunId) could not be downloaded (artifacts expire after 30 days)."
+    if (-not (Skip-Step 2 "2. Static gates and Ribbon check")) {
+        $step = Start-Step "2. Static gates and Ribbon check"
+        New-Item -ItemType Directory -Path $folders.static | Out-Null
+        $staticDetail = "rehearsal: static report not retrieved"
+        if (-not $Rehearse) {
+            # The report CI wrote on the push run of this exact commit, as
+            # release-check.yml reads it after publication.
+            $download = Invoke-Native -Program "gh" -Arguments @("run", "download", $script:staticRunId,
+                "--repo", $Repository, "--name", "static-checks-$sha", "--dir", $folders.static)
+            $staticReport = Join-Path $folders.static "static-checks.json"
+            if ($download.Code -ne 0 -or -not (Test-Path -LiteralPath $staticReport)) {
+                Stop-Release $step "The static-checks report of run $($script:staticRunId) could not be downloaded (artifacts expire after 30 days)."
+            }
+            $report = Get-Content -LiteralPath $staticReport -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($report.status -ne "pass" -or $report.candidate_sha -ne $sha -or $report.dirty -ne $false -or
+                $report.mode -ne "committed" -or @($report.checks).Count -ne 11) {
+                Stop-Release $step "The static report of run $($script:staticRunId) is not a clean committed PASS of 11 gates for $sha."
+            }
+            $staticDetail = "11 gates PASS in CI run $($script:staticRunId)"
         }
-        $report = Get-Content -LiteralPath $staticReport -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($report.status -ne "pass" -or $report.candidate_sha -ne $sha -or $report.dirty -ne $false -or
-            $report.mode -ne "committed" -or @($report.checks).Count -ne 11) {
-            Stop-Release $step "The static report of run $($script:staticRunId) is not a clean committed PASS of 11 gates for $sha."
-        }
-        $staticDetail = "11 gates PASS in CI run $($script:staticRunId)"
+        $ribbon = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot ".github\scripts\check-ribbon-resources.py"),
+            "--root", (Join-Path $RepoRoot "src\ribbon"))
+        [System.IO.File]::WriteAllLines((Join-Path $folders.static "ribbon-resources.txt"),
+            [string[]](@("Commit: $sha", "Command: python .github/scripts/check-ribbon-resources.py --root src/ribbon",
+                         "Exit code: $($ribbon.Code)", "") + $ribbon.Output), $utf8NoBom)
+        if ($ribbon.Code -ne 0) { Stop-Release $step "check-ribbon-resources.py failed." }
+        Complete-Step $step "$staticDetail; Ribbon resources pass"
     }
-    $ribbon = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot ".github\scripts\check-ribbon-resources.py"),
-        "--root", (Join-Path $RepoRoot "src\ribbon"))
-    [System.IO.File]::WriteAllLines((Join-Path $folders.static "ribbon-resources.txt"),
-        [string[]](@("Commit: $sha", "Command: python .github/scripts/check-ribbon-resources.py --root src/ribbon",
-                     "Exit code: $($ribbon.Code)", "") + $ribbon.Output), $utf8NoBom)
-    if ($ribbon.Code -ne 0) { Stop-Release $step "check-ribbon-resources.py failed." }
-    Complete-Step $step "$staticDetail; Ribbon resources pass"
 
     # ------------------------------------------------------------------------
     # 3. Source runs
     # ------------------------------------------------------------------------
-    $step = Start-Step "3. Source runs"
-    if ((Invoke-ToolScript "Certify-Excel.ps1" @("-BundleDir", $folders.source_standard, "-NoOpen")) -ne 0) {
-        Stop-Release $step "The standard source run failed; see $($folders.source_standard)."
+    if (-not (Skip-Step 3 "3. Source runs")) {
+        $step = Start-Step "3. Source runs"
+        if ((Invoke-ToolScript "Certify-Excel.ps1" @("-BundleDir", $folders.source_standard, "-NoOpen")) -ne 0) {
+            Stop-Release $step "The standard source run failed; see $($folders.source_standard)."
+        }
+        if ((Invoke-ToolScript "Certify-Excel.ps1" @("-WithUISmoke", "-BundleDir", $folders.source_ui_smoke, "-NoOpen")) -ne 0) {
+            Stop-Release $step "The UI-smoke source run failed; see $($folders.source_ui_smoke)."
+        }
+        Complete-Step $step "standard and UI smoke PASS"
     }
-    if ((Invoke-ToolScript "Certify-Excel.ps1" @("-WithUISmoke", "-BundleDir", $folders.source_ui_smoke, "-NoOpen")) -ne 0) {
-        Stop-Release $step "The UI-smoke source run failed; see $($folders.source_ui_smoke)."
-    }
-    Complete-Step $step "standard and UI smoke PASS"
 
     # ------------------------------------------------------------------------
     # 4. Package builds
     # ------------------------------------------------------------------------
-    $step = Start-Step "4. Add-in and demo builds"
-    if ((Invoke-ToolScript "Build-Addin.ps1" @("-PackageName", $addinName, "-BundleDir", $folders.addin_build, "-NoOpen")) -ne 0) {
-        Stop-Release $step "The add-in build failed; see $($folders.addin_build)."
+    if (-not (Skip-Step 4 "4. Add-in and demo builds")) {
+        $step = Start-Step "4. Add-in and demo builds"
+        if ((Invoke-ToolScript "Build-Addin.ps1" @("-PackageName", $addinName, "-BundleDir", $folders.addin_build, "-NoOpen")) -ne 0) {
+            Stop-Release $step "The add-in build failed; see $($folders.addin_build)."
+        }
+        if ((Invoke-ToolScript "Build-Addin.ps1" @("-Demo", "-PackageName", $demoName, "-BundleDir", $folders.demo_build, "-NoOpen")) -ne 0) {
+            Stop-Release $step "The demo build failed; see $($folders.demo_build)."
+        }
+        Complete-Step $step "$addinName $(Get-Sha256 $addinPath), $demoName $(Get-Sha256 $demoPath)"
     }
-    if ((Invoke-ToolScript "Build-Addin.ps1" @("-Demo", "-PackageName", $demoName, "-BundleDir", $folders.demo_build, "-NoOpen")) -ne 0) {
-        Stop-Release $step "The demo build failed; see $($folders.demo_build)."
-    }
-    $addinPath = Join-Path $folders.addin_build $addinName
-    $demoPath = Join-Path $folders.demo_build $demoName
-    Complete-Step $step "$addinName $(Get-Sha256 $addinPath), $demoName $(Get-Sha256 $demoPath)"
 
     # ------------------------------------------------------------------------
     # 5. Package runs
     # ------------------------------------------------------------------------
-    $step = Start-Step "5. Package runs"
-    if ((Invoke-ToolScript "Certify-Excel.ps1" @("-Package", $addinPath, "-BundleDir", $folders.addin_run, "-NoOpen")) -ne 0) {
-        Stop-Release $step "The add-in package run failed; see $($folders.addin_run)."
+    if (-not (Skip-Step 5 "5. Package runs")) {
+        $step = Start-Step "5. Package runs"
+        if ((Invoke-ToolScript "Certify-Excel.ps1" @("-Package", $addinPath, "-BundleDir", $folders.addin_run, "-NoOpen")) -ne 0) {
+            Stop-Release $step "The add-in package run failed; see $($folders.addin_run)."
+        }
+        if ((Invoke-ToolScript "Certify-Excel.ps1" @("-Package", $demoPath, "-BundleDir", $folders.demo_run, "-NoOpen")) -ne 0) {
+            Stop-Release $step "The demo package run failed; see $($folders.demo_run)."
+        }
+        Complete-Step $step "both packs PASS in both packages"
     }
-    if ((Invoke-ToolScript "Certify-Excel.ps1" @("-Package", $demoPath, "-BundleDir", $folders.demo_run, "-NoOpen")) -ne 0) {
-        Stop-Release $step "The demo package run failed; see $($folders.demo_run)."
-    }
-    Complete-Step $step "both packs PASS in both packages"
 
     # ------------------------------------------------------------------------
     # 6. User manual PDF
     # ------------------------------------------------------------------------
-    $step = Start-Step "6. User manual PDF"
-    New-Item -ItemType Directory -Path $folders.manual | Out-Null
-    $pdfPath = Join-Path $assetsDir $pdfName
-    $render = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot "tools\render_manual.py"),
-        "--html", (Join-Path $folders.manual "USER_MANUAL.html"), "--pdf", $pdfPath, "--ref", $sha)
-    foreach ($line in $render.Output) { Write-Session "  $line" }
-    if ($render.Code -ne 0) { Stop-Release $step "tools/render_manual.py failed." }
-    Invoke-Item -LiteralPath $pdfPath
-    if (-not (Read-YesNo "The PDF is open. Did you check every page, and is every page right?")) {
-        Stop-Release $step "The operator did not accept the PDF."
+    if (-not (Skip-Step 6 "6. User manual PDF")) {
+        $step = Start-Step "6. User manual PDF"
+        # Printed by CI: the release host's managed Chrome and Edge refuse the
+        # DevTools connection that headless printing needs. A release takes the
+        # push run on main for this commit; a rehearsal takes any run for it.
+        $manualRuns = Invoke-Native -Program "gh" -Arguments @("api", "-X", "GET",
+            "repos/$Repository/actions/workflows/user-manual.yml/runs",
+            "-f", "head_sha=$sha", "-f", "status=success", "-f", "per_page=100")
+        $manualRun = $null
+        if ($manualRuns.Code -eq 0) {
+            $manualRun = @((($manualRuns.Output -join "`n") | ConvertFrom-Json).workflow_runs | Where-Object {
+                    $_.head_sha -eq $sha -and $_.conclusion -eq "success" -and
+                    ($Rehearse -or ($_.event -eq "push" -and $_.head_branch -eq "main")) }) | Select-Object -First 1
+        }
+        if ($null -eq $manualRun) {
+            Stop-Release $step ("No successful User manual PDF run for $sha" +
+                $(if ($Rehearse) { "; push the branch or open its pull request first." } else { " on a push to main." }))
+        }
+        New-Item -ItemType Directory -Path $folders.manual | Out-Null
+        $download = Invoke-Native -Program "gh" -Arguments @("run", "download", [string]$manualRun.id,
+            "--repo", $Repository, "--name", "user-manual-$sha", "--dir", $folders.manual)
+        $printed = Join-Path $folders.manual "USER_MANUAL.pdf"
+        $commitFile = Join-Path $folders.manual "COMMIT"
+        if ($download.Code -ne 0 -or -not (Test-Path -LiteralPath $printed) -or -not (Test-Path -LiteralPath $commitFile)) {
+            Stop-Release $step "The PDF of run $($manualRun.id) could not be downloaded (artifacts expire after 90 days)."
+        }
+        if ((Get-Content -LiteralPath $commitFile -Raw).Trim() -ne $sha) {
+            Stop-Release $step "The PDF of run $($manualRun.id) was not rendered from $sha."
+        }
+        Copy-Item -LiteralPath $printed -Destination $pdfPath
+        Write-Session "PDF from $($manualRun.html_url)"
+        Invoke-Item -LiteralPath $pdfPath
+        if (-not (Read-YesNo "The PDF is open. Did you check every page, and is every page right?")) {
+            Stop-Release $step "The operator did not accept the PDF."
+        }
+        Complete-Step $step "$pdfName $(Get-Sha256 $pdfPath) from CI run $($manualRun.id), checked by the operator"
     }
-    Complete-Step $step "$pdfName $(Get-Sha256 $pdfPath), checked by the operator"
 
     # ------------------------------------------------------------------------
     # 7. Manual checks
     # ------------------------------------------------------------------------
-    $step = Start-Step "7. Manual checks"
-    Write-Host "For each manual check of RELEASING section 8 answer PASS, NOT RUN or FAIL."
-    Write-Host "PASS and NOT RUN need a description of the evidence or of the gap; NOT RUN also"
-    Write-Host "needs the name of whoever accepts the gap. FAIL stops the release."
-    $manual = [ordered]@{}
-    foreach ($name in $manualChecks.Keys) {
-        Write-Host ""
-        Write-Host "$name - $($manualChecks[$name])"
-        $status = ""
-        while ($status -notin @("PASS", "NOT RUN", "FAIL")) {
-            $status = (Read-Host "  Result (PASS / NOT RUN / FAIL)").Trim().ToUpperInvariant()
+    if (-not (Skip-Step 7 "7. Manual checks")) {
+        $step = Start-Step "7. Manual checks"
+        Write-Host "For each manual check of RELEASING section 8 answer PASS, NOT RUN or FAIL."
+        Write-Host "PASS and NOT RUN need a description of the evidence or of the gap; NOT RUN also"
+        Write-Host "needs the name of whoever accepts the gap. FAIL stops the release."
+        $manual = [ordered]@{}
+        foreach ($name in $manualChecks.Keys) {
+            Write-Host ""
+            Write-Host "$name - $($manualChecks[$name])"
+            $status = ""
+            while ($status -notin @("PASS", "NOT RUN", "FAIL")) {
+                $status = (Read-Host "  Result (PASS / NOT RUN / FAIL)").Trim().ToUpperInvariant()
+            }
+            if ($status -eq "FAIL") {
+                Stop-Release $step "$name failed; an unresolved failure cannot be accepted as a gap."
+            }
+            $record = [ordered]@{ status = $status; detail = (Read-Required "  Evidence or gap, one line") }
+            if ($status -eq "NOT RUN") {
+                $record.accepted_by = Read-Required "  Gap accepted by (name)"
+            }
+            $manual[$name] = $record
         }
-        if ($status -eq "FAIL") {
-            Stop-Release $step "$name failed; an unresolved failure cannot be accepted as a gap."
-        }
-        $record = [ordered]@{ status = $status; detail = (Read-Required "  Evidence or gap, one line") }
-        if ($status -eq "NOT RUN") {
-            $record.accepted_by = Read-Required "  Gap accepted by (name)"
-        }
-        $manual[$name] = $record
+        [System.IO.File]::WriteAllText($manualPath, ($manual | ConvertTo-Json -Depth 4), $utf8NoBom)
+        Complete-Step $step ("$(@($manual.Values | Where-Object { $_.status -eq 'PASS' }).Count) PASS, " +
+                             "$(@($manual.Values | Where-Object { $_.status -eq 'NOT RUN' }).Count) NOT RUN")
     }
-    $manualPath = Join-Path $releaseDir "manual-checks.json"
-    [System.IO.File]::WriteAllText($manualPath, ($manual | ConvertTo-Json -Depth 4), $utf8NoBom)
-    Complete-Step $step ("$(@($manual.Values | Where-Object { $_.status -eq 'PASS' }).Count) PASS, " +
-                         "$(@($manual.Values | Where-Object { $_.status -eq 'NOT RUN' }).Count) NOT RUN")
 
     if ($Rehearse) {
         # A rehearsal runs on a commit that is not a release candidate, so
@@ -466,25 +594,27 @@ try {
     # ------------------------------------------------------------------------
     # 8. Evidence
     # ------------------------------------------------------------------------
-    $step = Start-Step "8. Evidence, tag message and release notes"
-    foreach ($pair in @(@($addinPath, $addinName), @($demoPath, $demoName))) {
-        $target = Join-Path $assetsDir $pair[1]
-        Copy-Item -LiteralPath $pair[0] -Destination $target
-        if ((Get-Sha256 $target) -ne (Get-Sha256 $pair[0])) { Stop-Release $step "$($pair[1]) changed while it was copied." }
+    if (-not (Skip-Step 8 "8. Evidence, tag message and release notes")) {
+        $step = Start-Step "8. Evidence, tag message and release notes"
+        foreach ($pair in @(@($addinPath, $addinName), @($demoPath, $demoName))) {
+            $target = Join-Path $assetsDir $pair[1]
+            Copy-Item -LiteralPath $pair[0] -Destination $target
+            if ((Get-Sha256 $target) -ne (Get-Sha256 $pair[0])) { Stop-Release $step "$($pair[1]) changed while it was copied." }
+        }
+        $assemble = @((Join-Path $RepoRoot "tools\assemble_release.py"), "--root", $RepoRoot, "--candidate-sha", $sha,
+            "--assets-dir", $assetsDir, "--static-report", (Join-Path $folders.static "static-checks.json"),
+            "--source-standard", $folders.source_standard, "--source-ui-smoke", $folders.source_ui_smoke,
+            "--addin-build", $folders.addin_build, "--addin-run", $folders.addin_run,
+            "--demo-build", $folders.demo_build, "--demo-run", $folders.demo_run,
+            "--manual", $manualPath, "--title", $Title, "--evidence-issue", [string]$EvidenceIssue,
+            "--output-dir", $folders.evidence)
+        if ($refNumbers.Count -gt 0) { $assemble += @("--refs") + @($refNumbers | ForEach-Object { [string]$_ }) }
+        $evidence = Invoke-Python -Python $python -Arguments $assemble
+        foreach ($line in $evidence.Output) { Write-Session "  $line" }
+        if ($evidence.Code -ne 0) { Stop-Release $step "tools/assemble_release.py refused the evidence." }
+        Copy-Item -LiteralPath (Join-Path $folders.evidence "release-evidence.json") -Destination $assetsDir
+        Complete-Step $step "release-evidence.json validated: $(($evidence.Output | Select-Object -Last 1))"
     }
-    $assemble = @((Join-Path $RepoRoot "tools\assemble_release.py"), "--root", $RepoRoot, "--candidate-sha", $sha,
-        "--assets-dir", $assetsDir, "--static-report", (Join-Path $folders.static "static-checks.json"),
-        "--source-standard", $folders.source_standard, "--source-ui-smoke", $folders.source_ui_smoke,
-        "--addin-build", $folders.addin_build, "--addin-run", $folders.addin_run,
-        "--demo-build", $folders.demo_build, "--demo-run", $folders.demo_run,
-        "--manual", $manualPath, "--title", $Title, "--evidence-issue", [string]$EvidenceIssue,
-        "--output-dir", $folders.evidence)
-    if ($refNumbers.Count -gt 0) { $assemble += @("--refs") + @($refNumbers | ForEach-Object { [string]$_ }) }
-    $evidence = Invoke-Python -Python $python -Arguments $assemble
-    foreach ($line in $evidence.Output) { Write-Session "  $line" }
-    if ($evidence.Code -ne 0) { Stop-Release $step "tools/assemble_release.py refused the evidence." }
-    Copy-Item -LiteralPath (Join-Path $folders.evidence "release-evidence.json") -Destination $assetsDir
-    Complete-Step $step "release-evidence.json validated: $(($evidence.Output | Select-Object -Last 1))"
 
     # ------------------------------------------------------------------------
     # 9. Final confirmation
@@ -577,6 +707,7 @@ $report = @(
     "Candidate:  $sha",
     "Title:      $Title",
     "Static run: $($script:summary.static_run)",
+    $(if ($script:summary.resumed) { "Resumed:    kept steps $($script:summary.kept_steps -join ', ')$(if ($script:resumedFrom) { ' (run at ' + $script:resumedFrom + ')' } else { '' })" } else { "Resumed:    no" }),
     "",
     "Steps:")
 foreach ($item in $script:summary.steps) {

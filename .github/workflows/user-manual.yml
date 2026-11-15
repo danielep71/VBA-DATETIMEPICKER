@@ -1,0 +1,53 @@
+name: User manual PDF
+# Renders docs/USER_MANUAL.md to the PDF each release publishes, for the exact
+# commit, and keeps it as the artifact user-manual-<sha> (#222). The release
+# host cannot print it: its managed Chrome and Edge refuse the DevTools
+# connection headless printing needs. tools/Release.ps1 downloads the
+# artifact of the push run on main for the release commit, and the operator
+# checks every page before it is published.
+on:
+  push:
+    branches:
+      - main
+      - "release/**"
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      # A pull request's run renders and names its head commit, not the
+      # temporary merge commit, so the PDF's links point at a commit that stays.
+      COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Install the documentation packages (hash-locked, wheels only)
+        shell: bash
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
+      - name: Render the user manual
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$COMMIT" ]] || { echo "Checked out $(git rev-parse HEAD), not $COMMIT"; exit 1; }
+          python tools/render_manual.py --ref "$COMMIT" \
+            --html "$RUNNER_TEMP/user-manual/USER_MANUAL.html" \
+            --pdf "$RUNNER_TEMP/user-manual/USER_MANUAL.pdf" \
+            --browser "$(command -v google-chrome)"
+          printf '%s\n' "$COMMIT" > "$RUNNER_TEMP/user-manual/COMMIT"
+      - name: Keep the PDF of this commit
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: user-manual-${{ env.COMMIT }}
+          path: ${{ runner.temp }}/user-manual/
+          if-no-files-found: error
+          retention-days: 90
