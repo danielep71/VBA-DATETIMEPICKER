@@ -117,9 +117,11 @@ in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
   ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
   runs a preflight, takes the static gates from the CI report of the same
   commit, runs the Ribbon check, both source runs, both package builds and
-  package runs, and the manual PDF. It then asks the six
-  manual checks, assembles the evidence, asks for confirmation, tags, publishes
-  and validates the downloaded release. `-DryRun` stops before the tag.
+  package runs, and the manual PDF. It records the six manual checks as not
+  run, assembles the evidence, asks for the tag, tags, publishes and validates
+  the downloaded release; nothing else is asked (`Build-Addin.ps1
+  -NoRibbonCheck`). `-DryRun` stops before the tag. A cleanup call refused
+  because Excel has already exited is logged, not counted as a failure.
   The user manual PDF comes from the new **User manual PDF** workflow, which
   renders it for every push to `main` and the release branches and every pull
   request: the release host's managed Chrome and Edge refuse the DevTools

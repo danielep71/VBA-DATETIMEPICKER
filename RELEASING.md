@@ -117,15 +117,15 @@ It stops at the first failure and runs, in order:
    locally, with its output kept (section 5);
 3. both source runs, `tools/Certify-Excel.ps1` standard and `-WithUISmoke`
    (section 6);
-4. the add-in and demo builds with the release file names; you answer their
-   Ribbon questions (section 7);
+4. the add-in and demo builds with the release file names, without the Ribbon
+   questions (`-NoRibbonCheck`; section 7);
 5. both packs inside each package, `Certify-Excel.ps1 -Package` (section 7,
    step 10);
 6. the user manual PDF that the **User manual PDF** workflow rendered for this
-   commit on its push run on `main`, downloaded from CI; you check it page by
-   page;
-7. the six manual checks, asked one by one: PASS, NOT RUN with the name of whoever
-   accepts the gap, or FAIL, which stops;
+   commit on its push run on `main`, downloaded from CI and checked against the
+   commit;
+7. the six manual checks, recorded as NOT RUN and accepted by the Git
+   `user.name` of the checkout; the release notes list them as accepted gaps;
 8. the evidence, with `tools/assemble_release.py`: `release-evidence.json`
    validated by `check_release.py`, the tag message and the release notes
    (sections 8 and 9);

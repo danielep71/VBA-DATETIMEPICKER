@@ -26,10 +26,15 @@ $script:failed = 0
 
 function New-StandIn {
     # An object with one method that records its call and throws on request.
-    param([string]$Method, [bool]$Throws, [System.Collections.Generic.List[string]]$Calls, [string]$Name)
-    $object = [pscustomobject]@{ Name = $Name; Throws = $Throws; Calls = $Calls }
+    # With an HResult it throws a COMException carrying it, as a dead Excel does.
+    param([string]$Method, [bool]$Throws, [System.Collections.Generic.List[string]]$Calls, [string]$Name,
+          [int]$HResult = 0)
+    $object = [pscustomobject]@{ Name = $Name; Throws = $Throws; Calls = $Calls; HResult = $HResult }
     $body = {
         $this.Calls.Add($this.Name)
+        if ($this.HResult -ne 0) {
+            throw (New-Object System.Runtime.InteropServices.COMException("$($this.Name) gone", $this.HResult))
+        }
         if ($this.Throws) {
             throw "$($this.Name) refused"
         }
@@ -58,10 +63,10 @@ function Assert-True {
 }
 
 function Invoke-Cleanup {
-    param([bool]$BookThrows, [bool]$QuitThrows)
+    param([bool]$BookThrows, [bool]$QuitThrows, [int]$HResult = 0)
     $calls = New-Object System.Collections.Generic.List[string]
-    $book = New-StandIn -Method "Close" -Throws $BookThrows -Calls $calls -Name "workbook"
-    $excel = New-StandIn -Method "Quit" -Throws $QuitThrows -Calls $calls -Name "excel"
+    $book = New-StandIn -Method "Close" -Throws $BookThrows -Calls $calls -Name "workbook" -HResult $HResult
+    $excel = New-StandIn -Method "Quit" -Throws $QuitThrows -Calls $calls -Name "excel" -HResult $HResult
     $logged = New-Object System.Collections.Generic.List[string]
     $log = { param([string]$Text) $logged.Add($Text) }.GetNewClosure()
     $failures = @(Close-ExcelInstance -Excel $excel -Workbooks @($book) -Label "Run" -Log $log)
@@ -119,6 +124,16 @@ Test-Case "both failures are recorded and an earlier reason is kept" {
     Assert-True (@($summary.reasons).Count -eq 3) "expected 3 reasons, got $(@($summary.reasons).Count)"
     Assert-True ($summary.reasons[0] -eq "Stopped: the harness raised an error") "the original error was not kept first"
     Assert-True ($summary.reasons[2] -like "Excel cleanup: Run: Excel could not be asked to quit: *") "unexpected reason: $($summary.reasons[2])"
+}
+
+Test-Case "an Excel that has already exited is logged, not counted" {
+    # 0x800706BE (the call failed) and 0x800706BA (server unavailable).
+    foreach ($code in @(-2147023170, -2147023174)) {
+        $run = Invoke-Cleanup -BookThrows $false -QuitThrows $false -HResult $code
+        Assert-True ($run.Failures.Count -eq 0) "expected no failure for $code, got: $($run.Failures -join '; ')"
+        Assert-True ($run.Logged -contains "Run: Excel had already exited") "the exit was not logged for $code"
+        Assert-True (($run.Calls -join ",") -eq "workbook,excel") "Quit was not tried for $code"
+    }
 }
 
 Test-Case "nothing to close returns no failure" {

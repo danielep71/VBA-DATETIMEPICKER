@@ -589,7 +589,8 @@ reads:
   `Certify-Excel.cmd -Package` run;
 - `release-assets/` with the two packages and the user manual PDF;
 - the exact-candidate `static-checks.json`;
-- `manual-checks.json`, the six manual records as the operator answered them
+- `manual-checks.json`, the six manual records (from `Release.cmd`: NOT RUN,
+  accepted by the Git `user.name`)
   (the same objects as the `manual` member of the record).
 
 ```sh
@@ -642,8 +643,12 @@ by the system admin") cannot print the manual locally.
 
 `-Title` and `-EvidenceIssue` are asked for when missing; `-Refs` takes issue
 numbers separated by commas. Each step runs the existing tool in its own
-PowerShell process in the same console, so you answer the Ribbon questions
-there, and its exit code decides. The release folder,
+PowerShell process in the same console, and its exit code decides. Nothing is
+asked but the tag: the builds run with `-NoRibbonCheck`, the PDF is checked
+against the commit, and the six manual checks are recorded as NOT RUN,
+accepted by the Git `user.name`. Excel ending by itself while a run closes is
+logged, not counted as a cleanup failure, when the call reports that Excel has
+already exited. The release folder,
 `DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>` next to the checkout,
 holds:
 
@@ -653,7 +658,7 @@ holds:
 | `source-standard/`, `source-ui_smoke/` | The two source runs of `Certify-Excel.ps1` |
 | `addin-build/`, `demo-build/` | The builds, with the release file names |
 | `addin-run/`, `demo-run/` | The package runs of `Certify-Excel.ps1 -Package` |
-| `manual/`, `manual-checks.json` | The PDF as downloaded from CI with the commit it was rendered from, and your answers to the six manual checks |
+| `manual/`, `manual-checks.json` | The PDF as downloaded from CI with the commit it was rendered from, and the six manual records |
 | `release-assets/` | The two packages, the PDF and `release-evidence.json`, as published |
 | `evidence/` | The output of `tools/assemble_release.py` |
 | `assets-check-<stamp>.json` | The check of `release-assets/` against the evidence before the confirmation |
