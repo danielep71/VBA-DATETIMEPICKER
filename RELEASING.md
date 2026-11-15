@@ -260,14 +260,14 @@ For each artifact:
    for `customUI/customUI.xml`. Office RibbonX Editor does this when the part is
    added as an "Office 2007 Custom UI Part".
 
-   For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6, the Ribbon
-   part of step 8 and step 10 from a clean checkout. The add-in's
+   For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6 and 8, the
+   Ribbon part of step 9 and step 11 from a clean checkout. The add-in's
    `ThisWorkbook` code is a candidate input too. It is tracked as
    `src/addin/ThisWorkbook.cls`, and the tool copies it into the workbook's
    document module, because a document module cannot be imported. The tool
    records its evidence in a folder outside the checkout
    ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
-   Step 9 and the demo workbook remain separate.
+   Step 10 and the demo workbook remain separate.
 5. Fail the build if a required Ribbon part or referenced custom resource cannot
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
@@ -275,15 +275,22 @@ For each artifact:
 7. Include the packaged harness required by `tools/vba-projects.json`, including
    `test/M_cDP_Test.bas`, in both packages. Removing it or substituting another
    smoke test breaks the certification rule. `check_release.py` cannot detect
-   it: the validator checks package names, sizes and hashes and the recorded
-   results, not the package contents.
-8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
+   it: the validator checks package names, sizes, hashes, build-machine
+   metadata and the recorded results, not the VBA inside the package.
+8. Remove the build machine's metadata: the save folder, author, sensitivity
+   label, document-library and printer data that Excel records on save
+   ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
+   Run `python tools/sanitize_package.py <package> --in-place` on each package
+   before it is reopened, tested and hashed. `tools/Build-Addin.cmd` does it for
+   the add-in, and `check_release.py` refuses a package that still carries any
+   of it.
+9. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
    group/controls are present, all intended custom images render, and each
    enabled Ribbon action dispatches correctly.
-9. Run both `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke` on each package.
-   Record expected and actual run/suite totals, failures and cleanup failures.
-10. Record filename, size, and SHA-256.
-11. Never edit the artifact after hashing.
+10. Run both `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke` on each package.
+    Record expected and actual run/suite totals, failures and cleanup failures.
+11. Record filename, size, and SHA-256.
+12. Never edit the artifact after hashing.
 
 The user manual PDF is rendered from `docs/USER_MANUAL.md` at the exact
 candidate. Its links to other repository files point at that commit. It has

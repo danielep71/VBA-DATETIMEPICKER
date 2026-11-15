@@ -2,7 +2,9 @@
 """Validate a DateTimePicker evidence record and exact local package hashes.
 
 This checks consistency of maintainer assertions, not their authenticity. It
-does not run Excel, build packages, publish releases, or close milestones.
+does not run Excel, build packages, publish releases, or close milestones. It
+also refuses a package that still carries build-machine metadata (save folder,
+author, sensitivity label, document-library or printer data; #221).
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from _gatelib import git_text, write_json
+from sanitize_package import SanitizeError, check_package
 
 MANUAL = ("provider-ownership", "clock-lifecycle", "grid-ownership",
           "application-state", "packaged-entry-paths", "ribbon-image-provenance")
@@ -90,6 +93,12 @@ def validate(root: Path, record: dict[str, Any], assets_dir: Path, static: dict[
             for block in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(block)
         require(asset.get("sha256") == digest.hexdigest(), f"{host}: SHA-256 mismatch")
+        try:
+            metadata = check_package(path)
+        except SanitizeError as error:
+            raise ValueError(f"{host}: {error}") from error
+        require(not metadata, f"{host}: package carries build-machine metadata ({'; '.join(metadata)}); "
+                "run tools/sanitize_package.py before testing and hashing")
         require(asset.get("compile") == "PASS", f"{host}: compile has not passed")
         environment = asset.get("environment")
         require(isinstance(environment, dict), f"{host}: environment required")

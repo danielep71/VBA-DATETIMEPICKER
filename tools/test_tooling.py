@@ -4,6 +4,7 @@ import hashlib
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,19 @@ class ConditionalTests(unittest.TestCase):
         self.assertEqual(check_source.ribbon_callbacks(b'<button onAction="Run"/>'), ["Run"])
 
 
+def write_clean_package(path: Path, *, creator: str = "") -> None:
+    """A minimal synthetic package; not an Office certification."""
+    core = ('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/'
+            'core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            + (f"<dc:creator>{creator}</dc:creator>" if creator else "") + "</cp:coreProperties>")
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/'
+                         '2006/content-types"/>')
+        archive.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/'
+                         'spreadsheetml/2006/main"/>')
+        archive.writestr("docProps/core.xml", core)
+
+
 class ReleaseTests(unittest.TestCase):
     def test_release_validator_expects_every_static_gate(self) -> None:
         self.assertEqual(check_release.STATIC_CHECKS, check.gate_names())
@@ -66,8 +80,8 @@ class ReleaseTests(unittest.TestCase):
                                   for name in check_release.MANUAL}}
         for host, filename in (("xlam", "DATETIMEPICKER.v1.2.3.xlam"),
                                ("xlsm", "DATETIMEPICKER-demo-v1.2.3.xlsm")):
-            data = b"Synthetic bytes; not an Office certification"
-            (self.root / filename).write_bytes(data)
+            write_clean_package(self.root / filename)
+            data = (self.root / filename).read_bytes()
             pack = {"state": "PASS", "run": 10, "passed": 10, "failed": 0,
                     "cleanup_failures": 0, "expected_run": 10, "suites": 2, "expected_suites": 2}
             self.record["assets"].append({"host": host, "filename": filename,
@@ -102,6 +116,23 @@ class ReleaseTests(unittest.TestCase):
         path = self.root / self.record["assets"][0]["filename"]
         path.write_bytes(b"x" * path.stat().st_size)
         with self.assertRaisesRegex(ValueError, "SHA-256"):
+            self.validate()
+
+    def test_package_with_build_metadata_fails(self) -> None:
+        asset = self.record["assets"][0]
+        path = self.root / asset["filename"]
+        write_clean_package(path, creator="Someone")
+        data = path.read_bytes()
+        asset.update(size=len(data), sha256=hashlib.sha256(data).hexdigest())
+        with self.assertRaisesRegex(ValueError, "build-machine metadata"):
+            self.validate()
+
+    def test_package_that_is_not_an_office_file_fails(self) -> None:
+        asset = self.record["assets"][1]
+        path = self.root / asset["filename"]
+        path.write_bytes(b"Synthetic bytes")
+        asset.update(size=15, sha256=hashlib.sha256(b"Synthetic bytes").hexdigest())
+        with self.assertRaisesRegex(ValueError, "not a readable Office package"):
             self.validate()
 
     def test_preparation_does_not_invent_excel_results(self) -> None:
