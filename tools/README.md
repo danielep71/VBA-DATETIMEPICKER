@@ -269,7 +269,11 @@ checkout of the commit that built the package:
 
 It records the package's size and SHA-256, then runs two sessions, each in a
 new Excel instance: `TST_DP_RunAll`, then `TST_DP_RunAll_WithUISmoke`. Each
-session opens the package read-only (an add-in also gets a blank workbook,
+session sets that instance's `Application.AutomationSecurity` to Low, so the
+package's macros run without a **Security Notice**; the property is not saved
+and the Trust Center settings stay as they are. If a policy refuses it, Excel
+asks and the run waits for **Enable Macros**. Each session then opens the
+package read-only (an add-in also gets a blank workbook,
 which receives `TST_DP_RESULTS`), adds the generated runner to the open package
 in memory, compiles, runs the pack, reads the results and closes everything
 without saving. After each session it checks that the package's SHA-256 has not

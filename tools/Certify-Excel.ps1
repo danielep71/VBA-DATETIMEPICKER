@@ -34,7 +34,10 @@ Source run (the default), for the commit checked out in this repository:
 Package run (-Package <file>), for a built .xlam or demo .xlsm (#222):
 1. and 2. as above; the package's size and SHA-256 are recorded first;
 3. runs two sessions, each in a new Excel instance: TST_DP_RunAll, then
-   TST_DP_RunAll_WithUISmoke. Each session opens the package read-only (an
+   TST_DP_RunAll_WithUISmoke. Each session sets that instance's
+   Application.AutomationSecurity to Low, so the package's macros run
+   without a "Security Notice" (the property is not saved and the Trust
+   Center settings are unchanged), then opens the package read-only (an
    add-in also gets a blank workbook to hold the result sheet), adds the
    generated runner to the open package in memory, compiles, runs the pack,
    reads the results and closes everything without saving;
@@ -102,6 +105,7 @@ $harnessModule = "M_cDP_Test"
 $resultSheetName = "TST_DP_RESULTS"
 $summaryValueColumn = 11
 $xlOpenXMLWorkbookMacroEnabled = 52
+$msoAutomationSecurityLow = 1
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:sessionLog = $null
 $script:cleanupFailures = New-Object System.Collections.Generic.List[string]
@@ -206,6 +210,34 @@ function Close-Excel {
     foreach ($failure in @(Close-ExcelInstance -Excel $Excel -Workbooks $Workbooks -Label $Label -Log $logCleanup)) {
         $script:cleanupFailures.Add($failure)
     }
+}
+
+function Enable-PackageMacros {
+    # A package opened by a script runs its macros only as this instance's
+    # Application.AutomationSecurity allows. With the Trust Center's
+    # "Disable VBA macros with notification", Excel would otherwise stop at a
+    # "Security Notice" for every pack until someone chose Enable Macros. The
+    # property belongs to this Excel instance only and is not saved: the Trust
+    # Center settings stay as they are. A policy may refuse it; then Excel asks,
+    # and the run waits for the answer.
+    param([object]$Excel)
+    try {
+        $Excel.AutomationSecurity = $msoAutomationSecurityLow
+    }
+    catch {
+        Write-Session ("AutomationSecurity could not be set: " + $_.Exception.Message)
+    }
+    $level = [int]$Excel.AutomationSecurity
+    if ($level -eq $msoAutomationSecurityLow) {
+        $summary.host.package_macros = "Enabled for files this Excel instance opens (AutomationSecurity=1)"
+    }
+    else {
+        $summary.host.package_macros = "AutomationSecurity=$level; Excel asks before running the package's macros"
+        Write-Host ""
+        Write-Host "Excel will ask whether to enable the package's macros. Choose Enable Macros;"
+        Write-Host "the run waits until you do."
+    }
+    Write-Session "Package macros: $($summary.host.package_macros)"
 }
 
 function New-HarnessRecord {
@@ -572,6 +604,7 @@ $summary = [ordered]@{
         office_bitness     = $officeBitness
         macro_policy       = "unknown"
         vba_project_access = "unknown"
+        package_macros     = $null
     }
     import             = [ordered]@{ status = "NOT_RUN"; components = @() }
     compile            = [ordered]@{ status = "NOT_RUN"; detail = "Not run" }
@@ -622,6 +655,7 @@ try {
             try {
                 $excel = Start-Excel
                 Assert-VbaProjectAccess
+                Enable-PackageMacros -Excel $excel
                 $workbook = $excel.Workbooks.Open($packagePath, 0, $true)
                 if ($packageHost -eq "xlam") {
                     # An add-in has no window; the harness writes its result
@@ -751,6 +785,7 @@ $report = @(
 if ($packageMode) {
     $report += @(
         "Package:         $packageName ($packageHost)",
+        "Package macros:  $($summary.host.package_macros)",
         "Size:            $($summary.package.bytes) bytes",
         "SHA-256:         $($summary.package.sha256)",
         "The package was opened read-only and never saved. Which commit built it is",

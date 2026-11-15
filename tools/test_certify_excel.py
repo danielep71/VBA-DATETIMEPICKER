@@ -83,6 +83,14 @@ class PackageRunTests(unittest.TestCase):
         verdict = self.code[self.code.index("Add-CleanupResult -Summary $summary"):]
         self.assertIn("if ($pack.sha256_after -ne $summary.package.sha256) {", verdict)
 
+    def test_macros_are_enabled_for_this_instance_before_opening(self) -> None:
+        enable = self.package_branch.index("Enable-PackageMacros -Excel $excel")
+        self.assertLess(enable, self.package_branch.index("$excel.Workbooks.Open($packagePath, 0, $true)"))
+        body = function_body(self.code, "Enable-PackageMacros")
+        self.assertIn("$Excel.AutomationSecurity = $msoAutomationSecurityLow", body)
+        self.assertNotIn("Set-ItemProperty", self.code)
+        self.assertNotIn("New-ItemProperty", self.code)
+
     def test_package_runs_refuse_source_only_switches(self) -> None:
         self.assertIn("-WithUISmoke applies to a source run", self.code)
 
