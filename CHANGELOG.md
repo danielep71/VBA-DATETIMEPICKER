@@ -103,6 +103,17 @@ Use only the categories needed by a release.
 
 ### Added
 
+- `tools/Build-Demo.cmd` (`tools/Build-Addin.ps1 -Demo`) builds the demo
+  workbook `DATETIMEPICKER-demo-vX.Y.Z.xlsm` from a clean checkout, with the
+  add-in's modules, `ThisWorkbook` code and Ribbon, sanitized and reopened for
+  a check ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)).
+  Its content comes from the new `DP_Demo_PrepareReleaseWorkbook` and
+  `DP_Demo_CreateStartSheet` in `demo/M_DP_DEMO.bas`: the demo sheet, very
+  hidden as `Workbook_Open` leaves it, behind a **Start** sheet that says how
+  to open it and names the version and commit. The v1.2.2 demo workbook had
+  instead kept a leftover `TST_DP_RESULTS` sheet as its only visible sheet.
+  Build-Addin's reopening now sets `AutomationSecurity` to Low for its own
+  Excel instance, so the package's macros run without a Security Notice.
 - `tools/Certify-Excel.cmd -Package <file>` runs the regression pack inside a
   built `.xlam` or demo `.xlsm` (RELEASING §7, step 10;
   [#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It

@@ -269,7 +269,9 @@ For each artifact:
    ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
    `tools/Certify-Excel.cmd -Package <file>` performs step 10 on either package
    ([tools/README.md](tools/README.md#run-the-regression-pack-inside-a-built-package-windows)).
-   The demo workbook build remains separate.
+   `tools/Build-Demo.cmd` builds the demo workbook the same way, with the demo
+   sheet very hidden behind a Start sheet
+   ([tools/README.md](tools/README.md#build-the-demo-workbook)).
 5. Fail the build if a required Ribbon part or referenced custom resource cannot
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
