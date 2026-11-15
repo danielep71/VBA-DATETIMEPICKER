@@ -202,7 +202,7 @@ class SanitizeTests(unittest.TestCase):
 
         original = sanitizer.sanitize_parts
         with mock.patch("sanitize_package.sanitize_parts", side_effect=tamper), \
-                self.assertRaisesRegex(sanitizer.SanitizeError, "more than the removed"):
+                self.assertRaisesRegex(sanitizer.SanitizeError, "more than the planned"):
             sanitizer.sanitize_package(self.dirty, self.folder / "out.xlam")
 
     def test_text_change_is_refused(self) -> None:
@@ -213,7 +213,7 @@ class SanitizeTests(unittest.TestCase):
 
         original = sanitizer.sanitize_parts
         with mock.patch("sanitize_package.sanitize_parts", side_effect=tamper), \
-                self.assertRaisesRegex(sanitizer.SanitizeError, "text content changed"):
+                self.assertRaisesRegex(sanitizer.SanitizeError, "more than the planned"):
             sanitizer.sanitize_package(self.dirty, self.folder / "out.xlam")
 
     def test_other_prefixes_are_found_and_removed(self) -> None:
@@ -255,6 +255,36 @@ class SanitizeTests(unittest.TestCase):
         result = read(output)
         self.assertNotIn(b'x:id="rId1"', result["xl/worksheets/sheet1.xml"])
         self.assertNotIn(b"printerSettings", result["xl/worksheets/_rels/sheet1.xml.rels"])
+
+    def test_other_content_of_alternate_content_is_kept(self) -> None:
+        parts = dirty_parts()
+        parts["xl/workbook.xml"] = str(parts["xl/workbook.xml"]).replace(
+            "</mc:Choice></mc:AlternateContent>",
+            '<workbookPr date1904="1"/></mc:Choice><mc:Fallback><workbookPr date1904="1"/></mc:Fallback>'
+            "</mc:AlternateContent>")
+        write(self.dirty, parts)
+        output = self.folder / "out.xlam"
+        sanitizer.sanitize_package(self.dirty, output)
+        workbook = read(output)["xl/workbook.xml"]
+        self.assertEqual(workbook.count(b'<workbookPr date1904="1"/>'), 2)
+        self.assertIn(b"<mc:Fallback>", workbook)
+        self.assertNotIn(b"absPath", workbook)
+
+    def test_markup_inside_cdata_is_kept(self) -> None:
+        parts = dirty_parts()
+        parts["docProps/core.xml"] = str(parts["docProps/core.xml"]).replace(
+            "<dcterms:created",
+            "<dc:title><![CDATA[Keep <dc:creator>Some Person</dc:creator> text]]></dc:title><dcterms:created")
+        parts["xl/worksheets/sheet1.xml"] = str(parts["xl/worksheets/sheet1.xml"]).replace(
+            "<t>Keep</t>", '<t><![CDATA[<pageSetup r:id="rId1"/>]]></t>')
+        write(self.dirty, parts)
+        output = self.folder / "out.xlam"
+        sanitizer.sanitize_package(self.dirty, output)
+        result = read(output)
+        self.assertIn(b"<![CDATA[Keep <dc:creator>Some Person</dc:creator> text]]>", result["docProps/core.xml"])
+        self.assertNotIn(b"<dc:creator>Some Person</dc:creator><cp:", result["docProps/core.xml"])
+        self.assertIn(b'<![CDATA[<pageSetup r:id="rId1"/>]]>', result["xl/worksheets/sheet1.xml"])
+        self.assertIn(b'<pageSetup orientation="portrait"/>', result["xl/worksheets/sheet1.xml"])
 
     def test_untouched_parts_keep_their_bytes_and_order(self) -> None:
         output = self.folder / "out.xlam"
