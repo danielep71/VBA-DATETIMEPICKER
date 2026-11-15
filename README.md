@@ -88,7 +88,7 @@ It is designed for real workbook workflows rather than an isolated UserForm demo
 - optional compact layout, live clock and weekend highlighting;
 - optional Windows title-bar styling and mouse-positioning support;
 - registry-backed settings with **optional deployment namespaces**;
-- a **single-provider lease** — introduced in `v1.2.0`, enforced on every entry path since `v1.2.1` — that refuses a second current-version provider before it can overwrite shared Excel registrations;
+- a **single-provider lease** — introduced in `v1.2.0`, enforced on every entry path since `v1.2.1` and on the shortcut, right-click and grid-icon setters from `v1.2.3` — that refuses a second current-version provider before it can overwrite shared Excel registrations;
 - structured write-back and native-window outcomes for operations that can partially succeed;
 - a regression harness that distinguishes assertion failure, cleanup failure, dirty start and incomplete execution.
 
@@ -138,7 +138,7 @@ It is especially useful when:
 | Keyboard | `Ctrl + Shift + D` | On by default; turn off with `M_Settings_SetEnableKeyboardShortcut False` |
 | Ribbon | RibbonX callbacks | Optional `customUI.xml` integration |
 | Settings | Registry-backed | Legacy global scope or explicit deployment namespace |
-| Runtime ownership | One current-version provider | Second current-version provider is refused on every entry path, before shared registration |
+| Runtime ownership | One current-version provider | Second current-version provider is refused on every entry path, before shared registration; its integration setters save but do not apply |
 | WinAPI | Optional styling and positioning | 32-/64-bit aware; styling transaction is observable and recoverable |
 | Testing | Regression harness | Clean-start, completion and cleanup-aware run states |
 
@@ -542,7 +542,8 @@ M_Settings_SetEnableKeyboardShortcut False   ' True turns it back on
 ```
 
 The choice is saved as `EnableKeyboardShortcut` in the active settings scope and
-takes effect at once. From an add-in host, run it with
+takes effect at once in the copy that runs the Date / Time Picker. Set before
+`DP_Start`, it is applied when the runtime starts. From an add-in host, run it with
 `Application.Run "'<add-in file name>'!M_Settings_SetEnableKeyboardShortcut", False`.
 
 ### Navigate inside the picker
@@ -733,11 +734,17 @@ any later entry path
     → DP_Show, DP_Preload, DP_Click, DP_OpenForActiveCell,
       keyboard, Ribbon_ShowPicker
     → ownership re-proved before the manager is reached
+
+shortcut, right-click or grid-icon setter
+    → value saved in every copy
+    → applied only by the copy that owns the lease
 ```
 
 Acquisition occurs **before** shared registration. A provider that registered first and checked ownership afterwards would already have caused the collision the lease is meant to prevent.
 
 Since `v1.2.1` this admission check runs on **every** runtime entry path. Through `v1.2.0` only `DP_Start` consulted the lease, so a refused copy could still reach the manager by another route and register shared state it later removed ([#37](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/37)).
+
+From `v1.2.3` the settings setters that drive shared Excel state check ownership too. Through `v1.2.2`, `M_Settings_SetEnableKeyboardShortcut`, `M_Settings_SetShowRightClick` and `M_Settings_SetShowGridIcon` applied their value at once in any copy, so a copy that did not own the runtime could rebind `Ctrl + Shift + D` or add and remove the owner's right-click entry and grid icons. They now save the value in every copy but apply it only in the owning copy. Under another copy's lease they report the same refusal as the entry points; while no copy holds the lease they show nothing, and `DP_Start` applies the saved value ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
 
 ### Teardown and repair are guarded too
 
@@ -797,6 +804,8 @@ DP_ForceReleaseProviderLease
 ```text
 v1.2.1 or later + v1.2.1 or later
     → second current-version provider refused on every entry path
+    → a v1.2.1 or v1.2.2 copy still applies its shortcut, right-click
+      and grid-icon setters without the lease
 
 v1.2.1 or later + v1.2.0
     → v1.2.0 admits the lease only at DP_Start
@@ -847,8 +856,10 @@ Each persisted setting also has a `Public` setter and getter pair,
 `M_Settings_SetEnableKeyboardShortcut` (see
 [Open from Excel](#open-from-excel)) and `M_Settings_SetShowRightClick`.
 A setter saves the value and applies it at once. The setters that change the
-shortcut, right-click entry or grid icons do not currently check the provider
-lease ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
+shortcut, right-click entry or grid icons apply it only in the copy that owns
+the provider lease; any other copy saves the value and leaves those shared
+registrations alone, reporting a refusal if another copy holds the lease
+([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
 
 A normal host usually needs only:
 
@@ -1506,7 +1517,9 @@ The current source deliberately supports:
 one active DatePicker provider per Excel process
 ```
 
-and refuses a second current-version provider on every runtime entry path.
+and refuses a second current-version provider on every runtime entry path. Its
+shortcut, right-click and grid-icon setters still save their value; only the
+owning copy applies it.
 
 True multi-provider coexistence and arbitration remain a separate architectural problem.
 

@@ -2094,7 +2094,11 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '   Applies the requested keyboard shortcut setting unchanged, whatever the
 '   right-click menu and in-grid icon settings are
 '   Persists the updated settings when needed
-'   Synchronizes Application.OnKey with the final setting
+'   Synchronizes Application.OnKey with the final setting when this copy owns
+'   the provider lease
+'   Otherwise leaves Application.OnKey untouched: reports the refusal when
+'   another copy holds the lease, or writes one Immediate Window line when no
+'   copy holds it yet
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, settings
@@ -2109,6 +2113,8 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Lease_IsOwner
+'   M_Lease_ReportSettingNotApplied
 '   M_KeyboardShortcut_Update
 '   gDP_EnableKeyboardShortcut
 '
@@ -2123,8 +2129,15 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '   because Application.OnKey is session state and may have been reset by Excel,
 '   another add-in, workbook activation, or teardown logic
 '
+'   Application.OnKey is shared by every copy in the Excel session. This setter
+'   used to rebind it without consulting the provider lease, so a copy that did
+'   not own the runtime could take Ctrl + Shift + D from the owner or release
+'   it under the owner (#194). The value is still validated, stored and saved
+'   in every copy, because it is a user preference; only the owning copy
+'   applies it, here or when DP_Start reads it
+'
 ' UPDATED
-'   2026-11-09
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -2135,6 +2148,7 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
     Dim OldEnableKeyboard       As Boolean      'Previous keyboard shortcut setting
     Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
     Dim SettingsChanged         As Boolean      'True when the resolved setting differs
+    Dim OwnsRuntime             As Boolean      'True when this copy owns the provider lease
     Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
     Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
     Dim ErrorNumber             As Long         'Captured error number
@@ -2183,10 +2197,24 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
         SettingsChanged = (NewEnableKeyboard <> OldEnableKeyboard)
 
 '------------------------------------------------------------------------------
+' RESOLVE PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve provider ownership"
+    'Only the copy that owns the provider lease may touch Application.OnKey (#194)
+        OwnsRuntime = M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
 ' SYNCHRONIZE ONLY WHEN SETTING IS UNCHANGED
 '------------------------------------------------------------------------------
     'Synchronize Application.OnKey and exit when no persisted setting changed
         If Not SettingsChanged Then
+            'Leave the shared binding to the owning copy and report why
+                If Not OwnsRuntime Then
+                    HandlerStep = "Report setting not applied"
+                    M_Lease_ReportSettingNotApplied PROC_NAME
+                    Exit Sub
+                End If
             'Track the current handler step
                 HandlerStep = "Synchronize keyboard shortcut"
             'Synchronize keyboard shortcut integration with the current setting
@@ -2214,6 +2242,17 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' DEFER TO THE OWNING COPY
+'------------------------------------------------------------------------------
+    'Leave the shared binding to the owning copy and report why. The saved value
+    'is applied by that copy, at the latest when DP_Start reads it
+        If Not OwnsRuntime Then
+            HandlerStep = "Report setting not applied"
+            M_Lease_ReportSettingNotApplied PROC_NAME
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE KEYBOARD SHORTCUT
@@ -3381,8 +3420,11 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 ' BEHAVIOR
 '   Ensures current settings are loaded, applies the requested right-click menu
 '   setting, persists the updated settings when needed, and synchronizes the
-'   Excel right-click menu. The keyboard shortcut setting is carried forward
-'   unchanged: disabling both visual entry points does not re-enable it
+'   Excel right-click menu when this copy owns the provider lease. Otherwise the
+'   menus are left untouched: the refusal is reported when another copy holds
+'   the lease, or one Immediate Window line is written when no copy holds it
+'   yet. The keyboard shortcut setting is carried forward unchanged: disabling
+'   both visual entry points does not re-enable it
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, settings
@@ -3395,6 +3437,8 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Lease_IsOwner
+'   M_Lease_ReportSettingNotApplied
 '   M_ContextMenu_Update
 '   M_KeyboardShortcut_Update
 '
@@ -3412,8 +3456,14 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '   unchanged, because Excel context menus may be reset by Excel, another add-in,
 '   workbook activation, or application-level cleanup
 '
+'   The right-click entry sits on command bars shared by every copy in the
+'   Excel session. This setter used to add or remove it without consulting the
+'   provider lease, so a copy that did not own the runtime could remove the
+'   owner's entry (#194). The value is still validated, stored and saved in
+'   every copy; only the owning copy applies it, here or when DP_Start reads it
+'
 ' UPDATED
-'   2026-11-09
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3427,6 +3477,7 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 
     Dim RightClickChanged       As Boolean      'True when right-click menu setting changed
     Dim KeyboardChanged         As Boolean      'True when the keyboard shortcut setting changed
+    Dim OwnsRuntime             As Boolean      'True when this copy owns the provider lease
     Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
     Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
 
@@ -3484,11 +3535,26 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
         KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
 
 '------------------------------------------------------------------------------
+' RESOLVE PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve provider ownership"
+
+    'Only the copy that owns the provider lease may touch the shared menus (#194)
+        OwnsRuntime = M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
 ' SYNCHRONIZE ONLY WHEN SETTINGS ARE UNCHANGED
 '------------------------------------------------------------------------------
     'Synchronize the right-click menu and exit when no persisted setting changed
         If Not RightClickChanged Then
             If Not KeyboardChanged Then
+                'Leave the shared menus to the owning copy and report why
+                    If Not OwnsRuntime Then
+                        HandlerStep = "Report setting not applied"
+                        M_Lease_ReportSettingNotApplied PROC_NAME
+                        Exit Sub
+                    End If
                 'Track the current handler step
                     HandlerStep = "Synchronize right-click menu"
                 'Synchronize right-click menus with the current setting
@@ -3521,6 +3587,17 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' DEFER TO THE OWNING COPY
+'------------------------------------------------------------------------------
+    'Leave the shared menus and binding to the owning copy and report why. The
+    'saved value is applied by that copy, at the latest when DP_Start reads it
+        If Not OwnsRuntime Then
+            HandlerStep = "Report setting not applied"
+            M_Lease_ReportSettingNotApplied PROC_NAME
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE RIGHT-CLICK MENU
@@ -3599,9 +3676,11 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 ' BEHAVIOR
 '   Ensures current settings are loaded, applies the requested in-grid icon
 '   setting, persists the updated settings when needed, and removes any stale
-'   in-grid icon when the feature is disabled. The keyboard shortcut setting is
-'   carried forward unchanged: disabling both visual entry points does not
-'   re-enable it
+'   in-grid icon when the feature is disabled and this copy owns the provider
+'   lease. Otherwise no icon is touched: the refusal is reported when another
+'   copy holds the lease, or one Immediate Window line is written when no copy
+'   holds it yet. The keyboard shortcut setting is carried forward unchanged:
+'   disabling both visual entry points does not re-enable it
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, settings
@@ -3614,6 +3693,8 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Lease_IsOwner
+'   M_Lease_ReportSettingNotApplied
 '   M_KeyboardShortcut_Update
 '   M_GridIcon_Remove
 '
@@ -3634,8 +3715,14 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '   Enabling the in-grid icon is persisted immediately. Actual icon display is
 '   expected to occur through the manager selection / context refresh path
 '
+'   The grid icons belong to the copy that owns the runtime. This setter used
+'   to remove them without consulting the provider lease, so a copy that did
+'   not own the runtime could delete the owner's icon (#194). The value is
+'   still validated, stored and saved in every copy; only the owning copy
+'   applies it, here or when DP_Start reads it
+'
 ' UPDATED
-'   2026-11-09
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3649,6 +3736,7 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 
     Dim GridIconChanged         As Boolean      'True when in-grid icon setting changed
     Dim KeyboardChanged         As Boolean      'True when the keyboard shortcut setting changed
+    Dim OwnsRuntime             As Boolean      'True when this copy owns the provider lease
     Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
     Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
 
@@ -3706,11 +3794,26 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
 
 '------------------------------------------------------------------------------
+' RESOLVE PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve provider ownership"
+
+    'Only the copy that owns the provider lease may touch the grid icons (#194)
+        OwnsRuntime = M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
 ' CLEAN UP ONLY WHEN SETTINGS ARE UNCHANGED
 '------------------------------------------------------------------------------
     'Remove stale grid icon and exit when no persisted setting changed
         If Not GridIconChanged Then
             If Not KeyboardChanged Then
+                'Leave the grid icons to the owning copy and report why
+                    If Not OwnsRuntime Then
+                        HandlerStep = "Report setting not applied"
+                        M_Lease_ReportSettingNotApplied PROC_NAME
+                        Exit Sub
+                    End If
                 'Remove any stale in-grid icon when the feature is disabled
                     If Not ShowGridIcon Then M_GridIcon_Remove
                 'Exit because no registry write is required
@@ -3740,6 +3843,17 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' DEFER TO THE OWNING COPY
+'------------------------------------------------------------------------------
+    'Leave the grid icons and binding to the owning copy and report why. The
+    'saved value is applied by that copy, at the latest when DP_Start reads it
+        If Not OwnsRuntime Then
+            HandlerStep = "Report setting not applied"
+            M_Lease_ReportSettingNotApplied PROC_NAME
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE KEYBOARD SHORTCUT
@@ -6162,6 +6276,92 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
             "    DP_ForceReleaseProviderLease", _
             vbExclamation Or vbOKOnly, _
             DP_MSGBOX_TITLE
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Lease_ReportSettingNotApplied(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                         REPORT SETTING NOT APPLIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Explains why a settings setter saved its value but left the shared Excel
+'   registration it controls untouched
+'
+' WHY THIS EXISTS
+'   The keyboard shortcut, right-click and grid-icon setters change
+'   application-wide Excel state. Only the copy that owns the provider lease
+'   may do that, so a setter in any other copy saves the value and stops (#194).
+'   Whoever called it still needs to know whether that was a conflict with
+'   another copy or a runtime that has not been started yet
+'
+' INPUTS
+'   EntryPoint
+'     Name of the calling setter, for the report and diagnostics
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Reads the lease. When a lease exists - held by another copy, or unreadable -
+'   reports through M_Lease_ReportRefusal, exactly as a refused entry point
+'   does. When no lease exists, writes one line to the Immediate Window and
+'   shows nothing
+'
+' ERROR POLICY
+'   Does not raise. The setting has already been saved, and reporting must not
+'   turn that into a failure
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_ReportRefusal
+'
+' NOTES
+'   Call it only after M_Lease_IsOwner returned False. It never acquires,
+'   reclaims or releases a lease: a setter is not a start path
+'
+'   No lease is the ordinary state before DP_Start, for example in a host that
+'   sets its integration preferences in Workbook_Open and then starts the
+'   runtime. That is not a conflict, so it shows no message box. DP_Start reads
+'   the saved value and applies it
+'
+'   A copy whose lease bar vanished while it held its token (#113) also sees no
+'   lease here. The setter does not reclaim it; the right-click re-ensure and
+'   DP_Stop do
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeaseOwner      As String       'Lease owner as read now
+
+'------------------------------------------------------------------------------
+' CLASSIFY
+'------------------------------------------------------------------------------
+    'Never let reporting raise into a setter that has already saved its value
+        On Error Resume Next
+    'Read the lease. No bar is the only free answer; an unreadable lease is held
+        LeaseOwner = M_Lease_ReadOwner()
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Another copy holds the lease, or ownership cannot be verified: refuse
+    'visibly, through the same report the entry points use
+        If VBA.LenB(LeaseOwner) > 0 Then
+            M_Lease_ReportRefusal EntryPoint
+    'No copy runs the DatePicker yet: note it without interrupting the caller
+        Else
+            Debug.Print EntryPoint & " | Not applied | Setting saved; no copy " & _
+                "holds the provider lease, so the copy that runs DP_Start " & _
+                "applies it"
+        End If
     'Clear any suppressed reporting error
         Err.Clear
 
