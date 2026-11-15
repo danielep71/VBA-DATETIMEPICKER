@@ -29,9 +29,12 @@ Option Explicit
 '   - DP_Demo_CreateDemoSheet
 '   - DP_Demo_EnsureDemoSheet
 '   - DP_Demo_FillTableColumn
+'   - DP_Demo_CreateStartSheet
+'   - DP_Demo_PrepareReleaseWorkbook (release demo build, #222)
 '
 ' EXPECTED DEMO SHEET
 '   - Worksheet name: DATE PICKER DEMO
+'   - Release demo workbook only: a visible Start sheet before it
 '
 ' DEMO SEMANTICS
 '   Green input cells are the surfaces the DatePicker is meant to write into.
@@ -65,7 +68,7 @@ Option Explicit
 '   That is intentional: it demonstrates the UseLocalNames setting
 '
 ' UPDATED
-'   2026-11-09
+'   2026-11-15
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -76,6 +79,9 @@ Option Explicit
     Private Const DEMO_SHEET_NAME               As String = "DATE PICKER DEMO"  'Demo worksheet name
     Private Const DEMO_TITLE                    As String = "Date / Time Picker" 'Title band caption (#88)
     Private Const DEMO_SUBTITLE                 As String = "Demo"              'Subtitle band caption
+    Private Const START_SHEET_NAME              As String = "Start"             'Release demo start worksheet name
+    Private Const START_SUBTITLE                As String = "Start here"        'Start sheet subtitle band caption
+    Private Const START_PROJECT_URL             As String = "https://github.com/danielep71/VBA-DATETIMEPICKER" 'Project home
 
     '-------------------------------LAYOUT-------------------------------------
     Private Const DEMO_CONTENT_COLUMNS          As String = "C:K"               'Content columns
@@ -444,6 +450,243 @@ ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, _
             "Demo sheet resolution failed: " & Err.Description
+
+End Function
+
+Public Sub DP_Demo_CreateStartSheet( _
+    Optional ByVal TargetWorkbook As Workbook = Nothing, _
+    Optional ByVal BuildCaption As String = vbNullString)
+
+'
+'------------------------------------------------------------------------------
+'                           CREATE START SHEET
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds or rebuilds the Start worksheet of the release demo workbook and
+'   moves it to the first position
+'
+' WHY THIS EXISTS
+'   Workbook_Open hides the demo sheet, and Excel requires at least one visible
+'   worksheet. The published demo workbook therefore needs a visible sheet of
+'   its own, and that sheet should tell a new user how to open the demo rather
+'   than show an empty grid (#222)
+'
+' INPUTS
+'   TargetWorkbook
+'     Workbook to build into. Defaults to ActiveWorkbook when omitted
+'
+'   BuildCaption
+'     Optional line identifying the build, for example the release and the
+'     commit it was built from. Omitted when empty
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Builds the Start sheet on the standard demo template, writes the welcome
+'   panel, and moves the sheet before every other worksheet. An existing Start
+'   sheet is rebuilt in place rather than duplicated
+'
+' ERROR POLICY
+'   Raises a descriptive runtime error to the caller
+'
+' DEPENDENCIES
+'   DP_Demo_ResolveTargetWorkbook
+'   DEMO_Sheet_BuildTemplate
+'   DEMO_SetRangeBorder
+'
+' UPDATED
+'   2026-11-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "M_DP_DEMO.DP_Demo_CreateStartSheet"
+    Dim Wb                  As Workbook                 'Resolved target workbook
+    Dim WS                  As Worksheet                'Start worksheet
+    Dim Panel               As Range                    'Welcome panel range
+    Dim LastRow             As Long                     'Last row of the welcome panel
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo ErrorHandler
+    'Resolve the workbook that will receive the Start sheet
+        Set Wb = DP_Demo_ResolveTargetWorkbook(TargetWorkbook)
+
+'------------------------------------------------------------------------------
+' BUILD TEMPLATE
+'------------------------------------------------------------------------------
+    'Build or rebuild the Start sheet on the same template as the demo sheet
+        DEMO_Sheet_BuildTemplate _
+            WS_Name:=START_SHEET_NAME, Title:=DEMO_TITLE, SubTitle:=START_SUBTITLE, _
+            TargetWorkbook:=Wb, _
+            ContentColumns:=DEMO_CONTENT_COLUMNS, ContentColumnWidth:=DEMO_CONTENT_WIDTH, _
+            SeparatorColumns:=DEMO_SEPARATOR_COLUMNS, _
+            BodyRowHeight:=DEMO_BODY_ROW_HEIGHT, ZoomPercent:=DEMO_ZOOM_PERCENT
+    'Resolve the Start sheet after template preparation
+        Set WS = Wb.Worksheets(START_SHEET_NAME)
+
+'------------------------------------------------------------------------------
+' WRITE WELCOME PANEL
+'------------------------------------------------------------------------------
+    'Write the opening line
+        WS.Range("C4").Value = _
+            "This workbook contains the Date / Time Picker and a demo sheet that shows it at work."
+    'Write how to open the demo sheet
+        WS.Range("C5").Value = "Open the demo sheet:"
+        WS.Range("C6").Value = "1) On the Home tab, find the Date / Time Picker group."
+        WS.Range("C7").Value = _
+            "2) Click the arrow under Show Picker, then Demo. Click Demo again to hide the sheet."
+    'Write how to open the picker
+        WS.Range("C8").Value = _
+            "Open the picker on any date cell with the in-grid icon, the right-click entry, " & _
+            "Ctrl + Shift + D or Show Picker."
+    'Write the recovery and safety notes
+        WS.Range("C9").Value = _
+            "Reset, in the same menu, restarts the Date / Time Picker if it stops responding."
+        WS.Range("C10").Value = _
+            "Macros must be enabled. Download this workbook only from the project's GitHub " & _
+            "Releases page and compare its SHA-256 there."
+        WS.Range("C11").Value = "Source, documentation and user manual: " & START_PROJECT_URL
+    'Write the build line when one was supplied
+        LastRow = 11
+        If VBA.LenB(BuildCaption) > 0 Then
+            LastRow = 12
+            WS.Range("C12").Value = BuildCaption
+        End If
+
+'------------------------------------------------------------------------------
+' FORMAT WELCOME PANEL
+'------------------------------------------------------------------------------
+    'Resolve the panel from the rows actually written
+        Set Panel = WS.Range("C4:K" & VBA.CStr(LastRow))
+    'Emphasise the opening line
+        With WS.Range("C4").Font
+            .Bold = True
+            .Italic = True
+        End With
+    'Keep the panel text left-aligned and unwrapped, on the instruction colour
+        With Panel
+            .HorizontalAlignment = xlLeft
+            .VerticalAlignment = xlCenter
+            .WrapText = False
+            .Interior.Color = DEMO_COLOR_NOTES
+        End With
+    'Draw the panel outline without inner gridlines
+        DEMO_SetRangeBorder Panel, 0, xlThin, False
+
+'------------------------------------------------------------------------------
+' POSITION SHEET
+'------------------------------------------------------------------------------
+    'Move the Start sheet before every other worksheet
+        If Not WS Is Wb.Worksheets(1) Then
+            WS.Move Before:=Wb.Worksheets(1)
+        End If
+
+'------------------------------------------------------------------------------
+' EXIT
+'------------------------------------------------------------------------------
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' ERROR HANDLER
+'------------------------------------------------------------------------------
+ErrorHandler:
+    'Raise a descriptive error to the caller
+        Err.Raise Err.Number, PROC_NAME, _
+            "Start sheet creation failed: " & Err.Description
+
+End Sub
+
+Public Function DP_Demo_PrepareReleaseWorkbook( _
+    Optional ByVal BuildCaption As String = vbNullString) As String
+
+'
+'------------------------------------------------------------------------------
+'                       PREPARE RELEASE WORKBOOK
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Builds the content of the release demo workbook in ActiveWorkbook: the demo
+'   sheet, very hidden, and the Start sheet, active
+'
+' WHY THIS EXISTS
+'   tools/Build-Addin.ps1 -Demo builds the published DATETIMEPICKER-demo-vX.Y.Z
+'   workbook from source (#222). It calls this one entry point through
+'   Application.Run, so the content is defined by reviewable VBA, and an error
+'   comes back as text instead of opening Visual Basic's modal error window
+'
+' INPUTS
+'   BuildCaption
+'     Line identifying the build, written on the Start sheet. Optional
+'
+' RETURNS
+'   "OK" when both sheets were built, the demo sheet is very hidden and the
+'   Start sheet is active
+'
+'   "ERROR <number>: <description>" otherwise
+'
+' BEHAVIOR
+'   Builds the demo sheet, builds the Start sheet, activates the Start sheet and
+'   sets the demo sheet to xlSheetVeryHidden, as Workbook_Open leaves it. Other
+'   worksheets are not touched
+'
+' ERROR POLICY
+'   Never raises. Every error is returned as text
+'
+' DEPENDENCIES
+'   DP_Demo_CreateDemoSheet
+'   DP_Demo_CreateStartSheet
+'
+' UPDATED
+'   2026-11-15
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Wb                  As Workbook                 'Workbook being prepared
+    Dim StartSheet          As Worksheet                'Start worksheet
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+        On Error GoTo Failed
+    'Resolve the workbook being prepared
+        Set Wb = DP_Demo_ResolveTargetWorkbook(Nothing)
+
+'------------------------------------------------------------------------------
+' BUILD SHEETS
+'------------------------------------------------------------------------------
+    'Build the demo sheet
+        DP_Demo_CreateDemoSheet Wb
+    'Build the Start sheet in the first position
+        DP_Demo_CreateStartSheet Wb, BuildCaption
+
+'------------------------------------------------------------------------------
+' LEAVE THE OPENING STATE
+'------------------------------------------------------------------------------
+    'Activate the Start sheet, so the demo sheet can be hidden
+        Set StartSheet = Wb.Worksheets(START_SHEET_NAME)
+        If Wb.Windows.Count > 0 Then
+            Wb.Activate
+            StartSheet.Activate
+            StartSheet.Range("A1").Select
+        End If
+    'Hide the demo sheet as Workbook_Open does; Ribbon > Demo shows it again
+        Wb.Worksheets(DEMO_SHEET_NAME).Visible = xlSheetVeryHidden
+    'Report success
+        DP_Demo_PrepareReleaseWorkbook = "OK"
+        Exit Function
+
+'------------------------------------------------------------------------------
+' FAILED
+'------------------------------------------------------------------------------
+Failed:
+    'Return the error as text; never raise into the caller
+        DP_Demo_PrepareReleaseWorkbook = "ERROR " & VBA.CStr(Err.Number) & ": " & Err.Description
+        Err.Clear
 
 End Function
 

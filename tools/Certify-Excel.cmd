@@ -15,8 +15,9 @@ if not exist "%SCRIPT%" (
 
 rem Builds a new workbook from the checked-out commit, compiles it, runs the
 rem regression pack and writes an evidence folder next to the checkout.
+rem -Package <file> runs both packs inside a built .xlam or .xlsm instead.
 rem See tools\README.md. Extra arguments are passed to the script, for example
-rem -WithUISmoke or -AllowDirty.
+rem -WithUISmoke, -Package <file> or -AllowDirty.
 echo Excel regression run of the checked-out commit
 echo Close other Excel work first. Do not use Excel until the run ends.
 echo.

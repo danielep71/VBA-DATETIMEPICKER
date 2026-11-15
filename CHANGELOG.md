@@ -97,12 +97,67 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
-> Planned for `v1.2.3` (user-facing consistency and Ribbon source patch), not
-> yet released. Work continues on `release/v1.2.3`; release certification will be
-> recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+No unreleased changes yet.
+
+---
+
+<a id="v1.2.3"></a>
+
+## [1.2.3] - 2026-11-15
+
+> 🩹 **Patch** · user-facing consistency and Ribbon source release · no supported API break
+
+Release certification of the tagged commit and both packaged hosts is recorded
+in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 ### Added
 
+- `tools/Release.cmd` (`tools/Release.ps1`) runs RELEASING sections 5 to 11
+  from one command on the exact `main` commit
+  ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+  runs a preflight, takes the static gates from the CI report of the same
+  commit, runs the Ribbon check, both source runs, both package builds and
+  package runs, and the manual PDF. It then asks the six
+  manual checks, assembles the evidence, asks for confirmation, tags, publishes
+  and validates the downloaded release. `-DryRun` stops before the tag.
+  The user manual PDF comes from the new **User manual PDF** workflow, which
+  renders it for every push to `main` and the release branches and every pull
+  request: the release host's managed Chrome and Edge refuse the DevTools
+  connection that headless printing needs. `-Resume <folder>` continues a
+  run that stopped, keeping the steps that passed; the files to publish are
+  always checked against the evidence again before the confirmation.
+  `release-check.yml` now also runs on its own when a release is published,
+  reading the candidate from the tag and the record from the release's
+  `release-evidence.json` asset.
+- `tools/Build-Demo.cmd` (`tools/Build-Addin.ps1 -Demo`) builds the demo
+  workbook `DATETIMEPICKER-demo-vX.Y.Z.xlsm` from a clean checkout, with the
+  add-in's modules, `ThisWorkbook` code and Ribbon, sanitized and reopened for
+  a check ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)).
+  Its content comes from the new `DP_Demo_PrepareReleaseWorkbook` and
+  `DP_Demo_CreateStartSheet` in `demo/M_DP_DEMO.bas`: the demo sheet, very
+  hidden as `Workbook_Open` leaves it, behind a **Start** sheet that says how
+  to open it and names the version and commit. The v1.2.2 demo workbook had
+  instead kept a leftover `TST_DP_RESULTS` sheet as its only visible sheet.
+  Build-Addin's reopening now sets `AutomationSecurity` to Low for its own
+  Excel instance, so the package's macros run without a Security Notice.
+- `tools/Certify-Excel.cmd -Package <file>` runs the regression pack inside a
+  built `.xlam` or demo `.xlsm` (RELEASING §7, step 10;
+  [#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+  runs `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke`, each in a new Excel
+  instance with the package open read-only, never saves it, and fails if the
+  package's SHA-256 changes. The harness now writes the suites dispatched and
+  completed to `K9:K10` of `TST_DP_RESULTS` and as a `Harness | Suites` row, and
+  both source and package runs fail when a dispatched suite did not complete.
+  The summary line keeps its format.
+- `tools/assemble_release.py` builds `release-evidence.json`, the annotated
+  tag's message and the GitHub Release notes from the recorded evidence
+  folders, the candidate's own CHANGELOG and harness, the static report and the
+  operator's manual answers
+  ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+  cross-checks one candidate SHA, clean trees, PASS results and each package's
+  SHA-256 across build, test and asset; takes each pack's expected total from
+  the source run of the same commit and the expected suites from the harness;
+  validates the record with `check_release.py`; and never overwrites output.
 - One-command add-in build with its Ribbon, `tools/Build-Addin.cmd` with
   `tools/Build-Addin.ps1`, for Windows hosts ([#208](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/208)). From a clean checkout it:
   - checks `src/ribbon/`;
@@ -248,6 +303,45 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Release packages no longer carry details of the machine and account that
+  built them. Excel records the save folder, the author, a Microsoft Purview
+  sensitivity label, document-library metadata and the printer's settings in
+  every workbook it saves, and every package published up to v1.2.2 carried
+  them. The new `tools/sanitize_package.py` removes them; nothing else in the
+  package changes, and `xl/vbaProject.bin` stays byte-identical.
+  `tools/Build-Addin.cmd` runs it before reopening and hashing the add-in, and
+  `tools/check_release.py` refuses a package that still carries any of it
+  ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
+- The nine packages already published for v1.1.0 to v1.2.2 were replaced on
+  2026-11-15 by copies cleaned with `tools/sanitize_package.py`. Asset names,
+  tags and `xl/vbaProject.bin` are unchanged, so the code is the same; only
+  the SHA-256 of each file changed. A hash quoted before that date, in an
+  issue, a pull request or certification evidence, is the hash of the original
+  file. Each release's notes list both values
+  ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)):
+
+  | Release | Asset | SHA-256 before | SHA-256 now |
+  | --- | --- | --- | --- |
+  | v1.1.0 | `DATETIMEPICKER.xlam` | `05df5410…c91c` | `26d2c71d5eaa1844dd7d2cf63914ba9563d0aae614d25347faf9698fa8fbcf24` |
+  | v1.1.1 | `DATETIMEPICKER.v1.1.1.xlam` | `ee6c003a…a35b` | `830306942fb56228d0fe4b2e1d1f9a8b7c5ee592e973a2d5af1307e3a39a2688` |
+  | v1.1.1 | `DATETIMEPICKER.demo.-.v1.1.1.xlsm` | `36a1bd1d…4a0d` | `4d9655e419ff7d14d896da5fbfac79d769ae826b6b9811f01464a73cad01749a` |
+  | v1.2.0 | `DATETIMEPICKER.v1.2.0.xlam` | `69d83687…ef66` | `9023e94b727e05072a735ae8292cb627ba078382a1d5b0d1468cb7dfba9e961e` |
+  | v1.2.0 | `DATETIMEPICKER-demo-v1.2.0.xlsm` | `a7163ab8…9f8f` | `5321104469a130f594b3008ec3a5c598aa7424ba41c7f7ec6aa37b9802781fb9` |
+  | v1.2.1 | `DATETIMEPICKER.v1.2.1.xlam` | `f8e6a812…db78` | `59b17a47f832ad161fd1bc042b0d8b382c399b2f303f3c651363f2da9bf79e7e` |
+  | v1.2.1 | `DATETIMEPICKER-demo-v1.2.1.xlsm` | `26f112cc…4bb6` | `3b7ba05335cf220d05676a96b2f86b756d536d2d42836e45c5ca462a777499df` |
+  | v1.2.2 | `DATETIMEPICKER.v1.2.2.xlam` | `e7b26ba6…510b` | `eec4217e4f6333661fc35c16922fb19f4f06409bb6dae0a31c9c4a5eccee59e1` |
+  | v1.2.2 | `DATETIMEPICKER-demo-v1.2.2.xlsm` | `5e0b97f3…8e7c` | `ab376ca659392a185bd33f42e26c4068568fb07b0be59f553a8d88b44edbb935` |
+
+- `tools/Certify-Excel.ps1` and `tools/Build-Addin.ps1` no longer report PASS
+  when Excel cannot be closed. A workbook `Close` or an Excel `Quit` that
+  failed was only written to `session.log`, so a run could pass while Excel
+  was still running or still held the package open. Both scripts now close
+  Excel through `tools/ExcelCleanup.psm1`, which tries every step even after a
+  failure and returns each failure. The failures are recorded under `cleanup`
+  in `summary.json`, listed as reasons, shown as `Excel cleanup:` in the
+  evidence text, and give FAIL and exit code 1. An error that stopped the run
+  earlier is kept. `tools/Test-ExcelCleanup.ps1` checks this without Excel
+  ([#196](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/196)).
 - Building the demo sheets and the harness result sheet no longer depends on
   the default printer. `DEMO_Sheet_BuildTemplate` reset the sheet with every
   option, including page-break removal, which makes Excel query the default
@@ -1744,7 +1838,8 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0

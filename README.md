@@ -10,7 +10,7 @@
 
 [![Excel VBA](https://img.shields.io/badge/Excel_VBA-32%20%2F%2064--bit-217346?style=for-the-badge&logo=microsoft-excel&logoColor=white)](https://github.com/danielep71/VBA-DATETIMEPICKER)
 [![Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#requirements)
-[![Source](https://img.shields.io/badge/Source-v1.2.2-6f42c1?style=for-the-badge)](#release-status)
+[![Source](https://img.shields.io/badge/Source-v1.2.3-6f42c1?style=for-the-badge)](#release-status)
 [![Tests](https://img.shields.io/badge/Regression_v1.2.2-879%2F879-2ea44f?style=for-the-badge)](#regression-testing)
 [![License](https://img.shields.io/badge/License-Apache_2.0-2ea44f?style=for-the-badge)](LICENSE)
 
@@ -336,14 +336,18 @@ The demo source can build the worksheet through:
 DP_Demo_CreateDemoSheet
 ```
 
+The released demo workbook opens on a **Start** sheet. Its demo sheet is
+hidden until you choose **Home → Date / Time Picker → Demo** (the drop-down
+part of **Show Picker**).
+
 ## Option 3 — install the `.xlam`
 
 Download the add-in asset from
 [GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases). At
-`v1.2.2` it is:
+`v1.2.3` it is:
 
 ```text
-DATETIMEPICKER.v1.2.2.xlam
+DATETIMEPICKER.v1.2.3.xlam
 ```
 
 Take the exact name from the Release page and check its SHA-256 against the one
@@ -1646,10 +1650,10 @@ For source changes after the recorded Wiki baseline, the branch source and READM
 
 # 🧭 Release status
 
-## Unreleased — planned `v1.2.3`, user-facing consistency and Ribbon source
+## v1.2.3 — user-facing consistency and Ribbon source
 
-Not yet released. The work below is on `main` and continues on
-`release/v1.2.3`; `v1.2.2` is the latest release. Planned as a patch release. The component shows one name, **Date / Time
+In preparation: `v1.2.2` stays the latest published release until the `v1.2.3`
+tag exists. A patch release. The component shows one name, **Date / Time
 Picker**, on every surface ([#88](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/88)). The Ribbon **Reset** command reports
 success only from the recorded outcome of the operation it ran, and starts the
 runtime when no provider holds the lease ([#89](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/89)). The right-click entry appears
@@ -1798,7 +1802,7 @@ rather than a closed compiled-only component.
 
 ## 📌 Status
 
-**Unreleased work:** planned `v1.2.3`, continuing on `release/v1.2.3`; its certification record will be [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+**In preparation:** `v1.2.3`, under certification in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122); it is not published until its tag and GitHub Release exist.
 
 **Published release:** [v1.2.2](https://github.com/danielep71/VBA-DATETIMEPICKER/releases/tag/v1.2.2), published on 2026-10-01. Its annotated tag targets [`4d5b0419154c48b580c504f69629ea64efefa6d1`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/4d5b0419154c48b580c504f69629ea64efefa6d1). Both downloaded asset hashes match the Release's SHA-256 values. The Release reports both-host regression results (879/882 PASS). Issue [#63](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/63) was administratively closed on 2026-10-01 by maintainer decision with explicitly accepted deviations; this does **not** constitute full certification under [RELEASING.md](RELEASING.md), because mandatory manual matrices remain unexecuted: the manual matrices for [#50](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/50), [#27](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/27) (full real-`OnTime` reverification), [#53](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/53), [#52](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/52) and [#64](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/64), and the provenance of the custom Ribbon images ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)), were not run or recorded and are accepted as disclosed `v1.2.2` limitations. Publication and matching hashes do not substitute for those checks.
 

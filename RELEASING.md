@@ -88,6 +88,64 @@ The Git tag adds the lower-case prefix: version `1.2.3` becomes annotated tag `v
 
 Test both embedded-source and add-in consumption if both are advertised for the release.
 
+<a id="one-command"></a>
+
+## ⚡ One command: `tools/Release.cmd`
+
+Sections 5 to 11 are run by one command on the Windows host
+([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). Prepare
+sections 1 to 4 as before: integrate into `main`, then check out the exact
+integration commit with a clean tree. Run a dry run first:
+
+```powershell
+git fetch origin main --tags
+git switch --detach origin/main
+.\tools\Release.cmd -DryRun -Title "<short title>" -Refs 88,89 -EvidenceIssue <n>
+.\tools\Release.cmd -Title "<short title>" -Refs 88,89 -EvidenceIssue <n>
+```
+
+It stops at the first failure and runs, in order:
+
+1. **preflight**. The checkout must be exactly `origin/main` with a clean tree,
+   and `VERSION` must have a dated CHANGELOG section. The tag and the GitHub
+   Release must not exist yet, and the static-checks workflow must have a
+   successful push run on `main` for this commit. GitHub CLI must be signed in,
+   and Python with the documentation packages must be available;
+2. the static gates: the `static-checks.json` that CI wrote on that push run is
+   downloaded and must be a clean committed PASS of all eleven gates for this
+   commit (the same report `release-check.yml` reads); the Ribbon check runs
+   locally, with its output kept (section 5);
+3. both source runs, `tools/Certify-Excel.ps1` standard and `-WithUISmoke`
+   (section 6);
+4. the add-in and demo builds with the release file names; you answer their
+   Ribbon questions (section 7);
+5. both packs inside each package, `Certify-Excel.ps1 -Package` (section 7,
+   step 10);
+6. the user manual PDF that the **User manual PDF** workflow rendered for this
+   commit on its push run on `main`, downloaded from CI; you check it page by
+   page;
+7. the six manual checks, asked one by one: PASS, NOT RUN with the name of whoever
+   accepts the gap, or FAIL, which stops;
+8. the evidence, with `tools/assemble_release.py`: `release-evidence.json`
+   validated by `check_release.py`, the tag message and the release notes
+   (sections 8 and 9);
+9. a final confirmation: you type the tag;
+10. the annotated tag, pushed, and the GitHub Release with the two packages, the
+    PDF and `release-evidence.json` (sections 9 and 10). The published files
+    are downloaded again and validated with `--require-tag`, and the
+    **Verify published release evidence** workflow runs on its own (section 11).
+
+`-DryRun` does steps 1 to 9 and stops before the tag; `-Rehearse` tries steps
+2 to 7 on a checkout that is not a release candidate yet. `-Resume <folder>`
+continues a run that stopped: the preflight runs again, the steps that passed
+are kept, and the run continues from the first one that did not; the files to
+publish are always checked against the evidence again before the confirmation. Everything goes into one
+folder next to the checkout, `DATETIMEPICKER-release-vX.Y.Z-<sha12>-<stamp>`,
+ending with `release.txt` and `release.json`
+([tools/README.md](tools/README.md#run-the-whole-release-windows)). The sections
+below remain the reference for what each step checks and for doing a step by
+hand.
+
 ## 1. Open the release branch, then freeze the candidate
 
 ### Start of the release cycle
@@ -260,14 +318,18 @@ For each artifact:
    for `customUI/customUI.xml`. Office RibbonX Editor does this when the part is
    added as an "Office 2007 Custom UI Part".
 
-   For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6, the Ribbon
-   part of step 8 and step 10 from a clean checkout. The add-in's
+   For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6 and 8, the
+   Ribbon part of step 9 and step 11 from a clean checkout. The add-in's
    `ThisWorkbook` code is a candidate input too. It is tracked as
    `src/addin/ThisWorkbook.cls`, and the tool copies it into the workbook's
    document module, because a document module cannot be imported. The tool
    records its evidence in a folder outside the checkout
    ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
-   Step 9 and the demo workbook remain separate.
+   `tools/Certify-Excel.cmd -Package <file>` performs step 10 on either package
+   ([tools/README.md](tools/README.md#run-the-regression-pack-inside-a-built-package-windows)).
+   `tools/Build-Demo.cmd` builds the demo workbook the same way, with the demo
+   sheet very hidden behind a Start sheet
+   ([tools/README.md](tools/README.md#build-the-demo-workbook)).
 5. Fail the build if a required Ribbon part or referenced custom resource cannot
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
@@ -275,21 +337,36 @@ For each artifact:
 7. Include the packaged harness required by `tools/vba-projects.json`, including
    `test/M_cDP_Test.bas`, in both packages. Removing it or substituting another
    smoke test breaks the certification rule. `check_release.py` cannot detect
-   it: the validator checks package names, sizes and hashes and the recorded
-   results, not the package contents.
-8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
+   it: the validator checks package names, sizes, hashes, build-machine
+   metadata and the recorded results, not the VBA inside the package.
+8. Remove the build machine's metadata: the save folder, author, sensitivity
+   label, document-library and printer data that Excel records on save
+   ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
+   Run `python tools/sanitize_package.py <package> --in-place` on each package
+   before it is reopened, tested and hashed. `tools/Build-Addin.cmd` does it for
+   the add-in, and `check_release.py` refuses a package that still carries any
+   of it.
+9. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
    group/controls are present, all intended custom images render, and each
    enabled Ribbon action dispatches correctly.
-9. Run both `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke` on each package.
-   Record expected and actual run/suite totals, failures and cleanup failures.
-10. Record filename, size, and SHA-256.
-11. Never edit the artifact after hashing.
+10. Run both `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke` on each package.
+    Record expected and actual run/suite totals, failures and cleanup failures.
+    The harness writes the suites dispatched and completed to `K9:K10` of
+    `TST_DP_RESULTS`. `tools/Certify-Excel.cmd -Package <file>` runs both packs
+    in the package without saving it and fails if its SHA-256 changes.
+11. Record filename, size, and SHA-256.
+12. Never edit the artifact after hashing.
 
 The user manual PDF is rendered from `docs/USER_MANUAL.md` at the exact
 candidate. Its links to other repository files point at that commit. It has
 page numbers, bookmarks, and a table of contents with the page of each section.
-Install Python-Markdown and pypdf from the hash-locked
-`tools/requirements-docs.txt` first, then render with headless Chrome or Edge:
+The **User manual PDF** workflow (`.github/workflows/user-manual.yml`) renders
+it on every push to `main` and the release branches and on every pull request,
+and keeps it as the artifact `user-manual-<sha>` for 90 days; `tools/Release.cmd`
+publishes the one of the push run on `main` for the candidate. A host whose
+browser allows headless printing can also render it locally. Install
+Python-Markdown and pypdf from the hash-locked `tools/requirements-docs.txt`
+first, then render with headless Chrome or Edge:
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
@@ -326,6 +403,10 @@ python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha
 python tools/check_release.py --evidence test-results/release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
 ```
 
+`tools/assemble_release.py` fills the record from the evidence folders instead
+([tools/README.md](tools/README.md#assemble-the-record-from-the-evidence-folders));
+`tools/Release.cmd` runs it (step 8 of [One command](#one-command)).
+
 Use [the certification template](docs/RELEASE_CERTIFICATION_TEMPLATE.md) alongside
 that JSON. Record both per-host environments, standard/UI-smoke counts and all
 six manual records. Blank or NOT RUN compile/harness fields block validation.
@@ -342,8 +423,10 @@ renewed exact-source evidence; package changes invalidate test and hash evidence
 Tag only the certified commit on `main`.
 
 The tag message is the release's permanent, offline record: it travels with every
-clone, while Release pages and issues can be edited later. Write it from the
-evidence record into a file outside the repository, using this template:
+clone, while Release pages and issues can be edited later. `tools/assemble_release.py`
+writes it from the evidence record as `tag-message.txt`, and `tools/Release.cmd`
+creates and pushes the tag from it. By hand, write it into a file outside the
+repository, using this template:
 
 ```text
 vX.Y.Z - <short release title>
@@ -421,11 +504,19 @@ Create the release from the annotated tag and include:
 7. Full changelog comparison link.
 8. Security-reporting link.
 
-Upload the already-hashed artifacts. Do not rebuild between tagging and upload.
-After publication, dispatch `release-check.yml` with `candidate_sha` and the
-completed JSON. It retrieves the successful main push-run static report and
-both published packages, then validates the annotated tag and downloaded hashes.
-Retain its report and disclose any accepted manual limitations.
+Upload the already-hashed artifacts and `release-evidence.json`. Do not rebuild
+between tagging and upload. `tools/assemble_release.py` writes the notes
+(`release-notes.md`): the dated CHANGELOG section, the downloads with SHA-256,
+both packs on both packages, the environment, the manual checks and the
+deviations. Add any upgrade notes or highlights by editing the CHANGELOG section
+before the candidate is frozen, not the generated file.
+
+Publishing the release starts `release-check.yml` on its own. It takes the
+candidate from the tag and the record from the `release-evidence.json` asset,
+retrieves the successful main push-run static report and both published
+packages, then validates the annotated tag and downloaded hashes. It can also be
+dispatched by hand with `candidate_sha` and the completed JSON. Retain its
+report and disclose any accepted manual limitations.
 
 ## 11. Verify after publication
 

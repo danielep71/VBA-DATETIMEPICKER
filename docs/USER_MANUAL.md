@@ -383,6 +383,7 @@ The demo sheet lets you try the picker on prepared cells. Open it with
 
 | Situation | Where the demo sheet goes |
 |---|---|
+| You opened the demo workbook from the release | Its own demo sheet, kept hidden behind the **Start** sheet until you choose **Demo** |
 | The picker is built into the workbook | A sheet in that workbook |
 | You use the add-in | The open workbook that already has the demo sheet, or a new workbook |
 
@@ -540,7 +541,7 @@ down and [report the problem](#get-help).
 ## 🕰 Older versions
 
 The published `v1.2.2` add-in differs from this manual in a few visible ways
-(see [CHANGELOG.md](../CHANGELOG.md#unreleased)):
+(see [CHANGELOG.md](../CHANGELOG.md#v1.2.3)):
 
 | In `v1.2.2` | In this manual (`v1.2.3`) |
 |---|---|

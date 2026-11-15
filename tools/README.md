@@ -236,8 +236,9 @@ The run:
 4. compiles with **Debug → Compile VBAProject**; if the VBE does not show the
    result, it asks you to compile and answer Y or N;
 5. runs `TST_DP_RunAll` (`-WithUISmoke` runs `TST_DP_RunAll_WithUISmoke`);
-6. reads the summary and every row of `TST_DP_RESULTS`, saves the workbook,
-   closes Excel and opens the evidence folder.
+6. reads the summary, the suites dispatched and completed (`K9:K10`) and every
+   row of `TST_DP_RESULTS`, saves the workbook, closes Excel and opens the
+   evidence folder.
 
 The evidence folder, `DATETIMEPICKER-excel-<sha12>-<yyyyMMdd-HHmmss>` next to
 the checkout (or `-BundleDir`), holds:
@@ -251,9 +252,43 @@ the checkout (or `-BundleDir`), holds:
 | `DATETIMEPICKER-regression.xlsm` | The workbook as the run left it |
 
 The exit code is 0 only when import and compile pass, the harness reports
-`State=PASS` with no cleanup failure, and the tree was clean. The run covers
-compilation and the regression pack; the manual matrices of a release
-certification (RELEASING §6) and package tests are still separate.
+`State=PASS` with no cleanup failure, every dispatched suite completed, Excel
+accepts every close request (see [Closing Excel](#closing-excel)), and the
+tree was clean. The run covers compilation and the regression pack; the manual
+matrices of a release certification (RELEASING §6) are still separate.
+
+## Run the regression pack inside a built package (Windows)
+
+`-Package <file>` runs the regression pack inside a built `.xlam` add-in or demo
+`.xlsm` instead of the source (RELEASING §7, step 10). Run it from the clean
+checkout of the commit that built the package:
+
+```powershell
+.	ools\Certify-Excel.cmd -Package ..\DATETIMEPICKER-addin-<sha12>-<stamp>\DATETIMEPICKER.v1.2.3.xlam
+```
+
+It records the package's size and SHA-256, then runs two sessions, each in a
+new Excel instance: `TST_DP_RunAll`, then `TST_DP_RunAll_WithUISmoke`. Each
+session sets that instance's `Application.AutomationSecurity` to Low, so the
+package's macros run without a **Security Notice**; the property is not saved
+and the Trust Center settings stay as they are. If a policy refuses it, Excel
+asks and the run waits for **Enable Macros**. Each session then opens the
+package read-only (an add-in also gets a blank workbook,
+which receives `TST_DP_RESULTS`), adds the generated runner to the open package
+in memory, compiles, runs the pack, reads the results and closes everything
+without saving. After each session it checks that the package's SHA-256 has not
+changed. It also records the monitor count, the primary display's scaling, the
+load mode, and how many other add-ins the instance has open; their names go to
+`session.log` only, because they can identify the operator's environment. `-WithUISmoke` and `-Configuration` do not apply.
+
+The evidence folder is `DATETIMEPICKER-package-<sha12>-<yyyyMMdd-HHmmss>`, with
+`certification.txt`, `summary.json`, `session.log`, `results-standard.tsv` and
+`results-ui_smoke.tsv`. The exit code is 0 only when, in both packs, the
+compile passes, the harness reports `State=PASS` with no cleanup failure and
+every dispatched suite completed; Excel accepts every close request; the tree
+is clean; and the package hash never changes. The run proves what these bytes
+did in Excel; the build evidence of `tools/Build-Addin.cmd` records which
+commit built them.
 
 ## Build the add-in and check its Ribbon (Windows)
 
@@ -296,14 +331,18 @@ The run:
      PNG content type when the package has none;
    - verifies the result before replacing the file;
    - refuses a package that already has a Ribbon;
-7. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
+7. removes the build machine's metadata with `tools/sanitize_package.py` (see
+   [Remove build-machine metadata](#remove-build-machine-metadata-from-a-package));
+8. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
    on it. The inspection is advisory and its verdict does not decide the build;
-8. opens the package read-only in a fresh Excel instance with a blank workbook,
-   and asks three questions:
+9. opens the package read-only in a fresh Excel instance with a blank workbook,
+   with that instance's `Application.AutomationSecurity` set to Low so that the
+   package's macros run without a **Security Notice** (not saved; the Trust
+   Center settings stay as they are), and asks three questions:
    - Does Show Picker show its icon?
    - Do Reset and Demo show theirs?
    - Does Show Picker open the picker?
-9. closes without saving and checks that the package hash is unchanged.
+10. closes without saving and checks that the package hash is unchanged.
 
 The evidence folder, `DATETIMEPICKER-addin-<sha12>-<yyyyMMdd-HHmmss>` next to
 the checkout (or `-BundleDir`), holds:
@@ -314,13 +353,110 @@ the checkout (or `-BundleDir`), holds:
 | `summary.json` | The same, machine-readable, with the reasons for a FAIL |
 | `DATETIMEPICKER-build-<sha12>.xlam` | The package (`-PackageName` sets another name) |
 | `ribbon-injection.json` | Each injected part with its size and SHA-256, and the root relationship |
+| `package-metadata.json` | The metadata found and removed, and the parts removed or edited |
 | `package-inspection.json`, `.md` | The advisory package inspection |
 | `session.log` | Each step with its time |
 
 The exit code is 0 only when every step passes, all three answers are yes, the
-hash is unchanged after reopening, and the tree was clean. The tool does not run
-the regression pack on the package (RELEASING §7 step 9) and builds no demo
-workbook.
+hash is unchanged after reopening, Excel accepts every close request (see
+[Closing Excel](#closing-excel)), and the tree was clean. The tool does not run
+the regression pack on the package; `tools/Certify-Excel.cmd -Package` does
+(RELEASING §7 step 10).
+
+### Build the demo workbook
+
+`tools/Build-Demo.cmd` runs the same script with `-Demo`
+([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). The
+demo workbook has the same modules, the same `ThisWorkbook` code and the same
+Ribbon as the add-in. The differences:
+
+- after compiling, it calls `DP_Demo_PrepareReleaseWorkbook` in
+  `demo/M_DP_DEMO.bas`, which builds the demo sheet and a **Start** sheet in
+  front of it, activates Start and hides the demo sheet as `Workbook_Open`
+  does. It returns `OK` or the error as text;
+- it removes the new workbook's empty default sheets and stops if one is not
+  empty. The workbook must end with a visible Start sheet and the very hidden
+  demo sheet, in that order;
+- it saves an `.xlsm` (`DATETIMEPICKER-demo-build-<sha12>.xlsm`, or
+  `-PackageName`) into `DATETIMEPICKER-demo-<sha12>-<yyyyMMdd-HHmmss>`;
+- after reopening it, with no blank workbook, it asks two more questions:
+  - Does the workbook open on its Start sheet?
+  - Does **Demo** show the demo sheet with a working **Fill Table Column**
+    button?
+
+The Start sheet says how to open the demo sheet and the picker, and names the
+version and commit it was built from. `summary.json` records `"kind": "demo"`
+and the sheets under `demo_content`; an add-in build records `"kind": "addin"`.
+
+## Closing Excel
+
+Both tools close the Excel instances they start through
+`tools/ExcelCleanup.psm1`. It closes each workbook without saving, asks Excel
+to quit and releases each COM reference. Every step is tried even when an
+earlier one fails, and an error that stopped the run earlier is kept.
+
+Each failed step is:
+- written to `session.log`;
+- recorded under `cleanup` in `summary.json`, with status `FAIL`;
+- listed among the reasons, so the verdict is FAIL and the exit code 1;
+- shown as `Excel cleanup: FAIL` in `certification.txt` or `build.txt`.
+
+`Excel cleanup: PASS` means that Excel accepted every request. It does not
+prove that the `EXCEL.EXE` process has ended: Windows ends it once every
+reference is released, which the tools cannot observe. If Excel is still
+running after a run, close it in Task Manager before the next run.
+
+`tools/Test-ExcelCleanup.ps1` checks this behaviour without Excel. It uses
+stand-in objects whose `Close` and `Quit` succeed or throw, and checks that
+every step is tried and that a failure cannot give PASS:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Test-ExcelCleanup.ps1
+```
+
+It prints one line per case and exits 0 only when every case passes.
+`tools/test_excel_cleanup.py`, run by `tools/check.py`, checks that both tools
+close Excel only through the module and record its result before the verdict.
+
+## Remove build-machine metadata from a package
+
+When Excel saves a workbook or add-in, it records details of the machine and
+account that saved it. Every package published up to v1.2.2 carried them
+([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
+`tools/sanitize_package.py` finds and removes:
+
+| Where | What |
+| --- | --- |
+| `x15ac:absPath` in `xl/workbook.xml` | The folder the file was saved from |
+| `docMetadata/` | A Microsoft Purview sensitivity label, with the tenant ID |
+| `customXml/` | Document-library content-type metadata |
+| `xl/printerSettings/` | The printer's settings, including its name |
+| `dc:creator`, `cp:lastModifiedBy` in `docProps/core.xml` | The author and last editor |
+| `Company`, `Manager` in `docProps/app.xml` | The organization and manager |
+
+```sh
+python tools/sanitize_package.py --check <package>...          # report; exit 1 if any is found
+python tools/sanitize_package.py <package> --output <copy>      # write a sanitized copy
+python tools/sanitize_package.py <package> --in-place           # replace the package
+```
+
+How it changes the package:
+- It drops those parts together with their relationships, content types and
+  `r:id` references, and removes the elements and values.
+- Every other part keeps identical content, in the same order. That includes
+  `xl/vbaProject.bin`, the cell data and the Ribbon parts.
+- Elements and attributes are recognised by namespace and local name, so a part
+  that binds another prefix (or none) is handled the same way.
+
+Before replacing anything, it checks the result:
+- the copy reads back;
+- no metadata remains;
+- the untouched parts are byte-identical;
+- no relationship points to a missing part.
+
+`--report <file>` writes the findings and the parts removed or edited as JSON.
+`tools/Build-Addin.cmd` runs it before reopening and hashing the add-in, and
+`check_release.py` refuses a package that still carries any of it.
 
 ## Render the user manual to PDF
 
@@ -333,6 +469,14 @@ own hash-locked lock file:
 python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
 python tools/render_manual.py --html test-results/USER_MANUAL.html --pdf test-results/USER_MANUAL.pdf
 ```
+
+The **User manual PDF** workflow (`.github/workflows/user-manual.yml`) runs the
+same command on Ubuntu with Chrome for every push to `main` and the release
+branches and every pull request. It renders the pushed commit, or the pull
+request's head commit, and keeps the PDF, the HTML and a `COMMIT` file as the
+artifact `user-manual-<sha>` for 90 days. The released PDF is that artifact
+(see [Run the whole release](#run-the-whole-release-windows)): a managed Chrome
+or Edge that refuses DevTools cannot print headless.
 
 The HTML:
 - embeds every image as a data URI, and accepts only images inside the
@@ -422,8 +566,8 @@ workflow fails rather than substituting another commit's report.
 
 The validator requires the candidate to be reachable from fetched `origin/main`
 and records the main SHA used for that check. It rejects stale candidate IDs, missing hosts, failed compile,
-incomplete/failed regressions, cleanup failures, changed bytes and unaccepted
-manual gaps. `NOT RUN` needs a named `accepted_by` and a description; output is
+incomplete/failed regressions, cleanup failures, changed bytes, packages that
+still carry build-machine metadata, and unaccepted manual gaps. `NOT RUN` needs a named `accepted_by` and a description; output is
 `pass_with_limitations`, with the gaps retained individually. A reported `FAIL`
 blocks validation. Acceptance remains a maintainer decision, not an automatic
 waiver. Successful validation checks record consistency; it does not authenticate
@@ -432,6 +576,124 @@ that a described manual test happened. Keep the original logs with the record.
 
 Use this for future candidates containing these tools. Do not reconstruct or
 re-certify v1.2.2: its accepted limitations, tag and packages remain authoritative.
+
+### Assemble the record from the evidence folders
+
+`tools/assemble_release.py` fills the record from recorded output instead of by
+hand ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+reads:
+
+- two source runs of `tools/Certify-Excel.cmd`, standard and `-WithUISmoke`;
+- for each package, its build folder (`tools/Build-Addin.cmd` for the add-in,
+  `tools/Build-Demo.cmd` for the demo; both write `"kind"`) and its
+  `Certify-Excel.cmd -Package` run;
+- `release-assets/` with the two packages and the user manual PDF;
+- the exact-candidate `static-checks.json`;
+- `manual-checks.json`, the six manual records as the operator answered them
+  (the same objects as the `manual` member of the record).
+
+```sh
+python tools/assemble_release.py --candidate-sha <full-sha> \
+  --assets-dir release-assets --static-report test-results/static-checks.json \
+  --source-standard <folder> --source-ui-smoke <folder> \
+  --addin-build <folder> --addin-run <folder> --demo-build <folder> --demo-run <folder> \
+  --manual manual-checks.json --title "<short title>" --refs 88 89 \
+  --evidence-issue 122 --output-dir release-out
+```
+
+It refuses the input unless every folder names the candidate SHA, a clean tree
+and PASS; each package's SHA-256 is the same in its build, its package run and
+`release-assets/`, and never changed during a run; every dispatched suite
+completed and the suites dispatched equal the `TST_DP_RunSuiteSafe` calls in the
+candidate's harness; and Excel, Windows and bitness are known. Each pack's
+expected total is the source run's total for the same commit, so a package that
+runs fewer assertions than its source fails. The record is then validated with
+`check_release.py`.
+
+It writes four files into a new or empty `--output-dir` and never overwrites
+one:
+
+| File | Content |
+| --- | --- |
+| `release-evidence.json` | The record, with the PDF under `documents` |
+| `release-check.json` | `check_release.py`'s result: `pass` or `pass_with_limitations` |
+| `tag-message.txt` | The annotated tag's message in the RELEASING §9 template |
+| `release-notes.md` | The candidate's dated CHANGELOG section with links resolved at the tag, the downloads with SHA-256, the results of both packs on both packages, the environment, the manual checks and the deviations |
+
+A manual check `NOT RUN` with a named `accepted_by` becomes a deviation in the
+tag message and the notes. The tool tags nothing and publishes nothing.
+
+## Run the whole release (Windows)
+
+`tools/Release.cmd` (or `tools/Release.ps1`) runs RELEASING sections 5 to 11
+from one command, on a clean checkout of the exact `origin/main` commit
+([RELEASING](../RELEASING.md#one-command),
+[#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It needs
+everything the other Windows tools need, plus GitHub CLI (`gh`, signed in).
+It needs neither Node.js nor a browser that can print headless: it downloads,
+for the same commit, the `static-checks.json` that CI wrote on the push run of
+`main`, and the PDF that the **User manual PDF** workflow rendered. A managed
+Chrome or Edge that refuses DevTools ("DevTools remote debugging is disallowed
+by the system admin") cannot print the manual locally.
+
+```powershell
+.\tools\Release.cmd -DryRun -Title "<short title>" -Refs 88,89 -EvidenceIssue 122
+```
+
+`-Title` and `-EvidenceIssue` are asked for when missing; `-Refs` takes issue
+numbers separated by commas. Each step runs the existing tool in its own
+PowerShell process in the same console, so you answer the Ribbon questions
+there, and its exit code decides. The release folder,
+`DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>` next to the checkout,
+holds:
+
+| Path | Content |
+| --- | --- |
+| `static/` | The CI static report of the commit (`static-checks.json` and its logs), and `ribbon-resources.txt` |
+| `source-standard/`, `source-ui_smoke/` | The two source runs of `Certify-Excel.ps1` |
+| `addin-build/`, `demo-build/` | The builds, with the release file names |
+| `addin-run/`, `demo-run/` | The package runs of `Certify-Excel.ps1 -Package` |
+| `manual/`, `manual-checks.json` | The PDF as downloaded from CI with the commit it was rendered from, and your answers to the six manual checks |
+| `release-assets/` | The two packages, the PDF and `release-evidence.json`, as published |
+| `evidence/` | The output of `tools/assemble_release.py` |
+| `assets-check-<stamp>.json` | The check of `release-assets/` against the evidence before the confirmation |
+| `published/`, `published-check.json` | The release downloaded again, and its validation with the tag |
+| `release.txt`, `release.json`, `session.log` | Each step with its result, and the reason it stopped |
+
+The preflight refuses a commit that is not `origin/main`, a tree that is not
+clean, a `VERSION` without a dated CHANGELOG section, an existing tag or
+release, and a commit without a successful static-checks push run on `main`.
+`-DryRun` stops after the final confirmation step, before anything is tagged or
+published. `-Rehearse` tries the command on any clean checkout, such as a pull
+request branch: it skips the release-state checks (main, `VERSION`,
+CHANGELOG, tag, release, static run), takes the PDF of any successful run for
+the commit (the pull request's, for a branch), runs steps 2 to 7 and stops
+before the evidence, so its result is never release evidence.
+
+`-Resume <release folder>` continues a run that stopped, in the same folder:
+
+```powershell
+.\tools\Release.cmd -Resume ..\DATETIMEPICKER-release-v1.2.3-<sha12>-<stamp>
+```
+
+The title, references and certification issue are taken from that run. The
+preflight runs again. The steps from 2 that passed, in a row, are kept, and
+the run continues from the first one that did not. A step that runs again
+first moves its earlier folders aside as `<name>.failed-<yyyyMMdd-HHmmss>`,
+because the tools never write into a folder that is not empty. A release
+resumes only at the same commit; a rehearsal may keep steps that ran at an
+earlier commit of the tools, and `release.txt` says so. Whether step 8 was
+kept or not, the final confirmation step first checks the packages, the PDF
+and `release-evidence.json` in `release-assets/` against the evidence again
+(`assets-check-<stamp>.json`), so files changed after an earlier run are never
+published.
+
+Without `-DryRun`, you type the tag to confirm. The command then checks that
+`origin/main` has not moved and pushes the annotated tag. It creates the
+release, downloads it again and compares every file with the tested one, then
+runs `check_release.py --require-tag`. If the release cannot be created after
+the tag was pushed, it says so and leaves the tag: RELEASING's
+[Recovery](../RELEASING.md#-recovery) applies.
 
 ## Template origin and adaptations
 
