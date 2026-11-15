@@ -275,7 +275,15 @@ def print_pdf(browser: str, html_file: Path, pdf_file: Path) -> None:
     if os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0:
         arguments.insert(1, "--no-sandbox")
     try:
-        result = subprocess.run(arguments, capture_output=True, check=False, timeout=180)
+        # The output is not read, so it is not captured. On Windows, Chrome leaves
+        # helper processes (such as its crash handler) that inherit captured
+        # pipes; waiting for those pipes to close outlasted the timeout even
+        # after the PDF was written (#222).
+        try:
+            result = subprocess.run(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, check=False, timeout=180)
+        except subprocess.TimeoutExpired as error:
+            raise RenderError(f"The browser did not finish within {error.timeout:.0f} seconds") from error
         if result.returncode != 0:
             raise RenderError(f"The browser exited with code {result.returncode}")
         if not fresh.is_file() or fresh.stat().st_size < 1024 or fresh.read_bytes()[:5] != b"%PDF-":
