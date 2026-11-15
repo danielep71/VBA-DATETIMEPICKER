@@ -95,7 +95,8 @@ class AssembleTests(unittest.TestCase):
                 "mode": "source", "entry_point": entry, "harness": harness(pack), "host": host()}
         for host_name in ("xlam", "xlsm"):
             digest, size = self.hashes[host_name]
-            self.summaries[f"{host_name}-build"] = self.common(assemble_release.BUILDERS[host_name]) | {
+            self.summaries[f"{host_name}-build"] = self.common(assemble_release.BUILDER) | {
+                "kind": assemble_release.KINDS[host_name],
                 "package": {"file": "built", "bytes": size, "sha256": digest, "sha256_after_reopen": digest},
                 "metadata": {"status": "PASS"}}
             self.summaries[f"{host_name}-run"] = self.common(assemble_release.CERTIFY) | {
@@ -269,7 +270,11 @@ class AssembleTests(unittest.TestCase):
             self.assemble()
 
     def test_wrong_builder_fails(self) -> None:
-        self.summaries["xlsm-build"]["tool"] = assemble_release.BUILDERS["xlam"]
+        self.summaries["xlsm-build"]["kind"] = "addin"
+        with self.assertRaisesRegex(ValueError, "xlsm build: built a 'addin' package"):
+            self.assemble()
+        self.summaries["xlsm-build"]["kind"] = "demo"
+        self.summaries["xlsm-build"]["tool"] = assemble_release.CERTIFY
         with self.assertRaisesRegex(ValueError, "xlsm build: written by"):
             self.assemble()
 

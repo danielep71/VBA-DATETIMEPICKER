@@ -550,7 +550,8 @@ reads:
 
 - two source runs of `tools/Certify-Excel.cmd`, standard and `-WithUISmoke`;
 - for each package, its build folder (`tools/Build-Addin.cmd` for the add-in,
-  `tools/Build-Demo.ps1` for the demo) and its `Certify-Excel.cmd -Package` run;
+  `tools/Build-Demo.cmd` for the demo; both write `"kind"`) and its
+  `Certify-Excel.cmd -Package` run;
 - `release-assets/` with the two packages and the user manual PDF;
 - the exact-candidate `static-checks.json`;
 - `manual-checks.json`, the six manual records as the operator answered them

@@ -32,7 +32,8 @@ from _gatelib import git_text, write_text
 
 REPOSITORY_URL = "https://github.com/danielep71/VBA-DATETIMEPICKER"
 CERTIFY = "tools/Certify-Excel.ps1"
-BUILDERS = {"xlam": "tools/Build-Addin.ps1", "xlsm": "tools/Build-Demo.ps1"}
+BUILDER = "tools/Build-Addin.ps1"
+KINDS = {"xlam": "addin", "xlsm": "demo"}  # Build-Addin.ps1, and with -Demo (Build-Demo.cmd)
 PACKS = {"standard": "TST_DP_RunAll", "ui_smoke": "TST_DP_RunAll_WithUISmoke"}
 UI_SMOKE_SUITE = "UISmoke"
 HARNESS = "test/M_cDP_Test.bas"
@@ -137,7 +138,8 @@ def package_asset(host: str, build_dir: Path, run_dir: Path, assets_dir: Path, v
 
     label = f"{host} build"
     build = load_summary(build_dir, label)
-    check_common(build, label, BUILDERS[host], sha)
+    check_common(build, label, BUILDER, sha)
+    require(build.get("kind") == KINDS[host], f"{label}: built a {build.get('kind')!r} package, not {KINDS[host]}")
     built = as_object(build.get("package"), label)
     require(built.get("sha256") == digest and built.get("bytes") == size,
             f"{label}: the built package is not {filename} in {assets_dir}")
