@@ -49,7 +49,8 @@ ABS_PATH_BARE = re.compile(r"<x15ac:absPath\b[^>]*/>")
 CORE_PEOPLE = re.compile(r"<(dc:creator|cp:lastModifiedBy)\b[^>]*>[^<]*</\1>|<(dc:creator|cp:lastModifiedBy)\b[^>]*/>")
 APP_PEOPLE = re.compile(r"<(Company|Manager)>([^<]*)</\1>")
 RELATIONSHIP = re.compile(r"<Relationship\b[^>]*/>")
-START_TAG = re.compile(r"""<[A-Za-z_][\w.:-]*(?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*/?>""")
+START_TAG = re.compile(r"""<[A-Za-z_][\w.:-]*(?:\s+[^\s=/>"']+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*/?>""")
+TAG_ATTRIBUTE = re.compile(r"""(\s+)([^\s=/>"']+)(\s*=\s*)("[^"]*"|'[^']*')""")
 OVERRIDE = re.compile(r"<Override\b[^>]*/>")
 
 
@@ -62,6 +63,7 @@ class Result:
     findings: list[str] = field(default_factory=list)
     removed_parts: list[str] = field(default_factory=list)
     edited_parts: list[str] = field(default_factory=list)
+    references: dict[str, set[str]] = field(default_factory=dict)
 
 
 def attribute(element: str, name: str) -> str | None:
@@ -147,22 +149,50 @@ def well_formed(part: str, content: bytes) -> None:
 
 
 def remove_references(content: str, ids: set[str]) -> str:
-    """Drop ``r:id`` attributes naming a removed relationship, in start tags only.
+    """Drop the ``r:id`` attributes whose value is a removed relationship ID.
 
-    Character data is never touched: a cell or formula may contain the same text.
+    Each start tag is split into whole attributes, so text inside another
+    attribute's value, or in character data, is never touched: a tooltip, a cell
+    or a formula may contain the same characters.
     """
-    pattern = re.compile(r"""\s+r:id\s*=\s*(?:"(?:""" + "|".join(map(re.escape, sorted(ids)))
-                         + r""")"|'(?:""" + "|".join(map(re.escape, sorted(ids))) + r""")')""")
-    return START_TAG.sub(lambda m: pattern.sub("", m.group(0)), content)
+    def attributes(tag: re.Match[str]) -> str:
+        return TAG_ATTRIBUTE.sub(
+            lambda a: "" if a.group(2) == "r:id" and a.group(4)[1:-1] in ids else a.group(0), tag.group(0))
+
+    return START_TAG.sub(attributes, content)
+
+
+Event = tuple[str, str, tuple[tuple[str, str], ...]]
+
+
+def events(content: bytes, drop_ids: set[str] | None = None) -> list[Event]:
+    """Elements, attributes and text of an XML part, in order; optionally without some ``r:id``."""
+    found: list[Event] = []
+    parser = expat.ParserCreate()
+
+    def start(name: str, attrs: dict[str, str]) -> None:
+        kept = {k: v for k, v in attrs.items() if not (drop_ids and k == "r:id" and v in drop_ids)}
+        found.append(("start", name, tuple(sorted(kept.items()))))
+
+    def end(name: str) -> None:
+        found.append(("end", name, ()))
+
+    def data(chunk: str) -> None:
+        if found and found[-1][0] == "text":
+            found[-1] = ("text", found[-1][1] + chunk, ())
+        else:
+            found.append(("text", chunk, ()))
+
+    parser.StartElementHandler = start
+    parser.EndElementHandler = end
+    parser.CharacterDataHandler = data
+    parser.Parse(content, True)
+    return found
 
 
 def character_data(content: bytes) -> str:
     """The text content of an XML part, in document order."""
-    chunks: list[str] = []
-    parser = expat.ParserCreate()
-    parser.CharacterDataHandler = chunks.append
-    parser.Parse(content, True)
-    return "".join(chunks)
+    return "".join(value for kind, value, _attrs in events(content) if kind == "text")
 
 
 def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
@@ -194,9 +224,11 @@ def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
 
     for source, ids in dropped_ids.items():
         if source in out and source.endswith(".xml"):
-            content = remove_references(edited.get(source, text(out, source)), ids)
-            if content != text(out, source):
+            before = edited.get(source, text(out, source))
+            content = remove_references(before, ids)
+            if content != before:
                 edited[source] = content
+                result.references[source] = ids
 
     types = text(out, CONTENT_TYPES)
     updated_types = OVERRIDE.sub(
@@ -238,6 +270,14 @@ def verify(original: dict[str, bytes], sanitized: dict[str, bytes], result: Resu
         if part.endswith(".xml") and part not in (CORE, APP) \
                 and character_data(original[part]) != character_data(sanitized[part]):
             raise SanitizeError(f"{part}: text content changed")
+    for part, ids in result.references.items():
+        # Only the r:id attributes may differ; every other element, attribute and
+        # text must match. The workbook may also lose its absPath element.
+        before = original[part]
+        if part == WORKBOOK:
+            before = ABS_PATH_BARE.sub("", ABS_PATH_BLOCK.sub("", before.decode("utf-8"))).encode("utf-8")
+        if events(before, ids) != events(sanitized[part]):
+            raise SanitizeError(f"{part}: more than the removed r:id references changed")
     for part, content in original.items():
         if part in result.removed_parts or part in result.edited_parts:
             continue

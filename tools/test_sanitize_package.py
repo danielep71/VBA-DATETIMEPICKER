@@ -181,6 +181,30 @@ class SanitizeTests(unittest.TestCase):
         self.assertIn(b'<f>"r:id=""rId1"""</f>', sheet)
         self.assertIn(b'<pageSetup orientation="portrait"/>', sheet)
 
+    def test_matching_text_in_another_attribute_is_kept(self) -> None:
+        parts = dirty_parts()
+        parts["xl/worksheets/sheet1.xml"] = str(parts["xl/worksheets/sheet1.xml"]).replace(
+            "</sheetData>", '</sheetData><hyperlinks><hyperlink ref="A1" '
+            "tooltip=\"Keep r:id='rId1' text\" display='r:id=\"rId1\"'/></hyperlinks>")
+        write(self.dirty, parts)
+        output = self.folder / "out.xlam"
+        sanitizer.sanitize_package(self.dirty, output)
+        sheet = read(output)["xl/worksheets/sheet1.xml"]
+        self.assertIn(b"tooltip=\"Keep r:id='rId1' text\" display='r:id=\"rId1\"'", sheet)
+        self.assertIn(b'<pageSetup orientation="portrait"/>', sheet)
+
+    def test_attribute_change_is_refused(self) -> None:
+        def tamper(data: dict[str, bytes]) -> tuple[dict[str, bytes], sanitizer.Result]:
+            out, result = original(data)
+            out["xl/worksheets/sheet1.xml"] = out["xl/worksheets/sheet1.xml"].replace(
+                b'orientation="portrait"', b'orientation="landscape"')
+            return out, result
+
+        original = sanitizer.sanitize_parts
+        with mock.patch("sanitize_package.sanitize_parts", side_effect=tamper), \
+                self.assertRaisesRegex(sanitizer.SanitizeError, "more than the removed"):
+            sanitizer.sanitize_package(self.dirty, self.folder / "out.xlam")
+
     def test_text_change_is_refused(self) -> None:
         def tamper(data: dict[str, bytes]) -> tuple[dict[str, bytes], sanitizer.Result]:
             out, result = original(data)
