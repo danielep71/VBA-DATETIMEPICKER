@@ -24,13 +24,15 @@ For the commit checked out in this repository:
 7. runs TST_DP_RunAll, or TST_DP_RunAll_WithUISmoke with -WithUISmoke;
 8. reads the harness summary and every result row from the TST_DP_RESULTS
    worksheet, saves the workbook in the evidence folder, closes it and quits
-   Excel;
+   Excel. Each close step is tried even when an earlier one fails, and each
+   failure is recorded (tools\ExcelCleanup.psm1);
 9. writes summary.json, results.tsv and certification.txt, and opens the
    folder.
 
 The exit code is 0 only when the import and compile passed, the harness ran
-and reported State=PASS with no cleanup failure, and the working tree was
-clean. Everything else exits 1, and the evidence says why.
+and reported State=PASS with no cleanup failure, Excel accepted every close
+request, and the working tree was clean. Everything else exits 1, and the
+evidence says why.
 
 This automates the compile and regression steps of RELEASING.md. It does not
 replace the manual matrices recorded for a release certification.
@@ -66,6 +68,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "ExcelCleanup.psm1") -Force
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -269,6 +272,7 @@ $summary = [ordered]@{
         result_rows      = 0
     }
     workbook           = $null
+    cleanup            = [ordered]@{ status = "NOT_RUN"; failures = @() }
     result             = "FAIL"
     reasons            = @()
 }
@@ -491,33 +495,17 @@ catch {
     Write-Session ("Stopped: " + $_.Exception.Message)
 }
 finally {
-    if ($null -ne $workbook) {
-        try {
-            $workbook.Close($false)
-            Write-Session "Workbook closed"
-        }
-        catch {
-            Write-Session ("The workbook could not be closed: " + $_.Exception.Message)
-        }
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($workbook)
-    }
-    if ($null -ne $excel) {
-        try {
-            $excel.Quit()
-            Write-Session "Excel closed"
-        }
-        catch {
-            Write-Session ("Excel could not be closed: " + $_.Exception.Message)
-        }
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
-    }
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
+    # Every step is tried and every failure kept: Excel may still be running.
+    $logCleanup = { param([string]$Text) Write-Session $Text }
+    $cleanupFailures = @(Close-ExcelInstance -Excel $excel -Workbooks @($workbook) -Label "Run" -Log $logCleanup)
+    $workbook = $null
+    $excel = $null
 }
 
 # ----------------------------------------------------------------------------
 # Verdict and evidence
 # ----------------------------------------------------------------------------
+Add-CleanupResult -Summary $summary -Failures $cleanupFailures
 if ($dirty) { $summary.reasons += "The working tree had changes to tracked files" }
 if ($summary.import.status -ne "PASS") { $summary.reasons += "Import: $($summary.import.status)" }
 if ($summary.compile.status -ne "PASS") { $summary.reasons += "Compile: $($summary.compile.status)" }
@@ -550,6 +538,7 @@ $report = @(
     "Import:          $($summary.import.status)",
     "Compile:         $($summary.compile.status) - $($summary.compile.detail)",
     "Harness:         $($summary.harness.status)$(if ($summary.harness.error) { ' - ' + $summary.harness.error } else { '' })",
+    "Excel cleanup:   $($summary.cleanup.status)",
     "",
     "Harness summary line, verbatim:",
     "$(if ($summary.harness.summary_line) { $summary.harness.summary_line } else { '(not found)' })",

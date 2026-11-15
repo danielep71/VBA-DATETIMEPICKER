@@ -251,7 +251,8 @@ the checkout (or `-BundleDir`), holds:
 | `DATETIMEPICKER-regression.xlsm` | The workbook as the run left it |
 
 The exit code is 0 only when import and compile pass, the harness reports
-`State=PASS` with no cleanup failure, and the tree was clean. The run covers
+`State=PASS` with no cleanup failure, Excel accepts every close request (see
+[Closing Excel](#closing-excel)), and the tree was clean. The run covers
 compilation and the regression pack; the manual matrices of a release
 certification (RELEASING §6) and package tests are still separate.
 
@@ -318,9 +319,40 @@ the checkout (or `-BundleDir`), holds:
 | `session.log` | Each step with its time |
 
 The exit code is 0 only when every step passes, all three answers are yes, the
-hash is unchanged after reopening, and the tree was clean. The tool does not run
+hash is unchanged after reopening, Excel accepts every close request (see
+[Closing Excel](#closing-excel)), and the tree was clean. The tool does not run
 the regression pack on the package (RELEASING §7 step 9) and builds no demo
 workbook.
+
+## Closing Excel
+
+Both tools close the Excel instances they start through
+`tools/ExcelCleanup.psm1`. It closes each workbook without saving, asks Excel
+to quit and releases each COM reference. Every step is tried even when an
+earlier one fails, and an error that stopped the run earlier is kept.
+
+Each failed step is:
+- written to `session.log`;
+- recorded under `cleanup` in `summary.json`, with status `FAIL`;
+- listed among the reasons, so the verdict is FAIL and the exit code 1;
+- shown as `Excel cleanup: FAIL` in `certification.txt` or `build.txt`.
+
+`Excel cleanup: PASS` means that Excel accepted every request. It does not
+prove that the `EXCEL.EXE` process has ended: Windows ends it once every
+reference is released, which the tools cannot observe. If Excel is still
+running after a run, close it in Task Manager before the next run.
+
+`tools/Test-ExcelCleanup.ps1` checks this behaviour without Excel. It uses
+stand-in objects whose `Close` and `Quit` succeed or throw, and checks that
+every step is tried and that a failure cannot give PASS:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Test-ExcelCleanup.ps1
+```
+
+It prints one line per case and exits 0 only when every case passes.
+`tools/test_excel_cleanup.py`, run by `tools/check.py`, checks that both tools
+close Excel only through the module and record its result before the verdict.
 
 ## Render the user manual to PDF
 

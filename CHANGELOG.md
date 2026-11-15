@@ -248,6 +248,16 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- `tools/Certify-Excel.ps1` and `tools/Build-Addin.ps1` no longer report PASS
+  when Excel cannot be closed. A workbook `Close` or an Excel `Quit` that
+  failed was only written to `session.log`, so a run could pass while Excel
+  was still running or still held the package open. Both scripts now close
+  Excel through `tools/ExcelCleanup.psm1`, which tries every step even after a
+  failure and returns each failure. The failures are recorded under `cleanup`
+  in `summary.json`, listed as reasons, shown as `Excel cleanup:` in the
+  evidence text, and give FAIL and exit code 1. An error that stopped the run
+  earlier is kept. `tools/Test-ExcelCleanup.ps1` checks this without Excel
+  ([#196](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/196)).
 - Building the demo sheets and the harness result sheet no longer depends on
   the default printer. `DEMO_Sheet_BuildTemplate` reset the sheet with every
   option, including page-break removal, which makes Excel query the default

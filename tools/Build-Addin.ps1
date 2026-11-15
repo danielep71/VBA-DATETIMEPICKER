@@ -35,12 +35,15 @@ For the commit checked out in this repository:
 10. opens the package in a fresh Excel instance and asks you three questions
     about the Ribbon: the Show Picker icon, the Reset and Demo icons, and
     whether Show Picker opens the picker. It closes without saving and checks
-    that the package hash has not changed;
+    that the package hash has not changed. Each Excel instance is closed with
+    tools\ExcelCleanup.psm1: every close step is tried even when an earlier one
+    fails, and each failure is recorded;
 11. writes summary.json and build.txt, and opens the folder.
 
 The exit code is 0 only when every step passed, all three answers were yes,
-the package hash was unchanged after reopening, and the working tree was
-clean. Everything else exits 1, and the evidence says why.
+the package hash was unchanged after reopening, Excel accepted every close
+request, and the working tree was clean. Everything else exits 1, and the
+evidence says why.
 
 This automates the package build and the Ribbon check of RELEASING.md
 section 7. It does not run the regression pack on the package (use
@@ -79,6 +82,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "ExcelCleanup.psm1") -Force
 
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -90,6 +94,7 @@ $xlOpenXMLAddIn = 55
 $vbextDocument = 100
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:sessionLog = $null
+$script:cleanupFailures = New-Object System.Collections.Generic.List[string]
 $windows1252 = [System.Text.Encoding]::GetEncoding(1252)
 
 function Get-Timestamp {
@@ -216,30 +221,13 @@ function Read-YesNo {
 }
 
 function Close-Excel {
+    # Every step is tried and every failure kept for the verdict: Excel may
+    # still be running, or still hold the package open.
     param([object]$Excel, [object[]]$Workbooks, [string]$Label)
-    foreach ($book in $Workbooks) {
-        if ($null -ne $book) {
-            try {
-                $book.Close($false)
-            }
-            catch {
-                Write-Session ("A $Label workbook could not be closed: " + $_.Exception.Message)
-            }
-            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($book)
-        }
+    $logCleanup = { param([string]$Text) Write-Session $Text }
+    foreach ($failure in @(Close-ExcelInstance -Excel $Excel -Workbooks $Workbooks -Label $Label -Log $logCleanup)) {
+        $script:cleanupFailures.Add($failure)
     }
-    if ($null -ne $Excel) {
-        try {
-            $Excel.Quit()
-            Write-Session "$Label Excel closed"
-        }
-        catch {
-            Write-Session ("$Label Excel could not be closed: " + $_.Exception.Message)
-        }
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($Excel)
-    }
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
 }
 
 # ----------------------------------------------------------------------------
@@ -397,6 +385,7 @@ $summary = [ordered]@{
         menu_icons        = $null
         show_picker_opens = $null
     }
+    cleanup            = [ordered]@{ status = "NOT_RUN"; failures = @() }
     result             = "FAIL"
     reasons            = @()
 }
@@ -646,6 +635,7 @@ finally {
 # ----------------------------------------------------------------------------
 # Verdict and evidence
 # ----------------------------------------------------------------------------
+Add-CleanupResult -Summary $summary -Failures $script:cleanupFailures.ToArray()
 if ($dirty) { $summary.reasons += "The working tree had changes to tracked files" }
 if ($summary.ribbon_source.status -ne "PASS") { $summary.reasons += "Ribbon source: $($summary.ribbon_source.status)" }
 if ($summary.import.status -ne "PASS") { $summary.reasons += "Import: $($summary.import.status)" }
@@ -696,6 +686,7 @@ $report = @(
     "Compile:         $($summary.compile.status) - $($summary.compile.detail)",
     "Save as .xlam:   $($summary.save.status)",
     "Ribbon inject:   $($summary.ribbon_injection.status)",
+    "Excel cleanup:   $($summary.cleanup.status)",
     "",
     "Package:         $PackageName",
     "Size:            $($summary.package.bytes) bytes",
