@@ -622,8 +622,10 @@ from one command, on a clean checkout of the exact `origin/main` commit
 ([RELEASING](../RELEASING.md#one-command),
 [#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It needs
 everything the other Windows tools need, plus GitHub CLI (`gh`, signed in),
-Node.js, Python-Markdown and pypdf (`tools/requirements-docs.txt`) and Chrome,
-Edge or Chromium.
+Python-Markdown and pypdf (`tools/requirements-docs.txt`) and Chrome, Edge or
+Chromium. It does not need Node.js: it does not run `tools/check.py` locally,
+but downloads the `static-checks.json` that CI wrote on the push run of the
+same commit.
 
 ```powershell
 .\tools\Release.cmd -DryRun -Title "<short title>" -Refs 88,89 -EvidenceIssue 122
@@ -638,7 +640,7 @@ holds:
 
 | Path | Content |
 | --- | --- |
-| `static/` | `static-checks.json` and the logs of `tools/check.py --ci`, and `ribbon-resources.txt` |
+| `static/` | The CI static report of the commit (`static-checks.json` and its logs), and `ribbon-resources.txt` |
 | `source-standard/`, `source-ui_smoke/` | The two source runs of `Certify-Excel.ps1` |
 | `addin-build/`, `demo-build/` | The builds, with the release file names |
 | `addin-run/`, `demo-run/` | The package runs of `Certify-Excel.ps1 -Package` |

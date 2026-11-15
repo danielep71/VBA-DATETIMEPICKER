@@ -11,9 +11,11 @@ first failure:
     clean; VERSION is X.Y.Z with a dated CHANGELOG section; the tag and the
     GitHub Release do not exist yet; the static-checks workflow has a
     successful push run on main for this commit; GitHub CLI is signed in;
-    Python 3.11+ with the documentation packages and Node.js are on the PATH;
- 2. the static gates (tools/check.py --ci) and the Ribbon check
-    (.github/scripts/check-ribbon-resources.py);
+    Python 3.11+ with the documentation packages is on the PATH;
+ 2. the static gates: the static-checks.json of that push run, downloaded
+    from GitHub Actions (the report release-check.yml also reads), so the
+    eleven gates are those CI ran on this exact commit; and the Ribbon check
+    (.github/scripts/check-ribbon-resources.py), run here;
  3. the source runs: tools/Certify-Excel.ps1, standard and -WithUISmoke;
  4. the add-in and demo builds: tools/Build-Addin.ps1 and -Demo, with the
     release file names (you answer their Ribbon questions);
@@ -41,8 +43,9 @@ checkout, DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>, which ends
 with release.txt and release.json.
 
 .REQUIREMENTS
-- Windows with desktop Excel, Git, Python 3.11 or later, Node.js and GitHub
-  CLI (gh, signed in with access to the repository) on the PATH.
+- Windows with desktop Excel, Git, Python 3.11 or later and GitHub CLI (gh,
+  signed in with access to the repository) on the PATH. Node.js is not
+  needed: the static report comes from CI.
 - Python-Markdown and pypdf: python -m pip install --require-hashes
   --only-binary=:all: -r tools/requirements-docs.txt
 - Chrome, Edge or Chromium for the PDF.
@@ -316,10 +319,14 @@ try {
             "repos/$Repository/actions/workflows/static-checks.yml/runs",
             "-f", "head_sha=$sha", "-f", "event=push", "-f", "status=success", "-f", "per_page=100")
         $runUrl = ""
+        $script:staticRunId = $null
         if ($runs.Code -eq 0) {
             $found = @((($runs.Output -join "`n") | ConvertFrom-Json).workflow_runs | Where-Object {
                     $_.head_sha -eq $sha -and $_.head_branch -eq "main" -and $_.event -eq "push" -and $_.conclusion -eq "success" })
-            if ($found.Count -gt 0) { $runUrl = [string]$found[0].html_url }
+            if ($found.Count -gt 0) {
+                $runUrl = [string]$found[0].html_url
+                $script:staticRunId = [string]$found[0].id
+            }
         }
         if ($runUrl.Length -eq 0) {
             Stop-Release $step "No successful static-checks push run on main for $sha (RELEASING section 1, step 5)."
@@ -333,7 +340,6 @@ try {
         Stop-Release $step ("Python-Markdown or pypdf is missing: python -m pip install --require-hashes " +
                             "--only-binary=:all: -r tools/requirements-docs.txt")
     }
-    if ($null -eq (Get-Command node -ErrorAction SilentlyContinue)) { Stop-Release $step "Node.js is not on the PATH (tools/check.py needs it)." }
     Complete-Step $step $(if ($Rehearse) { "rehearsal: clean tree, $($python.Version); release state not checked" }
         else { "main $sha, clean, $tag new, static run $($script:summary.static_run), $($python.Version)" })
 
@@ -341,17 +347,31 @@ try {
     # 2. Static gates and the Ribbon check
     # ------------------------------------------------------------------------
     $step = Start-Step "2. Static gates and Ribbon check"
-    $static = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot "tools\check.py"), "--ci",
-        "--root", $RepoRoot, "--output-dir", $folders.static)
-    foreach ($line in $static.Output) { Write-Session "  $line" }
-    if ($static.Code -ne 0) { Stop-Release $step "tools/check.py --ci failed." }
+    New-Item -ItemType Directory -Path $folders.static | Out-Null
+    $staticDetail = "rehearsal: static report not retrieved"
+    if (-not $Rehearse) {
+        # The report CI wrote on the push run of this exact commit, as
+        # release-check.yml reads it after publication.
+        $download = Invoke-Native -Program "gh" -Arguments @("run", "download", $script:staticRunId,
+            "--repo", $Repository, "--name", "static-checks-$sha", "--dir", $folders.static)
+        $staticReport = Join-Path $folders.static "static-checks.json"
+        if ($download.Code -ne 0 -or -not (Test-Path -LiteralPath $staticReport)) {
+            Stop-Release $step "The static-checks report of run $($script:staticRunId) could not be downloaded (artifacts expire after 30 days)."
+        }
+        $report = Get-Content -LiteralPath $staticReport -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($report.status -ne "pass" -or $report.candidate_sha -ne $sha -or $report.dirty -ne $false -or
+            $report.mode -ne "committed" -or @($report.checks).Count -ne 11) {
+            Stop-Release $step "The static report of run $($script:staticRunId) is not a clean committed PASS of 11 gates for $sha."
+        }
+        $staticDetail = "11 gates PASS in CI run $($script:staticRunId)"
+    }
     $ribbon = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot ".github\scripts\check-ribbon-resources.py"),
         "--root", (Join-Path $RepoRoot "src\ribbon"))
     [System.IO.File]::WriteAllLines((Join-Path $folders.static "ribbon-resources.txt"),
         [string[]](@("Commit: $sha", "Command: python .github/scripts/check-ribbon-resources.py --root src/ribbon",
                      "Exit code: $($ribbon.Code)", "") + $ribbon.Output), $utf8NoBom)
     if ($ribbon.Code -ne 0) { Stop-Release $step "check-ribbon-resources.py failed." }
-    Complete-Step $step "11 gates and the Ribbon resources pass"
+    Complete-Step $step "$staticDetail; Ribbon resources pass"
 
     # ------------------------------------------------------------------------
     # 3. Source runs

@@ -106,8 +106,9 @@ Use only the categories needed by a release.
 - `tools/Release.cmd` (`tools/Release.ps1`) runs RELEASING sections 5 to 11
   from one command on the exact `main` commit
   ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
-  runs a preflight, the static gates and Ribbon check, both source runs, both
-  package builds and package runs, and the manual PDF. It then asks the six
+  runs a preflight, takes the static gates from the CI report of the same
+  commit, runs the Ribbon check, both source runs, both package builds and
+  package runs, and the manual PDF. It then asks the six
   manual checks, assembles the evidence, asks for confirmation, tags, publishes
   and validates the downloaded release. `-DryRun` stops before the tag.
   `release-check.yml` now also runs on its own when a release is published,

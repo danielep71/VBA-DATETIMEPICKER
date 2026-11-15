@@ -53,6 +53,16 @@ class ReleaseScriptTests(unittest.TestCase):
                 self.assertIn(needle, self.preflight)
         self.assertNotIn("--jq", self.code)
 
+    def test_static_gates_come_from_the_ci_report_of_the_commit(self) -> None:
+        start = self.code.index('$step = Start-Step "2. Static gates')
+        step = self.code[start:self.code.index('$step = Start-Step "3.', start)]
+        self.assertIn('@("run", "download", $script:staticRunId,', step)
+        self.assertIn('"--name", "static-checks-$sha"', step)
+        self.assertIn('$report.status -ne "pass" -or $report.candidate_sha -ne $sha -or $report.dirty -ne $false', step)
+        self.assertIn("@($report.checks).Count -ne 11", step)
+        self.assertNotIn("check.py", step)
+        self.assertNotIn("node", self.code.lower().replace("nodes", ""))
+
     def test_dry_run_never_tags_or_publishes(self) -> None:
         for needle in ('"tag", "-a", $tag, $sha, "-F", $messagePath', '"push", "origin", "refs/tags/$tag"',
                        '@("release", "create", $tag'):

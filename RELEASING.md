@@ -110,9 +110,11 @@ It stops at the first failure and runs, in order:
    and `VERSION` must have a dated CHANGELOG section. The tag and the GitHub
    Release must not exist yet, and the static-checks workflow must have a
    successful push run on `main` for this commit. GitHub CLI must be signed in,
-   and Python with the documentation packages and Node.js must be available;
-2. the static gates (`tools/check.py --ci`) and the Ribbon check, with its
-   output kept (section 5);
+   and Python with the documentation packages must be available;
+2. the static gates: the `static-checks.json` that CI wrote on that push run is
+   downloaded and must be a clean committed PASS of all eleven gates for this
+   commit (the same report `release-check.yml` reads); the Ribbon check runs
+   locally, with its output kept (section 5);
 3. both source runs, `tools/Certify-Excel.ps1` standard and `-WithUISmoke`
    (section 6);
 4. the add-in and demo builds with the release file names; you answer their
