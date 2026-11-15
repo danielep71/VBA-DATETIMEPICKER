@@ -96,6 +96,9 @@ class PackageRunTests(unittest.TestCase):
         # other_addins for each package; they come from the run, not by hand.
         for key in ("monitors", "scaling", "other_addins", "load_mode"):
             self.assertRegex(self.code, rf"\n        {key} +=")
+        # Excel started by a script can still load COM add-ins (seen at 8a96dea),
+        # so the load mode must not claim that none load.
+        self.assertNotIn("no add-ins", self.code)
 
     def test_other_addin_names_stay_out_of_the_evidence(self) -> None:
         body = function_body(self.code, "Get-OtherAddIns")

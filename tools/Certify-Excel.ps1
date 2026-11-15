@@ -678,7 +678,7 @@ $summary = [ordered]@{
         scaling            = $display.scaling
         other_addins       = "unknown"
         load_mode          = $(if ($packageMode) {
-                "$packageHost opened read-only by tools/Certify-Excel.ps1 in an Excel instance it started (no add-ins load at startup)" } else {
+                "$packageHost opened read-only by tools/Certify-Excel.ps1 in an Excel instance it started" } else {
                 "source imported into a new workbook by tools/Certify-Excel.ps1" })
     }
     import             = [ordered]@{ status = "NOT_RUN"; components = @() }
