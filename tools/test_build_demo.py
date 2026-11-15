@@ -8,6 +8,8 @@ import re
 import unittest
 from pathlib import Path
 
+import assemble_release
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "Build-Addin.ps1"
 DEMO = ROOT / "demo" / "M_DP_DEMO.bas"
@@ -92,6 +94,12 @@ class DemoBuildTests(unittest.TestCase):
     def test_summary_names_the_kind(self) -> None:
         self.assertIn('$kind = $(if ($Demo) { "demo" } else { "addin" })', self.code)
         self.assertIn("    kind               = $kind", self.code)
+
+    def test_kinds_match_what_the_assembler_reads(self) -> None:
+        self.assertEqual(assemble_release.BUILDER, "tools/Build-Addin.ps1")
+        self.assertIn(f'tool               = "{assemble_release.BUILDER}"', self.code)
+        self.assertEqual(assemble_release.KINDS, {"xlam": "addin", "xlsm": "demo"})
+        self.assertIn('$kind = $(if ($Demo) { "demo" } else { "addin" })', self.code)
 
     def test_launcher_passes_demo(self) -> None:
         launcher = LAUNCHER.read_text(encoding="ascii")
