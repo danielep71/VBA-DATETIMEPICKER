@@ -138,7 +138,8 @@ It stops at the first failure and runs, in order:
 `-DryRun` does steps 1 to 9 and stops before the tag; `-Rehearse` tries steps
 2 to 7 on a checkout that is not a release candidate yet. `-Resume <folder>`
 continues a run that stopped: the preflight runs again, the steps that passed
-are kept, and the run continues from the first one that did not. Everything goes into one
+are kept, and the run continues from the first one that did not; the files to
+publish are always checked against the evidence again before the confirmation. Everything goes into one
 folder next to the checkout, `DATETIMEPICKER-release-vX.Y.Z-<sha12>-<stamp>`,
 ending with `release.txt` and `release.json`
 ([tools/README.md](tools/README.md#run-the-whole-release-windows)). The sections

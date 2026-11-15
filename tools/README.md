@@ -656,6 +656,7 @@ holds:
 | `manual/`, `manual-checks.json` | The PDF as downloaded from CI with the commit it was rendered from, and your answers to the six manual checks |
 | `release-assets/` | The two packages, the PDF and `release-evidence.json`, as published |
 | `evidence/` | The output of `tools/assemble_release.py` |
+| `assets-check-<stamp>.json` | The check of `release-assets/` against the evidence before the confirmation |
 | `published/`, `published-check.json` | The release downloaded again, and its validation with the tag |
 | `release.txt`, `release.json`, `session.log` | Each step with its result, and the reason it stopped |
 
@@ -681,7 +682,13 @@ the run continues from the first one that did not. A step that runs again
 first moves its earlier folders aside as `<name>.failed-<yyyyMMdd-HHmmss>`,
 because the tools never write into a folder that is not empty. A release
 resumes only at the same commit; a rehearsal may keep steps that ran at an
-earlier commit of the tools, and `release.txt` says so. Without it, you type the tag to confirm. The command then checks that
+earlier commit of the tools, and `release.txt` says so. Whether step 8 was
+kept or not, the final confirmation step first checks the packages, the PDF
+and `release-evidence.json` in `release-assets/` against the evidence again
+(`assets-check-<stamp>.json`), so files changed after an earlier run are never
+published.
+
+Without `-DryRun`, you type the tag to confirm. The command then checks that
 `origin/main` has not moved and pushes the annotated tag. It creates the
 release, downloads it again and compares every file with the tested one, then
 runs `check_release.py --require-tag`. If the release cannot be created after
