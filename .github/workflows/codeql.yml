@@ -11,10 +11,9 @@ on:
     branches:
       - main
       - "release/**"
+  # Every pull request, whatever its base, so a stacked pull request is
+  # analyzed too; tools/test_workflow_triggers.py guards the filters.
   pull_request:
-    branches:
-      - main
-      - "release/**"
   schedule:
     - cron: "17 4 * * 2"
   workflow_dispatch:
