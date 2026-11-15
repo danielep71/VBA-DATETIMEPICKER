@@ -41,7 +41,7 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 '     are grouped separately so the public surface is easier to navigate.
 '
 ' UPDATED
-'   2026-11-09
+'   2026-11-15
 '
 ' AUTHOR
 '   Daniele Penza
@@ -1610,8 +1610,12 @@ Public Sub DEMO_Sheet_Reset( _
 '   protected worksheet. Therefore that specific flag cannot be reconstructed
 '   faithfully during re-protection.
 '
+'   RemovePageBreaks makes Excel query the default printer's driver to lay out
+'   pages. A slow or sleeping printer can then block or prompt (#204), so
+'   DEMO_Sheet_BuildTemplate passes FALSE.
+'
 ' UPDATED
-'   2026-04-24
+'   2026-11-15
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -1892,7 +1896,8 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 ' BEHAVIOR
 '   - Uses the requested workbook or defaults to ThisWorkbook
 '   - Gets or creates the requested worksheet
-'   - Resets the sheet before rebuilding it
+'   - Resets the sheet before rebuilding it, leaving page breaks unchanged
+'     so that no step depends on the default printer
 '   - Derives the separator column from ContentColumns
 '   - Derives the first hidden column from the separator column
 '   - Writes title / subtitle bands from column B to the last content column
@@ -1917,7 +1922,7 @@ Public Sub DEMO_Sheet_BuildTemplate( _
 '     for backward compatibility.
 '
 ' UPDATED
-'   2026-04-24
+'   2026-11-15
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -2048,7 +2053,10 @@ Public Sub DEMO_Sheet_BuildTemplate( _
         Set WS = DEMO_Sheet_GetOrCreate(Wb, WS_Name)
 
     'Reset the worksheet to a clean reusable state before rebuilding it
-        DEMO_Sheet_Reset WS
+    'Leave page breaks alone: removing them makes Excel query the default
+    'printer's driver, which can block or prompt when that printer is slow or
+    'asleep (#204). A rebuilt template sheet carries no manual page breaks
+        DEMO_Sheet_Reset WS, RemovePageBreaks:=False
 
 '------------------------------------------------------------------------------
 ' INITIALIZE WORKSHEET LIMITS
