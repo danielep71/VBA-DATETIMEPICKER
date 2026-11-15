@@ -330,6 +330,10 @@ def main(argv: list[str] | None = None) -> int:
     options = parser.parse_args(argv)
     try:
         ref = options.ref or checked_out_revision(ROOT)
+        # test-results/ and release-assets/ are ignored, so a fresh clone has neither.
+        for output in (options.html, options.pdf):
+            if output is not None:
+                output.resolve().parent.mkdir(parents=True, exist_ok=True)
         if options.pdf is None:
             options.html.write_text(build_html(ROOT, ref), encoding="utf-8")
         else:

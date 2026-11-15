@@ -157,6 +157,34 @@ class ContentsTests(unittest.TestCase):
             renderer.assign_pages(document, [("Manual", 1), ("B", 2)])
 
 
+class OutputFolderTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.folder)
+
+    def test_missing_html_folder_is_created(self) -> None:
+        target = self.folder / "test-results" / "nested" / "manual.html"
+        with mock.patch("render_manual.build_html", return_value="<html></html>"), \
+                mock.patch("sys.stdout"):
+            self.assertEqual(renderer.main(["--html", str(target), "--ref", "abc123"]), 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), "<html></html>")
+
+    def test_missing_pdf_folder_is_created(self) -> None:
+        html_target = self.folder / "test-results" / "manual.html"
+        pdf_target = self.folder / "release-assets" / "manual.pdf"
+
+        def render(_browser: str, _root: Path, _ref: str, html_file: Path, pdf_file: Path) -> None:
+            html_file.write_text("<html></html>", encoding="utf-8")
+            pdf_file.write_bytes(b"%PDF-1.7")
+
+        with mock.patch("render_manual.find_browser", return_value="browser"), \
+                mock.patch("render_manual.render_pdf", side_effect=render), mock.patch("sys.stdout"):
+            self.assertEqual(renderer.main(["--html", str(html_target), "--pdf", str(pdf_target),
+                                            "--ref", "abc123"]), 0)
+        self.assertTrue(html_target.is_file())
+        self.assertTrue(pdf_target.is_file())
+
+
 @unittest.skipUnless(importlib.util.find_spec("markdown"), "Python-Markdown is not installed")
 class ManualTests(unittest.TestCase):
     def test_the_manual_renders_self_contained(self) -> None:
