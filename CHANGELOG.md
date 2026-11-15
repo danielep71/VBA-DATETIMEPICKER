@@ -318,6 +318,14 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- CONTRIBUTING's final-head review rule lets an unchanged sync pull request
+  name the integration's review instead of requesting a new one: its head is
+  the integration merge commit, its diff against the release branch is empty,
+  and the integration review covered the same tree. CI still runs, a sync that
+  changes any file is reviewed as usual, and a review is still renewed after a
+  rebase. The pull-request template points to the rule
+  ([#200](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/200)).
+
 - Aligned the release procedure and certification template with the evidence
   validator: certify the integrated main SHA, record both required packages,
   per-host environments, harness totals and six manual records, and retain a

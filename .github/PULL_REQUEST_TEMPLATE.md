@@ -338,7 +338,7 @@ Unresolved question or accepted trade-off:
 
 ## 🔏 Final-head review
 
-<!-- Complete before merging; see CONTRIBUTING.md, "Final-head review". Re-check after every push. Bot pull requests that only bump a pinned dependency are exempt. -->
+<!-- Complete before merging; see CONTRIBUTING.md, "Final-head review". Re-check after every push. Bot pull requests that only bump a pinned dependency are exempt; an unchanged sync pull request may name the integration's review instead (see CONTRIBUTING.md). -->
 
 | Record | Value |
 | --- | --- |
