@@ -103,6 +103,15 @@ Use only the categories needed by a release.
 
 ### Added
 
+- `tools/Certify-Excel.cmd -Package <file>` runs the regression pack inside a
+  built `.xlam` or demo `.xlsm` (RELEASING §7, step 10;
+  [#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+  runs `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke`, each in a new Excel
+  instance with the package open read-only, never saves it, and fails if the
+  package's SHA-256 changes. The harness now writes the suites dispatched and
+  completed to `K9:K10` of `TST_DP_RESULTS` and as a `Harness | Suites` row, and
+  both source and package runs fail when a dispatched suite did not complete.
+  The summary line keeps its format.
 - One-command add-in build with its Ribbon, `tools/Build-Addin.cmd` with
   `tools/Build-Addin.ps1`, for Windows hosts ([#208](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/208)). From a clean checkout it:
   - checks `src/ribbon/`;

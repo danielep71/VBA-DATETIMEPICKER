@@ -267,7 +267,9 @@ For each artifact:
    document module, because a document module cannot be imported. The tool
    records its evidence in a folder outside the checkout
    ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
-   Step 10 and the demo workbook remain separate.
+   `tools/Certify-Excel.cmd -Package <file>` performs step 10 on either package
+   ([tools/README.md](tools/README.md#run-the-regression-pack-inside-a-built-package-windows)).
+   The demo workbook build remains separate.
 5. Fail the build if a required Ribbon part or referenced custom resource cannot
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
@@ -289,6 +291,9 @@ For each artifact:
    enabled Ribbon action dispatches correctly.
 10. Run both `TST_DP_RunAll` and `TST_DP_RunAll_WithUISmoke` on each package.
     Record expected and actual run/suite totals, failures and cleanup failures.
+    The harness writes the suites dispatched and completed to `K9:K10` of
+    `TST_DP_RESULTS`. `tools/Certify-Excel.cmd -Package <file>` runs both packs
+    in the package without saving it and fails if its SHA-256 changes.
 11. Record filename, size, and SHA-256.
 12. Never edit the artifact after hashing.
 
