@@ -541,7 +541,7 @@ down and [report the problem](#get-help).
 ## 🕰 Older versions
 
 The published `v1.2.2` add-in differs from this manual in a few visible ways
-(see [CHANGELOG.md](../CHANGELOG.md#unreleased)):
+(see [CHANGELOG.md](../CHANGELOG.md#v1.2.3)):
 
 | In `v1.2.2` | In this manual (`v1.2.3`) |
 |---|---|

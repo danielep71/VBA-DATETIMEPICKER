@@ -97,9 +97,18 @@ Use only the categories needed by a release.
 
 ## [Unreleased]
 
-> Planned for `v1.2.3` (user-facing consistency and Ribbon source patch), not
-> yet released. Work continues on `release/v1.2.3`; release certification will be
-> recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+No unreleased changes yet.
+
+---
+
+<a id="v1.2.3"></a>
+
+## [1.2.3] - 2026-11-15
+
+> 🩹 **Patch** · user-facing consistency and Ribbon source release · no supported API break
+
+Release certification of the tagged commit and both packaged hosts is recorded
+in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 ### Added
 
@@ -1828,7 +1837,8 @@ Backfilled from the repository history.
 
 ---
 
-[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/danielep71/VBA-DATETIMEPICKER/compare/v1.1.1...v1.2.0
