@@ -383,6 +383,7 @@ The demo sheet lets you try the picker on prepared cells. Open it with
 
 | Situation | Where the demo sheet goes |
 |---|---|
+| You opened the demo workbook from the release | Its own demo sheet, kept hidden behind the **Start** sheet until you choose **Demo** |
 | The picker is built into the workbook | A sheet in that workbook |
 | You use the add-in | The open workbook that already has the demo sheet, or a new workbook |
 

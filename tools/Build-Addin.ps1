@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-Build the add-in package of the checked-out commit with its Ribbon, reopen it in
-Excel to check the Ribbon, and write an evidence folder that names the commit,
-the package hash and the host.
+Build the add-in package of the checked-out commit with its Ribbon (or, with
+-Demo, the demo workbook), reopen it in Excel to check the Ribbon, and write an
+evidence folder that names the commit, the package hash and the host.
 
 .DESCRIPTION
 For the commit checked out in this repository:
@@ -25,7 +25,10 @@ For the commit checked out in this repository:
    own ThisWorkbook module. A document module cannot be imported as a
    component, so its code is copied in, and the file's SHA-256 is recorded;
 7. compiles the project with Debug > Compile VBAProject and saves it as an
-   .xlam add-in in the evidence folder;
+   .xlam add-in in the evidence folder. With -Demo it first builds the demo
+   workbook's content with demo\M_DP_DEMO.bas DP_Demo_PrepareReleaseWorkbook
+   (the demo sheet, very hidden, and a Start sheet in front), removes the new
+   workbook's empty default sheets, and saves an .xlsm instead (#222);
 8. injects src/ribbon/ into the package's customUI/ folder with
    tools\build_ribbon_package.py, which also adds the root relationship and
    verifies the result, then removes the save folder, author, sensitivity
@@ -34,9 +37,14 @@ For the commit checked out in this repository:
 9. records the package's size and SHA-256, and runs
    tools\inspect_vba_package.py on it (advisory; its verdict is recorded but
    does not decide the build);
-10. opens the package in a fresh Excel instance and asks you three questions
-    about the Ribbon: the Show Picker icon, the Reset and Demo icons, and
-    whether Show Picker opens the picker. It closes without saving and checks
+10. opens the package in a fresh Excel instance, with
+    Application.AutomationSecurity set to Low for that instance only so that
+    its macros run without a Security Notice (not saved; the Trust Center is
+    unchanged), and asks you three questions about the Ribbon: the Show Picker
+    icon, the Reset and Demo icons, and whether Show Picker opens the picker.
+    With -Demo it asks two more: whether the workbook opens on its Start sheet,
+    and whether Demo shows the demo sheet with a working Fill Table Column
+    button. It closes without saving and checks
     that the package hash has not changed. Each Excel instance is closed with
     tools\ExcelCleanup.psm1: every close step is tried even when an earlier one
     fails, and each failure is recorded;
@@ -48,9 +56,8 @@ request, and the working tree was clean. Everything else exits 1, and the
 evidence says why.
 
 This automates the package build and the Ribbon check of RELEASING.md
-section 7. It does not run the regression pack on the package (use
-tools\Certify-Excel.cmd for the source, and step 10 of section 7 for packages),
-and it builds no demo workbook.
+section 7, for the add-in and, with -Demo, for the demo workbook. It does not
+run the regression pack on the package: tools\Certify-Excel.cmd -Package does.
 
 .REQUIREMENTS
 - Windows with desktop Excel, Git and Python 3.11 or later on the PATH
@@ -65,6 +72,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Build-Addin.ps1
 
 .EXAMPLE
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Build-Addin.ps1 -PackageName DATETIMEPICKER.v1.2.3.xlam
+
+.EXAMPLE
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Build-Addin.ps1 -Demo -PackageName DATETIMEPICKER-demo-v1.2.3.xlsm
 #>
 [CmdletBinding()]
 param(
@@ -78,6 +88,7 @@ param(
     [string]$Operator = "Repository owner, local Windows workstation",
     [Parameter(Mandatory = $false)]
     [string]$RepoRoot,
+    [switch]$Demo,
     [switch]$AllowDirty,
     [switch]$NoOpen
 )
@@ -93,6 +104,13 @@ $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 
 $compileControlId = 578
 $xlOpenXMLAddIn = 55
+$xlOpenXMLWorkbookMacroEnabled = 52
+$xlSheetVeryHidden = 2
+$msoAutomationSecurityLow = 1
+$demoSheetName = "DATE PICKER DEMO"
+$startSheetName = "Start"
+$kind = $(if ($Demo) { "demo" } else { "addin" })
+$extension = $(if ($Demo) { ".xlsm" } else { ".xlam" })
 $vbextDocument = 100
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:sessionLog = $null
@@ -308,15 +326,16 @@ if ($workbookCode -notmatch '(?m)^\s*Private Sub Workbook_Open\(\)') {
 $workbookSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $workbookSourceFile).Hash.ToLowerInvariant()
 
 if ([string]::IsNullOrWhiteSpace($PackageName)) {
-    $PackageName = "DATETIMEPICKER-build-" + $sha.Substring(0, 12) + ".xlam"
+    $PackageName = $(if ($Demo) { "DATETIMEPICKER-demo-build-" } else { "DATETIMEPICKER-build-" }) + $sha.Substring(0, 12) + $extension
 }
-if ($PackageName -notmatch '^[A-Za-z0-9._-]+\.xlam$') {
-    throw "-PackageName must be a plain file name ending in .xlam: $PackageName"
+if ($PackageName -notmatch ('^[A-Za-z0-9._-]+' + [regex]::Escape($extension) + '$')) {
+    throw "-PackageName must be a plain file name ending in ${extension}: $PackageName"
 }
+$version = (Get-Content -LiteralPath (Join-Path $RepoRoot "VERSION") -Raw).Trim()
 
 $stamp = (Get-Date).ToString("yyyyMMdd-HHmmss")
 if ([string]::IsNullOrWhiteSpace($BundleDir)) {
-    $BundleDir = Join-Path (Split-Path -Parent $RepoRoot) ("DATETIMEPICKER-addin-" + $sha.Substring(0, 12) + "-" + $stamp)
+    $BundleDir = Join-Path (Split-Path -Parent $RepoRoot) ("DATETIMEPICKER-" + $kind + "-" + $sha.Substring(0, 12) + "-" + $stamp)
 }
 if (Test-Path -LiteralPath $BundleDir) {
     if (@(Get-ChildItem -LiteralPath $BundleDir -Force).Count -gt 0) {
@@ -333,7 +352,7 @@ if ($BundleDir.StartsWith($RepoRoot + [System.IO.Path]::DirectorySeparatorChar, 
 $script:sessionLog = Join-Path $BundleDir "session.log"
 $packagePath = Join-Path $BundleDir $PackageName
 $startedAt = Get-Timestamp
-Write-Session "Add-in build of $sha ($branch)"
+Write-Session "$(if ($Demo) { 'Demo workbook' } else { 'Add-in' }) build of $sha ($branch)"
 Write-Session "Checkout $RepoRoot; evidence $BundleDir; configuration $Configuration; package $PackageName"
 if ($dirty) {
     Write-Session "The working tree has changes (-AllowDirty): this build is not release-grade"
@@ -357,6 +376,7 @@ Write-Session "Windows: $osText"
 
 $summary = [ordered]@{
     tool               = "tools/Build-Addin.ps1"
+    kind               = $kind
     operator           = $Operator
     candidate_sha      = $sha
     branch             = $branch
@@ -372,11 +392,13 @@ $summary = [ordered]@{
         macro_policy       = "unknown"
         vba_project_access = "unknown"
         python             = "unknown"
+        package_macros     = $null
     }
     ribbon_source      = [ordered]@{ status = "NOT_RUN"; output = @() }
     import             = [ordered]@{ status = "NOT_RUN"; components = @() }
     lifecycle_hooks    = [ordered]@{ status = "NOT_RUN"; module = $null; source = $workbookSource; source_sha256 = $workbookSourceHash }
     compile            = [ordered]@{ status = "NOT_RUN"; detail = "Not run" }
+    demo_content       = [ordered]@{ status = $(if ($Demo) { "NOT_RUN" } else { "NOT_APPLICABLE" }); result = $null; caption = $null; removed = @(); sheets = @() }
     save               = [ordered]@{ status = "NOT_RUN" }
     ribbon_injection   = [ordered]@{ status = "NOT_RUN"; output = @() }
     metadata           = [ordered]@{ status = "NOT_RUN"; output = @() }
@@ -387,6 +409,8 @@ $summary = [ordered]@{
         show_picker_icon  = $null
         menu_icons        = $null
         show_picker_opens = $null
+        opens_on_start    = $null
+        demo_sheet_works  = $null
     }
     cleanup            = [ordered]@{ status = "NOT_RUN"; failures = @() }
     result             = "FAIL"
@@ -542,9 +566,61 @@ try {
     $vbe.MainWindow.Visible = $false
 
     # ------------------------------------------------------------------------
-    # Save as an add-in and close the build instance
+    # Demo workbook content (-Demo)
     # ------------------------------------------------------------------------
-    $workbook.SaveAs($packagePath, $xlOpenXMLAddIn)
+    if ($Demo) {
+        # The content is defined by tracked VBA; the function returns OK or the
+        # error as text, so no modal error window can stop the build.
+        $caption = "Version $version, built from commit $($sha.Substring(0, 12))."
+        $summary.demo_content.caption = $caption
+        $workbook.Activate()
+        $qualified = "'" + ([string]$workbook.Name).Replace("'", "''") + "'!"
+        $result = [string]$excel.Run($qualified + "DP_Demo_PrepareReleaseWorkbook", $caption)
+        $summary.demo_content.result = $result
+        Write-Session "DP_Demo_PrepareReleaseWorkbook: $result"
+        if ($result -ne "OK") {
+            $summary.demo_content.status = "FAIL"
+            throw "The demo workbook content could not be built: $result"
+        }
+        # A new workbook has one or more empty default sheets with localized
+        # names. Only empty sheets are removed; anything else stops the build.
+        $remove = @()
+        foreach ($sheet in $workbook.Worksheets) {
+            $name = [string]$sheet.Name
+            if ($name -eq $startSheetName -or $name -eq $demoSheetName) {
+                continue
+            }
+            if ([int]$excel.WorksheetFunction.CountA($sheet.Cells) -ne 0 -or [int]$sheet.Shapes.Count -ne 0) {
+                $summary.demo_content.status = "FAIL"
+                throw "The new workbook has a sheet that is not empty: $name"
+            }
+            $remove += $sheet
+        }
+        foreach ($sheet in $remove) {
+            $summary.demo_content.removed += [string]$sheet.Name
+            [void]$sheet.Delete()
+        }
+        $sheets = @()
+        foreach ($sheet in $workbook.Worksheets) {
+            $sheets += [ordered]@{ name = [string]$sheet.Name; visible = [int]$sheet.Visible }
+        }
+        $summary.demo_content.sheets = $sheets
+        $expected = ($sheets.Count -eq 2 -and
+            $sheets[0].name -eq $startSheetName -and $sheets[0].visible -eq -1 -and
+            $sheets[1].name -eq $demoSheetName -and $sheets[1].visible -eq $xlSheetVeryHidden)
+        if (-not $expected) {
+            $summary.demo_content.status = "FAIL"
+            throw ("The demo workbook must hold a visible Start sheet and the very hidden demo sheet, in that order; found: " +
+                   (($sheets | ForEach-Object { "$($_.name) ($($_.visible))" }) -join ", "))
+        }
+        $summary.demo_content.status = "PASS"
+        Write-Session "Demo content: Start (visible), $demoSheetName (very hidden); removed $($summary.demo_content.removed -join ', ')"
+    }
+
+    # ------------------------------------------------------------------------
+    # Save the package and close the build instance
+    # ------------------------------------------------------------------------
+    $workbook.SaveAs($packagePath, $(if ($Demo) { $xlOpenXMLWorkbookMacroEnabled } else { $xlOpenXMLAddIn }))
     $summary.save = [ordered]@{ status = "PASS" }
     Write-Session "Saved as $packagePath"
     # Workbook_BeforeClose would call DP_Stop on a runtime this instance never
@@ -604,23 +680,44 @@ try {
     $summary.ribbon_check.status = "STARTED"
     $excel = New-Object -ComObject Excel.Application
     $excel.Visible = $true
+    # The package's macros must run for the Ribbon and Workbook_Open. The
+    # property belongs to this instance only and is not saved.
+    try {
+        $excel.AutomationSecurity = $msoAutomationSecurityLow
+    }
+    catch {
+        Write-Session ("AutomationSecurity could not be set: " + $_.Exception.Message)
+    }
+    $summary.host.package_macros = $(if ([int]$excel.AutomationSecurity -eq $msoAutomationSecurityLow) {
+            "Enabled for files this Excel instance opens (AutomationSecurity=1)" } else {
+            "AutomationSecurity=$([int]$excel.AutomationSecurity); Excel asks before running the package's macros" })
+    Write-Session "Package macros: $($summary.host.package_macros)"
     $addin = $excel.Workbooks.Open($packagePath, 0, $true)
-    $blank = $excel.Workbooks.Add()
+    $blank = $null
+    if (-not $Demo) {
+        $blank = $excel.Workbooks.Add()
+    }
     try {
         $excel.WindowState = -4137
     }
     catch {
     }
-    Write-Session "Reopened $PackageName read-only in a new Excel instance, with a blank workbook"
+    Write-Session "Reopened $PackageName read-only in a new Excel instance$(if ($null -ne $blank) { ', with a blank workbook' } else { '' })"
     Write-Host ""
     Write-Host "Switch to the new Excel window and open its Home tab."
     $summary.ribbon_check.show_picker_icon = Read-YesNo "1. The 'Date / Time Picker' group shows a large 'Show Picker' button with its calendar-grid icon?"
     $summary.ribbon_check.menu_icons = Read-YesNo "2. The arrow under 'Show Picker' opens a menu where 'Reset' and 'Demo' each show their own icon?"
     $summary.ribbon_check.show_picker_opens = Read-YesNo "3. Clicking 'Show Picker' opens the Date / Time Picker? (close it again before answering)"
+    if ($Demo) {
+        $summary.ribbon_check.opens_on_start = Read-YesNo "4. The workbook opened on its 'Start' sheet, with its instructions?"
+        $summary.ribbon_check.demo_sheet_works = Read-YesNo "5. 'Demo' in that menu shows the demo sheet, and its 'Fill Table Column' button responds? (cancel its prompt)"
+    }
     $summary.ribbon_check.status = "ANSWERED"
     Write-Session ("Ribbon check: Show Picker icon=" + $summary.ribbon_check.show_picker_icon +
                    "; Reset and Demo icons=" + $summary.ribbon_check.menu_icons +
-                   "; Show Picker opens the picker=" + $summary.ribbon_check.show_picker_opens)
+                   "; Show Picker opens the picker=" + $summary.ribbon_check.show_picker_opens +
+                   $(if ($Demo) { "; opens on Start=" + $summary.ribbon_check.opens_on_start +
+                           "; demo sheet works=" + $summary.ribbon_check.demo_sheet_works } else { "" }))
     Close-Excel -Excel $excel -Workbooks @($blank, $addin) -Label "Check"
     $excel = $null
     $summary.package.sha256_after_reopen = (Get-FileHash -Algorithm SHA256 -LiteralPath $packagePath).Hash.ToLowerInvariant()
@@ -658,7 +755,8 @@ if ($summary.ribbon_source.status -ne "PASS") { $summary.reasons += "Ribbon sour
 if ($summary.import.status -ne "PASS") { $summary.reasons += "Import: $($summary.import.status)" }
 if ($summary.lifecycle_hooks.status -ne "PASS") { $summary.reasons += "ThisWorkbook code: $($summary.lifecycle_hooks.status)" }
 if ($summary.compile.status -ne "PASS") { $summary.reasons += "Compile: $($summary.compile.status)" }
-if ($summary.save.status -ne "PASS") { $summary.reasons += "Save as add-in: $($summary.save.status)" }
+if ($Demo -and $summary.demo_content.status -ne "PASS") { $summary.reasons += "Demo content: $($summary.demo_content.status)" }
+if ($summary.save.status -ne "PASS") { $summary.reasons += "Save as ${extension}: $($summary.save.status)" }
 if ($summary.ribbon_injection.status -ne "PASS") { $summary.reasons += "Ribbon injection: $($summary.ribbon_injection.status)" }
 if ($summary.metadata.status -ne "PASS") { $summary.reasons += "Metadata removal: $($summary.metadata.status)" }
 if ($summary.ribbon_check.status -ne "ANSWERED") {
@@ -668,6 +766,8 @@ else {
     if (-not $summary.ribbon_check.show_picker_icon) { $summary.reasons += "The Show Picker icon did not render" }
     if (-not $summary.ribbon_check.menu_icons) { $summary.reasons += "The Reset or Demo icon did not render" }
     if (-not $summary.ribbon_check.show_picker_opens) { $summary.reasons += "Show Picker did not open the picker" }
+    if ($Demo -and -not $summary.ribbon_check.opens_on_start) { $summary.reasons += "The demo workbook did not open on its Start sheet" }
+    if ($Demo -and -not $summary.ribbon_check.demo_sheet_works) { $summary.reasons += "Demo did not show a working demo sheet" }
 }
 if ($null -ne $summary.package.sha256 -and $summary.package.sha256_after_reopen -ne $summary.package.sha256) {
     $summary.reasons += "The package hash changed after reopening, or could not be read"
@@ -687,7 +787,7 @@ function Format-Answer {
 }
 
 $report = @(
-    "Add-in build and Ribbon check",
+    $(if ($Demo) { "Demo workbook build and Ribbon check" } else { "Add-in build and Ribbon check" }),
     "",
     "Result:          $($summary.result)",
     "Candidate:       $sha ($branch)",
@@ -702,12 +802,14 @@ $report = @(
     "ThisWorkbook:    $($summary.lifecycle_hooks.status) - $workbookSource into $($summary.lifecycle_hooks.module)",
     "                 source SHA-256 $workbookSourceHash",
     "Compile:         $($summary.compile.status) - $($summary.compile.detail)",
-    "Save as .xlam:   $($summary.save.status)",
+    "Demo content:    $($summary.demo_content.status)$(if ($Demo) { ' - ' + $summary.demo_content.result } else { '' })",
+    "Save as ${extension}:   $($summary.save.status)",
     "Ribbon inject:   $($summary.ribbon_injection.status)",
     "Metadata:        $($summary.metadata.status) - save folder, author, label and printer removed",
     "Excel cleanup:   $($summary.cleanup.status)",
     "",
     "Package:         $PackageName",
+    "Package macros:  $($summary.host.package_macros)",
     "Size:            $($summary.package.bytes) bytes",
     "SHA-256:         $($summary.package.sha256)",
     "After reopening: $($summary.package.sha256_after_reopen)",
@@ -717,6 +819,8 @@ $report = @(
     "  Show Picker shows its icon:        $(Format-Answer $summary.ribbon_check.show_picker_icon)",
     "  Reset and Demo show their icons:   $(Format-Answer $summary.ribbon_check.menu_icons)",
     "  Show Picker opens the picker:      $(Format-Answer $summary.ribbon_check.show_picker_opens)",
+    "  Opens on the Start sheet:          $(Format-Answer $summary.ribbon_check.opens_on_start)",
+    "  Demo shows a working demo sheet:   $(Format-Answer $summary.ribbon_check.demo_sheet_works)",
     "",
     "Started:  $startedAt",
     "Finished: $($summary.finished_at)")

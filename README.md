@@ -336,6 +336,10 @@ The demo source can build the worksheet through:
 DP_Demo_CreateDemoSheet
 ```
 
+The released demo workbook opens on a **Start** sheet. Its demo sheet is
+hidden until you choose **Home → Date / Time Picker → Demo** (the drop-down
+part of **Show Picker**).
+
 ## Option 3 — install the `.xlam`
 
 Download the add-in asset from

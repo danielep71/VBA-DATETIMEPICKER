@@ -336,7 +336,9 @@ The run:
 8. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
    on it. The inspection is advisory and its verdict does not decide the build;
 9. opens the package read-only in a fresh Excel instance with a blank workbook,
-   and asks three questions:
+   with that instance's `Application.AutomationSecurity` set to Low so that the
+   package's macros run without a **Security Notice** (not saved; the Trust
+   Center settings stay as they are), and asks three questions:
    - Does Show Picker show its icon?
    - Do Reset and Demo show theirs?
    - Does Show Picker open the picker?
@@ -358,8 +360,33 @@ the checkout (or `-BundleDir`), holds:
 The exit code is 0 only when every step passes, all three answers are yes, the
 hash is unchanged after reopening, Excel accepts every close request (see
 [Closing Excel](#closing-excel)), and the tree was clean. The tool does not run
-the regression pack on the package (RELEASING §7 step 10) and builds no demo
-workbook.
+the regression pack on the package; `tools/Certify-Excel.cmd -Package` does
+(RELEASING §7 step 10).
+
+### Build the demo workbook
+
+`tools/Build-Demo.cmd` runs the same script with `-Demo`
+([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). The
+demo workbook has the same modules, the same `ThisWorkbook` code and the same
+Ribbon as the add-in. The differences:
+
+- after compiling, it calls `DP_Demo_PrepareReleaseWorkbook` in
+  `demo/M_DP_DEMO.bas`, which builds the demo sheet and a **Start** sheet in
+  front of it, activates Start and hides the demo sheet as `Workbook_Open`
+  does. It returns `OK` or the error as text;
+- it removes the new workbook's empty default sheets and stops if one is not
+  empty. The workbook must end with a visible Start sheet and the very hidden
+  demo sheet, in that order;
+- it saves an `.xlsm` (`DATETIMEPICKER-demo-build-<sha12>.xlsm`, or
+  `-PackageName`) into `DATETIMEPICKER-demo-<sha12>-<yyyyMMdd-HHmmss>`;
+- after reopening it, with no blank workbook, it asks two more questions:
+  - Does the workbook open on its Start sheet?
+  - Does **Demo** show the demo sheet with a working **Fill Table Column**
+    button?
+
+The Start sheet says how to open the demo sheet and the picker, and names the
+version and commit it was built from. `summary.json` records `"kind": "demo"`
+and the sheets under `demo_content`; an add-in build records `"kind": "addin"`.
 
 ## Closing Excel
 
