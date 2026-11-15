@@ -12300,9 +12300,11 @@ Private Sub TST_DP_WriteSummary()
 '   Nothing
 '
 ' BEHAVIOR
-'   Records an INFO result with the total run, passed, and failed counts, then
-'   writes the same counts to fixed cells on the result sheet if available and
-'   auto-fits the result columns
+'   Records an INFO result with the total run, passed, and failed counts, and a
+'   second INFO result with the suites dispatched and completed, then writes the
+'   same counts to fixed cells on the result sheet (K5:K10) if available and
+'   auto-fits the result columns. Release evidence reads the suite counts from
+'   these cells (#222); the summary line itself keeps its documented format
 '
 ' ERROR POLICY
 '   Best-effort. Worksheet-write failures are silently absorbed
@@ -12312,7 +12314,7 @@ Private Sub TST_DP_WriteSummary()
 '   mTST_DP_ResultSheet
 '
 ' UPDATED
-'   2026-05-14
+'   2026-11-15
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -12325,6 +12327,12 @@ Private Sub TST_DP_WriteSummary()
             "; Passed=" & VBA.CStr(mTST_DP_PassCount) & _
             "; Failed=" & VBA.CStr(mTST_DP_FailCount) & _
             "; CleanupFailures=" & VBA.CStr(mTST_DP_CleanupFails)
+
+    'Record the suites dispatched and completed, so evidence can show that every
+    'dispatched suite returned
+        TST_DP_RecordInfo "Harness", "Suites", _
+            "Dispatched=" & VBA.CStr(mTST_DP_SuitesDispatched) & _
+            "; Completed=" & VBA.CStr(mTST_DP_SuitesCompleted)
 
     'Record the first cleanup failure detail so the summary is actionable
         If VBA.Len(mTST_DP_CleanupDetail) <> 0 Then
@@ -12350,6 +12358,10 @@ Private Sub TST_DP_WriteSummary()
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_FailCount
         mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_LABEL).Value = "State"
         mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_VALUE).Value = TST_DP_ResolveRunState()
+        mTST_DP_ResultSheet.Cells(9, TST_DP_COL_SUMMARY_LABEL).Value = "Suites dispatched"
+        mTST_DP_ResultSheet.Cells(9, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_SuitesDispatched
+        mTST_DP_ResultSheet.Cells(10, TST_DP_COL_SUMMARY_LABEL).Value = "Suites completed"
+        mTST_DP_ResultSheet.Cells(10, TST_DP_COL_SUMMARY_VALUE).Value = mTST_DP_SuitesCompleted
 
     'Bold the summary labels
         mTST_DP_ResultSheet.Cells(4, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
@@ -12358,6 +12370,8 @@ Private Sub TST_DP_WriteSummary()
         mTST_DP_ResultSheet.Cells(7, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
         mTST_DP_ResultSheet.Cells(8, TST_DP_COL_SUMMARY_VALUE).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(9, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
+        mTST_DP_ResultSheet.Cells(10, TST_DP_COL_SUMMARY_LABEL).Font.Bold = True
 
     'Auto-fit the result and summary columns
         mTST_DP_ResultSheet.Columns("C:K").AutoFit

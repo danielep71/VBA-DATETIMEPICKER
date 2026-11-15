@@ -236,8 +236,9 @@ The run:
 4. compiles with **Debug → Compile VBAProject**; if the VBE does not show the
    result, it asks you to compile and answer Y or N;
 5. runs `TST_DP_RunAll` (`-WithUISmoke` runs `TST_DP_RunAll_WithUISmoke`);
-6. reads the summary and every row of `TST_DP_RESULTS`, saves the workbook,
-   closes Excel and opens the evidence folder.
+6. reads the summary, the suites dispatched and completed (`K9:K10`) and every
+   row of `TST_DP_RESULTS`, saves the workbook, closes Excel and opens the
+   evidence folder.
 
 The evidence folder, `DATETIMEPICKER-excel-<sha12>-<yyyyMMdd-HHmmss>` next to
 the checkout (or `-BundleDir`), holds:
@@ -251,10 +252,43 @@ the checkout (or `-BundleDir`), holds:
 | `DATETIMEPICKER-regression.xlsm` | The workbook as the run left it |
 
 The exit code is 0 only when import and compile pass, the harness reports
-`State=PASS` with no cleanup failure, Excel accepts every close request (see
-[Closing Excel](#closing-excel)), and the tree was clean. The run covers
-compilation and the regression pack; the manual matrices of a release
-certification (RELEASING §6) and package tests are still separate.
+`State=PASS` with no cleanup failure, every dispatched suite completed, Excel
+accepts every close request (see [Closing Excel](#closing-excel)), and the
+tree was clean. The run covers compilation and the regression pack; the manual
+matrices of a release certification (RELEASING §6) are still separate.
+
+## Run the regression pack inside a built package (Windows)
+
+`-Package <file>` runs the regression pack inside a built `.xlam` add-in or demo
+`.xlsm` instead of the source (RELEASING §7, step 10). Run it from the clean
+checkout of the commit that built the package:
+
+```powershell
+.	ools\Certify-Excel.cmd -Package ..\DATETIMEPICKER-addin-<sha12>-<stamp>\DATETIMEPICKER.v1.2.3.xlam
+```
+
+It records the package's size and SHA-256, then runs two sessions, each in a
+new Excel instance: `TST_DP_RunAll`, then `TST_DP_RunAll_WithUISmoke`. Each
+session sets that instance's `Application.AutomationSecurity` to Low, so the
+package's macros run without a **Security Notice**; the property is not saved
+and the Trust Center settings stay as they are. If a policy refuses it, Excel
+asks and the run waits for **Enable Macros**. Each session then opens the
+package read-only (an add-in also gets a blank workbook,
+which receives `TST_DP_RESULTS`), adds the generated runner to the open package
+in memory, compiles, runs the pack, reads the results and closes everything
+without saving. After each session it checks that the package's SHA-256 has not
+changed. It also records the monitor count, the primary display's scaling, the
+load mode, and how many other add-ins the instance has open; their names go to
+`session.log` only, because they can identify the operator's environment. `-WithUISmoke` and `-Configuration` do not apply.
+
+The evidence folder is `DATETIMEPICKER-package-<sha12>-<yyyyMMdd-HHmmss>`, with
+`certification.txt`, `summary.json`, `session.log`, `results-standard.tsv` and
+`results-ui_smoke.tsv`. The exit code is 0 only when, in both packs, the
+compile passes, the harness reports `State=PASS` with no cleanup failure and
+every dispatched suite completed; Excel accepts every close request; the tree
+is clean; and the package hash never changes. The run proves what these bytes
+did in Excel; the build evidence of `tools/Build-Addin.cmd` records which
+commit built them.
 
 ## Build the add-in and check its Ribbon (Windows)
 
