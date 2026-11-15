@@ -297,14 +297,16 @@ The run:
      PNG content type when the package has none;
    - verifies the result before replacing the file;
    - refuses a package that already has a Ribbon;
-7. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
+7. removes the build machine's metadata with `tools/sanitize_package.py` (see
+   [Remove build-machine metadata](#remove-build-machine-metadata-from-a-package));
+8. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
    on it. The inspection is advisory and its verdict does not decide the build;
-8. opens the package read-only in a fresh Excel instance with a blank workbook,
+9. opens the package read-only in a fresh Excel instance with a blank workbook,
    and asks three questions:
    - Does Show Picker show its icon?
    - Do Reset and Demo show theirs?
    - Does Show Picker open the picker?
-9. closes without saving and checks that the package hash is unchanged.
+10. closes without saving and checks that the package hash is unchanged.
 
 The evidence folder, `DATETIMEPICKER-addin-<sha12>-<yyyyMMdd-HHmmss>` next to
 the checkout (or `-BundleDir`), holds:
@@ -315,13 +317,14 @@ the checkout (or `-BundleDir`), holds:
 | `summary.json` | The same, machine-readable, with the reasons for a FAIL |
 | `DATETIMEPICKER-build-<sha12>.xlam` | The package (`-PackageName` sets another name) |
 | `ribbon-injection.json` | Each injected part with its size and SHA-256, and the root relationship |
+| `package-metadata.json` | The metadata found and removed, and the parts removed or edited |
 | `package-inspection.json`, `.md` | The advisory package inspection |
 | `session.log` | Each step with its time |
 
 The exit code is 0 only when every step passes, all three answers are yes, the
 hash is unchanged after reopening, Excel accepts every close request (see
 [Closing Excel](#closing-excel)), and the tree was clean. The tool does not run
-the regression pack on the package (RELEASING §7 step 9) and builds no demo
+the regression pack on the package (RELEASING §7 step 10) and builds no demo
 workbook.
 
 ## Closing Excel
@@ -353,6 +356,46 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Test-ExcelCleanu
 It prints one line per case and exits 0 only when every case passes.
 `tools/test_excel_cleanup.py`, run by `tools/check.py`, checks that both tools
 close Excel only through the module and record its result before the verdict.
+
+## Remove build-machine metadata from a package
+
+When Excel saves a workbook or add-in, it records details of the machine and
+account that saved it. Every package published up to v1.2.2 carried them
+([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
+`tools/sanitize_package.py` finds and removes:
+
+| Where | What |
+| --- | --- |
+| `x15ac:absPath` in `xl/workbook.xml` | The folder the file was saved from |
+| `docMetadata/` | A Microsoft Purview sensitivity label, with the tenant ID |
+| `customXml/` | Document-library content-type metadata |
+| `xl/printerSettings/` | The printer's settings, including its name |
+| `dc:creator`, `cp:lastModifiedBy` in `docProps/core.xml` | The author and last editor |
+| `Company`, `Manager` in `docProps/app.xml` | The organization and manager |
+
+```sh
+python tools/sanitize_package.py --check <package>...          # report; exit 1 if any is found
+python tools/sanitize_package.py <package> --output <copy>      # write a sanitized copy
+python tools/sanitize_package.py <package> --in-place           # replace the package
+```
+
+How it changes the package:
+- It drops those parts together with their relationships, content types and
+  `r:id` references, and removes the elements and values.
+- Every other part keeps identical content, in the same order. That includes
+  `xl/vbaProject.bin`, the cell data and the Ribbon parts.
+- Elements and attributes are recognised by namespace and local name, so a part
+  that binds another prefix (or none) is handled the same way.
+
+Before replacing anything, it checks the result:
+- the copy reads back;
+- no metadata remains;
+- the untouched parts are byte-identical;
+- no relationship points to a missing part.
+
+`--report <file>` writes the findings and the parts removed or edited as JSON.
+`tools/Build-Addin.cmd` runs it before reopening and hashing the add-in, and
+`check_release.py` refuses a package that still carries any of it.
 
 ## Render the user manual to PDF
 
@@ -454,8 +497,8 @@ workflow fails rather than substituting another commit's report.
 
 The validator requires the candidate to be reachable from fetched `origin/main`
 and records the main SHA used for that check. It rejects stale candidate IDs, missing hosts, failed compile,
-incomplete/failed regressions, cleanup failures, changed bytes and unaccepted
-manual gaps. `NOT RUN` needs a named `accepted_by` and a description; output is
+incomplete/failed regressions, cleanup failures, changed bytes, packages that
+still carry build-machine metadata, and unaccepted manual gaps. `NOT RUN` needs a named `accepted_by` and a description; output is
 `pass_with_limitations`, with the gaps retained individually. A reported `FAIL`
 blocks validation. Acceptance remains a maintainer decision, not an automatic
 waiver. Successful validation checks record consistency; it does not authenticate

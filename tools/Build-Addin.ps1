@@ -28,7 +28,9 @@ For the commit checked out in this repository:
    .xlam add-in in the evidence folder;
 8. injects src/ribbon/ into the package's customUI/ folder with
    tools\build_ribbon_package.py, which also adds the root relationship and
-   verifies the result;
+   verifies the result, then removes the save folder, author, sensitivity
+   label, document-library and printer metadata that Excel recorded, with
+   tools\sanitize_package.py (#221);
 9. records the package's size and SHA-256, and runs
    tools\inspect_vba_package.py on it (advisory; its verdict is recorded but
    does not decide the build);
@@ -47,7 +49,7 @@ evidence says why.
 
 This automates the package build and the Ribbon check of RELEASING.md
 section 7. It does not run the regression pack on the package (use
-tools\Certify-Excel.cmd for the source, and step 9 of section 7 for packages),
+tools\Certify-Excel.cmd for the source, and step 10 of section 7 for packages),
 and it builds no demo workbook.
 
 .REQUIREMENTS
@@ -377,6 +379,7 @@ $summary = [ordered]@{
     compile            = [ordered]@{ status = "NOT_RUN"; detail = "Not run" }
     save               = [ordered]@{ status = "NOT_RUN" }
     ribbon_injection   = [ordered]@{ status = "NOT_RUN"; output = @() }
+    metadata           = [ordered]@{ status = "NOT_RUN"; output = @() }
     package            = [ordered]@{ file = $PackageName; bytes = $null; sha256 = $null; sha256_after_reopen = $null }
     package_inspection = [ordered]@{ status = "NOT_RUN"; exit_code = $null }
     ribbon_check       = [ordered]@{
@@ -565,6 +568,20 @@ try {
     if ($injection.Code -ne 0) {
         throw "The Ribbon could not be injected; see build_ribbon_package.py above."
     }
+
+    # Excel records the save folder, author, sensitivity label and printer in
+    # the package. Remove them before the package is reopened, tested and
+    # hashed (#221).
+    $sanitizer = Join-Path $RepoRoot "tools\sanitize_package.py"
+    $sanitize = Invoke-Python -Python $python -Arguments @(
+        $sanitizer, $packagePath, "--in-place", "--report", (Join-Path $BundleDir "package-metadata.json"))
+    $summary.metadata = [ordered]@{ status = $(if ($sanitize.Code -eq 0) { "PASS" } else { "FAIL" }); output = $sanitize.Output }
+    foreach ($line in $sanitize.Output) {
+        Write-Session "  $line"
+    }
+    if ($sanitize.Code -ne 0) {
+        throw "The package metadata could not be removed; see sanitize_package.py above."
+    }
     $summary.package.bytes = (Get-Item -LiteralPath $packagePath).Length
     $summary.package.sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $packagePath).Hash.ToLowerInvariant()
     Write-Session "Package $PackageName, $($summary.package.bytes) bytes, SHA-256 $($summary.package.sha256)"
@@ -643,6 +660,7 @@ if ($summary.lifecycle_hooks.status -ne "PASS") { $summary.reasons += "ThisWorkb
 if ($summary.compile.status -ne "PASS") { $summary.reasons += "Compile: $($summary.compile.status)" }
 if ($summary.save.status -ne "PASS") { $summary.reasons += "Save as add-in: $($summary.save.status)" }
 if ($summary.ribbon_injection.status -ne "PASS") { $summary.reasons += "Ribbon injection: $($summary.ribbon_injection.status)" }
+if ($summary.metadata.status -ne "PASS") { $summary.reasons += "Metadata removal: $($summary.metadata.status)" }
 if ($summary.ribbon_check.status -ne "ANSWERED") {
     $summary.reasons += "Ribbon check: $($summary.ribbon_check.status)"
 }
@@ -686,6 +704,7 @@ $report = @(
     "Compile:         $($summary.compile.status) - $($summary.compile.detail)",
     "Save as .xlam:   $($summary.save.status)",
     "Ribbon inject:   $($summary.ribbon_injection.status)",
+    "Metadata:        $($summary.metadata.status) - save folder, author, label and printer removed",
     "Excel cleanup:   $($summary.cleanup.status)",
     "",
     "Package:         $PackageName",

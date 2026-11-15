@@ -248,6 +248,15 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Release packages no longer carry details of the machine and account that
+  built them. Excel records the save folder, the author, a Microsoft Purview
+  sensitivity label, document-library metadata and the printer's settings in
+  every workbook it saves, and every package published up to v1.2.2 carried
+  them. The new `tools/sanitize_package.py` removes them; nothing else in the
+  package changes, and `xl/vbaProject.bin` stays byte-identical.
+  `tools/Build-Addin.cmd` runs it before reopening and hashing the add-in, and
+  `tools/check_release.py` refuses a package that still carries any of it
+  ([#221](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/221)).
 - `tools/Certify-Excel.ps1` and `tools/Build-Addin.ps1` no longer report PASS
   when Excel cannot be closed. A workbook `Close` or an Excel `Quit` that
   failed was only written to `session.log`, so a run could pass while Excel
