@@ -395,7 +395,7 @@ Option Explicit
     
     Public gDP_CloseAfterSelection      As Boolean              'Close picker after successful write-back
     Public gDP_UseWinAPI                As Boolean              'Allow optional WinAPI-dependent native behavior
-    Public gDP_EnableKeyboardShortcut   As Boolean              'Enable keyboard shortcut fallback
+    Public gDP_EnableKeyboardShortcut   As Boolean              'Ctrl+Shift+D shortcut enabled
     Public gDP_HolidayCallbackName      As String               'Optional holiday callback name
     
     Public gDP_InitialDate              As Date                 'Initial date for next form instance
@@ -802,8 +802,9 @@ Public Sub M_Settings_Load()
 '   the Behavior section in later builds
 '
 '   Parses all Boolean settings from stable storage values, normalizes invalid
-'   or unsupported values to defaults, prevents a dead access configuration, and
-'   saves the normalized state back to the registry
+'   or unsupported values to defaults, and saves the normalized state back to
+'   the registry. Valid access-path settings are kept as stored, even when no
+'   built-in entry point remains enabled (see NOTES)
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, normalized,
@@ -840,7 +841,7 @@ Public Sub M_Settings_Load()
 '   caller-supplied entry point
 '
 ' UPDATED
-'   2026-08-23
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -1441,8 +1442,9 @@ Private Sub M_Settings_InitializeDefaults()
 '   Nothing
 '
 ' BEHAVIOR
-'   Assigns default values to all persisted settings, applies safe platform
-'   defaults, and prevents a dead access configuration
+'   Assigns default values to all persisted settings and applies safe platform
+'   defaults. Access-path settings take their defaults and are not adjusted to
+'   keep an entry point available (see NOTES)
 '
 ' ERROR POLICY
 '   Best-effort initialization
@@ -1466,7 +1468,7 @@ Private Sub M_Settings_InitializeDefaults()
 '   caller-supplied entry point
 '
 ' UPDATED
-'   2026-08-23
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -2089,11 +2091,14 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 '
 ' BEHAVIOR
 '   Ensures current settings are loaded
-'   Applies the requested keyboard shortcut setting
-'   Forces keyboard shortcut access on when both right-click menu access and
-'   in-grid icon access are disabled
+'   Applies the requested keyboard shortcut setting unchanged, whatever the
+'   right-click menu and in-grid icon settings are
 '   Persists the updated settings when needed
-'   Synchronizes Application.OnKey with the final setting
+'   Synchronizes Application.OnKey with the final setting when this copy owns
+'   the provider lease
+'   Otherwise leaves Application.OnKey untouched: reports the refusal when
+'   another copy holds the lease, or writes one Immediate Window line when no
+'   copy holds it yet
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, settings
@@ -2108,25 +2113,31 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Lease_IsOwner
+'   M_Lease_ReportSettingNotApplied
 '   M_KeyboardShortcut_Update
 '   gDP_EnableKeyboardShortcut
-'   gDP_ShowRightClick
-'   gDP_ShowGridIcon
 '
 ' NOTES
 '   Disabling right-click menu access, in-grid icon access, and keyboard shortcut
-'   access at the same time would leave the user without a practical manual
-'   DatePicker entry point
-'
-'   For this reason, a request to disable the keyboard shortcut is normalized
-'   back to True when both other manual access paths are disabled
+'   access at the same time is a valid configuration. A request to disable the
+'   keyboard shortcut is honoured even when both other access paths are
+'   disabled; the picker remains reachable through DP_Show, DP_Click and the
+'   Ribbon (#42)
 '
 '   The keyboard shortcut is synchronized even when the setting is unchanged
 '   because Application.OnKey is session state and may have been reset by Excel,
 '   another add-in, workbook activation, or teardown logic
 '
+'   Application.OnKey is shared by every copy in the Excel session. This setter
+'   used to rebind it without consulting the provider lease, so a copy that did
+'   not own the runtime could take Ctrl + Shift + D from the owner or release
+'   it under the owner (#194). The value is still validated, stored and saved
+'   in every copy, because it is a user preference; only the owning copy
+'   applies it, here or when DP_Start reads it
+'
 ' UPDATED
-'   2026-08-23
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -2137,6 +2148,7 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
     Dim OldEnableKeyboard       As Boolean      'Previous keyboard shortcut setting
     Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
     Dim SettingsChanged         As Boolean      'True when the resolved setting differs
+    Dim OwnsRuntime             As Boolean      'True when this copy owns the provider lease
     Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
     Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
     Dim ErrorNumber             As Long         'Captured error number
@@ -2185,10 +2197,24 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
         SettingsChanged = (NewEnableKeyboard <> OldEnableKeyboard)
 
 '------------------------------------------------------------------------------
+' RESOLVE PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve provider ownership"
+    'Only the copy that owns the provider lease may touch Application.OnKey (#194)
+        OwnsRuntime = M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
 ' SYNCHRONIZE ONLY WHEN SETTING IS UNCHANGED
 '------------------------------------------------------------------------------
     'Synchronize Application.OnKey and exit when no persisted setting changed
         If Not SettingsChanged Then
+            'Leave the shared binding to the owning copy and report why
+                If Not OwnsRuntime Then
+                    HandlerStep = "Report setting not applied"
+                    M_Lease_ReportSettingNotApplied PROC_NAME
+                    Exit Sub
+                End If
             'Track the current handler step
                 HandlerStep = "Synchronize keyboard shortcut"
             'Synchronize keyboard shortcut integration with the current setting
@@ -2216,6 +2242,17 @@ Public Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As 
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' DEFER TO THE OWNING COPY
+'------------------------------------------------------------------------------
+    'Leave the shared binding to the owning copy and report why. The saved value
+    'is applied by that copy, at the latest when DP_Start reads it
+        If Not OwnsRuntime Then
+            HandlerStep = "Report setting not applied"
+            M_Lease_ReportSettingNotApplied PROC_NAME
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE KEYBOARD SHORTCUT
@@ -3382,10 +3419,12 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 '
 ' BEHAVIOR
 '   Ensures current settings are loaded, applies the requested right-click menu
-'   setting, keeps keyboard shortcut access enabled when both visual entry
-'   points are disabled, persists the updated settings when needed, synchronizes
-'   the Excel right-click menu, and updates keyboard shortcut integration when it
-'   was changed as a fallback
+'   setting, persists the updated settings when needed, and synchronizes the
+'   Excel right-click menu when this copy owns the provider lease. Otherwise the
+'   menus are left untouched: the refusal is reported when another copy holds
+'   the lease, or one Immediate Window line is written when no copy holds it
+'   yet. The keyboard shortcut setting is carried forward unchanged: disabling
+'   both visual entry points does not re-enable it
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, settings
@@ -3398,20 +3437,33 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Lease_IsOwner
+'   M_Lease_ReportSettingNotApplied
 '   M_ContextMenu_Update
 '   M_KeyboardShortcut_Update
 '
 ' NOTES
-'   Disabling both right-click menu access and in-grid icon access would leave
-'   the user without a visible/manual DatePicker entry point unless the keyboard
-'   shortcut remains enabled
+'   Disabling both right-click menu access and in-grid icon access leaves the
+'   keyboard shortcut as the user set it. Zero built-in entry points is a valid
+'   configuration: the picker remains reachable through DP_Show, DP_Click and
+'   the Ribbon (#42)
+'
+'   The keyboard change flag and the M_KeyboardShortcut_Update call below are
+'   left over from the removed fallback. The resolved keyboard value always
+'   equals the current one, so that branch is not taken
 '
 '   The right-click menu is synchronized even when the persisted setting is
 '   unchanged, because Excel context menus may be reset by Excel, another add-in,
 '   workbook activation, or application-level cleanup
 '
+'   The right-click entry sits on command bars shared by every copy in the
+'   Excel session. This setter used to add or remove it without consulting the
+'   provider lease, so a copy that did not own the runtime could remove the
+'   owner's entry (#194). The value is still validated, stored and saved in
+'   every copy; only the owning copy applies it, here or when DP_Start reads it
+'
 ' UPDATED
-'   2026-08-23
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3424,7 +3476,8 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
     Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
 
     Dim RightClickChanged       As Boolean      'True when right-click menu setting changed
-    Dim KeyboardChanged         As Boolean      'True when keyboard shortcut fallback changed
+    Dim KeyboardChanged         As Boolean      'True when the keyboard shortcut setting changed
+    Dim OwnsRuntime             As Boolean      'True when this copy owns the provider lease
     Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
     Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
 
@@ -3482,11 +3535,26 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
         KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
 
 '------------------------------------------------------------------------------
+' RESOLVE PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve provider ownership"
+
+    'Only the copy that owns the provider lease may touch the shared menus (#194)
+        OwnsRuntime = M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
 ' SYNCHRONIZE ONLY WHEN SETTINGS ARE UNCHANGED
 '------------------------------------------------------------------------------
     'Synchronize the right-click menu and exit when no persisted setting changed
         If Not RightClickChanged Then
             If Not KeyboardChanged Then
+                'Leave the shared menus to the owning copy and report why
+                    If Not OwnsRuntime Then
+                        HandlerStep = "Report setting not applied"
+                        M_Lease_ReportSettingNotApplied PROC_NAME
+                        Exit Sub
+                    End If
                 'Track the current handler step
                     HandlerStep = "Synchronize right-click menu"
                 'Synchronize right-click menus with the current setting
@@ -3519,6 +3587,17 @@ Public Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' DEFER TO THE OWNING COPY
+'------------------------------------------------------------------------------
+    'Leave the shared menus and binding to the owning copy and report why. The
+    'saved value is applied by that copy, at the latest when DP_Start reads it
+        If Not OwnsRuntime Then
+            HandlerStep = "Report setting not applied"
+            M_Lease_ReportSettingNotApplied PROC_NAME
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE RIGHT-CLICK MENU
@@ -3596,10 +3675,12 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '
 ' BEHAVIOR
 '   Ensures current settings are loaded, applies the requested in-grid icon
-'   setting, keeps keyboard shortcut access enabled when both visual entry
-'   points are disabled, persists the updated settings when needed, synchronizes
-'   keyboard shortcut integration when it was changed as a fallback, and removes
-'   any stale in-grid icon when the feature is disabled
+'   setting, persists the updated settings when needed, and removes any stale
+'   in-grid icon when the feature is disabled and this copy owns the provider
+'   lease. Otherwise no icon is touched: the refusal is reported when another
+'   copy holds the lease, or one Immediate Window line is written when no copy
+'   holds it yet. The keyboard shortcut setting is carried forward unchanged:
+'   disabling both visual entry points does not re-enable it
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if settings cannot be loaded, settings
@@ -3612,13 +3693,20 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 ' DEPENDENCIES
 '   M_Settings_EnsureLoaded
 '   M_Settings_Save
+'   M_Lease_IsOwner
+'   M_Lease_ReportSettingNotApplied
 '   M_KeyboardShortcut_Update
 '   M_GridIcon_Remove
 '
 ' NOTES
-'   Disabling both right-click menu access and in-grid icon access would leave
-'   the user without a visible/manual DatePicker entry point unless the keyboard
-'   shortcut remains enabled
+'   Disabling both right-click menu access and in-grid icon access leaves the
+'   keyboard shortcut as the user set it. Zero built-in entry points is a valid
+'   configuration: the picker remains reachable through DP_Show, DP_Click and
+'   the Ribbon (#42)
+'
+'   The keyboard change flag and the M_KeyboardShortcut_Update call below are
+'   left over from the removed fallback. The resolved keyboard value always
+'   equals the current one, so that branch is not taken
 '
 '   The stale grid icon is removed even when the setting was already disabled,
 '   because worksheet shapes may survive prior failures, workbook activation, or
@@ -3627,8 +3715,14 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
 '   Enabling the in-grid icon is persisted immediately. Actual icon display is
 '   expected to occur through the manager selection / context refresh path
 '
+'   The grid icons belong to the copy that owns the runtime. This setter used
+'   to remove them without consulting the provider lease, so a copy that did
+'   not own the runtime could delete the owner's icon (#194). The value is
+'   still validated, stored and saved in every copy; only the owning copy
+'   applies it, here or when DP_Start reads it
+'
 ' UPDATED
-'   2026-08-23
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -3641,7 +3735,8 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
     Dim NewEnableKeyboard       As Boolean      'Resolved keyboard shortcut setting
 
     Dim GridIconChanged         As Boolean      'True when in-grid icon setting changed
-    Dim KeyboardChanged         As Boolean      'True when keyboard shortcut fallback changed
+    Dim KeyboardChanged         As Boolean      'True when the keyboard shortcut setting changed
+    Dim OwnsRuntime             As Boolean      'True when this copy owns the provider lease
     Dim SettingsMutated         As Boolean      'True after in-memory settings are changed
     Dim SettingsPersisted       As Boolean      'True after settings are saved successfully
 
@@ -3699,11 +3794,26 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         KeyboardChanged = (NewEnableKeyboard <> OldEnableKeyboard)
 
 '------------------------------------------------------------------------------
+' RESOLVE PROVIDER OWNERSHIP
+'------------------------------------------------------------------------------
+    'Track the current handler step
+        HandlerStep = "Resolve provider ownership"
+
+    'Only the copy that owns the provider lease may touch the grid icons (#194)
+        OwnsRuntime = M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
 ' CLEAN UP ONLY WHEN SETTINGS ARE UNCHANGED
 '------------------------------------------------------------------------------
     'Remove stale grid icon and exit when no persisted setting changed
         If Not GridIconChanged Then
             If Not KeyboardChanged Then
+                'Leave the grid icons to the owning copy and report why
+                    If Not OwnsRuntime Then
+                        HandlerStep = "Report setting not applied"
+                        M_Lease_ReportSettingNotApplied PROC_NAME
+                        Exit Sub
+                    End If
                 'Remove any stale in-grid icon when the feature is disabled
                     If Not ShowGridIcon Then M_GridIcon_Remove
                 'Exit because no registry write is required
@@ -3733,6 +3843,17 @@ Public Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)
         M_Settings_Save
     'Mark settings as persisted
         SettingsPersisted = True
+
+'------------------------------------------------------------------------------
+' DEFER TO THE OWNING COPY
+'------------------------------------------------------------------------------
+    'Leave the grid icons and binding to the owning copy and report why. The
+    'saved value is applied by that copy, at the latest when DP_Start reads it
+        If Not OwnsRuntime Then
+            HandlerStep = "Report setting not applied"
+            M_Lease_ReportSettingNotApplied PROC_NAME
+            Exit Sub
+        End If
 
 '------------------------------------------------------------------------------
 ' SYNCHRONIZE KEYBOARD SHORTCUT
@@ -6144,7 +6265,7 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
         End If
     'Tell the operator, because nothing else in the session will
         MsgBox _
-            "Another copy of the DatePicker is already active in this Excel " & _
+            "Another copy of the Date / Time Picker is already active in this Excel " & _
             "session, or its ownership could not be verified." & VBA.vbCrLf & VBA.vbCrLf & _
             "Running two copies at once is not supported: they share the same " & _
             "keyboard shortcut, right-click entry and grid icons, and either " & _
@@ -6155,6 +6276,92 @@ Private Sub M_Lease_ReportRefusal(ByVal EntryPoint As String)
             "    DP_ForceReleaseProviderLease", _
             vbExclamation Or vbOKOnly, _
             DP_MSGBOX_TITLE
+    'Clear any suppressed reporting error
+        Err.Clear
+
+End Sub
+
+Private Sub M_Lease_ReportSettingNotApplied(ByVal EntryPoint As String)
+
+'
+'------------------------------------------------------------------------------
+'                         REPORT SETTING NOT APPLIED
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Explains why a settings setter saved its value but left the shared Excel
+'   registration it controls untouched
+'
+' WHY THIS EXISTS
+'   The keyboard shortcut, right-click and grid-icon setters change
+'   application-wide Excel state. Only the copy that owns the provider lease
+'   may do that, so a setter in any other copy saves the value and stops (#194).
+'   Whoever called it still needs to know whether that was a conflict with
+'   another copy or a runtime that has not been started yet
+'
+' INPUTS
+'   EntryPoint
+'     Name of the calling setter, for the report and diagnostics
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Reads the lease. When a lease exists - held by another copy, or unreadable -
+'   reports through M_Lease_ReportRefusal, exactly as a refused entry point
+'   does. When no lease exists, writes one line to the Immediate Window and
+'   shows nothing
+'
+' ERROR POLICY
+'   Does not raise. The setting has already been saved, and reporting must not
+'   turn that into a failure
+'
+' DEPENDENCIES
+'   M_Lease_ReadOwner
+'   M_Lease_ReportRefusal
+'
+' NOTES
+'   Call it only after M_Lease_IsOwner returned False. It never acquires,
+'   reclaims or releases a lease: a setter is not a start path
+'
+'   No lease is the ordinary state before DP_Start, for example in a host that
+'   sets its integration preferences in Workbook_Open and then starts the
+'   runtime. That is not a conflict, so it shows no message box. DP_Start reads
+'   the saved value and applies it
+'
+'   A copy whose lease bar vanished while it held its token (#113) also sees no
+'   lease here. The setter does not reclaim it; the right-click re-ensure and
+'   DP_Stop do
+'
+' UPDATED
+'   2026-11-14
+'------------------------------------------------------------------------------
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim LeaseOwner      As String       'Lease owner as read now
+
+'------------------------------------------------------------------------------
+' CLASSIFY
+'------------------------------------------------------------------------------
+    'Never let reporting raise into a setter that has already saved its value
+        On Error Resume Next
+    'Read the lease. No bar is the only free answer; an unreadable lease is held
+        LeaseOwner = M_Lease_ReadOwner()
+
+'------------------------------------------------------------------------------
+' REPORT
+'------------------------------------------------------------------------------
+    'Another copy holds the lease, or ownership cannot be verified: refuse
+    'visibly, through the same report the entry points use
+        If VBA.LenB(LeaseOwner) > 0 Then
+            M_Lease_ReportRefusal EntryPoint
+    'No copy runs the DatePicker yet: note it without interrupting the caller
+        Else
+            Debug.Print EntryPoint & " | Not applied | Setting saved; no copy " & _
+                "holds the provider lease, so the copy that runs DP_Start " & _
+                "applies it"
+        End If
     'Clear any suppressed reporting error
         Err.Clear
 
@@ -8954,9 +9161,10 @@ Public Sub DP_Show()
 '
 '   Otherwise, it should open on today's date
 '
-'   The form is explicitly loaded and positioned before it is shown so the first
-'   visible paint occurs close to the mouse instead of flashing briefly in the
-'   top-left corner of the screen
+'   The form is explicitly loaded before it is shown, so its runtime UI is built
+'   while it is still hidden. Positioning near the mouse is applied once the
+'   native window exists: UserForm_Activate positions it on first activation,
+'   and DP_Show applies one final correction after Show
 '
 ' INPUTS
 '   None
@@ -8965,11 +9173,13 @@ Public Sub DP_Show()
 '   Nothing
 '
 ' BEHAVIOR
-'   Ensures DatePicker infrastructure is available, resolves the initial display
-'   date from ActiveCell when possible, unloads any existing DatePicker instance,
-'   stores bridge state for the next form instance, loads UF_DatePicker, positions
-'   the loaded form close to the mouse, shows it modelessly, and applies one
-'   final post-show positioning correction
+'   Admits this provider through the shared admission boundary and exits when
+'   admission is refused. Ensures DatePicker infrastructure is available, and
+'   reuses an already-visible picker and exits when possible. Otherwise resolves
+'   the initial display date from ActiveCell when possible, stores bridge state,
+'   refreshes an already-loaded form in place or loads UF_DatePicker when none
+'   is loaded, shows the form modelessly, applies the configured clock mode, and
+'   applies one final post-show positioning correction
 '
 ' ERROR POLICY
 '   Raises a descriptive runtime error if the DatePicker cannot be prepared,
@@ -8978,21 +9188,26 @@ Public Sub DP_Show()
 '   Mouse positioning is best-effort and does not prevent the picker from opening
 '
 ' DEPENDENCIES
+'   M_Lease_EnsureAdmitted
 '   M_Picker_EnsureManager
-'   M_FormBridge_UnloadLoadedPicker
+'   M_FormBridge_TryReuseLoadedPickerFromActiveCell
 '   M_FormBridge_GetLoadedForm
+'   M_Timer_ApplyClockMode
 '   M_Window_MoveFormToMouse
 '   UF_DatePicker
 '
 ' NOTES
 '   Load UF_DatePicker is intentional
 '
+'   An existing instance is not unloaded. A loaded form is reused or refreshed
+'   in place, so M_FormBridge_UnloadLoadedPicker is not called
+'
 '   The StepName diagnostic is intentionally retained because UserForm loading
 '   can fail inside nested Initialize routines and otherwise surface only as a
 '   generic DP_Show failure
 '
 ' UPDATED
-'   2026-05-04
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -10343,12 +10558,19 @@ Public Function DP_FillTableColumn( _
 '     False for a non-interactive call. Suppresses both prompts, which is what
 '     makes the routine usable from the regression harness
 '
+'   OverwriteFormulas
+'     False, the default, preserves a cell holding a formula and counts it in
+'     FormulaSkippedCount. True replaces formulas in the filled column
+'
 ' RETURNS
 '   DP_WriteResult describing the fill
 '
 '   A zeroed result when the selection was not a table data cell or the user
 '   declined the described scope. WrittenCount is then zero and nothing was
 '   written
+'
+'   A result with AttemptedCount above zero and WrittenCount zero when the fill
+'   reached the column but wrote no cell
 '
 ' BEHAVIOR
 '   Resolves the table column owning the selection. Reports and exits when the
@@ -10364,8 +10586,9 @@ Public Function DP_FillTableColumn( _
 '   A selection outside a table data body is an ordinary usage condition, not an
 '   error. It reports and exits cleanly
 '
-'   A partial write is reported, not raised. The engine already raised if nothing
-'   at all could be written
+'   A partial write is reported, not raised. That includes a fill that wrote no
+'   cell at all: since #21 the engine returns a zero-write as a complete result
+'   rather than raising
 '
 '   A predicted scope that does not match AttemptedCount is a detectable
 '   inconsistency rather than a partial write, and is reported as one
@@ -10403,7 +10626,7 @@ Public Function DP_FillTableColumn( _
 '   between preview and application, or that the two resolution paths diverged
 '
 ' UPDATED
-'   2026-08-23
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -10610,6 +10833,10 @@ Public Function M_WriteBack_Apply( _
 '
 '     False to allow single table-cell selections to expand to the full table
 '     data column when applicable
+'
+'   OverwriteFormulas
+'     False, the default, preserves a cell holding a formula and counts it in
+'     FormulaSkippedCount. True replaces it
 '
 ' RETURNS
 '   DP_WriteResult describing the completed write-back
@@ -11750,6 +11977,10 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   iType
 '     DatePicker write action to apply
 '
+'   OverwriteFormulas
+'     False preserves a cell holding a formula. True replaces it. Passed through
+'     to M_WriteBack_PopulateRange
+'
 '   Result
 '     Accumulating DP_WriteResult, populated across every target area
 '
@@ -11789,7 +12020,7 @@ Private Sub M_WriteBack_ApplyResolvedTarget( _
 '   reports the whole write rather than its last area
 '
 ' UPDATED
-'   2026-08-23
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -11952,6 +12183,10 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '     False to expand a single selected table data-body cell to the full table
 '     data column
 '
+'   OverwriteFormulas
+'     False preserves a cell holding a formula. True replaces it. Passed through
+'     to M_WriteBack_ApplyResolvedTarget
+'
 '   Result
 '     Accumulating DP_WriteResult, populated with the resolver metadata and the
 '     write counts
@@ -11979,7 +12214,7 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
 '   safe default lives on the public entry points, not on this private stage
 '
 ' UPDATED
-'   2026-08-23
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -12055,6 +12290,11 @@ Public Sub M_WriteBack_PopulateRange( _
 '     Accumulating DP_WriteResult. Counts and addresses for this range are added
 '     to whatever the result already carries, so one result can describe a target
 '     written one area at a time
+'
+'   OverwriteFormulas
+'     False, the default, preserves a cell holding a formula and counts it in
+'     FormulaSkippedCount, and refuses the bulk path when the range holds any
+'     formula. True replaces formulas
 '
 ' RETURNS
 '   Nothing. The outcome is accumulated into Result
@@ -13692,7 +13932,7 @@ Private Function M_Timer_ApplySchedule( _
 '
 ' WHY THIS EXISTS
 '   Cancellation needs the exact EarliestTime and Procedure that were scheduled,
-'   and nothing could previously observe either. Routing all three call sites
+'   and nothing could previously observe either. Routing every call site
 '   through one routine records the identity of every registration and gives the
 '   regression a deterministic way to make scheduling or cancellation fail
 '   without waiting for wall-clock time
@@ -21312,12 +21552,15 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 '   None
 '
 ' NOTES
-'   Generated from DP_GridIcon_64.png
+'   Matches src/ribbon/images/DP_GridIcon_64.png pixel for pixel (64 x 64,
+'   8-bit RGBA) but not byte for byte. The decoded PNG is 4,671 bytes against
+'   the tracked file's 5,198: it omits the sRGB, gAMA and pHYs chunks and
+'   compresses the image data differently
 '   Base64 length: 6228
 '   Base64 length Mod 4: 0
 '
 ' UPDATED
-'   2026-05-08
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -21710,8 +21953,9 @@ Private Function M_FormBridge_TryReuseLoadedPickerFromActiveCell( _
 '   rebuilding it
 '
 ' WHY THIS EXISTS
-'   DP_Show currently unloads and rebuilds the UserForm every time it is called.
-'   That is robust, but slower than necessary when the picker is already visible.
+'   Before this reuse path, DP_Show unloaded and rebuilt the UserForm on every
+'   call. That was robust, but slower than necessary when the picker is already
+'   visible.
 '
 '   Reusing the visible form avoids rebuilding runtime labels, hooks, panels,
 '   fonts, settings controls, and day-grid infrastructure.
@@ -22271,18 +22515,21 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '                       FORM BRIDGE UNLOAD LOADED PICKER
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Unloads any already-loaded DatePicker UserForm instance before DP_Show loads
-'   a fresh instance
+'   Unloads any already-loaded DatePicker UserForm instance
+'
+'   CURRENTLY UNUSED. Nothing in this project calls it. DP_Show, which it was
+'   written for, now reuses or refreshes a loaded form instead of unloading it,
+'   and the routine is Private, so nothing outside this module can reach it
 '
 ' WHY THIS EXISTS
-'   DP_Show relies on UserForm_Initialize to rebuild the runtime UI and consume
-'   the pending initial-date bridge state
-'
-'   If a previous DatePicker instance is already loaded, it should be removed
-'   before the new instance is loaded
+'   DP_Show used to rely on UserForm_Initialize to rebuild the runtime UI and
+'   consume the pending initial-date bridge state, so a previously loaded
+'   instance had to be removed before a new one was loaded
 '
 '   The helper must avoid direct references to the DatePicker default instance
 '   because such references can instantiate the form accidentally
+'
+'   It is kept unchanged while its removal is open in #182
 '
 ' INPUTS
 '   None
@@ -22319,11 +22566,11 @@ Private Sub M_FormBridge_UnloadLoadedPicker()
 '   The scan and unload phases are separated because unloading a form changes
 '   the VBA.UserForms collection
 '
-'   DP_Show must not fail just because an old transient form instance or stale
+'   A caller must not fail just because an old transient form instance or stale
 '   timer cannot be cleaned up fully
 '
 ' UPDATED
-'   2026-05-06
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -22823,20 +23070,21 @@ Public Sub Ribbon_ShowPicker(ByVal control As IRibbonControl)
 '   Delegates DatePicker display to DP_Show
 '
 ' ERROR POLICY
-'   Catches runtime errors and reports them through a user-facing message box
-'   so Ribbon callback failures do not fail silently
+'   Catches runtime errors and reports them through Ribbon_ReportError, which
+'   shows a user-facing message box, so Ribbon callback failures do not fail
+'   silently
 '
 ' DEPENDENCIES
 '   IRibbonControl
 '   DP_Show
-'   DP_MSGBOX_TITLE
+'   Ribbon_ReportError
 '
 ' NOTES
 '   The Control argument is required by the RibbonX callback signature even when
 '   this routine does not use it directly
 '
 ' UPDATED
-'   2026-05-15
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -23213,7 +23461,6 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   DP_Demo_EnsureDemoSheet
 '   DP_DEMO_SHEET_NAME
 '   M_DemoSheet_ResolveShowOnToggle
-'   DP_DemoSheet_Show
 '   DP_DemoSheet_HideVeryHidden
 '   Ribbon_ReportError
 '
@@ -23230,7 +23477,7 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
 '   that has never opened the demo workbook
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -23319,12 +23566,21 @@ Public Sub Ribbon_HideDemo(ByVal control As IRibbonControl)
 '                           RIBBON HIDE DEMO SHEET
 '------------------------------------------------------------------------------
 ' PURPOSE
-'   Hides the DatePicker demo worksheet from a Ribbon button
+'   Hides the DatePicker demo worksheet. Written as a Ribbon onAction callback
+'
+'   CURRENTLY UNUSED. No control in src/ribbon/customUI.xml is wired to this
+'   callback: the Demo button calls Ribbon_Demo, which toggles the sheet. No
+'   procedure in this project calls it either
 '
 ' WHY THIS EXISTS
-'   The demo sheet can be shown explicitly through the Ribbon. This companion
-'   action lets the user hide it again without relying on save events, which may
-'   be triggered automatically by AutoSave
+'   It was the companion of a separate show action, letting the user hide the
+'   demo sheet without relying on save events, which may be triggered
+'   automatically by AutoSave. Ribbon_Demo now covers both directions
+'
+'   It is kept because it is Public and has the RibbonX onAction signature, so
+'   the Ribbon XML can be wired to it again without a code change. The
+'   IRibbonControl argument keeps it out of the Macros dialog. Its removal is
+'   open in #182
 '
 ' INPUTS
 '   Control
@@ -23345,7 +23601,7 @@ Public Sub Ribbon_HideDemo(ByVal control As IRibbonControl)
 '   Ribbon_ReportError
 '
 ' UPDATED
-'   2026-05-15
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -23481,10 +23737,17 @@ Public Sub DP_DemoSheet_Show()
 ' PURPOSE
 '   Shows and activates the DatePicker demo worksheet
 '
+'   CURRENTLY UNUSED. No procedure in this project and no Ribbon control calls
+'   it. Ribbon_Demo shows the demo sheet itself
+'
 ' WHY THIS EXISTS
 '   The demo worksheet is intentionally hidden during normal workbook startup
-'   and save lifecycle. A Ribbon action needs a controlled way to make it visible
-'   again for showcase or validation purposes
+'   and save lifecycle. This routine was written as the controlled way for a
+'   Ribbon action to make it visible again for showcase or validation purposes
+'
+'   It is kept because it is Public and takes no arguments, so a user can still
+'   run it by name from the Macros dialog or through Application.Run. Its
+'   removal is open in #182
 '
 ' INPUTS
 '   None
@@ -23513,7 +23776,7 @@ Public Sub DP_DemoSheet_Show()
 '   built is not this routine's decision
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -23581,7 +23844,7 @@ Public Sub DP_DemoSheet_Show()
 ErrorHandler:
     'Raise a descriptive error to the caller
         Err.Raise Err.Number, PROC_NAME, _
-            "Unable to show the DatePicker demo sheet '" & DP_DEMO_SHEET_NAME & "'. " & Err.Description
+            "Unable to show the Date / Time Picker demo sheet '" & DP_DEMO_SHEET_NAME & "'. " & Err.Description
 
 End Sub
 

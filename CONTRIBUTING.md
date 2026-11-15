@@ -138,7 +138,7 @@ Four kinds of pull request follow from that:
 
 | Pull request | From → into | Issue reference | Merge method |
 |---|---|---|---|
-| Task | topic branch → release branch | `Resolves #N` | Squash |
+| Task | topic branch → release branch | `Resolves #N` when the PR meets all the issue's acceptance criteria, otherwise `Refs #N` | Squash |
 | Integration | release branch → `main` | `Refs #N` only | Merge commit |
 | Sync | branch at `main` → release branch | none | Merge commit |
 | Dependabot | Dependabot branch → release branch | none | Merge commit |
@@ -317,7 +317,10 @@ Validation must be proportional to risk and reproducible from the exact source
 under review.
 
 - Compile the complete VBA project.
-- Run `TST_DP_RunAll` for production changes.
+- Run `TST_DP_RunAll` for production changes. On Windows,
+  `tools/Certify-Excel.cmd` builds a workbook from the checkout, compiles it
+  and runs the pack in one step, and writes an evidence folder you can attach
+  ([tools/README.md](tools/README.md#run-the-regression-pack-in-excel-windows)).
 - Run `TST_DP_RunAll_WithUISmoke`, `DP_Show`, and `DP_Close` for form/UI changes.
 - Exercise affected provider-lease, write-back, formula, keyboard, timer, settings, and recovery paths.
 - For native-window changes, test a real supported Windows host and the applicable 32/64-bit behavior.
@@ -489,6 +492,19 @@ Merge only when the recorded SHA is the head being merged.
 requests that only bump a pinned dependency need no review record. Instead,
 check the diff, confirm that each new pin matches its upstream release tag, and
 require CI to pass on the head being merged.
+
+**Exception for an unchanged sync pull request.** A sync pull request (a branch
+at `main` into the release branch) needs no new automated review when all of
+these hold:
+
+- its head is the integration merge commit on `main`;
+- its diff against the release branch is empty;
+- the integration pull request's final-head review covered the same tree.
+
+Its **Final-head review** record then names that integration review, and CI
+still runs on its head. A sync pull request that changes any file is reviewed
+as usual. A renewed review after a rebase or a merge of the base branch is
+never skipped, because newly merged code can still conflict in meaning.
 
 ---
 

@@ -12,7 +12,7 @@
   "macro_name_functions": [
     "M_GetQualifiedMacroName"
   ],
-  "untracked_components": "Document modules (ThisWorkbook, worksheet modules) live only inside the Office packages and are not exported. Their procedures are not globally callable, so they cannot satisfy an unqualified call; calls made from them are not analyzed.",
+  "untracked_components": "Document modules (ThisWorkbook, worksheet modules) live inside the Office packages and cannot be imported as components. Their procedures are not globally callable, so they cannot satisfy an unqualified call, and calls made from them are not analyzed. The add-in's ThisWorkbook code is tracked as src/addin/ThisWorkbook.cls and listed under document_modules: tools/Build-Addin.ps1 writes it into the package's workbook module, and the import tools never import it as a component.",
   "configurations": {
     "packaged-hosts": {
       "description": "Components of both release packages: DATETIMEPICKER.vX.Y.Z.xlam and the demo .xlsm (production, demo builder and regression harness).",
@@ -25,6 +25,9 @@
         "demo/M_DP_DEMO.bas",
         "demo/M_DEMO_BUILDER.bas",
         "test/M_cDP_Test.bas"
+      ],
+      "document_modules": [
+        "src/addin/ThisWorkbook.cls"
       ],
       "ribbon": "src/ribbon/customUI.xml"
     },

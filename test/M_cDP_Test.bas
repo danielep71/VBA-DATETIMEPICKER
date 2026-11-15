@@ -1052,7 +1052,7 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "RibbonDemo"
     'Run the Ribbon Reset outcome checks
         TST_DP_RunSuiteSafe "RibbonReset"
-    'Run demo builder fast-mode transaction checks
+    'Run demo builder fast-mode transaction and button-grid checks
         TST_DP_RunSuiteSafe "DemoFastMode"
 
     'Run the application-state suite
@@ -1091,7 +1091,7 @@ CleanExit:
 
     'Reset DatePicker UI artifacts after testing. Each operation is checked on its
     'own, because a composite step that suppresses its own errors cannot report
-    'which of five operations failed, or that any of them did
+    'which of the operations below failed, or that any of them did
         M_Timer_Stop
         TST_DP_CheckCleanupStep "StopTimer"
 
@@ -3226,7 +3226,8 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
 '==============================================================================
 ' PURPOSE
 '   Proves a discontiguous write returns one complete DP_WriteResult whose totals
-'   do not depend on the order Excel enumerates Target.Areas
+'   do not depend on the order Excel enumerates Target.Areas, writes every area
+'   and leaves the cells between the areas untouched
 '
 ' WHY THIS EXISTS
 '   At v1.2.0 M_WriteBack_PopulateRange raised before accumulating whenever an
@@ -3240,21 +3241,27 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
 '   M_WriteBack_Apply, then repeats it with the areas swapped and asserts the
 '   totals are identical
 '
+'   Selects D25 and D27, the cells the demo's discontiguous scenario names, and
+'   asserts both receive the date while D26 keeps its value (#182)
+'
 ' NOTES
 '   M_WriteBack_Apply resolves its target from Application.Selection and emits no
 '   message box. Shortfall reporting belongs to its callers, so this suite drives
 '   the engine without modal interruption
 '
 '   The suite works in column M, away from the ranges the other write-back suites
-'   use, and restores sheet protection in both exit paths
+'   use, and restores sheet protection in both exit paths. The gap case uses
+'   D25:D27 to mirror the demo layout; no other suite writes there
 '
 ' UPDATED
-'   2026-08-25
+'   2026-11-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const GAP_SENTINEL  As String = "Gap sentinel"  'Value the cell between the areas holds
+
     Dim ForwardResult   As DP_WriteResult   'Result with the writable area first
     Dim ReverseResult   As DP_WriteResult   'Result with the writable area last
     Dim ZeroResult      As DP_WriteResult   'Result for an all-zero-write target
@@ -3269,6 +3276,8 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
     Dim Raised          As Boolean          'True if technical-failure case raised
     Dim RaisedNumber    As Long             'Raised number for technical-failure case
     Dim WasProtected    As Boolean          'Sheet protection state on entry
+    Dim GapUnion        As Excel.Range      'Two single-cell areas with one cell between them
+    Dim GapResult       As DP_WriteResult   'Result for the two-area target with a gap
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -3376,6 +3385,39 @@ Private Sub TST_DP_RunSuite_MultiAreaWriteResult()
         TST_DP_AssertTrue "Zero-write target still names the resolved target", _
             (VBA.LenB(ZeroResult.ResolvedTargetAddress) > 0)
         TST_DP_AssertWriteResultBalances "Zero-write result balances", ZeroResult
+
+'------------------------------------------------------------------------------
+' EVERY AREA IS WRITTEN AND THE CELL BETWEEN THEM IS NOT
+'------------------------------------------------------------------------------
+    'The demo's discontiguous scenario selects D25 and D27 with Ctrl+click and
+    'promises that D26 is unchanged (#182). D26 holds a sentinel rather than
+    'staying blank, so a write that cleared it would be caught as well as one
+    'that wrote the date into it. The sheet is still unprotected here
+        mTST_DP_ScratchSheet.Range("D25:D27").ClearContents
+        mTST_DP_ScratchSheet.Range("D26").Value = GAP_SENTINEL
+        gDP_WriteValue = VBA.DateSerial(2026, 11, 14)
+    'Select the two areas, because the engine resolves its target from the
+    'selection, exactly as it does when the picker writes
+        Set GapUnion = Excel.Application.Union( _
+            mTST_DP_ScratchSheet.Range("D25"), _
+            mTST_DP_ScratchSheet.Range("D27"))
+        TST_DP_ActivateWorksheetForTest mTST_DP_ScratchSheet
+        GapUnion.Select
+        GapResult = M_WriteBack_Apply(DP_WriteAction_DatePicker)
+
+        TST_DP_AssertEqualsLong "Two areas with a gap count both areas", _
+            2, GapResult.AreasCount
+        TST_DP_AssertEqualsLong "Two areas with a gap write 2 cells", _
+            2, VBA.CLng(GapResult.WrittenCount)
+        TST_DP_AssertCellDateEquals "Two areas with a gap write the first area D25", _
+            VBA.DateSerial(2026, 11, 14), _
+            mTST_DP_ScratchSheet.Range("D25")
+        TST_DP_AssertCellDateEquals "Two areas with a gap write the second area D27", _
+            VBA.DateSerial(2026, 11, 14), _
+            mTST_DP_ScratchSheet.Range("D27")
+        TST_DP_AssertEqualsString "Two areas with a gap leave D26 unchanged", _
+            GAP_SENTINEL, VBA.CStr(mTST_DP_ScratchSheet.Range("D26").Value)
+        TST_DP_AssertWriteResultBalances "Two areas with a gap balance", GapResult
 
 '------------------------------------------------------------------------------
 ' WRITABLE THEN LOCKED-ONLY, AND THE REVERSE
@@ -3578,7 +3620,9 @@ SuiteExit:
         mTST_DP_ScratchSheet.Range("M5:M12").Locked = True
         mTST_DP_ScratchSheet.Range("R20:T123").Clear
         mTST_DP_ScratchSheet.Range("R20:T123").Locked = True
+        mTST_DP_ScratchSheet.Range("D25:D27").ClearContents
         Set CapUnion = Nothing
+        Set GapUnion = Nothing
         If WasProtected Then
             mTST_DP_ScratchSheet.Protect
         End If
@@ -5924,8 +5968,8 @@ Private Sub TST_DP_RunSuite_StopWithoutOwnership()
 '
 ' WHY THIS EXISTS
 '   DP_Stop runs from Workbook_BeforeClose. A copy that never started used to
-'   show "Another copy of the DatePicker is already active" at every Excel exit,
-'   although no other copy existed (#115)
+'   show "Another copy of the Date / Time Picker is already active" at every
+'   Excel exit, although no other copy existed (#115)
 '
 ' INPUTS
 '   None
@@ -6117,6 +6161,12 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '   cannot prove it owns it - then drives each entry path and asserts that no
 '   manager, form or shared registration appeared, and that the path refused
 '
+'   Drives the keyboard shortcut, right-click and grid-icon setters the same
+'   way: under the foreign lease each one stores and saves its value, refuses,
+'   and leaves the owner's right-click entries, grid icon and lease untouched.
+'   With no lease at all they save silently and take nothing. As the owner they
+'   still apply at once (#194)
+'
 ' NOTES
 '   Refusal reporting is silenced for the duration. Application.DisplayAlerts
 '   does not suppress VBA.MsgBox, so without this the run would block on a modal
@@ -6125,8 +6175,15 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 '   Silencing is restored in both exit paths. A run that left it enabled would
 '   hide genuine provider conflicts from the operator
 '
+'   Excel exposes no getter for Application.OnKey, so the keyboard setter's
+'   binding cannot be read back (#42). Its refusal is asserted instead: the
+'   refusal is reported only on the branch that skips the OnKey update
+'
+'   The three integration settings are captured on entry and restored, as the
+'   owner, in both exit paths
+'
 ' UPDATED
-'   2026-08-27
+'   2026-11-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -6139,6 +6196,11 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
     Dim FormAfter           As Boolean      'True when the picker form is loaded after a refused path
     Dim GuardHeld           As Boolean      'True when the direct-admission backstop raised
     Dim OwnerSurvived       As Boolean      'True when the owner's lease outlived a refused teardown
+    Dim SavedShowRightClick As Boolean      'Right-click setting before the suite
+    Dim SavedShowGridIcon   As Boolean      'Grid-icon setting before the suite
+    Dim SavedKeyboard       As Boolean      'Keyboard shortcut setting before the suite
+    Dim MenuBefore          As Long         'Right-click controls before a setter runs
+    Dim IconsBefore         As Long         'Grid icons before a setter runs
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -6153,6 +6215,10 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
         M_Lease_Test_SilenceRefusalReport True
     'Record the caller's Excel event state so the preservation check is honest
         EventsBefore = Excel.Application.EnableEvents
+    'Capture the integration settings so the suite leaves them as it found them
+        SavedShowRightClick = M_Settings_GetShowRightClick()
+        SavedShowGridIcon = M_Settings_GetShowGridIcon()
+        SavedKeyboard = M_Settings_GetEnableKeyboardShortcut()
     'Begin from a defined position
         TST_DP_ForceClearLeaseForTest
         Set gDP_Manager = Nothing
@@ -6260,6 +6326,125 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
             Not (gDP_Manager Is Nothing)
 
 '------------------------------------------------------------------------------
+' FOREIGN LEASE + RIGHT-CLICK SETTER
+'------------------------------------------------------------------------------
+    'Enabling from a copy that does not own the runtime stores the value and
+    'refuses, without adding an entry
+        M_ContextMenu_Remove
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick True
+        TST_DP_AssertTrue "SetShowRightClick True refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue "SetShowRightClick True is stored under a foreign lease", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertEqualsLong _
+            "SetShowRightClick True adds no entry under a foreign lease", _
+            0, TST_DP_ContextMenuControlCount()
+    'Give the owner its registered entries. The direct update stands in for the
+    'owner's own registration; it is not the path under test
+        M_ContextMenu_Update
+        MenuBefore = TST_DP_ContextMenuControlCount()
+        TST_DP_AssertTrue "Setter setup: the owner's right-click entries exist", _
+            (MenuBefore > 0)
+    'Disabling from that copy must not remove the owner's entries
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick False
+        TST_DP_AssertTrue "SetShowRightClick False refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse "SetShowRightClick False is stored under a foreign lease", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertEqualsLong _
+            "SetShowRightClick False keeps the owner's entries under a foreign lease", _
+            MenuBefore, TST_DP_ContextMenuControlCount()
+    'Repeating the unchanged value takes the resync branch; it must not either
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick False
+        TST_DP_AssertTrue _
+            "Unchanged SetShowRightClick refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsLong _
+            "Unchanged SetShowRightClick keeps the owner's entries", _
+            MenuBefore, TST_DP_ContextMenuControlCount()
+    'Remove the stand-in entries
+        M_ContextMenu_Remove
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + GRID-ICON SETTER
+'------------------------------------------------------------------------------
+    'Enabling stores the value and refuses; it creates nothing by itself
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowGridIcon True
+        TST_DP_AssertTrue "SetShowGridIcon True refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue "SetShowGridIcon True is stored under a foreign lease", _
+            M_Settings_GetShowGridIcon()
+    'Give the owner a grid icon, standing in for the one its runtime holds
+        IconsBefore = TST_DP_PlantGridIconForTest()
+        TST_DP_AssertEqualsLong "Setter setup: the owner's grid icon exists", _
+            1, IconsBefore
+    'Disabling from that copy must not delete the owner's icon
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowGridIcon False
+        TST_DP_AssertTrue "SetShowGridIcon False refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse "SetShowGridIcon False is stored under a foreign lease", _
+            M_Settings_GetShowGridIcon()
+        TST_DP_AssertEqualsLong _
+            "SetShowGridIcon False keeps the owner's icon under a foreign lease", _
+            IconsBefore, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+    'Repeating the unchanged value takes the stale-icon branch; it must not either
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowGridIcon False
+        TST_DP_AssertTrue _
+            "Unchanged SetShowGridIcon refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsLong _
+            "Unchanged SetShowGridIcon keeps the owner's icon", _
+            IconsBefore, _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+    'Remove the stand-in icon
+        M_GridIcon_PurgeAll
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE + KEYBOARD SHORTCUT SETTER
+'------------------------------------------------------------------------------
+    'Application.OnKey has no getter, so the binding cannot be read back (#42).
+    'The refusal is reported only on the branch that skips the OnKey update,
+    'which is what these assertions prove, together with the stored value
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetEnableKeyboardShortcut False
+        TST_DP_AssertTrue _
+            "SetEnableKeyboardShortcut False refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertFalse _
+            "SetEnableKeyboardShortcut False is stored under a foreign lease", _
+            M_Settings_GetEnableKeyboardShortcut()
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetEnableKeyboardShortcut True
+        TST_DP_AssertTrue _
+            "SetEnableKeyboardShortcut True refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertTrue _
+            "SetEnableKeyboardShortcut True is stored under a foreign lease", _
+            M_Settings_GetEnableKeyboardShortcut()
+
+'------------------------------------------------------------------------------
+' FOREIGN LEASE: SETTER VALUES ARE SAVED AND THE LEASE IS UNTOUCHED
+'------------------------------------------------------------------------------
+    'Reload from persisted storage: a refused setter still saves the preference
+        M_Settings_Load
+        TST_DP_AssertFalse "Right-click value set under a foreign lease was saved", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertFalse "Grid-icon value set under a foreign lease was saved", _
+            M_Settings_GetShowGridIcon()
+        TST_DP_AssertTrue "Keyboard value set under a foreign lease was saved", _
+            M_Settings_GetEnableKeyboardShortcut()
+    'No setter may take, rewrite or release the owner's lease
+        TST_DP_AssertEqualsString "Refused setters do not disturb the owner's lease", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
 ' A REFUSED COPY CANNOT TEAR DOWN THE OWNER
 '------------------------------------------------------------------------------
     'DP_Stop and DP_RepairRuntime already gate on ownership. This proves the
@@ -6281,6 +6466,30 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
             (Excel.Application.EnableEvents = EventsBefore)
 
 '------------------------------------------------------------------------------
+' NO LEASE + SETTERS SAVE SILENTLY AND TAKE NOTHING
+'------------------------------------------------------------------------------
+    'Before any copy starts, a setter is an ordinary preference write. It must
+    'not report a refusal, take the free lease or register anything
+        TST_DP_ForceClearLeaseForTest
+        M_ContextMenu_Remove
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        M_Settings_SetShowRightClick False
+        M_Settings_SetShowRightClick True
+        M_Settings_SetShowGridIcon True
+        M_Settings_SetEnableKeyboardShortcut True
+        TST_DP_AssertEqualsLong "Setters report no refusal while no lease is held", _
+            RefusalsBefore, M_Lease_Test_RefusalReportCount()
+        TST_DP_AssertEqualsLong "Setters take no lease while none is held", _
+            0, VBA.LenB(TST_DP_ReadLeaseOwnerForTest())
+        TST_DP_AssertEqualsLong _
+            "SetShowRightClick adds no entry while no lease is held", _
+            0, TST_DP_ContextMenuControlCount()
+        TST_DP_AssertTrue "SetShowRightClick is stored while no lease is held", _
+            M_Settings_GetShowRightClick()
+        TST_DP_AssertTrue "SetShowGridIcon is stored while no lease is held", _
+            M_Settings_GetShowGridIcon()
+
+'------------------------------------------------------------------------------
 ' OWNER LEASE + SUPPORTED PATHS SUCCEED IDEMPOTENTLY
 '------------------------------------------------------------------------------
     'Reclaim the lease the only way a project can once its token is gone
@@ -6300,6 +6509,20 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
         M_Picker_EnsureManager
         TST_DP_AssertTrue "Direct admission succeeds for the owner", _
             Not (gDP_Manager Is Nothing)
+    'The owner's setters still apply at once (#194)
+        M_Settings_SetShowRightClick False
+        TST_DP_AssertEqualsLong "SetShowRightClick False removes the owner's entries", _
+            0, TST_DP_ContextMenuControlCount()
+        M_Settings_SetShowRightClick True
+        TST_DP_AssertTrue "SetShowRightClick True registers the owner's entries", _
+            (TST_DP_ContextMenuControlCount() > 0)
+        M_Settings_SetShowGridIcon True
+        IconsBefore = TST_DP_PlantGridIconForTest()
+        TST_DP_AssertEqualsLong "Owner setup: the owner's grid icon exists", _
+            1, IconsBefore
+        M_Settings_SetShowGridIcon False
+        TST_DP_AssertEqualsLong "SetShowGridIcon False removes the owner's icon", _
+            0, TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
         TST_DP_AssertEqualsString "No owner path reported a refusal", _
             VBA.CStr(RefusalsBefore), _
             VBA.CStr(M_Lease_Test_RefusalReportCount())
@@ -6316,11 +6539,22 @@ Private Sub TST_DP_RunSuite_RuntimeAdmission()
 ' SUITE EXIT
 '------------------------------------------------------------------------------
 SuiteExit:
-    'Restore reporting so a genuine conflict is never hidden from the operator
-        M_Lease_Test_SilenceRefusalReport False
+    'Never let restoration raise back into the suite handler
+        On Error Resume Next
     'Leave the run owning the lease, as it did before this suite
         TST_DP_ForceClearLeaseForTest
         M_Lease_TryAcquire
+    'Restore the integration settings as the owner, so their registrations
+    'follow. Reporting is still silenced, so no setter can block on a modal
+        M_Settings_SetShowRightClick SavedShowRightClick
+        M_Settings_SetShowGridIcon SavedShowGridIcon
+        M_Settings_SetEnableKeyboardShortcut SavedKeyboard
+    'Restore reporting so a genuine conflict is never hidden from the operator
+        M_Lease_Test_SilenceRefusalReport False
+    'Clear any suppressed restoration error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
     'Exit after the suite completes
         Exit Sub
 
@@ -6332,10 +6566,43 @@ SuiteFail:
         TST_DP_RecordFail "Runtime admission suite", _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
         Err.Clear
-    'Restore reporting and lease state regardless
+    'Restore reporting, settings and lease state regardless
         Resume SuiteExit
 
 End Sub
+
+Private Function TST_DP_PlantGridIconForTest() As Long
+
+'
+'==============================================================================
+'                         PLANT GRID ICON FOR TEST
+'==============================================================================
+'   Leaves exactly one tracked, hidden DatePicker grid icon on the scratch sheet
+'   and returns how many grid icons the host workbook holds.
+'
+'   It stands in for the icon an owning runtime already has, so a suite can
+'   prove whether a later call removed it. It uses the component's own
+'   pre-creation path, which creates nothing while the grid-icon setting is
+'   disabled; the caller enables the setting first.
+'
+'   ScreenUpdating is raised around creation for the reason the PreCreateHidden
+'   suite records, then returned to the harness run state.
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' PLANT
+'------------------------------------------------------------------------------
+    'Start from no icon anywhere, so the count below is this helper's alone
+        M_GridIcon_PurgeAll
+    'Create through the normal cold path with screen updating on
+        Excel.Application.ScreenUpdating = True
+        M_GridIcon_PreCreateHidden mTST_DP_ScratchSheet.Range("D5")
+        Excel.Application.ScreenUpdating = False
+    'Report what the host workbook now holds
+        TST_DP_PlantGridIconForTest = _
+            TST_DP_CountNamedShapes(mTST_DP_HostWorkbook, DP_GRID_ICON_NAME)
+
+End Function
 
 Private Function TST_DP_IsPickerFormLoadedForTest() As Boolean
 
@@ -8384,7 +8651,8 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '                           DEMO FAST MODE SUITE
 '==============================================================================
 ' PURPOSE
-'   Validates the demo builder's fast-mode entry and exit as a transaction
+'   Validates the demo builder's fast-mode entry and exit as a transaction, and
+'   the button-grid specification contract of DEMO_Btn_AddGrid
 '
 ' WHY THIS EXISTS
 '   DEMO_FastMode_Begin captured and mutated four Application properties in
@@ -8394,6 +8662,11 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '
 '   Losing EnableEvents that way is invisible: the caller sees no error, only a
 '   workbook that has silently stopped reacting
+'
+'   DEMO_Btn_AddGrid passed a fill colour into the IsPrimary parameter of
+'   DEMO_Btn_Add, so every grid button came out primary whatever its
+'   specification said, and a button created without an action pointed at a
+'   macro that did not exist (#183)
 '
 ' INPUTS
 '   None
@@ -8405,15 +8678,24 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '   Drives DEMO_FastMode_Begin and DEMO_FastMode_End against real Application
 '   state, with faults injected at entry and restoration boundaries
 '
+'   Builds a button grid on the scratch sheet and asserts each button's fill
+'   colour and action, then asserts that a specification element of any other
+'   type raises before its button is created
+'
 ' ERROR POLICY
 '   Records suite-level failures and continues. Restores the harness's own
-'   Application state on every path
+'   Application state and deletes every grid button on every path
 '
 ' DEPENDENCIES
 '   DEMO_FastMode_Begin
 '   DEMO_FastMode_End
 '   DEMO_FastMode_Test_ArmFault
 '   tDEMOFastModeState
+'   DEMO_Btn_AddGrid
+'   DEMO_DEMOButton_NotAssigned
+'   UI_COLOR_PRIMARY_BG
+'   UI_COLOR_NEUTRAL_200
+'   mTST_DP_ScratchSheet
 '
 ' NOTES
 '   These cases mutate real Application state deliberately: the contract is about
@@ -8428,14 +8710,25 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
 '   tDEMOFastModeState, so no observation seam is needed and an abandoned record
 '   can never lock out a later run
 '
+'   The button-grid cases share this suite because it is the harness's one
+'   demo-builder suite, and they move with it under #35 and #62
+'
+'   DEMO_DEMOButton_NotAssigned shows a message box, so it is never run here.
+'   It is named only in a branch that never executes, which still makes the
+'   project fail to compile if the placeholder is removed or renamed
+'
 ' UPDATED
-'   2026-09-17
+'   2026-11-14
 '==============================================================================
 
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
     Const INJECTED_ERROR As Long = vbObjectError + 2850
+    Const SPEC_ERROR    As Long = vbObjectError + 2162      'Error DEMO_Btn_AddGrid raises for a bad element
+    Const GRID_PREFIX   As String = "TST_DP_GRID_"          'Name prefix of every grid button the suite creates
+    Const GRID_MACRO    As String = "TST_DP_GridSpecMacro"  'Action named by a specification; read back, never run
+    Const PLACEHOLDER   As String = "DEMO_DEMOButton_NotAssigned" 'Action of a button created without one
 
     Dim State           As tDEMOFastModeState   'Record under test
     Dim Inert           As tDEMOFastModeState   'Record that never entered fast mode
@@ -8471,6 +8764,11 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
     Dim RollbackNamed   As Boolean       'The rollback detail names the property
     Dim RollbackOthersRan As Boolean     'Rollback steps after the failure still ran
     Dim CompoundResolved As String       'Resolver text for the compound failure
+
+    Dim GridAnchor      As Excel.Range  'Scratch cell the button grid is anchored to
+    Dim GridSpecs       As Variant      'Button specifications under test
+    Dim GridErrNumber   As Long         'Error a rejected specification raised
+    Dim ActionText      As String       'OnAction text read back from a grid button
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -8800,6 +9098,91 @@ Private Sub TST_DP_RunSuite_DemoFastMode()
             VBA.InStr(1, ResolvedText, "EnableEvents", vbBinaryCompare) > 0
 
 '------------------------------------------------------------------------------
+' GRID BUTTONS ARE STYLED AS THEIR SPECIFICATIONS ASK
+'------------------------------------------------------------------------------
+    'One specification of each accepted form: name and caption only, IsPrimary
+    'alone, ActionMacro followed by IsPrimary, and IsPrimary True stated. Before
+    '#183 all four came out primary, because the colour reached IsPrimary
+        Set GridAnchor = mTST_DP_ScratchSheet.Range("X40")
+        GridSpecs = VBA.Array( _
+            VBA.Array(GRID_PREFIX & "N1", "Default"), _
+            VBA.Array(GRID_PREFIX & "N2", "Secondary", False), _
+            VBA.Array(GRID_PREFIX & "N3", "Secondary with action", GRID_MACRO, False), _
+            VBA.Array(GRID_PREFIX & "N4", "Primary", True))
+        DEMO_Btn_AddGrid mTST_DP_ScratchSheet, GridAnchor, GridSpecs
+
+    'Compare against the design tokens DEMO_Btn_Add applies for each style
+        TST_DP_AssertEqualsLong "Grid button without a style option is primary", _
+            UI_COLOR_PRIMARY_BG, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N1").Fill.ForeColor.RGB
+        TST_DP_AssertEqualsLong "Grid button with IsPrimary False is secondary", _
+            UI_COLOR_NEUTRAL_200, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N2").Fill.ForeColor.RGB
+        TST_DP_AssertEqualsLong "Grid button with an action and IsPrimary False is secondary", _
+            UI_COLOR_NEUTRAL_200, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N3").Fill.ForeColor.RGB
+        TST_DP_AssertEqualsLong "Grid button with IsPrimary True is primary", _
+            UI_COLOR_PRIMARY_BG, _
+            mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N4").Fill.ForeColor.RGB
+
+'------------------------------------------------------------------------------
+' GRID BUTTONS POINT AT A MACRO THAT EXISTS
+'------------------------------------------------------------------------------
+    'OnAction is workbook-qualified as 'Book'!Macro, so the macro name is the text
+    'after the last "!". Comparing only that part keeps the assertion independent
+    'of the host workbook's name
+        ActionText = mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N1").OnAction
+        TST_DP_AssertEqualsString "Grid button without an action gets the placeholder", _
+            PLACEHOLDER, VBA.Mid$(ActionText, VBA.InStrRev(ActionText, "!") + 1)
+        ActionText = mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N2").OnAction
+        TST_DP_AssertEqualsString "Grid button with only IsPrimary gets the placeholder", _
+            PLACEHOLDER, VBA.Mid$(ActionText, VBA.InStrRev(ActionText, "!") + 1)
+        ActionText = mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N3").OnAction
+        TST_DP_AssertEqualsString "Grid button keeps the action its specification names", _
+            GRID_MACRO, VBA.Mid$(ActionText, VBA.InStrRev(ActionText, "!") + 1)
+
+    'The placeholder shows a message box, so running it would stop an unattended
+    'run. Naming it in a branch that never executes proves at compile time that
+    'the macro the buttons above point at exists
+        If False Then DEMO_DEMOButton_NotAssigned
+
+'------------------------------------------------------------------------------
+' ANY OTHER SPECIFICATION ELEMENT IS REJECTED BEFORE A BUTTON IS CREATED
+'------------------------------------------------------------------------------
+    'A legacy numeric fill colour in the 3rd element used to be converted
+    'silently. It must now raise, and no button may be left for that item
+        GridSpecs = VBA.Array( _
+            VBA.Array(GRID_PREFIX & "E3", "Colour as 3rd element", 13145700))
+        On Error Resume Next
+        Err.Clear
+        DEMO_Btn_AddGrid mTST_DP_ScratchSheet, GridAnchor, GridSpecs
+        GridErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "A numeric 3rd grid element raises the specification error", _
+            SPEC_ERROR, GridErrNumber
+        TST_DP_AssertFalse "A rejected 3rd grid element creates no button", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, GRID_PREFIX & "E3")
+
+    'The 4th element accepts only IsPrimary
+        GridSpecs = VBA.Array( _
+            VBA.Array(GRID_PREFIX & "E4", "Colour as 4th element", GRID_MACRO, 13145700))
+        On Error Resume Next
+        Err.Clear
+        DEMO_Btn_AddGrid mTST_DP_ScratchSheet, GridAnchor, GridSpecs
+        GridErrNumber = Err.Number
+        Err.Clear
+    'Restore this procedure's own handler after its own error-mode change
+        On Error GoTo SuiteFail
+
+        TST_DP_AssertEqualsLong "A non-Boolean 4th grid element raises the specification error", _
+            SPEC_ERROR, GridErrNumber
+        TST_DP_AssertFalse "A rejected 4th grid element creates no button", _
+            TST_DP_ShapeExists(mTST_DP_ScratchSheet, GRID_PREFIX & "E4")
+
+'------------------------------------------------------------------------------
 ' SUITE EXIT
 '------------------------------------------------------------------------------
 SuiteExit:
@@ -8810,6 +9193,15 @@ SuiteExit:
         Excel.Application.DisplayAlerts = RunAlerts
         Excel.Application.EnableEvents = RunEvents
         Excel.Application.ScreenUpdating = RunScreen
+    'Delete every grid button the suite may have created, including the ones a
+    'regression would leave behind for the rejected specifications
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N1").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N2").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N3").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "N4").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "E3").Delete
+        mTST_DP_ScratchSheet.Shapes(GRID_PREFIX & "E4").Delete
+        Set GridAnchor = Nothing
         Err.Clear
         On Error GoTo 0
     'Exit after the suite completes

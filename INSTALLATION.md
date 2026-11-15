@@ -77,7 +77,8 @@ required to compile or to test the project as it currently stands:
 
 | Source | Purpose |
 |---|---|
-| `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder |
+| `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder, and point the package's root relationship at `customUI/customUI.xml` with the Office 2007 extensibility type (see [RELEASING.md](RELEASING.md#7-build-release-artifacts)) |
+| `src/addin/ThisWorkbook.cls` | The published add-in's `ThisWorkbook` code: hides the demo sheet, starts and preloads the picker on open, stops it before close, and clears the picker and grid icons before printing. A build input for the add-in package, copied into the workbook's own `ThisWorkbook` module by `tools/Build-Addin.cmd`. Do not import it: **File → Import** would create a class named `ThisWorkbook1`. For your own workbook, use the lifecycle hooks shown in README instead |
 | `test/M_cDP_Test.bas` | Regression harness |
 | `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
@@ -97,10 +98,12 @@ required to compile or to test the project as it currently stands:
 >
 > So a compilable project needs both demo modules, and the regression harness
 > additionally needs `M_DEMO_BUILDER.bas` in its own right: it builds its result
-> sheet through `DEMO_Sheet_BuildTemplate` and exercises the fast-mode
+> sheet through `DEMO_Sheet_BuildTemplate`, exercises the fast-mode
 > transaction through `DEMO_FastMode_Begin`, `DEMO_FastMode_End`,
 > `DEMO_FastMode_Test_ArmFault`, `DEMO_FastMode_ResolveFailure` and
-> `tDEMOFastModeState`. The harness makes no reference to `M_DP_DEMO`.
+> `tDEMOFastModeState`, and checks the button grid through `DEMO_Btn_AddGrid`,
+> `DEMO_DEMOButton_NotAssigned`, `UI_COLOR_PRIMARY_BG` and
+> `UI_COLOR_NEUTRAL_200`. The harness makes no reference to `M_DP_DEMO`.
 >
 > This is recorded as current fact, not as intended architecture. Production
 > source depending on demonstration source is a boundary problem: it was introduced in
@@ -126,6 +129,9 @@ required to compile or to test the project as it currently stands:
    Import `demo/M_DP_DEMO.bas` and `demo/M_DEMO_BUILDER.bas` as well — the
    project does not compile without them.
 3. Compile the complete VBA project.
+   If the package ships the Ribbon, add the `src/ribbon/` parts to the saved
+   package as the RibbonX row above describes; VBA compilation does not check
+   them.
 4. Wire `DP_Start` and `DP_Stop` into the workbook lifecycle if the component must start automatically.
 5. Set any deployment-specific settings namespace before the runtime loads.
 6. Save, close, reopen, and exercise `DP_Show` and `DP_Close` in a clean Excel session.
@@ -161,7 +167,8 @@ from source you imported.
    and choose the release you intend to run.
 2. Download the `.xlam` asset. Take the exact filename from the Release page.
 3. Verify its SHA-256 against the value published on that release before
-   enabling macros:
+   enabling macros. Releases from `v1.2.0` onward publish one; for earlier
+   releases, compare against the digest GitHub shows for the asset:
 
    ~~~text
    certutil -hashfile "<asset filename>" SHA256
@@ -169,6 +176,10 @@ from source you imported.
 
 4. Stop if the hash does not match. A mismatch means the file is not the
    published artifact, whatever its name.
+
+Each release from `v1.2.3` also publishes the user manual as
+`DATETIMEPICKER-user-manual-vX.Y.Z.pdf`, with its SHA-256. The same manual is
+[`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) in the repository.
 
 ### Install and enable
 
@@ -191,12 +202,14 @@ from source you imported.
 
 ### Validate
 
-1. Confirm the **Date / Time Picker** Ribbon group appears.
+1. Confirm the picker's Ribbon group appears on the **Home** tab. In `v1.2.2`,
+   the published add-in, it is labelled **DateTime Picker**; the current source
+   (unreleased `v1.2.3`) labels it **Date / Time Picker**.
 2. Select a date-formatted cell and confirm the entry path you expect —
    grid icon, context menu, keyboard shortcut or Ribbon — opens the picker.
 3. Write a date back and confirm the target cell receives it.
 4. Confirm no second provider is already active: a refusal message saying that
-   another copy of the DatePicker is already active, or that its ownership could
+   another copy of the Date / Time Picker is already active, or that its ownership could
    not be verified, means another copy owns the Excel process.
 
 Do not assume anything about what a published `.xlam` contains. Package contents
@@ -326,6 +339,7 @@ owns and document anything intentionally retained.
 
 ## 📚 Related documentation
 
+- [docs/USER_MANUAL.md](docs/USER_MANUAL.md) — how to use the picker in Excel, for end users
 - [README.md](README.md) — capabilities, requirements, and public API
 - [CHANGELOG.md](CHANGELOG.md) — version history and compatibility
 - [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards

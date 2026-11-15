@@ -124,7 +124,7 @@ Where relevant, technical reports and review comments should identify:
 | ✅ **Validation** | Relevant automated, static, manual or Excel regression evidence and whether the run completed |
 | ⚠️ **Boundary** | Assumptions, limitations, untested configurations, uncertainty, and what cannot yet be concluded |
 | 📘 **Workbook context** | Add-in or embedded use, relevant workbooks, worksheet/table/protection state, and selected range |
-| 🖱️ **Entry path** | Right-click, worksheet control, keyboard route, public API, or other path that exposed the behavior |
+| 🖱️ **Entry path** | Right-click, in-grid icon, Ribbon, worksheet control, keyboard route, public API, or other path that exposed the behavior |
 | 🔐 **Runtime state** | Loaded component copies, application events, scheduled callbacks, global UI hooks, reset/restart history, and cleanup outcome |
 
 Prefer explicit evidence classifications:
@@ -146,7 +146,7 @@ Project-specific expectations:
 
 - Distinguish selected-cell, table-column, formula, protected-cell, array-formula, partial-write, and explicit destructive behavior.
 - Do not claim ownership or restoration of application-wide state when the predecessor or current owner cannot be observed.
-- For UI or workbook changes, include compile and relevant regression evidence when practical, but keep runner details in the testing documentation.
+- For UI or workbook changes, include compile and relevant regression evidence when practical, but keep runner details in the [README regression-testing section](README.md#regression-testing) and the project Wiki.
 
 ---
 
@@ -322,7 +322,8 @@ GitHub's platform policies and community standards also apply where relevant.
 This Code of Conduct is informed by and adapted from the
 [Contributor Covenant, version 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct.html).
 Its project-specific technical and data-handling provisions are maintained for
-this repository.
+this repository. The Contributor Covenant is licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 ---
 

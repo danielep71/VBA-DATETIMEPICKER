@@ -1,7 +1,9 @@
 name: Static repository checks
 on:
+  # Every pull request, whatever its base, so a stacked pull request is checked
+  # too. Pushes run only where they land; release-check.yml needs the push run
+  # on main. tools/test_workflow_triggers.py guards both filters.
   pull_request:
-    branches: [main, "release/**"]
   push:
     branches: [main, "release/**"]
     tags: ["v*"]

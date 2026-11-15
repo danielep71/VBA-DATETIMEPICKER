@@ -103,6 +103,44 @@ Use only the categories needed by a release.
 
 ### Added
 
+- One-command add-in build with its Ribbon, `tools/Build-Addin.cmd` with
+  `tools/Build-Addin.ps1`, for Windows hosts ([#208](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/208)). From a clean checkout it:
+  - checks `src/ribbon/`;
+  - imports the `packaged-hosts` modules into a new workbook, writes the
+    tracked add-in `ThisWorkbook` code into its workbook module and compiles;
+  - saves an `.xlam`, injects `src/ribbon/` into `customUI/` with the root
+    relationship, and records the package's size and SHA-256;
+  - reopens the package in a fresh Excel instance, records the operator's
+    check of the three Ribbon icons and of Show Picker, and confirms the hash is
+    unchanged.
+
+  The injection is done by `tools/build_ribbon_package.py`. It copies the parts
+  byte for byte, refuses a package that already has a Ribbon, and is tested in
+  the `tool-tests` gate. This is the clean-build evidence #90 needs.
+- The add-in's `ThisWorkbook` code is now tracked source,
+  `src/addin/ThisWorkbook.cls` ([#211](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/211)). Until now it existed only inside the
+  published package, so the add-in could not be rebuilt from the repository as
+  RELEASING §7 requires. The code is that of `DATETIMEPICKER.v1.2.2.xlam`:
+  - `Workbook_Open` hides the demo sheet and calls `DP_Start` and
+    `DP_Preload`;
+  - `Workbook_BeforeClose` hides the demo sheet and calls `DP_Stop`;
+  - `Workbook_BeforePrint` closes the picker and purges grid icons.
+
+  The file is listed under `document_modules` in `tools/vba-projects.json`. It
+  is never imported as a component: `tools/Build-Addin.ps1` copies its code
+  into the workbook's own module, and the advisory call checker counts it as
+  covered without analyzing it.
+- One-command Excel regression run, `tools/Certify-Excel.cmd` with
+  `tools/Certify-Excel.ps1`, for Windows hosts. From a clean checkout it starts
+  its own Excel instance, imports the `packaged-hosts` modules of
+  `tools/vba-projects.json` into a new workbook, compiles the project, runs
+  `TST_DP_RunAll` (or the UI-smoke variant) through a generated error-handling
+  wrapper, and writes an evidence folder outside the checkout with the commit
+  SHA, the host, the harness summary line verbatim and every result row. It
+  reads the Trust Center settings and never changes them. It does not replace
+  the manual matrices of a release certification
+  ([#196](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/196)).
+
 - Markdown link checking, `tools/check_markdown_links.py`, with fixtures.
   A new `check.py` gate resolves every relative link and heading anchor in
   tracked Markdown offline, using GitHub's heading-slug rule. A weekly
@@ -140,6 +178,14 @@ Use only the categories needed by a release.
   manual limitations separately from passed tests.
 
 ### Changed
+
+- Static repository checks and CodeQL now run on pull requests to any base, so
+  a pull request stacked on another task branch is checked too. Pushes still
+  run only on `main`, the release branches and `v*` tags, which is where the
+  release check reads the static-checks run. A new tooling test fails if either
+  workflow's push filter drops `main` or a release branch, if `pull_request`
+  regains a branch filter, or if static checks skip a job by event
+  ([#199](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/199)).
 
 - The daily traffic export authenticates with a GitHub App instead of a
   long-lived personal access token. The App has only `Administration: read`
@@ -202,19 +248,67 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Building the demo sheets and the harness result sheet no longer depends on
+  the default printer. `DEMO_Sheet_BuildTemplate` reset the sheet with every
+  option, including page-break removal, which makes Excel query the default
+  printer's driver; with a slow or sleeping network printer that raised a
+  printer prompt in every Excel regression run. The template now resets the
+  sheet without touching page breaks; `DEMO_Sheet_Reset` keeps its signature
+  and still removes page breaks for a caller that asks for it.
+- The keyboard shortcut, right-click and grid-icon setters
+  (`M_Settings_SetEnableKeyboardShortcut`, `M_Settings_SetShowRightClick` and
+  `M_Settings_SetShowGridIcon`) no longer change shared Excel state from a copy
+  that does not own the runtime. Such a copy could rebind `Ctrl + Shift + D`,
+  or add and remove the owner's right-click entry and grid icons. The setters
+  still validate, store and save the value in every copy; only the owning copy
+  applies it. Under another copy's lease they report the provider-conflict
+  refusal, as the entry points do. While no copy holds the lease they show
+  nothing, write one Immediate Window line, and `DP_Start` applies the saved
+  value. The `RuntimeAdmission` suite drives all three setters under a foreign
+  lease, with no lease and as the owner
+  ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
+
+- Two messages still used the old "DatePicker" name: the provider-conflict
+  refusal now reads "Another copy of the Date / Time Picker is already
+  active", and the demo-sheet error names the Date / Time Picker demo sheet.
+  The demo's **Fill Table Column** error box is titled "Date / Time Picker"
+  like every other message, instead of the internal procedure name. The demo
+  sheet's second multi-cell scenario named a contiguous range (D25:D27) as a
+  discontiguous selection and expected it to be refused; it now asks for D25
+  and D27 with Ctrl+click and expects both areas written and D26 unchanged,
+  which is how write-back treats a multi-area selection
+  ([#182](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/182)).
+
+- The demo sheet's instructions now say "Date / Time Picker" instead of
+  "DatePicker". Step 2 lists every way to open the picker: the in-grid icon,
+  the right-click entry, `Ctrl + Shift + D` and the Ribbon's **Show Picker**
+  button ([#213](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/213)).
+  The in-grid icon's alternative text is unchanged: `DatePicker Grid Entry
+  Point` is the prefix of the icon-ownership marker, not a caption.
+
+- Demo builder buttons: `DEMO_Btn_AddGrid` passed a fill colour into
+  `DEMO_Btn_Add`'s `IsPrimary` parameter, so every grid button came out
+  primary whatever its specification. Grid specifications now take an
+  optional `IsPrimary` Boolean in place of the colour, and any other value
+  raises instead of being silently converted. Buttons created without an
+  action no longer point at a missing macro: the new placeholder
+  `DEMO_DEMOButton_NotAssigned` says that the button has no action yet
+  ([#183](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/183)).
+
 - Corrected advisory call-checker completeness, oversized Ribbon diagnostics,
-  label-policy defaults and workflow/documentation mismatches (issue #180).
+  label-policy defaults and workflow/documentation mismatches
+  ([#180](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/180)).
 
 - Fixed label drift checks for valid label names containing pipes or backticks
   by comparing structured canonical plans instead of parsing Markdown reports
-  (PR #119). Added clean, drift and failure regression fixtures.
-
+  ([#119](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/119)). Added clean, drift and failure regression fixtures.
 
 - The Markdown link gate decodes backslash escapes, as GitHub does. A valid
   link such as `[guide](guide\(v2\).md)` was reported as missing, and an
   escaped character in a heading, as in `DP\_Start`, produced the wrong anchor.
   Escaped backticks are also handled when identifying inline code spans
-  (PR #175), so links outside code remain checked and code examples stay excluded.
+  ([#175](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/175)), so links outside code remain checked and code examples stay
+  excluded.
   HTML attributes and autolinks are still taken literally
   ([#171](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/171)).
 
@@ -228,7 +322,8 @@ Use only the categories needed by a release.
   reported as the new `VBA-CALL-005`. Each fix has positive and negative
   fixtures. The checker stays advisory and is not a release gate.
 
-- Package inspector review corrections (PR #131, following #129): trace calls evaluated in `If` and
+- Package inspector review corrections ([#131](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/131), following
+  [#129](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/129)): trace calls evaluated in `If` and
   `ElseIf` conditions, treat `AddressOf` operands as unknown dispatch rather than
   execution, and report malformed or prohibited Ribbon XML as structured
   extraction failures. Added regression fixtures for all three cases.
@@ -252,9 +347,9 @@ Use only the categories needed by a release.
   cover every bar named `Cell` or `List Range Popup`
   ([#114](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/114)).
 
-- `DP_Stop` never shows "Another copy of the DatePicker is already active" at
-  Excel exit. A stop by a copy that cannot prove ownership touches nothing and
-  writes one Immediate Window line; a copy whose lease bar vanished while it
+- `DP_Stop` never shows "Another copy of the Date / Time Picker is already
+  active" at Excel exit. A stop by a copy that cannot prove ownership touches
+  nothing and writes one Immediate Window line; a copy whose lease bar vanished while it
   held its token reclaims the free lease and stops as the owner
   ([#115](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/115), [#113](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/113)).
   Provider conflicts are still reported when a copy starts or opens the picker.
@@ -285,18 +380,63 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- The demo-sheet screenshot, `assets/datepicker-demosheet.png`, shows the
+  current sheet ([#214](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/214)).
+  The old one showed the `DATETIME PICKER` title, a removed diagnostics step,
+  and a multi-cell scenario expected to be refused, which #191 corrected. The
+  new one shows the Date / Time Picker title and instructions, the D25/D27
+  scenario and the **Fill Table Column** button. README, the project website
+  and the user manual show it.
+- A user manual for people who use the picker in Excel, not for developers:
+  [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) ([#209](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/209)). It covers:
+  - installing the add-in;
+  - the four ways to open the picker;
+  - the day, month and year views, Today and Time, and the keys;
+  - what is written where, which cells are kept, and what the messages mean;
+  - the settings and where they are kept;
+  - the demo sheet;
+  - troubleshooting, including the "another copy" refusal.
+
+  Each statement was checked against the source. From `v1.2.3` each release
+  also publishes it as `DATETIMEPICKER-user-manual-vX.Y.Z.pdf`, rendered by the
+  new `tools/render_manual.py`. The PDF has page numbers, bookmarks, and a table
+  of contents with the page of each section. The tool uses Python-Markdown and
+  pypdf from the hash-locked `tools/requirements-docs.txt`, and headless Chrome
+  or Edge.
+  README, INSTALLATION, RELEASING §7, the certification template and the
+  project website link to the manual.
+- The social preview now has an editable source, `assets/social-preview.svg`,
+  rendered to `assets/social-preview.png` (1280×640). The old PNG had no source
+  and still showed `v1.0`. The new artwork follows the README's, draws the month
+  view after the real form and carries no version number. `assets/README.md`
+  documents the fonts and the render command. The landing page's `og:image`
+  points to the new file. `images/`, which held only the old preview and an
+  unused older copy of the README's hero image, is removed.
+- CONTRIBUTING's final-head review rule lets an unchanged sync pull request
+  name the integration's review instead of requesting a new one: its head is
+  the integration merge commit, its diff against the release branch is empty,
+  and the integration review covered the same tree. CI still runs, a sync that
+  changes any file is reviewed as usual, and a review is still renewed after a
+  rebase. The pull-request template points to the rule
+  ([#200](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/200)).
+
 - Aligned the release procedure and certification template with the evidence
   validator: certify the integrated main SHA, record both required packages,
   per-host environments, harness totals and six manual records, and retain a
-  separate mandatory Ribbon-resource result (issue #178).
+  separate mandatory Ribbon-resource result
+  ([#178](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/178)).
 
 - Added the GitHub Pages project website (`index.html` and `.nojekyll`), with
-  installation guidance, feature descriptions and repository links (PR #135,
-  integrated by PR #136).
+  installation guidance, feature descriptions and repository links
+  ([#135](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/135), merged into `main` and brought into `release/v1.2.3` by
+  [#140](https://github.com/danielep71/VBA-DATETIMEPICKER/pull/140)).
 
 - Reconciled contribution rules, issue-form branch names, traffic credentials
-  and Dependabot scope; CI pins Node.js 24 LTS (issue #179).
-- Reconciled superseded Unreleased claims, categories and references (issue #181).
+  and Dependabot scope; CI pins Node.js 24 LTS
+  ([#179](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/179)).
+
+- Reconciled superseded Unreleased claims, categories and references
+  ([#181](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/181)).
 
 - The project website now names the Apache License 2.0 in its page
   description, hero line, "Can I adapt it?" answer and footer, which still said
@@ -356,6 +496,31 @@ Use only the categories needed by a release.
   was still to be reconciled is replaced; the published tag and assets are
   unchanged.
 
+- The README and project website no longer describe `Ctrl + Shift + D` as
+  opt-in: it is enabled by default, and the README shows how to turn it off
+  with `M_Settings_SetEnableKeyboardShortcut False`. The footer button is named
+  **Time**, not Now; normal write-back is described as writing the current
+  selection, not a single cell; the regression badge and figures name the
+  version or commit they were measured at, and the README says the current
+  source has 32 standard suites. INSTALLATION names the `v1.2.2` Ribbon group
+  `DateTime Picker`. The README lists the registry sections apart from the
+  panel tabs, describes `DP_Click` as an Excel callback, completes the
+  repository tree and no longer promises `v1.1.x` upgrade paths
+  ([#177](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/177)).
+
+- Corrected Markdown documents, issue forms and the certification template
+  that disagreed with the source, tools or releases. The release procedure and
+  certification template write `test-results/release-evidence.json`, which Git
+  ignores, and no longer claim that `check_release.py` inspects package
+  contents. The README no longer calls production-called procedures
+  harness-only, scopes the WinAPI invariant to committed changes, lists the
+  harness seams and settings setters, and summarizes the #113 fix. The bug
+  form and checklists place the full provider-lease boundary at `v1.2.1`, ask
+  for `DP_WriteResult` only where the API returns it, and describe a lease left
+  after a VBA reset as expected. SECURITY names email as the working private
+  channel, and the Code of Conduct credits the Contributor Covenant licence
+  ([#193](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/193)).
+
 ### Validation
 
 - Pre-certification development run at `69a94d0` on the embedded `.xlsm` with
@@ -387,8 +552,8 @@ Use only the categories needed by a release.
   keeps its old title band until it is rebuilt.
 
 - New technically public routines `M_Ribbon_ResetShouldStart` and
-  `M_Ribbon_LifecycleSucceeded` exist only for the regression harness; they are
-  not supported API. The same applies to `M_ContextMenu_EnsureForRightClick`,
+  `M_Ribbon_LifecycleSucceeded` are called by `Ribbon_Reset` and are public so
+  the regression harness can test them; they are not supported API. The same applies to `M_ContextMenu_EnsureForRightClick`,
   which the manager calls from `SheetBeforeRightClick`. The harness gains the
   `ContextMenuCoverage`, `ContextMenuResync`, `StopWithoutOwnership` and
   `RibbonReset` suites.
@@ -396,6 +561,12 @@ Use only the categories needed by a release.
 - Code that relied on `DP_Stop` showing the refusal for a copy that never
   started will no longer see it. `M_Lifecycle_Test_LastSucceeded` is still
   `False` after such a stop.
+
+- Code that called the shortcut, right-click or grid-icon setter in a copy
+  that was never started, and relied on the call registering or removing the
+  shortcut, right-click entry or grid icon at once, must call `DP_Start`; the
+  saved value is applied there
+  ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
 
 ### Known limitations
 

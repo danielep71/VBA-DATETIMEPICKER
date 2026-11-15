@@ -14,9 +14,9 @@ Option Explicit
 '   The demo sheet was previously hand-built and lived only inside
 '   demo/DATEPICKER.xlsm. That had two consequences:
 '
-'     - Ribbon_Demo resolves the sheet from ThisWorkbook, so the Ribbon demo
-'       button works when the code is embedded in the demo workbook and fails
-'       in the .xlam, which has no worksheets at all
+'     - Ribbon_Demo resolved the sheet from ThisWorkbook, so the Ribbon demo
+'       button worked when the code was embedded in the demo workbook and
+'       failed in the .xlam, which has no worksheets at all
 '
 '     - the demo had no reviewable source. A change to it appeared in a pull
 '       request as a binary diff and nothing else
@@ -28,6 +28,7 @@ Option Explicit
 ' PUBLIC SURFACE
 '   - DP_Demo_CreateDemoSheet
 '   - DP_Demo_EnsureDemoSheet
+'   - DP_Demo_FillTableColumn
 '
 ' EXPECTED DEMO SHEET
 '   - Worksheet name: DATE PICKER DEMO
@@ -64,7 +65,7 @@ Option Explicit
 '   That is intentional: it demonstrates the UseLocalNames setting
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '==============================================================================
 
 '------------------------------------------------------------------------------
@@ -225,8 +226,8 @@ Public Sub DP_Demo_CreateDemoSheet( _
     'Build or rebuild the standard demo template
         HandlerStep = "Build sheet template"
     'Named arguments are used so only the values that differ from the builder
-    'defaults appear here. Passing all twenty-five positionally exceeds the VBA
-    'limit of twenty-five line continuations in a single statement
+    'defaults appear here. Passing all twenty-six positionally, one per line,
+    'exceeds the VBA limit of twenty-five line continuations in one statement
         DEMO_Sheet_BuildTemplate _
             WS_Name:=DEMO_SHEET_NAME, Title:=DEMO_TITLE, SubTitle:=DEMO_SUBTITLE, _
             TargetWorkbook:=Wb, _
@@ -484,6 +485,7 @@ Public Sub DP_Demo_FillTableColumn()
 '
 ' DEPENDENCIES
 '   DP_FillTableColumn
+'   DP_MSGBOX_TITLE
 '
 ' NOTES
 '   A selection outside a table data body is handled by DP_FillTableColumn
@@ -493,13 +495,8 @@ Public Sub DP_Demo_FillTableColumn()
 '   point being demonstrated is write scope, not date selection
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "M_DP_DEMO.DP_Demo_FillTableColumn"
 
 '------------------------------------------------------------------------------
 ' INITIALIZE
@@ -526,7 +523,7 @@ ErrorHandler:
             "The table column could not be filled." & VBA.vbCrLf & VBA.vbCrLf & _
             "Error " & VBA.CStr(Err.Number) & " - " & Err.Description, _
             vbExclamation, _
-            PROC_NAME
+            DP_MSGBOX_TITLE
 
 End Sub
 
@@ -567,8 +564,11 @@ Private Sub DP_Demo_WriteInstructions(ByVal WS As Worksheet)
 '   Shape, so sheet protection can suppress it even when the target cell is
 '   unlocked, and the workaround is not obvious
 '
+'   The instructions use the product name, Date / Time Picker, as every other
+'   caption does (#213)
+'
 ' UPDATED
-'   2026-08-22
+'   2026-11-15
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -593,14 +593,15 @@ Private Sub DP_Demo_WriteInstructions(ByVal WS As Worksheet)
     'Write the instruction steps
         WS.Range("C5").Value = "Instructions:"
         WS.Range("C6").Value = "1) Select a demo input cell."
-        WS.Range("C7").Value = "2) Invoke the DatePicker using the in-grid icon or right-click menu."
+        WS.Range("C7").Value = "2) Open the Date / Time Picker with the in-grid icon, the " & _
+            "right-click entry, Ctrl + Shift + D or the Ribbon's Show Picker button."
         WS.Range("C8").Value = _
             "3) Table write scope: picking a date in one Expiry Date cell writes " & _
             "that cell only. To fill the whole column, click Fill Table Column " & _
             "and confirm the reported scope."
     'Record the protected-sheet behaviour
         WS.Range("C9").Value = _
-            "Protected-sheet note: the in-grid DatePicker icon is a worksheet Shape, " & _
+            "Protected-sheet note: the in-grid Date / Time Picker icon is a worksheet Shape, " & _
             "so on a protected sheet it may not appear even when the target cell is " & _
             "unlocked. For the icon to remain available under protection, the sheet " & _
             "must allow drawing objects (for example DrawingObjects:=False, " & _
@@ -918,8 +919,9 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
 '
 ' WHY THIS EXISTS
 '   Write-back scope is the highest-risk behaviour in the component. The section
-'   gives a tester contiguous and non-contiguous ranges to select so the written
-'   scope can be observed directly
+'   gives a tester a contiguous and a discontiguous selection, so the written
+'   scope can be observed directly. Write-back writes every area of a
+'   discontiguous selection, so both scenarios are positive
 '
 ' INPUTS
 '   WS
@@ -946,7 +948,7 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
 '   to build a multi-cell selection with
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-14
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -981,10 +983,11 @@ Private Sub DP_Demo_BuildMultiCellSection(ByVal WS As Worksheet)
         WS.Range("C23").Value = "Multi-cell write-back"
         WS.Range("E23").Value = "Positive"
         WS.Range("F23").Value = "All selected cells should receive the picked date."
-    'Non-contiguous selection
-        WS.Range("C24").Value = "Select D25:D27 together"
-        WS.Range("E24").Value = "Negative"
-        WS.Range("F24").Value = "Discontiguous selection is not a single target."
+    'Discontiguous multi-area write-back. D26 between the two areas must stay
+    'untouched (#182)
+        WS.Range("C24").Value = "Select D25 and D27 (Ctrl+click)"
+        WS.Range("E24").Value = "Positive"
+        WS.Range("F24").Value = "Each area receives the date; D26 is unchanged."
 
 '------------------------------------------------------------------------------
 ' APPLY NUMBER FORMATS
@@ -1027,9 +1030,10 @@ Private Sub DP_Demo_BuildTableSection(ByVal WS As Worksheet)
 '   Builds the Excel Table demo section as a real ListObject
 '
 ' WHY THIS EXISTS
-'   Write-back into a structured table is the scenario behind the current
-'   table-column write-scope defect. The section must be a genuine ListObject,
-'   not a formatted range, or it does not exercise that path at all
+'   Write-back into a structured table is the scenario behind the former
+'   table-column write-scope defect, where picking a date in one table cell
+'   wrote the whole column (#13). The section must be a genuine ListObject, not
+'   a formatted range, or it does not exercise that path at all
 '
 ' INPUTS
 '   WS
@@ -1056,7 +1060,7 @@ Private Sub DP_Demo_BuildTableSection(ByVal WS As Worksheet)
 '   reporting how many cells it would affect
 '
 ' UPDATED
-'   2026-08-22
+'   2026-11-09
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------

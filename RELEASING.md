@@ -131,9 +131,8 @@ Update every applicable surface in one reviewable change:
 
 - `VERSION`
 - `CHANGELOG.md`
-- current-version package metadata (production module headers are not versioned)
-- demo builder header only if its implementation version actually changes; its
-  existing `VERSION 1.3.0` is implementation history, not the release version
+- current-version package metadata (module headers carry no version; the demo
+  builder header points to `VERSION`)
 - README compatibility and installation examples
 - Ribbon XML or package metadata when changed
 
@@ -191,8 +190,9 @@ closed v1.2.2 evidence is not reopened.
   `python .github/scripts/check-ribbon-resources.py --root src/ribbon`. It proves that every
   custom `image` dependency has a tracked file and an explicit package mapping,
   and that the part's namespace matches its file name. The **Check Ribbon
-  resources** workflow runs it on every pull request and release-branch push
-  that touches `src/ribbon/`. Missing Ribbon XML, relationships, or referenced
+  resources** workflow runs it on pull requests into `main` or `release/**` and
+  on pushes to those branches when `src/ribbon/`, the script or the workflow
+  changes. Missing Ribbon XML, relationships, or referenced
   custom resources are a **blocking package-source failure**.
   This is a required separate release record, not one of the eleven
   `static-checks.json` gates. Run it locally on the exact clean candidate and
@@ -208,6 +208,9 @@ Capture commands, tool versions, timestamps, and complete results. Rerun affecte
 
 - Run **Debug → Compile VBAProject** on the exact candidate.
 - Run `TST_DP_RunAll`.
+  `tools/Certify-Excel.cmd` does both from a clean checkout in one step and
+  writes an evidence folder naming the commit and host
+  ([tools/README.md](tools/README.md#run-the-regression-pack-in-excel-windows)).
 - Run `TST_DP_RunAll_WithUISmoke` in an interactive desktop session.
 - Exercise `DP_Show` and `DP_Close`, including provider, write-back, and formula scenarios.
 
@@ -232,6 +235,8 @@ Planned outputs:
 
 - `release-assets/DATETIMEPICKER.vX.Y.Z.xlam` add-in (required)
 - `release-assets/DATETIMEPICKER-demo-vX.Y.Z.xlsm` demo (required)
+- `release-assets/DATETIMEPICKER-user-manual-vX.Y.Z.pdf` user manual (required
+  from `v1.2.3`)
 - Source archive created by GitHub from the tag
 
 For each artifact:
@@ -254,13 +259,24 @@ For each artifact:
    (`http://schemas.microsoft.com/office/2006/relationships/ui/extensibility`)
    for `customUI/customUI.xml`. Office RibbonX Editor does this when the part is
    added as an "Office 2007 Custom UI Part".
+
+   For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6, the Ribbon
+   part of step 8 and step 10 from a clean checkout. The add-in's
+   `ThisWorkbook` code is a candidate input too. It is tracked as
+   `src/addin/ThisWorkbook.cls`, and the tool copies it into the workbook's
+   document module, because a document module cannot be imported. The tool
+   records its evidence in a folder outside the checkout
+   ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
+   Step 9 and the demo workbook remain separate.
 5. Fail the build if a required Ribbon part or referenced custom resource cannot
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
    VBA, **not** Open XML package completeness.
 7. Include the packaged harness required by `tools/vba-projects.json`, including
    `test/M_cDP_Test.bas`, in both packages. Removing it or substituting another
-   smoke test does not satisfy `check_release.py`.
+   smoke test breaks the certification rule. `check_release.py` cannot detect
+   it: the validator checks package names, sizes and hashes and the recorded
+   results, not the package contents.
 8. Reopen the packaged artifact and verify the shipped Ribbon itself: expected
    group/controls are present, all intended custom images render, and each
    enabled Ribbon action dispatches correctly.
@@ -268,6 +284,21 @@ For each artifact:
    Record expected and actual run/suite totals, failures and cleanup failures.
 10. Record filename, size, and SHA-256.
 11. Never edit the artifact after hashing.
+
+The user manual PDF is rendered from `docs/USER_MANUAL.md` at the exact
+candidate. Its links to other repository files point at that commit. It has
+page numbers, bookmarks, and a table of contents with the page of each section.
+Install Python-Markdown and pypdf from the hash-locked
+`tools/requirements-docs.txt` first, then render with headless Chrome or Edge:
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
+python tools/render_manual.py --html test-results/USER_MANUAL.html --pdf release-assets/DATETIMEPICKER-user-manual-vX.Y.Z.pdf
+```
+
+Open the PDF and check every page before you hash it. Record its filename, size
+and SHA-256 in the certification record (section 3 of the template).
+`check_release.py` validates the two packages only, not the manual.
 
 The Ribbon source above was recovered from the published `v1.2.2` add-in
 ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). Before that, the repository tracked an Office 2010 `customUI14.xml`
@@ -291,8 +322,8 @@ between final certification and tagging. Prepare the machine-readable record
 from the exact tested package bytes, then fill it from the retained logs:
 
 ```sh
-python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output release-evidence.json
-python tools/check_release.py --evidence release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
+python tools/check_release.py --prepare --candidate-sha <full-main-candidate-sha> --assets-dir release-assets --output test-results/release-evidence.json
+python tools/check_release.py --evidence test-results/release-evidence.json --assets-dir release-assets --static-report test-results/static-checks.json
 ```
 
 Use [the certification template](docs/RELEASE_CERTIFICATION_TEMPLATE.md) alongside

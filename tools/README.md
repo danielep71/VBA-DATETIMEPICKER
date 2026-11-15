@@ -207,6 +207,170 @@ load behaviour are not inspected. Only a fresh Excel session shows that.
 | `VBA-PKG-090` / `091` | failure | extraction failed / analysis incomplete |
 | `VBA-PKG-092` | unknown | manual export, not package evidence |
 
+## Run the regression pack in Excel (Windows)
+
+`tools/Certify-Excel.cmd` (double click) or `tools/Certify-Excel.ps1` builds,
+compiles and runs the regression pack of the checked-out commit in desktop
+Excel, without manual imports. It needs Windows, desktop Excel, Git on the
+`PATH`, and **Trust access to the VBA project object model** already turned on
+(Excel → File → Options → Trust Center → Trust Center Settings → Macro
+Settings). It reads the Trust Center settings and never changes them. Close
+other Excel work first, and do not use Excel until the run ends.
+
+```powershell
+git switch <branch-or-sha>
+git status                     # must show no changes to tracked files
+.\tools\Certify-Excel.cmd      # or: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Certify-Excel.ps1
+```
+
+The run:
+
+1. reads the full SHA and refuses changes to tracked files (`-AllowDirty` runs
+   anyway and records the run as not certification-grade);
+2. starts its own visible Excel instance, adds a new workbook and imports the
+   `packaged-hosts` modules of `tools/vba-projects.json` in their listed order
+   (`-Configuration` picks another), checking that each keeps its name;
+3. adds a generated `CertificationRunner` module, not part of the source, that
+   calls the harness under an error handler, so a raised error is recorded
+   instead of opening a modal **Run-time error** window;
+4. compiles with **Debug → Compile VBAProject**; if the VBE does not show the
+   result, it asks you to compile and answer Y or N;
+5. runs `TST_DP_RunAll` (`-WithUISmoke` runs `TST_DP_RunAll_WithUISmoke`);
+6. reads the summary and every row of `TST_DP_RESULTS`, saves the workbook,
+   closes Excel and opens the evidence folder.
+
+The evidence folder, `DATETIMEPICKER-excel-<sha12>-<yyyyMMdd-HHmmss>` next to
+the checkout (or `-BundleDir`), holds:
+
+| File | Content |
+| --- | --- |
+| `certification.txt` | Verdict, commit, host and the harness summary line verbatim |
+| `summary.json` | The same, machine-readable, with the reasons for a FAIL |
+| `results.tsv` | Every row of `TST_DP_RESULTS` |
+| `session.log` | Each step with its time |
+| `DATETIMEPICKER-regression.xlsm` | The workbook as the run left it |
+
+The exit code is 0 only when import and compile pass, the harness reports
+`State=PASS` with no cleanup failure, and the tree was clean. The run covers
+compilation and the regression pack; the manual matrices of a release
+certification (RELEASING §6) and package tests are still separate.
+
+## Build the add-in and check its Ribbon (Windows)
+
+`tools/Build-Addin.cmd` (double click) or `tools/Build-Addin.ps1` builds the
+add-in package of the checked-out commit with its Ribbon, reopens it in Excel,
+and asks you to confirm that the Ribbon renders (RELEASING §7). It needs:
+- Windows, desktop Excel, Git, and Python 3.11 or later on the `PATH`
+  (`python`, or the `py` launcher);
+- **Trust access to the VBA project object model** already turned on. The tool
+  never changes it.
+
+Close other Excel work first.
+
+```powershell
+git switch <branch-or-sha>
+git status                     # must show no changes to tracked files
+.\tools\Build-Addin.cmd        # or: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Build-Addin.ps1
+```
+
+The run:
+
+1. reads the full SHA and refuses changes to tracked files (`-AllowDirty`
+   builds anyway and records the build as not release-grade);
+2. runs `.github/scripts/check-ribbon-resources.py` on `src/ribbon`, so a
+   missing Ribbon part or image stops the build;
+3. imports the `packaged-hosts` modules of `tools/vba-projects.json` into a new
+   workbook, as Certify-Excel does. The harness is included, as RELEASING §7
+   requires for both packages;
+4. writes the add-in's tracked `ThisWorkbook` code into the workbook's own
+   `ThisWorkbook` module. The code lives in `src/addin/ThisWorkbook.cls`,
+   listed under `document_modules` in `tools/vba-projects.json`, and the file's
+   SHA-256 is recorded. A document module cannot be imported as a component, so
+   the code after the export header is copied in. Its `Workbook_Open` hides the
+   demo sheet and starts and preloads the picker; `Workbook_BeforeClose` stops
+   it; and `Workbook_BeforePrint` closes the picker and purges grid icons;
+5. compiles with **Debug → Compile VBAProject** and saves an `.xlam`;
+6. injects `src/ribbon/` with `tools/build_ribbon_package.py`. That tool:
+   - copies the parts into `customUI/` byte for byte;
+   - adds the Office 2007 extensibility relationship to `_rels/.rels`, and a
+     PNG content type when the package has none;
+   - verifies the result before replacing the file;
+   - refuses a package that already has a Ribbon;
+7. records the package size and SHA-256, and runs `tools/inspect_vba_package.py`
+   on it. The inspection is advisory and its verdict does not decide the build;
+8. opens the package read-only in a fresh Excel instance with a blank workbook,
+   and asks three questions:
+   - Does Show Picker show its icon?
+   - Do Reset and Demo show theirs?
+   - Does Show Picker open the picker?
+9. closes without saving and checks that the package hash is unchanged.
+
+The evidence folder, `DATETIMEPICKER-addin-<sha12>-<yyyyMMdd-HHmmss>` next to
+the checkout (or `-BundleDir`), holds:
+
+| File | Content |
+| --- | --- |
+| `build.txt` | Verdict, commit, host, package hash and the Ribbon answers |
+| `summary.json` | The same, machine-readable, with the reasons for a FAIL |
+| `DATETIMEPICKER-build-<sha12>.xlam` | The package (`-PackageName` sets another name) |
+| `ribbon-injection.json` | Each injected part with its size and SHA-256, and the root relationship |
+| `package-inspection.json`, `.md` | The advisory package inspection |
+| `session.log` | Each step with its time |
+
+The exit code is 0 only when every step passes, all three answers are yes, the
+hash is unchanged after reopening, and the tree was clean. The tool does not run
+the regression pack on the package (RELEASING §7 step 9) and builds no demo
+workbook.
+
+## Render the user manual to PDF
+
+`tools/render_manual.py` turns `docs/USER_MANUAL.md` into one self-contained
+HTML file and, through headless Chrome, Edge or Chromium, into the PDF that each
+release publishes (RELEASING §7). It needs Python-Markdown and pypdf, from their
+own hash-locked lock file:
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
+python tools/render_manual.py --html test-results/USER_MANUAL.html --pdf test-results/USER_MANUAL.pdf
+```
+
+The HTML:
+- embeds every image as a data URI, and accepts only images inside the
+  repository;
+- turns GitHub alerts (`> [!NOTE]` and the like) into styled boxes;
+- points links to other repository files at GitHub at one revision. That is the
+  checked-out commit, or `--ref`, so the PDF never links to a moving branch;
+- replaces the manual's Contents list with a table of contents of its sections.
+
+The PDF has:
+- page numbers ("Page X of Y");
+- a running title;
+- bookmarks (the document outline);
+- the page of each section in the table of contents.
+
+To get those pages, the PDF is printed twice:
+1. pypdf reads each section's page from the first print's outline;
+2. the second print fills the pages into the contents, and must keep every
+   section on the same page.
+
+The browser must support `--generate-pdf-document-outline`, as current Chrome
+and Edge do; the script stops if the PDF has no outline.
+
+The browser is found on the `PATH` or in its usual Windows folder; `--browser`
+names it explicitly. The script stops if the browser writes no PDF. The PDF's
+bytes include its creation time, so a release hashes the file it publishes.
+
+`tool-tests` covers the alert, image, link, contents, page-matching and browser
+handling without Python-Markdown or pypdf. It renders the real manual too when
+Python-Markdown is installed.
+
+To change the Markdown version, edit `tools/requirements-docs.in` and
+regenerate the lock with pip-tools from `tools/`, on the CI Python version:
+
+```sh
+pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=requirements-docs.txt --strip-extras requirements-docs.in
+```
+
 ## Traffic history (repository analytics)
 
 `tools/traffic_export.py` is used only by the **Daily traffic export** workflow.
@@ -281,8 +445,10 @@ Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at
   the unknown-symbol fixture uses a genuinely unknown project symbol.
 - `check_vba_jumps.py`: evaluates each reachable conditional source separately,
   retaining original line numbers for alternative procedure declarations.
-- CodeQL workflow: unchanged. Action versions and actionlint pin follow the
-  template; CodeQL action paths are grouped in Dependabot.
+- CodeQL workflow: adds the `actions` language and a timeout on the eligibility
+  job (#151). Dependabot keeps the action pins current, so they can be newer
+  than the template's; the actionlint pin matches it. CodeQL action paths are
+  grouped in Dependabot.
 
 All adopted tools carry the type annotations and line wrapping that the Ruff
 and mypy gates require; their behaviour is unchanged.

@@ -95,7 +95,7 @@ Assess compatibility against documented behavior, not merely the VBA `Public` ke
 
 ### Production source and package
 
-`M_DatePicker`, `cDatePickerManager`, `cDatePickerLabelHook`, and the complete `UF_DatePicker.frm`/`.frx` pair; Ribbon XML is package metadata when used.
+`M_DatePicker`, `cDatePickerManager`, `cDatePickerLabelHook`, and the complete `UF_DatePicker.frm`/`.frx` pair, plus the two `demo/` modules (`M_DP_DEMO`, `M_DEMO_BUILDER`) the production source still needs to compile ([#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86)); Ribbon XML is package metadata when used.
 
 - [ ] Required source files and import order are unchanged.
 - [ ] Required source files or order changed and `INSTALLATION.md` was updated.
@@ -338,7 +338,7 @@ Unresolved question or accepted trade-off:
 
 ## 🔏 Final-head review
 
-<!-- Complete before merging; see CONTRIBUTING.md, "Final-head review". Re-check after every push. Bot pull requests that only bump a pinned dependency are exempt. -->
+<!-- Complete before merging; see CONTRIBUTING.md, "Final-head review". Re-check after every push. Bot pull requests that only bump a pinned dependency are exempt; an unchanged sync pull request may name the integration's review instead (see CONTRIBUTING.md). -->
 
 | Record | Value |
 | --- | --- |
