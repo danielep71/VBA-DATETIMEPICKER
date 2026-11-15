@@ -4,9 +4,13 @@
 **Date:** <!-- YYYY-MM-DD -->
 
 Use this human-readable record alongside `release-evidence.json`, not instead
-of it. Generate the JSON with `tools/check_release.py --prepare` after testing
-and hashing the final packages. Fill it from actual logs; never invent results.
-An incomplete record is a blocker, not evidence of success.
+of it. `tools/Release.cmd` produces the JSON with `tools/assemble_release.py`
+from the evidence folders of the run, and every figure below can be copied
+from that release folder (`release.txt`, the `*/certification.txt` and
+`*/build.txt` files, and `evidence/`). By hand, generate it with
+`tools/check_release.py --prepare` after testing and hashing the final packages.
+Fill it from actual logs; never invent results. An incomplete record is a
+blocker, not evidence of success.
 
 ## 1. Identity and order
 

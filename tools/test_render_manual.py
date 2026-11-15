@@ -95,6 +95,32 @@ class BrowserTests(unittest.TestCase):
             return subprocess.CompletedProcess(arguments, code)
         return run
 
+    def test_browser_output_is_not_captured(self) -> None:
+        # Captured pipes held open by Chrome's helper processes made Windows
+        # runs time out after the PDF was written (#222).
+        seen: dict[str, Any] = {}
+        write = self.browser(b"%PDF-1.7 new " + b"y" * 2048)
+
+        def run(arguments: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
+            seen.update(options)
+            return write(arguments)  # type: ignore[no-any-return]
+
+        with mock.patch("render_manual.subprocess.run", run):
+            renderer.print_pdf("browser", self.html, self.pdf)
+        self.assertNotIn("capture_output", seen)
+        for stream in ("stdin", "stdout", "stderr"):
+            self.assertIs(seen.get(stream), subprocess.DEVNULL)
+
+    def test_timeout_is_a_render_error(self) -> None:
+        def run(arguments: list[str], **_: Any) -> subprocess.CompletedProcess[bytes]:
+            raise subprocess.TimeoutExpired(arguments, 180)
+
+        stale = self.pdf.read_bytes()
+        with mock.patch("render_manual.subprocess.run", run), \
+                self.assertRaisesRegex(renderer.RenderError, "did not finish within 180 seconds"):
+            renderer.print_pdf("browser", self.html, self.pdf)
+        self.assertEqual(self.pdf.read_bytes(), stale)
+
     def test_missing_explicit_browser_fails(self) -> None:
         with self.assertRaisesRegex(renderer.RenderError, "Browser not found"):
             renderer.find_browser("/no/such/browser")

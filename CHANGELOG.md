@@ -103,6 +103,22 @@ Use only the categories needed by a release.
 
 ### Added
 
+- `tools/Release.cmd` (`tools/Release.ps1`) runs RELEASING sections 5 to 11
+  from one command on the exact `main` commit
+  ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+  runs a preflight, takes the static gates from the CI report of the same
+  commit, runs the Ribbon check, both source runs, both package builds and
+  package runs, and the manual PDF. It then asks the six
+  manual checks, assembles the evidence, asks for confirmation, tags, publishes
+  and validates the downloaded release. `-DryRun` stops before the tag.
+  The user manual PDF comes from the new **User manual PDF** workflow, which
+  renders it for every push to `main` and the release branches and every pull
+  request: the release host's managed Chrome and Edge refuse the DevTools
+  connection that headless printing needs. `-Resume <folder>` continues a
+  run that stopped, keeping the steps that passed.
+  `release-check.yml` now also runs on its own when a release is published,
+  reading the candidate from the tag and the record from the release's
+  `release-evidence.json` asset.
 - `tools/Build-Demo.cmd` (`tools/Build-Addin.ps1 -Demo`) builds the demo
   workbook `DATETIMEPICKER-demo-vX.Y.Z.xlsm` from a clean checkout, with the
   add-in's modules, `ThisWorkbook` code and Ribbon, sanitized and reopened for
