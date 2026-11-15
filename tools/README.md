@@ -326,8 +326,8 @@ workbook.
 
 `tools/render_manual.py` turns `docs/USER_MANUAL.md` into one self-contained
 HTML file and, through headless Chrome, Edge or Chromium, into the PDF that each
-release publishes (RELEASING §7). It needs Python-Markdown, from its own
-hash-locked lock file:
+release publishes (RELEASING §7). It needs Python-Markdown and pypdf, from their
+own hash-locked lock file:
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
@@ -339,14 +339,30 @@ The HTML:
   repository;
 - turns GitHub alerts (`> [!NOTE]` and the like) into styled boxes;
 - points links to other repository files at GitHub at one revision. That is the
-  checked-out commit, or `--ref`, so the PDF never links to a moving branch.
+  checked-out commit, or `--ref`, so the PDF never links to a moving branch;
+- replaces the manual's Contents list with a table of contents of its sections.
+
+The PDF has:
+- page numbers ("Page X of Y");
+- a running title;
+- bookmarks (the document outline);
+- the page of each section in the table of contents.
+
+To get those pages, the PDF is printed twice:
+1. pypdf reads each section's page from the first print's outline;
+2. the second print fills the pages into the contents, and must keep every
+   section on the same page.
+
+The browser must support `--generate-pdf-document-outline`, as current Chrome
+and Edge do; the script stops if the PDF has no outline.
 
 The browser is found on the `PATH` or in its usual Windows folder; `--browser`
 names it explicitly. The script stops if the browser writes no PDF. The PDF's
 bytes include its creation time, so a release hashes the file it publishes.
 
-`tool-tests` covers the alert, image, link and browser handling without
-Python-Markdown. It renders the real manual too when the package is installed.
+`tool-tests` covers the alert, image, link, contents, page-matching and browser
+handling without Python-Markdown or pypdf. It renders the real manual too when
+Python-Markdown is installed.
 
 To change the Markdown version, edit `tools/requirements-docs.in` and
 regenerate the lock with pip-tools from `tools/`, on the CI Python version:

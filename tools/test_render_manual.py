@@ -1,10 +1,14 @@
 """Fixtures for render_manual.py: alerts, embedded images, pinned links and the browser lookup."""
 import base64
 import importlib.util
+import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
+from typing import Any
+from unittest import mock
 
 import render_manual as renderer
 
@@ -74,20 +78,98 @@ class LinkTests(unittest.TestCase):
 
 
 class BrowserTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.folder)
+        self.html = self.folder / "manual.html"
+        self.html.write_text("<p>x</p>", encoding="utf-8")
+        self.pdf = self.folder / "manual.pdf"
+        self.pdf.write_bytes(b"%PDF-1.4 stale " + b"x" * 2048)
+
+    @staticmethod
+    def browser(writes: bytes | None, code: int = 0) -> Any:
+        def run(arguments: list[str], **_: Any) -> subprocess.CompletedProcess[bytes]:
+            if writes is not None:
+                target = next(a for a in arguments if a.startswith("--print-to-pdf="))
+                Path(re.sub("^--print-to-pdf=", "", target)).write_bytes(writes)
+            return subprocess.CompletedProcess(arguments, code)
+        return run
+
     def test_missing_explicit_browser_fails(self) -> None:
         with self.assertRaisesRegex(renderer.RenderError, "Browser not found"):
             renderer.find_browser("/no/such/browser")
+
+    def test_new_pdf_replaces_the_destination(self) -> None:
+        fresh = b"%PDF-1.7 new " + b"y" * 2048
+        with mock.patch("render_manual.subprocess.run", self.browser(fresh)):
+            renderer.print_pdf("browser", self.html, self.pdf)
+        self.assertEqual(self.pdf.read_bytes(), fresh)
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()), ["manual.html", "manual.pdf"])
+
+    def test_stale_pdf_is_not_reported_as_new(self) -> None:
+        stale = self.pdf.read_bytes()
+        with mock.patch("render_manual.subprocess.run", self.browser(None)), \
+                self.assertRaisesRegex(renderer.RenderError, "did not write a PDF"):
+            renderer.print_pdf("browser", self.html, self.pdf)
+        self.assertEqual(self.pdf.read_bytes(), stale)
+
+    def test_browser_failure_keeps_the_destination(self) -> None:
+        stale = self.pdf.read_bytes()
+        with mock.patch("render_manual.subprocess.run", self.browser(b"%PDF-" + b"z" * 2048, code=1)), \
+                self.assertRaisesRegex(renderer.RenderError, "exited with code 1"):
+            renderer.print_pdf("browser", self.html, self.pdf)
+        self.assertEqual(self.pdf.read_bytes(), stale)
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir()), ["manual.html", "manual.pdf"])
+
+
+class ContentsTests(unittest.TestCase):
+    DOCUMENT = ('<h1>Manual</h1><h3>Subtitle</h3><h2 id="toc-contents">Contents</h2><ol><li>old</li></ol>'
+                '<h2 id="what-it-is">\U0001f4c5 What it is</h2><h3 id="day-view">Day &amp; view</h3>'
+                '<h4 id="deep">Deep</h4>')
+
+    def test_contents_list_becomes_a_table_of_contents(self) -> None:
+        out = renderer.insert_contents(self.DOCUMENT, {"what-it-is": 2, "day-view": 3})
+        self.assertNotIn("<li>old</li>", out)
+        self.assertIn('<li class="toc-2"><a href="#what-it-is"><span class="toc-title">\U0001f4c5 What it is</span>'
+                      '<span class="toc-dots"></span><span class="toc-page">2</span></a></li>', out)
+        self.assertIn('<span class="toc-title">Day &amp; view</span><span class="toc-dots"></span>'
+                      '<span class="toc-page">3</span>', out)
+        self.assertNotIn("Subtitle</span>", out)
+        self.assertNotIn("Deep</span>", out)
+
+    def test_without_pages_the_page_column_is_blank(self) -> None:
+        out = renderer.insert_contents(self.DOCUMENT, None)
+        self.assertIn('<span class="toc-page"></span>', out)
+
+    def test_a_manual_without_contents_fails(self) -> None:
+        with self.assertRaisesRegex(renderer.RenderError, "Contents"):
+            renderer.insert_contents("<h1>Manual</h1><h2 id=\"a\">A</h2>", None)
+
+    def test_pages_follow_the_outline_in_order(self) -> None:
+        document = '<h1>Manual</h1><h2 id="a">A &amp; B</h2><h3 id="c">C</h3>'
+        self.assertEqual(renderer.assign_pages(document, [("Manual", 1), ("A & B", 2), ("C", 4)]), {"a": 2, "c": 4})
+
+    def test_an_outline_that_does_not_match_fails(self) -> None:
+        document = '<h1>Manual</h1><h2 id="a">A</h2>'
+        with self.assertRaisesRegex(renderer.RenderError, "outline has 1 entries for 2 headings"):
+            renderer.assign_pages(document, [("Manual", 1)])
+        with self.assertRaisesRegex(renderer.RenderError, "does not match"):
+            renderer.assign_pages(document, [("Manual", 1), ("B", 2)])
 
 
 @unittest.skipUnless(importlib.util.find_spec("markdown"), "Python-Markdown is not installed")
 class ManualTests(unittest.TestCase):
     def test_the_manual_renders_self_contained(self) -> None:
         document = renderer.build_html(renderer.ROOT, "abc123")
-        self.assertIn("<h1>", document)
+        self.assertRegex(document, r'<h1 id="toc-[^"]+">')
         self.assertNotIn('src="../', document)
         self.assertNotIn("[!NOTE]", document)
         self.assertIn('class="alert alert-note"', document)
         self.assertNotIn('href="../', document)
+        self.assertIn('<nav class="toc">', document)
+        self.assertIn('<a href="#toc-settings">', document)
+        ids = re.findall(r'\bid="([^"]+)"', document)
+        self.assertEqual(len(ids), len(set(ids)), "duplicate ids")
 
 
 if __name__ == "__main__":

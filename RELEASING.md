@@ -286,9 +286,10 @@ For each artifact:
 11. Never edit the artifact after hashing.
 
 The user manual PDF is rendered from `docs/USER_MANUAL.md` at the exact
-candidate. Its links to other repository files point at that commit. Install
-Python-Markdown from the hash-locked `tools/requirements-docs.txt` first, then
-render with headless Chrome or Edge:
+candidate. Its links to other repository files point at that commit. It has
+page numbers, bookmarks, and a table of contents with the page of each section.
+Install Python-Markdown and pypdf from the hash-locked
+`tools/requirements-docs.txt` first, then render with headless Chrome or Edge:
 
 ```sh
 python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt

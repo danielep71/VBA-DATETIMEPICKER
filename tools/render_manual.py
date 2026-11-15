@@ -6,10 +6,14 @@ hash-locked tools/requirements-docs.txt). The HTML is self-contained:
 - images are embedded as data URIs;
 - GitHub alerts (> [!NOTE] and the like) become styled boxes;
 - links to other repository files point to GitHub at one fixed revision (the
-  checked-out commit by default), so the PDF never links to a moving branch.
+  checked-out commit by default), so the PDF never links to a moving branch;
+- the manual's Contents list becomes a table of contents of its sections.
 
-The PDF is printed by headless Chrome, Edge or Chromium. A release publishes
-it as DATETIMEPICKER-user-manual-vX.Y.Z.pdf (RELEASING.md section 7).
+The PDF is printed by headless Chrome, Edge or Chromium, with page numbers and
+a document outline (bookmarks). It is printed twice: the first print gives each
+section's page, read from the outline with pypdf; the second fills those pages
+into the table of contents and must keep the same pages. A release publishes it
+as DATETIMEPICKER-user-manual-vX.Y.Z.pdf (RELEASING.md section 7).
 
 Usage:
     python tools/render_manual.py --html <out.html> [--pdf <out.pdf>] [--ref <sha-or-tag>] [--browser <path>]
@@ -28,6 +32,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -38,13 +43,23 @@ HTML_BLOCK = re.compile(r"^<div\b(?![^>]*\bmarkdown=)([^>]*)>\s*$")
 ALERT = re.compile(r"^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*$")
 IMG_SRC = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]+)(")', re.IGNORECASE)
 HREF = re.compile(r'(<a\b[^>]*?\bhref=")([^"]+)(")', re.IGNORECASE)
+HEADING = re.compile(r'<h([1-6])(?: id="([^"]*)")?>(.*?)</h\1>', re.DOTALL)
+CONTENTS_LIST = re.compile(r'(<h2 id="toc-contents">.*?</h2>\s*)<ol>.*?</ol>', re.DOTALL)
+# Heading ids get a prefix so they never collide with the manual's own <a id> anchors.
+HEADING_ID_PREFIX = "toc-"
+TAG = re.compile(r"<[^>]+>")
 BROWSER_NAMES = ("chrome", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "msedge")
 WINDOWS_BROWSERS = (
     r"Google\Chrome\Application\chrome.exe",
     r"Microsoft\Edge\Application\msedge.exe",
 )
 STYLE = """
-@page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+@page { size: A4; margin: 18mm 16mm 20mm 16mm;
+  @top-right { content: "Date / Time Picker - User Manual"; font: 8pt "Segoe UI", Arial, sans-serif;
+               color: #59636e; }
+  @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 9pt "Segoe UI", Arial, sans-serif;
+                   color: #59636e; } }
+@page :first { @top-right { content: none; } }
 body { font-family: "Segoe UI", "Helvetica Neue", Arial, "Noto Sans", sans-serif;
        font-size: 10.5pt; line-height: 1.5; color: #1f2328; max-width: 180mm; margin: 0 auto; }
 h1, h2, h3 { line-height: 1.25; margin: 1.4em 0 0.5em; }
@@ -71,6 +86,13 @@ blockquote { margin: 0.8em 0; padding: 0 1em; color: #59636e; border-left: 4px s
 .alert-warning { border-color: #9a6700; background: #fff8c5; }
 .alert-caution { border-color: #cf222e; background: #ffebe9; }
 .revision { color: #59636e; font-size: 9pt; text-align: center; }
+.toc ol { list-style: none; padding: 0; margin: 0.4em 0 1em; }
+.toc li { margin: 0.15em 0; }
+.toc a { display: flex; align-items: baseline; color: inherit; }
+.toc .toc-dots { flex: 1; border-bottom: 1px dotted #8c959f; margin: 0 0.4em; }
+.toc .toc-page { min-width: 2em; text-align: right; }
+.toc .toc-2 { font-weight: 600; margin-top: 0.45em; }
+.toc .toc-3 { padding-left: 1.5em; font-size: 0.95em; }
 """
 
 
@@ -149,14 +171,63 @@ def markdown_to_html(text: str) -> str:
     except ImportError as error:
         raise RenderError("Python-Markdown is not installed. Run: python -m pip install --require-hashes "
                           "--only-binary=:all: -r tools/requirements-docs.txt") from error
-    return str(markdown.markdown(text, extensions=["tables", "fenced_code", "md_in_html", "sane_lists"],
-                                 output_format="html"))
+    toc = importlib.import_module("markdown.extensions.toc")
+
+    def slugify(value: str, separator: str) -> str:
+        return HEADING_ID_PREFIX + str(toc.slugify(value, separator))
+
+    return str(markdown.markdown(text, extensions=["tables", "fenced_code", "md_in_html", "sane_lists", "toc"],
+                                 extension_configs={"toc": {"slugify": slugify}}, output_format="html"))
 
 
-def build_html(root: Path, ref: str) -> str:
+def heading_text(fragment: str) -> str:
+    """Plain text of a heading's inner HTML, with whitespace collapsed."""
+    return " ".join(html.unescape(TAG.sub("", fragment)).split())
+
+
+def headings(document: str) -> list[tuple[int, str, str]]:
+    """(level, id, text) of every heading, in document order."""
+    return [(int(level), ident, heading_text(inner)) for level, ident, inner in HEADING.findall(document)]
+
+
+def insert_contents(document: str, pages: dict[str, int] | None) -> str:
+    """Replace the Contents list with a table of contents of the h2 and h3 sections after it.
+
+    pages maps a heading id to its page; without it the page column is left blank.
+    """
+    match = CONTENTS_LIST.search(document)
+    if match is None:
+        raise RenderError('The manual needs a "Contents" heading followed by a list')
+    entries = []
+    for level, ident, text in headings(document[match.end():]):
+        if level not in (2, 3) or not ident:
+            continue
+        page = str(pages[ident]) if pages is not None and ident in pages else ""
+        entries.append(f'<li class="toc-{level}"><a href="#{html.escape(ident, quote=True)}">'
+                       f'<span class="toc-title">{html.escape(text)}</span><span class="toc-dots"></span>'
+                       f'<span class="toc-page">{page}</span></a></li>')
+    contents = '<nav class="toc"><ol>' + "".join(entries) + "</ol></nav>"
+    return document[:match.start()] + match.group(1) + contents + document[match.end():]
+
+
+def assign_pages(document: str, outline: list[tuple[str, int]]) -> dict[str, int]:
+    """Map each heading id to its page, pairing the headings with the PDF outline in order."""
+    found = headings(document)
+    if len(found) != len(outline):
+        raise RenderError(f"The PDF outline has {len(outline)} entries for {len(found)} headings")
+    pages: dict[str, int] = {}
+    for (_level, ident, text), (title, page) in zip(found, outline, strict=True):
+        if " ".join(title.split()) != text:
+            raise RenderError(f"The PDF outline entry {title!r} does not match the heading {text!r}")
+        if ident:
+            pages[ident] = page
+    return pages
+
+
+def build_html(root: Path, ref: str, pages: dict[str, int] | None = None) -> str:
     source_file = root / Path(*SOURCE.parts)
     text = source_file.read_text(encoding="utf-8")
-    body = markdown_to_html(convert_alerts(text))
+    body = insert_contents(markdown_to_html(convert_alerts(text)), pages)
     body = rewrite_links(embed_images(body, source_file.parent, root), SOURCE, ref)
     revision = f'<p class="revision">Rendered from {SOURCE} at {html.escape(ref)}</p>'
     return ("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
@@ -191,15 +262,63 @@ def find_browser(explicit: str | None) -> str:
 
 
 def print_pdf(browser: str, html_file: Path, pdf_file: Path) -> None:
+    """Print html_file to pdf_file; the destination changes only when a new PDF was written."""
+    destination = pdf_file.resolve()
+    handle, name = tempfile.mkstemp(prefix=destination.stem + ".", suffix=".pdf", dir=destination.parent)
+    os.close(handle)
+    fresh = Path(name)
+    fresh.unlink()
     arguments = [browser, "--headless", "--disable-gpu", "--no-pdf-header-footer", "--print-to-pdf-no-header",
-                 f"--print-to-pdf={pdf_file.resolve()}", html_file.resolve().as_uri()]
+                 "--generate-pdf-document-outline", f"--print-to-pdf={fresh}", html_file.resolve().as_uri()]
     # Headless Chrome uses a temporary profile of its own; a fresh --user-data-dir
     # makes it wait for first-run network work instead of printing.
     if os.name == "posix" and hasattr(os, "geteuid") and os.geteuid() == 0:
         arguments.insert(1, "--no-sandbox")
-    subprocess.run(arguments, capture_output=True, check=False, timeout=180)
-    if not pdf_file.is_file() or pdf_file.stat().st_size < 1024 or pdf_file.read_bytes()[:5] != b"%PDF-":
-        raise RenderError(f"The browser did not write a PDF to {pdf_file}")
+    try:
+        result = subprocess.run(arguments, capture_output=True, check=False, timeout=180)
+        if result.returncode != 0:
+            raise RenderError(f"The browser exited with code {result.returncode}")
+        if not fresh.is_file() or fresh.stat().st_size < 1024 or fresh.read_bytes()[:5] != b"%PDF-":
+            raise RenderError(f"The browser did not write a PDF for {pdf_file}")
+        os.replace(fresh, destination)
+    finally:
+        if fresh.exists():
+            fresh.unlink()
+
+
+def outline_pages(pdf_file: Path) -> list[tuple[str, int]]:
+    """(title, 1-based page) of every PDF outline entry, depth first, which is document order."""
+    try:
+        pypdf = importlib.import_module("pypdf")
+    except ImportError as error:
+        raise RenderError("pypdf is not installed. Run: python -m pip install --require-hashes "
+                          "--only-binary=:all: -r tools/requirements-docs.txt") from error
+    reader = pypdf.PdfReader(str(pdf_file))
+    entries: list[tuple[str, int]] = []
+
+    def walk(items: list[object]) -> None:
+        for item in items:
+            if isinstance(item, list):
+                walk(item)
+            else:
+                entries.append((str(getattr(item, "title", "")), int(reader.get_destination_page_number(item)) + 1))
+    walk(list(reader.outline))
+    if not entries:
+        raise RenderError("The PDF has no outline; the browser does not support --generate-pdf-document-outline")
+    return entries
+
+
+def render_pdf(browser: str, root: Path, ref: str, html_file: Path, pdf_file: Path) -> None:
+    """Print twice: the first print gives the section pages, the second puts them in the contents."""
+    first = build_html(root, ref)
+    html_file.write_text(first, encoding="utf-8")
+    print_pdf(browser, html_file, pdf_file)
+    pages = assign_pages(first, outline_pages(pdf_file))
+    final = build_html(root, ref, pages)
+    html_file.write_text(final, encoding="utf-8")
+    print_pdf(browser, html_file, pdf_file)
+    if assign_pages(final, outline_pages(pdf_file)) != pages:
+        raise RenderError("Filling in the page numbers moved a section to another page")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -211,10 +330,12 @@ def main(argv: list[str] | None = None) -> int:
     options = parser.parse_args(argv)
     try:
         ref = options.ref or checked_out_revision(ROOT)
-        options.html.write_text(build_html(ROOT, ref), encoding="utf-8")
+        if options.pdf is None:
+            options.html.write_text(build_html(ROOT, ref), encoding="utf-8")
+        else:
+            render_pdf(find_browser(options.browser), ROOT, ref, options.html, options.pdf)
         print(f"HTML: {options.html}")
         if options.pdf is not None:
-            print_pdf(find_browser(options.browser), options.html, options.pdf)
             digest = hashlib.sha256(options.pdf.read_bytes()).hexdigest()
             print(f"PDF: {options.pdf} ({options.pdf.stat().st_size} bytes, sha256 {digest})")
     except (RenderError, OSError, subprocess.SubprocessError) as error:

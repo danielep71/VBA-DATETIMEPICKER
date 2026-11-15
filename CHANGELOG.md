@@ -385,8 +385,10 @@ Use only the categories needed by a release.
 
   Each statement was checked against the source. From `v1.2.3` each release
   also publishes it as `DATETIMEPICKER-user-manual-vX.Y.Z.pdf`, rendered by the
-  new `tools/render_manual.py`. That tool uses Python-Markdown from the
-  hash-locked `tools/requirements-docs.txt` and headless Chrome or Edge.
+  new `tools/render_manual.py`. The PDF has page numbers, bookmarks, and a table
+  of contents with the page of each section. The tool uses Python-Markdown and
+  pypdf from the hash-locked `tools/requirements-docs.txt`, and headless Chrome
+  or Edge.
   README, INSTALLATION, RELEASING §7, the certification template and the
   project website link to the manual.
 - The social preview now has an editable source, `assets/social-preview.svg`,

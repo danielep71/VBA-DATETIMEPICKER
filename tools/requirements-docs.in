@@ -1,3 +1,5 @@
-# Markdown rendering for tools/render_manual.py (the user manual PDF). Edit this
+# Rendering for tools/render_manual.py (the user manual PDF): Python-Markdown for the
+# HTML, pypdf to read the PDF outline for the page numbers in the contents. Edit this
 # file, then regenerate requirements-docs.txt as described in tools/README.md.
 markdown==3.10.3
+pypdf==6.21.4
