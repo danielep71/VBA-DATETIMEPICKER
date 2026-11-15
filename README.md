@@ -174,8 +174,11 @@ see [INSTALLATION.md](INSTALLATION.md) and [#86](https://github.com/danielep71/V
 
 If you use the Ribbon, also copy `src/ribbon/` into the package's `customUI/`
 folder unchanged: the RibbonX part, its relationship part and the three custom
-images it references ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). [RELEASING.md](RELEASING.md) lists the exact
-mapping:
+images it references ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). The package's root relationship must
+also point at `customUI/customUI.xml` with the Office 2007 extensibility type;
+without it Excel loads no Ribbon. [RELEASING.md](RELEASING.md#7-build-release-artifacts) lists the exact
+mapping, and `tools/Build-Addin.cmd` does all of this from a clean checkout
+([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)):
 
 ```text
 src/ribbon/customUI.xml

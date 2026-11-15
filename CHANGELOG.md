@@ -103,6 +103,20 @@ Use only the categories needed by a release.
 
 ### Added
 
+- One-command add-in build with its Ribbon, `tools/Build-Addin.cmd` with
+  `tools/Build-Addin.ps1`, for Windows hosts ([#208](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/208)). From a clean checkout it:
+  - checks `src/ribbon/`;
+  - imports the `packaged-hosts` modules into a new workbook, writes the
+    README lifecycle hooks into `ThisWorkbook` and compiles;
+  - saves an `.xlam`, injects `src/ribbon/` into `customUI/` with the root
+    relationship, and records the package's size and SHA-256;
+  - reopens the package in a fresh Excel instance, records the operator's
+    check of the three Ribbon icons and of Show Picker, and confirms the hash is
+    unchanged.
+
+  The injection is done by `tools/build_ribbon_package.py`. It copies the parts
+  byte for byte, refuses a package that already has a Ribbon, and is tested in
+  the `tool-tests` gate. This is the clean-build evidence #90 needs.
 - One-command Excel regression run, `tools/Certify-Excel.cmd` with
   `tools/Certify-Excel.ps1`, for Windows hosts. From a clean checkout it starts
   its own Excel instance, imports the `packaged-hosts` modules of

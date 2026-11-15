@@ -257,6 +257,14 @@ For each artifact:
    (`http://schemas.microsoft.com/office/2006/relationships/ui/extensibility`)
    for `customUI/customUI.xml`. Office RibbonX Editor does this when the part is
    added as an "Office 2007 Custom UI Part".
+
+   For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6, the Ribbon
+   part of step 8 and step 10 from a clean checkout. It writes the README
+   lifecycle hooks into `ThisWorkbook`, because the shipped add-in's own
+   `ThisWorkbook` code is not tracked source. It records its evidence in a
+   folder outside the checkout
+   ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
+   Step 9 and the demo workbook remain separate.
 5. Fail the build if a required Ribbon part or referenced custom resource cannot
    be resolved from the candidate-controlled inputs.
 6. Compile the VBA project before saving; remember that compilation validates
