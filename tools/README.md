@@ -569,6 +569,52 @@ that a described manual test happened. Keep the original logs with the record.
 Use this for future candidates containing these tools. Do not reconstruct or
 re-certify v1.2.2: its accepted limitations, tag and packages remain authoritative.
 
+### Assemble the record from the evidence folders
+
+`tools/assemble_release.py` fills the record from recorded output instead of by
+hand ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+reads:
+
+- two source runs of `tools/Certify-Excel.cmd`, standard and `-WithUISmoke`;
+- for each package, its build folder (`tools/Build-Addin.cmd` for the add-in,
+  `tools/Build-Demo.cmd` for the demo; both write `"kind"`) and its
+  `Certify-Excel.cmd -Package` run;
+- `release-assets/` with the two packages and the user manual PDF;
+- the exact-candidate `static-checks.json`;
+- `manual-checks.json`, the six manual records as the operator answered them
+  (the same objects as the `manual` member of the record).
+
+```sh
+python tools/assemble_release.py --candidate-sha <full-sha> \
+  --assets-dir release-assets --static-report test-results/static-checks.json \
+  --source-standard <folder> --source-ui-smoke <folder> \
+  --addin-build <folder> --addin-run <folder> --demo-build <folder> --demo-run <folder> \
+  --manual manual-checks.json --title "<short title>" --refs 88 89 \
+  --evidence-issue 122 --output-dir release-out
+```
+
+It refuses the input unless every folder names the candidate SHA, a clean tree
+and PASS; each package's SHA-256 is the same in its build, its package run and
+`release-assets/`, and never changed during a run; every dispatched suite
+completed and the suites dispatched equal the `TST_DP_RunSuiteSafe` calls in the
+candidate's harness; and Excel, Windows and bitness are known. Each pack's
+expected total is the source run's total for the same commit, so a package that
+runs fewer assertions than its source fails. The record is then validated with
+`check_release.py`.
+
+It writes four files into a new or empty `--output-dir` and never overwrites
+one:
+
+| File | Content |
+| --- | --- |
+| `release-evidence.json` | The record, with the PDF under `documents` |
+| `release-check.json` | `check_release.py`'s result: `pass` or `pass_with_limitations` |
+| `tag-message.txt` | The annotated tag's message in the RELEASING §9 template |
+| `release-notes.md` | The candidate's dated CHANGELOG section with links resolved at the tag, the downloads with SHA-256, the results of both packs on both packages, the environment, the manual checks and the deviations |
+
+A manual check `NOT RUN` with a named `accepted_by` becomes a deviation in the
+tag message and the notes. The tool tags nothing and publishes nothing.
+
 ## Template origin and adaptations
 
 Adopted from `danielep71/EXCEL-VBA-PROJECT-TEMPLATE` at

@@ -123,6 +123,15 @@ Use only the categories needed by a release.
   completed to `K9:K10` of `TST_DP_RESULTS` and as a `Harness | Suites` row, and
   both source and package runs fail when a dispatched suite did not complete.
   The summary line keeps its format.
+- `tools/assemble_release.py` builds `release-evidence.json`, the annotated
+  tag's message and the GitHub Release notes from the recorded evidence
+  folders, the candidate's own CHANGELOG and harness, the static report and the
+  operator's manual answers
+  ([#222](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/222)). It
+  cross-checks one candidate SHA, clean trees, PASS results and each package's
+  SHA-256 across build, test and asset; takes each pack's expected total from
+  the source run of the same commit and the expected suites from the harness;
+  validates the record with `check_release.py`; and never overwrites output.
 - One-command add-in build with its Ribbon, `tools/Build-Addin.cmd` with
   `tools/Build-Addin.ps1`, for Windows hosts ([#208](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/208)). From a clean checkout it:
   - checks `src/ribbon/`;
