@@ -322,6 +322,39 @@ hash is unchanged after reopening, and the tree was clean. The tool does not run
 the regression pack on the package (RELEASING §7 step 9) and builds no demo
 workbook.
 
+## Render the user manual to PDF
+
+`tools/render_manual.py` turns `docs/USER_MANUAL.md` into one self-contained
+HTML file and, through headless Chrome, Edge or Chromium, into the PDF that each
+release publishes (RELEASING §7). It needs Python-Markdown, from its own
+hash-locked lock file:
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
+python tools/render_manual.py --html test-results/USER_MANUAL.html --pdf test-results/USER_MANUAL.pdf
+```
+
+The HTML:
+- embeds every image as a data URI, and accepts only images inside the
+  repository;
+- turns GitHub alerts (`> [!NOTE]` and the like) into styled boxes;
+- points links to other repository files at GitHub at one revision. That is the
+  checked-out commit, or `--ref`, so the PDF never links to a moving branch.
+
+The browser is found on the `PATH` or in its usual Windows folder; `--browser`
+names it explicitly. The script stops if the browser writes no PDF. The PDF's
+bytes include its creation time, so a release hashes the file it publishes.
+
+`tool-tests` covers the alert, image, link and browser handling without
+Python-Markdown. It renders the real manual too when the package is installed.
+
+To change the Markdown version, edit `tools/requirements-docs.in` and
+regenerate the lock with pip-tools from `tools/`, on the CI Python version:
+
+```sh
+pip-compile --allow-unsafe --generate-hashes --no-emit-index-url --output-file=requirements-docs.txt --strip-extras requirements-docs.in
+```
+
 ## Traffic history (repository analytics)
 
 `tools/traffic_export.py` is used only by the **Daily traffic export** workflow.

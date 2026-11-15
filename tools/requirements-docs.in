@@ -1,0 +1,3 @@
+# Markdown rendering for tools/render_manual.py (the user manual PDF). Edit this
+# file, then regenerate requirements-docs.txt as described in tools/README.md.
+markdown==3.10.3

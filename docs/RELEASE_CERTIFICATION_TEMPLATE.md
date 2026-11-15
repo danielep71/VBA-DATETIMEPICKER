@@ -93,6 +93,17 @@ Both records are required in `assets`; store final files in `release-assets/`.
 | `environment.load_mode` | <!-- actual load/startup route --> | <!-- --> |
 | `environment.other_addins` | <!-- explicit none or list --> | <!-- --> |
 
+User manual PDF, rendered by `tools/render_manual.py` from `docs/USER_MANUAL.md`
+at the candidate. This record is not validated by `check_release.py`:
+
+| Field | Value |
+| --- | --- |
+| `filename` | `DATETIMEPICKER-user-manual-vX.Y.Z.pdf` |
+| `candidate_sha` | <!-- same candidate --> |
+| `size` | <!-- integer bytes > 0 --> |
+| `sha256` | <!-- final file digest --> |
+| `checked_pages` | <!-- every page opened and read: yes --> |
+
 Record source import and package construction steps, including the `.frm/.frx`
 pair, Ribbon XML, relationships and custom images. The packaged harness includes
 `test/M_cDP_Test.bas` as specified in `tools/vba-projects.json`; its absence

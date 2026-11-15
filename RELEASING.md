@@ -235,6 +235,8 @@ Planned outputs:
 
 - `release-assets/DATETIMEPICKER.vX.Y.Z.xlam` add-in (required)
 - `release-assets/DATETIMEPICKER-demo-vX.Y.Z.xlsm` demo (required)
+- `release-assets/DATETIMEPICKER-user-manual-vX.Y.Z.pdf` user manual (required
+  from `v1.2.3`)
 - Source archive created by GitHub from the tag
 
 For each artifact:
@@ -282,6 +284,20 @@ For each artifact:
    Record expected and actual run/suite totals, failures and cleanup failures.
 10. Record filename, size, and SHA-256.
 11. Never edit the artifact after hashing.
+
+The user manual PDF is rendered from `docs/USER_MANUAL.md` at the exact
+candidate. Its links to other repository files point at that commit. Install
+Python-Markdown from the hash-locked `tools/requirements-docs.txt` first, then
+render with headless Chrome or Edge:
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r tools/requirements-docs.txt
+python tools/render_manual.py --html test-results/USER_MANUAL.html --pdf release-assets/DATETIMEPICKER-user-manual-vX.Y.Z.pdf
+```
+
+Open the PDF and check every page before you hash it. Record its filename, size
+and SHA-256 in the certification record (section 3 of the template).
+`check_release.py` validates the two packages only, not the manual.
 
 The Ribbon source above was recovered from the published `v1.2.2` add-in
 ([#90](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/90)). Before that, the repository tracked an Office 2010 `customUI14.xml`

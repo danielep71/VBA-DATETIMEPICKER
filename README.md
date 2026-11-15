@@ -1339,7 +1339,8 @@ VBA-DATETIMEPICKER/
 ├─ docs/
 │  ├─ BUG_REPORT_DETAILS.md
 │  ├─ FEATURE_REQUEST_DETAILS.md
-│  └─ RELEASE_CERTIFICATION_TEMPLATE.md
+│  ├─ RELEASE_CERTIFICATION_TEMPLATE.md
+│  └─ USER_MANUAL.md
 ├─ src/
 │  ├─ addin/
 │  │  └─ ThisWorkbook.cls   (add-in workbook code; copied in by tools/Build-Addin, not imported)
@@ -1627,6 +1628,7 @@ The Wiki covers installation, API, manager/events, settings, testing/demo guidan
 
 | Resource | Purpose |
 |---|---|
+| [User manual](docs/USER_MANUAL.md) | How to use the picker in Excel, for people who are not developers; each release also publishes it as a PDF |
 | [Project website](https://danielep71.github.io/VBA-DATETIMEPICKER/) | Component overview, screenshots, downloads, and getting started |
 | [Wiki](https://github.com/danielep71/VBA-DATETIMEPICKER/wiki) | Extended installation, API and design documentation |
 | [README.md](README.md) | High-level contract, usage, architecture and limitations |
@@ -1634,7 +1636,7 @@ The Wiki covers installation, API, manager/events, settings, testing/demo guidan
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development workflow, coding rules and architecture decisions |
 | [SECURITY.md](SECURITY.md) | Security reporting and safe-use guidance |
 | [Regression tests](test/M_cDP_Test.bas) | Executable behavioral verification |
-| [GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases) | Published `.xlam`, demo workbook and release notes |
+| [GitHub Releases](https://github.com/danielep71/VBA-DATETIMEPICKER/releases) | Published `.xlam`, demo workbook, user manual PDF and release notes |
 
 For source changes after the recorded Wiki baseline, the branch source and README remain the immediate reference until the next Wiki verification pass.
 

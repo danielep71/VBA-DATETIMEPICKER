@@ -373,6 +373,22 @@ Use only the categories needed by a release.
 
 ### Documentation
 
+- A user manual for people who use the picker in Excel, not for developers:
+  [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) ([#209](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/209)). It covers:
+  - installing the add-in;
+  - the four ways to open the picker;
+  - the day, month and year views, Today and Time, and the keys;
+  - what is written where, which cells are kept, and what the messages mean;
+  - the settings and where they are kept;
+  - the demo sheet;
+  - troubleshooting, including the "another copy" refusal.
+
+  Each statement was checked against the source. From `v1.2.3` each release
+  also publishes it as `DATETIMEPICKER-user-manual-vX.Y.Z.pdf`, rendered by the
+  new `tools/render_manual.py`. That tool uses Python-Markdown from the
+  hash-locked `tools/requirements-docs.txt` and headless Chrome or Edge.
+  README, INSTALLATION, RELEASING §7, the certification template and the
+  project website link to the manual.
 - The social preview now has an editable source, `assets/social-preview.svg`,
   rendered to `assets/social-preview.png` (1280×640). The old PNG had no source
   and still showed `v1.0`. The new artwork follows the README's, draws the month

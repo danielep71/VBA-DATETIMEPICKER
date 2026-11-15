@@ -177,6 +177,10 @@ from source you imported.
 4. Stop if the hash does not match. A mismatch means the file is not the
    published artifact, whatever its name.
 
+Each release from `v1.2.3` also publishes the user manual as
+`DATETIMEPICKER-user-manual-vX.Y.Z.pdf`, with its SHA-256. The same manual is
+[`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) in the repository.
+
 ### Install and enable
 
 1. Right-click the downloaded file, open **Properties**, and unblock it if
@@ -335,6 +339,7 @@ owns and document anything intentionally retained.
 
 ## 📚 Related documentation
 
+- [docs/USER_MANUAL.md](docs/USER_MANUAL.md) — how to use the picker in Excel, for end users
 - [README.md](README.md) — capabilities, requirements, and public API
 - [CHANGELOG.md](CHANGELOG.md) — version history and compatibility
 - [CONTRIBUTING.md](CONTRIBUTING.md) — source and validation standards
