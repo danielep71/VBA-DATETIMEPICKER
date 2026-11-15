@@ -51,6 +51,35 @@ class AdvisoryCompleteness(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
 
 
+class DocumentModuleTests(unittest.TestCase):
+    """document_modules: workbook-module code written into a package, never imported (#211)."""
+
+    WORKBOOK = cls("ThisWorkbook", "Private Sub Workbook_Open()\n    DP_Start\nEnd Sub\n")
+    STANDARD = mod("M_A", "Public Sub DP_Start()\nEnd Sub\nPublic Sub DP_Name()\n    Debug.Print ThisWorkbook.Name\n"
+                          "End Sub\n")
+
+    def run_with(self, files: dict[str, str], document_modules: list[str]) -> dict[str, Any]:
+        manifest = {"project_name_patterns": PATTERNS, "configurations": {"fixture": {
+            "modules": ["a.bas"], "document_modules": document_modules}}}
+        return calls.analyze_project(files, manifest, None, None)
+
+    def test_listed_document_module_is_covered_and_not_analyzed(self) -> None:
+        report = self.run_with({"a.bas": self.STANDARD, "ThisWorkbook.cls": self.WORKBOOK}, ["ThisWorkbook.cls"])
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["coverage_findings"], [])
+        self.assertEqual(report["configurations"]["fixture"]["modules_analyzed"], ["a.bas"])
+        self.assertEqual(report["configurations"]["fixture"]["findings"], [])
+
+    def test_unlisted_document_module_is_a_coverage_gap(self) -> None:
+        report = self.run_with({"a.bas": self.STANDARD, "ThisWorkbook.cls": self.WORKBOOK}, [])
+        self.assertEqual([f["code"] for f in report["coverage_findings"]], ["VBA-CALL-091"])
+
+    def test_missing_document_module_is_reported(self) -> None:
+        report = self.run_with({"a.bas": self.STANDARD}, ["ThisWorkbook.cls"])
+        self.assertIn("VBA-CALL-091", [f["code"] for f in report["configurations"]["fixture"]["findings"]])
+        self.assertFalse(report["configurations"]["fixture"]["complete"])
+
+
 class ResolutionTests(unittest.TestCase):
     def test_valid_local_and_cross_module_calls(self) -> None:
         report = analyze({

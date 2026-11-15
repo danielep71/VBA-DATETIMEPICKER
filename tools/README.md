@@ -282,10 +282,13 @@ The run:
 3. imports the `packaged-hosts` modules of `tools/vba-projects.json` into a new
    workbook, as Certify-Excel does. The harness is included, as RELEASING §7
    requires for both packages;
-4. writes the lifecycle hooks documented in README into `ThisWorkbook`
-   (`Workbook_Open` → `DP_Start`, `Workbook_BeforeClose` → `DP_Stop`). The
-   shipped add-in's own `ThisWorkbook` code is not tracked source, so the
-   package is evidence of the build and the Ribbon, not a release asset;
+4. writes the add-in's tracked `ThisWorkbook` code into the workbook's own
+   `ThisWorkbook` module. The code lives in `src/addin/ThisWorkbook.cls`,
+   listed under `document_modules` in `tools/vba-projects.json`, and the file's
+   SHA-256 is recorded. A document module cannot be imported as a component, so
+   the code after the export header is copied in. Its `Workbook_Open` hides the
+   demo sheet and starts and preloads the picker; `Workbook_BeforeClose` stops
+   it; and `Workbook_BeforePrint` closes the picker and purges grid icons;
 5. compiles with **Debug → Compile VBAProject** and saves an `.xlam`;
 6. injects `src/ribbon/` with `tools/build_ribbon_package.py`. That tool:
    - copies the parts into `customUI/` byte for byte;

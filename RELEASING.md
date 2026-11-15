@@ -259,10 +259,11 @@ For each artifact:
    added as an "Office 2007 Custom UI Part".
 
    For the add-in, `tools/Build-Addin.cmd` performs steps 1 to 6, the Ribbon
-   part of step 8 and step 10 from a clean checkout. It writes the README
-   lifecycle hooks into `ThisWorkbook`, because the shipped add-in's own
-   `ThisWorkbook` code is not tracked source. It records its evidence in a
-   folder outside the checkout
+   part of step 8 and step 10 from a clean checkout. The add-in's
+   `ThisWorkbook` code is a candidate input too. It is tracked as
+   `src/addin/ThisWorkbook.cls`, and the tool copies it into the workbook's
+   document module, because a document module cannot be imported. The tool
+   records its evidence in a folder outside the checkout
    ([tools/README.md](tools/README.md#build-the-add-in-and-check-its-ribbon-windows)).
    Step 9 and the demo workbook remain separate.
 5. Fail the build if a required Ribbon part or referenced custom resource cannot

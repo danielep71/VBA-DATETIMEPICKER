@@ -20,10 +20,10 @@ For the commit checked out in this repository:
    the components of one configuration of tools\vba-projects.json
    (packaged-hosts by default, which includes the regression harness, step 7)
    in their listed order. Each component must keep its repository name;
-6. writes the lifecycle hooks documented in README.md into the workbook's
-   ThisWorkbook module: Workbook_Open calls DP_Start and Workbook_BeforeClose
-   calls DP_Stop. The shipped add-in's own ThisWorkbook code is not tracked
-   source, so it is not reproduced;
+6. writes the configuration's tracked ThisWorkbook code (document_modules in
+   tools\vba-projects.json, src\addin\ThisWorkbook.cls) into the workbook's
+   own ThisWorkbook module. A document module cannot be imported as a
+   component, so its code is copied in, and the file's SHA-256 is recorded;
 7. compiles the project with Debug > Compile VBAProject and saves it as an
    .xlam add-in in the evidence folder;
 8. injects src/ribbon/ into the package's customUI/ folder with
@@ -90,17 +90,7 @@ $xlOpenXMLAddIn = 55
 $vbextDocument = 100
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:sessionLog = $null
-$lifecycleLines = @(
-    "Option Explicit",
-    "",
-    "Private Sub Workbook_Open()",
-    "    DP_Start",
-    "End Sub",
-    "",
-    "Private Sub Workbook_BeforeClose(Cancel As Boolean)",
-    "    DP_Stop",
-    "End Sub",
-    "")
+$windows1252 = [System.Text.Encoding]::GetEncoding(1252)
 
 function Get-Timestamp {
     return (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz")
@@ -294,6 +284,39 @@ foreach ($component in $components) {
 }
 $ribbonRoot = Join-Path $RepoRoot "src\ribbon"
 
+# The add-in's ThisWorkbook code is tracked as an exported document module and
+# listed under document_modules; it is copied into the workbook, not imported.
+$documentModules = @()
+$documentNode = $configurationNode.Value.PSObject.Properties | Where-Object { $_.Name -eq "document_modules" }
+if ($null -ne $documentNode) {
+    $documentModules = @($documentNode.Value)
+}
+$workbookSources = @($documentModules | Where-Object { [System.IO.Path]::GetFileNameWithoutExtension([string]$_) -eq "ThisWorkbook" })
+if ($workbookSources.Count -ne 1) {
+    throw "Configuration '$Configuration' must list exactly one ThisWorkbook file under document_modules."
+}
+$workbookSource = [string]$workbookSources[0]
+$workbookSourceFile = Join-Path $RepoRoot ($workbookSource -replace '/', '\')
+if (-not (Test-Path -LiteralPath $workbookSourceFile)) {
+    throw "The ThisWorkbook source is missing from the checkout: $workbookSource"
+}
+# Everything after the export header (VERSION, BEGIN...END and Attribute lines)
+# is the module's code.
+$workbookLines = [System.IO.File]::ReadAllLines($workbookSourceFile, $windows1252)
+$first = 0
+while ($first -lt $workbookLines.Count -and
+    $workbookLines[$first] -match '^(VERSION \d|BEGIN\s*$|END\s*$|\s+MultiUse\s*=|Attribute VB_)') {
+    $first++
+}
+$workbookCode = ""
+if ($first -lt $workbookLines.Count) {
+    $workbookCode = ($workbookLines[$first..($workbookLines.Count - 1)] -join "`r`n")
+}
+if ($workbookCode -notmatch '(?m)^\s*Private Sub Workbook_Open\(\)') {
+    throw "$workbookSource has no Workbook_Open procedure after its export header."
+}
+$workbookSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $workbookSourceFile).Hash.ToLowerInvariant()
+
 if ([string]::IsNullOrWhiteSpace($PackageName)) {
     $PackageName = "DATETIMEPICKER-build-" + $sha.Substring(0, 12) + ".xlam"
 }
@@ -362,7 +385,7 @@ $summary = [ordered]@{
     }
     ribbon_source      = [ordered]@{ status = "NOT_RUN"; output = @() }
     import             = [ordered]@{ status = "NOT_RUN"; components = @() }
-    lifecycle_hooks    = [ordered]@{ status = "NOT_RUN"; module = $null; source = "README.md (Workbook_Open -> DP_Start, Workbook_BeforeClose -> DP_Stop)" }
+    lifecycle_hooks    = [ordered]@{ status = "NOT_RUN"; module = $null; source = $workbookSource; source_sha256 = $workbookSourceHash }
     compile            = [ordered]@{ status = "NOT_RUN"; detail = "Not run" }
     save               = [ordered]@{ status = "NOT_RUN" }
     ribbon_injection   = [ordered]@{ status = "NOT_RUN"; output = @() }
@@ -478,10 +501,10 @@ try {
     if ($codeModule.CountOfLines -gt 0) {
         $codeModule.DeleteLines(1, $codeModule.CountOfLines)
     }
-    $codeModule.AddFromString(($lifecycleLines -join "`r`n"))
+    $codeModule.AddFromString($workbookCode)
     $summary.lifecycle_hooks.status = "PASS"
     $summary.lifecycle_hooks.module = [string]$thisWorkbook[0].Name
-    Write-Session "Wrote the README lifecycle hooks into $($thisWorkbook[0].Name)"
+    Write-Session "Wrote $workbookSource (SHA-256 $workbookSourceHash) into $($thisWorkbook[0].Name)"
 
     # ------------------------------------------------------------------------
     # Compile
@@ -626,7 +649,7 @@ finally {
 if ($dirty) { $summary.reasons += "The working tree had changes to tracked files" }
 if ($summary.ribbon_source.status -ne "PASS") { $summary.reasons += "Ribbon source: $($summary.ribbon_source.status)" }
 if ($summary.import.status -ne "PASS") { $summary.reasons += "Import: $($summary.import.status)" }
-if ($summary.lifecycle_hooks.status -ne "PASS") { $summary.reasons += "Lifecycle hooks: $($summary.lifecycle_hooks.status)" }
+if ($summary.lifecycle_hooks.status -ne "PASS") { $summary.reasons += "ThisWorkbook code: $($summary.lifecycle_hooks.status)" }
 if ($summary.compile.status -ne "PASS") { $summary.reasons += "Compile: $($summary.compile.status)" }
 if ($summary.save.status -ne "PASS") { $summary.reasons += "Save as add-in: $($summary.save.status)" }
 if ($summary.ribbon_injection.status -ne "PASS") { $summary.reasons += "Ribbon injection: $($summary.ribbon_injection.status)" }
@@ -668,7 +691,8 @@ $report = @(
     "Python:          $($summary.host.python)",
     "Ribbon source:   $($summary.ribbon_source.status)",
     "Import:          $($summary.import.status)",
-    "Lifecycle hooks: $($summary.lifecycle_hooks.status) - README hooks in $($summary.lifecycle_hooks.module)",
+    "ThisWorkbook:    $($summary.lifecycle_hooks.status) - $workbookSource into $($summary.lifecycle_hooks.module)",
+    "                 source SHA-256 $workbookSourceHash",
     "Compile:         $($summary.compile.status) - $($summary.compile.detail)",
     "Save as .xlam:   $($summary.save.status)",
     "Ribbon inject:   $($summary.ribbon_injection.status)",

@@ -107,7 +107,7 @@ Use only the categories needed by a release.
   `tools/Build-Addin.ps1`, for Windows hosts ([#208](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/208)). From a clean checkout it:
   - checks `src/ribbon/`;
   - imports the `packaged-hosts` modules into a new workbook, writes the
-    README lifecycle hooks into `ThisWorkbook` and compiles;
+    tracked add-in `ThisWorkbook` code into its workbook module and compiles;
   - saves an `.xlam`, injects `src/ribbon/` into `customUI/` with the root
     relationship, and records the package's size and SHA-256;
   - reopens the package in a fresh Excel instance, records the operator's
@@ -117,6 +117,19 @@ Use only the categories needed by a release.
   The injection is done by `tools/build_ribbon_package.py`. It copies the parts
   byte for byte, refuses a package that already has a Ribbon, and is tested in
   the `tool-tests` gate. This is the clean-build evidence #90 needs.
+- The add-in's `ThisWorkbook` code is now tracked source,
+  `src/addin/ThisWorkbook.cls` ([#211](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/211)). Until now it existed only inside the
+  published package, so the add-in could not be rebuilt from the repository as
+  RELEASING §7 requires. The code is that of `DATETIMEPICKER.v1.2.2.xlam`:
+  - `Workbook_Open` hides the demo sheet and calls `DP_Start` and
+    `DP_Preload`;
+  - `Workbook_BeforeClose` hides the demo sheet and calls `DP_Stop`;
+  - `Workbook_BeforePrint` closes the picker and purges grid icons.
+
+  The file is listed under `document_modules` in `tools/vba-projects.json`. It
+  is never imported as a component: `tools/Build-Addin.ps1` copies its code
+  into the workbook's own module, and the advisory call checker counts it as
+  covered without analyzing it.
 - One-command Excel regression run, `tools/Certify-Excel.cmd` with
   `tools/Certify-Excel.ps1`, for Windows hosts. From a clean checkout it starts
   its own Excel instance, imports the `packaged-hosts` modules of

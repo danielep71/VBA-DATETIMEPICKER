@@ -1341,6 +1341,8 @@ VBA-DATETIMEPICKER/
 │  ├─ FEATURE_REQUEST_DETAILS.md
 │  └─ RELEASE_CERTIFICATION_TEMPLATE.md
 ├─ src/
+│  ├─ addin/
+│  │  └─ ThisWorkbook.cls   (add-in workbook code; copied in by tools/Build-Addin, not imported)
 │  ├─ classes/
 │  │  ├─ cDatePickerManager.cls
 │  │  └─ cDatePickerLabelHook.cls
