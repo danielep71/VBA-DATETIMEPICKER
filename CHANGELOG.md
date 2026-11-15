@@ -221,6 +221,13 @@ Use only the categories needed by a release.
 
 ### Fixed
 
+- Building the demo sheets and the harness result sheet no longer depends on
+  the default printer. `DEMO_Sheet_BuildTemplate` reset the sheet with every
+  option, including page-break removal, which makes Excel query the default
+  printer's driver; with a slow or sleeping network printer that raised a
+  printer prompt in every Excel regression run. The template now resets the
+  sheet without touching page breaks; `DEMO_Sheet_Reset` keeps its signature
+  and still removes page breaks for a caller that asks for it.
 - The keyboard shortcut, right-click and grid-icon setters
   (`M_Settings_SetEnableKeyboardShortcut`, `M_Settings_SetShowRightClick` and
   `M_Settings_SetShowGridIcon`) no longer change shared Excel state from a copy
