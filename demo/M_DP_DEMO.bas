@@ -564,8 +564,11 @@ Private Sub DP_Demo_WriteInstructions(ByVal WS As Worksheet)
 '   Shape, so sheet protection can suppress it even when the target cell is
 '   unlocked, and the workaround is not obvious
 '
+'   The instructions use the product name, Date / Time Picker, as every other
+'   caption does (#213)
+'
 ' UPDATED
-'   2026-08-22
+'   2026-11-15
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
@@ -590,14 +593,15 @@ Private Sub DP_Demo_WriteInstructions(ByVal WS As Worksheet)
     'Write the instruction steps
         WS.Range("C5").Value = "Instructions:"
         WS.Range("C6").Value = "1) Select a demo input cell."
-        WS.Range("C7").Value = "2) Invoke the DatePicker using the in-grid icon or right-click menu."
+        WS.Range("C7").Value = "2) Open the Date / Time Picker with the in-grid icon, the " & _
+            "right-click entry, Ctrl + Shift + D or the Ribbon's Show Picker button."
         WS.Range("C8").Value = _
             "3) Table write scope: picking a date in one Expiry Date cell writes " & _
             "that cell only. To fill the whole column, click Fill Table Column " & _
             "and confirm the reported scope."
     'Record the protected-sheet behaviour
         WS.Range("C9").Value = _
-            "Protected-sheet note: the in-grid DatePicker icon is a worksheet Shape, " & _
+            "Protected-sheet note: the in-grid Date / Time Picker icon is a worksheet Shape, " & _
             "so on a protected sheet it may not appear even when the target cell is " & _
             "unlocked. For the icon to remain available under protection, the sheet " & _
             "must allow drawing objects (for example DrawingObjects:=False, " & _

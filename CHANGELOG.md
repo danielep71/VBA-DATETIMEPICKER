@@ -279,6 +279,13 @@ Use only the categories needed by a release.
   which is how write-back treats a multi-area selection
   ([#182](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/182)).
 
+- The demo sheet's instructions now say "Date / Time Picker" instead of
+  "DatePicker". Step 2 lists every way to open the picker: the in-grid icon,
+  the right-click entry, `Ctrl + Shift + D` and the Ribbon's **Show Picker**
+  button ([#213](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/213)).
+  The in-grid icon's alternative text is unchanged: `DatePicker Grid Entry
+  Point` is the prefix of the icon-ownership marker, not a caption.
+
 - Demo builder buttons: `DEMO_Btn_AddGrid` passed a fill colour into
   `DEMO_Btn_Add`'s `IsPrimary` parameter, so every grid button came out
   primary whatever its specification. Grid specifications now take an
