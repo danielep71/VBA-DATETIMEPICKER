@@ -177,6 +177,18 @@ class ManualAndResumeTests(unittest.TestCase):
         self.assertNotIn("Skip-Step 1 ", self.code)
         self.assertNotIn("Skip-Step 9 ", self.code)
 
+    def test_files_to_publish_are_checked_again_after_a_kept_step_8(self) -> None:
+        # Step 9 never runs inside Skip-Step 8, so a resumed run re-checks the
+        # assets folder before the dry run ends and before the confirmation.
+        start = self.code.index('$step = Start-Step "9. Final confirmation"')
+        recheck = self.code[start:self.code.index("    if ($DryRun) {", start)]
+        self.assertGreater(start, self.code.index('if (-not (Skip-Step 8 "8.'))
+        self.assertIn('"--evidence", $recordPath, "--assets-dir", $assetsDir', recheck)
+        self.assertNotIn("--require-tag", recheck)
+        self.assertIn('if ($recheck.Code -ne 0) { Stop-Release $step', recheck)
+        self.assertIn('(Get-Sha256 (Join-Path $folders.evidence "release-evidence.json"))', recheck)
+        self.assertIn("(Get-Sha256 $pdfPath) -ne [string]$documents[0].sha256", recheck)
+
     def test_a_step_that_runs_again_moves_its_outputs_aside(self) -> None:
         self.assertIn('$aside = $path + ".failed-" + $stamp', self.code)
         self.assertIn("Move-Item -LiteralPath $path -Destination $aside", self.code)

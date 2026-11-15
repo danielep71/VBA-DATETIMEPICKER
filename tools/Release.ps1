@@ -49,8 +49,11 @@ The commit, tag and mode must be the same. The preflight runs again; the
 steps from 2 that passed before, in a row, are kept, and the run continues
 from the first one that did not. A step that runs again moves its earlier
 folders aside (.failed-<time>), because the tools never overwrite evidence.
-tools/assemble_release.py then cross-checks everything that was kept. Every step writes into one release folder next to the
-checkout, DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>, which ends
+tools/assemble_release.py then cross-checks everything that was kept, and
+step 9 always checks the packages, the PDF and release-evidence.json in the
+assets folder against the evidence again, so files changed after a kept
+step 8 are never published. Every step writes into one release folder next
+to the checkout, DATETIMEPICKER-release-vX.Y.Z-<sha12>-<yyyyMMdd-HHmmss>, which ends
 with release.txt and release.json.
 
 .REQUIREMENTS
@@ -622,6 +625,25 @@ try {
     $step = Start-Step "9. Final confirmation"
     $messagePath = Join-Path $folders.evidence "tag-message.txt"
     $notesPath = Join-Path $folders.evidence "release-notes.md"
+    # Step 8 may have been kept from an earlier run, so the files that will be
+    # published are checked again against the evidence, every time: a package,
+    # the PDF or the record changed since then is never tagged or published.
+    $recordPath = Join-Path $assetsDir "release-evidence.json"
+    if ((Get-Sha256 $recordPath) -ne (Get-Sha256 (Join-Path $folders.evidence "release-evidence.json"))) {
+        Stop-Release $step "release-evidence.json in $assetsDir differs from the assembled record."
+    }
+    $recheck = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot "tools\check_release.py"),
+        "--root", $RepoRoot, "--evidence", $recordPath, "--assets-dir", $assetsDir,
+        "--static-report", (Join-Path $folders.static "static-checks.json"),
+        "--output", (Join-Path $releaseDir "assets-check-$stamp.json"))
+    foreach ($line in $recheck.Output) { Write-Session "  $line" }
+    if ($recheck.Code -ne 0) { Stop-Release $step "check_release.py refused the files in $assetsDir." }
+    $documents = @((Get-Content -LiteralPath $recordPath -Raw -Encoding UTF8 | ConvertFrom-Json).documents)
+    if ($documents.Count -ne 1 -or $documents[0].filename -ne $pdfName -or
+        (Get-Sha256 $pdfPath) -ne [string]$documents[0].sha256) {
+        Stop-Release $step "$pdfName differs from the PDF recorded in release-evidence.json."
+    }
+    Write-Session "The packages, the PDF and release-evidence.json in $assetsDir match the evidence."
     Write-Host ""
     Write-Host "Tag message:"
     Write-Host ""

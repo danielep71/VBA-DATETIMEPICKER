@@ -124,7 +124,8 @@ in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
   renders it for every push to `main` and the release branches and every pull
   request: the release host's managed Chrome and Edge refuse the DevTools
   connection that headless printing needs. `-Resume <folder>` continues a
-  run that stopped, keeping the steps that passed.
+  run that stopped, keeping the steps that passed; the files to publish are
+  always checked against the evidence again before the confirmation.
   `release-check.yml` now also runs on its own when a release is published,
   reading the candidate from the tag and the record from the release's
   `release-evidence.json` asset.
