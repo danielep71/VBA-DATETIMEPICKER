@@ -342,3 +342,5 @@ workflows are DateTimePicker-specific adapters. They preserve `src/`, `demo/`
 and `test/`; no initializer is run and no full template-contract adoption is claimed.
 The canonical template's provisioning, portfolio, generated-project pilots and
 Wiki publication machinery are not applicable to this existing repository.
+
+<!-- Probe for #199: a pull request whose base is a task branch. Not for merge. -->
