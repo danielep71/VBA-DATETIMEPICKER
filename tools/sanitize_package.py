@@ -49,6 +49,7 @@ ABS_PATH_BARE = re.compile(r"<x15ac:absPath\b[^>]*/>")
 CORE_PEOPLE = re.compile(r"<(dc:creator|cp:lastModifiedBy)\b[^>]*>[^<]*</\1>|<(dc:creator|cp:lastModifiedBy)\b[^>]*/>")
 APP_PEOPLE = re.compile(r"<(Company|Manager)>([^<]*)</\1>")
 RELATIONSHIP = re.compile(r"<Relationship\b[^>]*/>")
+START_TAG = re.compile(r"""<[A-Za-z_][\w.:-]*(?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*/?>""")
 OVERRIDE = re.compile(r"<Override\b[^>]*/>")
 
 
@@ -145,6 +146,25 @@ def well_formed(part: str, content: bytes) -> None:
         raise SanitizeError(f"{part}: not well-formed after editing ({error})") from error
 
 
+def remove_references(content: str, ids: set[str]) -> str:
+    """Drop ``r:id`` attributes naming a removed relationship, in start tags only.
+
+    Character data is never touched: a cell or formula may contain the same text.
+    """
+    pattern = re.compile(r"""\s+r:id\s*=\s*(?:"(?:""" + "|".join(map(re.escape, sorted(ids)))
+                         + r""")"|'(?:""" + "|".join(map(re.escape, sorted(ids))) + r""")')""")
+    return START_TAG.sub(lambda m: pattern.sub("", m.group(0)), content)
+
+
+def character_data(content: bytes) -> str:
+    """The text content of an XML part, in document order."""
+    chunks: list[str] = []
+    parser = expat.ParserCreate()
+    parser.CharacterDataHandler = chunks.append
+    parser.Parse(content, True)
+    return "".join(chunks)
+
+
 def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
     result = Result(findings=inspect_parts(data))
     out = {part: content for part, content in data.items() if not is_removed(part)}
@@ -174,9 +194,7 @@ def sanitize_parts(data: dict[str, bytes]) -> tuple[dict[str, bytes], Result]:
 
     for source, ids in dropped_ids.items():
         if source in out and source.endswith(".xml"):
-            content = edited.get(source, text(out, source))
-            for rel_id in sorted(ids):
-                content = re.sub(r'\s+r:id="' + re.escape(rel_id) + '"', "", content)
+            content = remove_references(edited.get(source, text(out, source)), ids)
             if content != text(out, source):
                 edited[source] = content
 
@@ -216,6 +234,10 @@ def verify(original: dict[str, bytes], sanitized: dict[str, bytes], result: Resu
         raise SanitizeError("metadata remains after sanitizing: " + "; ".join(remaining))
     if VBA_PROJECT in original and sanitized.get(VBA_PROJECT) != original[VBA_PROJECT]:
         raise SanitizeError(f"{VBA_PROJECT} changed")
+    for part in result.edited_parts:
+        if part.endswith(".xml") and part not in (CORE, APP) \
+                and character_data(original[part]) != character_data(sanitized[part]):
+            raise SanitizeError(f"{part}: text content changed")
     for part, content in original.items():
         if part in result.removed_parts or part in result.edited_parts:
             continue

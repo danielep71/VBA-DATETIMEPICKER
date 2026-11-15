@@ -168,6 +168,30 @@ class SanitizeTests(unittest.TestCase):
         self.assertIn(b'TargetMode="External"', parts["xl/_rels/workbook.xml.rels"])
         self.assertIn(b"<Company></Company>", parts["docProps/app.xml"])
 
+    def test_matching_text_in_cells_is_kept(self) -> None:
+        parts = dirty_parts()
+        parts["xl/worksheets/sheet1.xml"] = str(parts["xl/worksheets/sheet1.xml"]).replace(
+            "<t>Keep</t>", '<t>Keep r:id="rId1" text</t>').replace(
+            "</row>", '<c r="B1"><f>"r:id=""rId1"""</f></c></row>')
+        write(self.dirty, parts)
+        output = self.folder / "out.xlam"
+        sanitizer.sanitize_package(self.dirty, output)
+        sheet = read(output)["xl/worksheets/sheet1.xml"]
+        self.assertIn(b'<t>Keep r:id="rId1" text</t>', sheet)
+        self.assertIn(b'<f>"r:id=""rId1"""</f>', sheet)
+        self.assertIn(b'<pageSetup orientation="portrait"/>', sheet)
+
+    def test_text_change_is_refused(self) -> None:
+        def tamper(data: dict[str, bytes]) -> tuple[dict[str, bytes], sanitizer.Result]:
+            out, result = original(data)
+            out["xl/worksheets/sheet1.xml"] = out["xl/worksheets/sheet1.xml"].replace(b"Keep", b"Lost")
+            return out, result
+
+        original = sanitizer.sanitize_parts
+        with mock.patch("sanitize_package.sanitize_parts", side_effect=tamper), \
+                self.assertRaisesRegex(sanitizer.SanitizeError, "text content changed"):
+            sanitizer.sanitize_package(self.dirty, self.folder / "out.xlam")
+
     def test_untouched_parts_keep_their_bytes_and_order(self) -> None:
         output = self.folder / "out.xlam"
         sanitizer.sanitize_package(self.dirty, output)
