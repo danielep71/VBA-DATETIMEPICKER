@@ -103,7 +103,7 @@ No unreleased changes yet.
 
 <a id="v1.2.3"></a>
 
-## [1.2.3] - 2026-11-15
+## [1.2.3] - 2026-11-16
 
 > 🩹 **Patch** · user-facing consistency and Ribbon source release · no supported API break
 
