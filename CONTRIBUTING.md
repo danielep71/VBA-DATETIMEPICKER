@@ -271,6 +271,31 @@ macro entry points. Alt+F8 and assigned controls require a parameterless public
 and name-resolution contracts. A signature change must state which channels
 remain supported and add coverage for them.
 
+### Public surface manifest
+
+[`src/public-surface.json`](src/public-surface.json) classifies every public
+declaration in a production standard module exactly once:
+
+- `supported`: consumer contract covered by Semantic Versioning;
+- `callback`: public only because RibbonX, `OnAction`, `OnKey` or `OnTime`
+  resolves it by name;
+- `internal`: implementation surface, including test seams and maintenance
+  helpers documented for manual recovery.
+
+A pull request that adds, removes or changes a public declaration updates the
+manifest in the same change; `tools/check_public_surface.py` fails otherwise.
+Changing a `supported` entry is a compatibility decision: state the release
+impact and record it in `CHANGELOG.md`. Keep new helpers `Private` unless
+another component genuinely needs them, and never classify a `*_Test_*` seam as
+anything but `internal`.
+
+`M_DatePicker` is the non-private facade: supported declarations, the public
+types and enums they use, and callbacks live there. Every other production
+standard module must start with `Option Private Module`, which keeps its public
+procedures out of other projects and out of the macro dialog. An internal
+parameterless `Sub` still in the facade is reachable from Alt+F8; the manifest
+records the issue that hides it in `pending`.
+
 `Application.OnKey` is an explicit ownership exception. Excel exposes no getter
 for the predecessor binding. The DatePicker may remove only the binding it
 installed and can restore normal Excel handling, but it must never claim to

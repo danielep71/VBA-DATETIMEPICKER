@@ -13,8 +13,8 @@ from _gatelib import git_text, write_json, write_text
 # Gate names as they appear in static-checks.json. check_release.STATIC_CHECKS
 # must list the same set; test_tooling enforces that.
 FIXTURE_GATES = ("check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace")
-REPORT_GATES = ("check_source", "check_vba_conditionals", "check_vba_jumps", "check_committed_whitespace",
-                "check_markdown_links")
+REPORT_GATES = ("check_source", "check_public_surface", "check_vba_conditionals", "check_vba_jumps",
+                "check_committed_whitespace", "check_markdown_links")
 NODE_GATES = ("labels-sync", "labels-drift")
 
 

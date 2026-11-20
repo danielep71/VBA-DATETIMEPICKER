@@ -9,9 +9,9 @@ repository root:
 python tools/check.py
 ```
 
-This runs source/Ribbon/form integrity, procedure-scoped jump checks, conditional
-declarations, whitespace, Markdown links and anchors, label fixtures and the
-tooling's negative tests.
+This runs source/Ribbon/form integrity, the public-surface classification,
+procedure-scoped jump checks, conditional declarations, whitespace, Markdown
+links and anchors, label fixtures and the tooling's negative tests.
 Reports and logs go to ignored `test-results/`. Findings return a nonzero exit
 code. CI uses `python tools/check.py --ci`, checking committed whitespace and
 requiring a clean tree; PR runs also supply `--base <base-sha>`.
@@ -47,6 +47,41 @@ pip-compile --generate-hashes --allow-unsafe --strip-extras --no-emit-index-url 
 Dependabot proposes updates to the lock weekly. Suppressions must be
 line-scoped (`# type: ignore[code]`, `# noqa: CODE`) with a reason; there are
 none today.
+
+## Public surface
+
+```sh
+python tools/check_public_surface.py --root .
+```
+
+A `check.py` gate. `src/public-surface.json` classifies every public
+declaration in a production standard module once, as `supported`, `callback`
+or `internal`, and records its signature and invocation channels. The gate
+reparses the source and fails when:
+
+- a public declaration is unclassified, or a manifest entry no longer exists;
+- a signature, enum or type member list differs from the manifest (for a
+  supported or callback symbol this is reported as an incompatible change);
+- a channel it can compute disagrees with the manifest: `macro-dialog`
+  (parameterless public `Sub` outside an `Option Private Module` module),
+  `ribbon-onaction` (`src/ribbon/customUI.xml`), by-name dispatch through
+  `M_GetQualifiedMacroName`, `OnAction`, `OnKey`, `OnTime` or
+  `Application.Run` string literals, and references from other production
+  components, `test/` and `demo/`;
+- a callback is orphaned or unbound, including any `IRibbonControl`
+  procedure without a Ribbon binding;
+- a test seam (`*_Test_*`) is not internal, an internal Alt+F8 entry point has
+  no `pending` issue, or a supported signature uses a type or enum that is not
+  supported;
+- the facade uses `Option Private Module`, another production standard module
+  does not, or an exposed class or document module declares public members;
+- the `public-surface:supported` or `public-surface:callback` list in
+  `README.md` differs from the manifest.
+
+Changing a supported entry in the manifest is the explicit compatibility
+decision; record it in `CHANGELOG.md` in the same pull request. The gate reads
+source text only: it does not compile VBA or prove that Excel resolves a
+callback.
 
 ## Markdown links and anchors
 

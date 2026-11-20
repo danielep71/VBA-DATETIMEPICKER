@@ -112,7 +112,7 @@ It stops at the first failure and runs, in order:
    successful push run on `main` for this commit. GitHub CLI must be signed in,
    and Python with the documentation packages must be available;
 2. the static gates: the `static-checks.json` that CI wrote on that push run is
-   downloaded and must be a clean committed PASS of all eleven gates for this
+   downloaded and must be a clean committed PASS of all twelve gates for this
    commit (the same report `release-check.yml` reads); the Ribbon check runs
    locally, with its output kept (section 5);
 3. both source runs, `tools/Certify-Excel.ps1` standard and `-WithUISmoke`
@@ -252,7 +252,7 @@ closed v1.2.2 evidence is not reopened.
   on pushes to those branches when `src/ribbon/`, the script or the workflow
   changes. Missing Ribbon XML, relationships, or referenced
   custom resources are a **blocking package-source failure**.
-  This is a required separate release record, not one of the eleven
+  This is a required separate release record, not one of the twelve
   `static-checks.json` gates. Run it locally on the exact clean candidate and
   retain the command, SHA and successful output even when the path-filtered
   workflow has no run. Do not infer success from a skipped workflow.
@@ -472,7 +472,7 @@ Retain at least:
 
 - candidate commit SHA
 - `release-evidence.json` and the validator output
-- exact-candidate `static-checks.json` with all eleven gates and successful main push-run URL
+- exact-candidate `static-checks.json` with all twelve gates and successful main push-run URL
 - separate Ribbon-resource command, candidate SHA and successful output
 - all six named manual records: `provider-ownership`, `clock-lifecycle`,
   `grid-ownership`, `application-state`, `packaged-entry-paths`,

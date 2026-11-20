@@ -1,0 +1,2238 @@
+{
+  "schema_version": 1,
+  "description": "Classification of every public declaration in production standard modules. Checked by tools/check_public_surface.py; see CONTRIBUTING.md, Public surface manifest.",
+  "facade": "src/modules/M_DatePicker.bas",
+  "symbols": [
+    {
+      "name": "DP_FORM_NAME",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Const DP_FORM_NAME As String = \"UF_DatePicker\""
+      ]
+    },
+    {
+      "name": "DP_MIN_YEAR",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Const DP_MIN_YEAR As Long = 100"
+      ]
+    },
+    {
+      "name": "DP_MAX_YEAR",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Const DP_MAX_YEAR As Long = 9999"
+      ]
+    },
+    {
+      "name": "DP_SETTINGS_APP_NAME",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Const DP_SETTINGS_APP_NAME As String = \"VBA_DATETIMEPICKER\""
+      ]
+    },
+    {
+      "name": "DP_GRID_ICON_NAME",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Const DP_GRID_ICON_NAME As String = \"DP_GridIcon\""
+      ]
+    },
+    {
+      "name": "DP_MSGBOX_TITLE",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [
+        "test-harness",
+        "demo"
+      ],
+      "signatures": [
+        "Const DP_MSGBOX_TITLE As String = \"Date / Time Picker\""
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_FIRST_DAY_OF_WEEK",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_FIRST_DAY_OF_WEEK As Long = vbMonday"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_USE_LOCAL_NAMES",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_USE_LOCAL_NAMES As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_HIGHLIGHT_WEEKENDS",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_HIGHLIGHT_WEEKENDS As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_CLOSE_AFTER_SELECTION",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_CLOSE_AFTER_SELECTION As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_SHOW_RIGHT_CLICK",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_SHOW_RIGHT_CLICK As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_SHOW_GRID_ICON",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_SHOW_GRID_ICON As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_ENABLE_KEYBOARD",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_ENABLE_KEYBOARD As Boolean = True"
+      ]
+    },
+    {
+      "name": "DP_KEYBOARD_SHORTCUT_TEXT",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_KEYBOARD_SHORTCUT_TEXT As String = \"Ctrl + Shift + D\""
+      ]
+    },
+    {
+      "name": "DP_DEFAULT_HOLIDAY_CALLBACK",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_DEFAULT_HOLIDAY_CALLBACK As String = vbNullString"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_HEADER",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_HEADER As Long = 9985057"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_HEADER_FORE",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_HEADER_FORE As Long = vbWhite"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_FORM_BACK",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_FORM_BACK As Long = vbWhite"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_TEXT",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_TEXT As Long = vbButtonText"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_TEXT_MUTED",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_TEXT_MUTED As Long = &H808080"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_BORDER_LIGHT",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_BORDER_LIGHT As Long = &HE6E6E6"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_HOVER",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_HOVER As Long = &HF2F2F2"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_FOOTER",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_FOOTER As Long = &HF7F7F7"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_SELECTED_BACK",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_SELECTED_BACK As Long = 9985057"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_SELECTED_FORE",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_SELECTED_FORE As Long = vbWhite"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_TODAY_BACK",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_TODAY_BACK As Long = &HF2F7FC"
+      ]
+    },
+    {
+      "name": "DP_THEME_COLOR_HOLIDAY_FORE",
+      "module": "M_DatePicker",
+      "kind": "Const",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Const DP_THEME_COLOR_HOLIDAY_FORE As Long = &H8080FF"
+      ]
+    },
+    {
+      "name": "DP_WriteAction",
+      "module": "M_DatePicker",
+      "kind": "Enum",
+      "classification": "supported",
+      "channels": [
+        "direct-vba"
+      ],
+      "signatures": [
+        "Enum DP_WriteAction"
+      ],
+      "members": [
+        "DP_WriteAction_DatePicker = 0"
+      ]
+    },
+    {
+      "name": "DP_ClockMode",
+      "module": "M_DatePicker",
+      "kind": "Enum",
+      "classification": "supported",
+      "channels": [
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Enum DP_ClockMode"
+      ],
+      "members": [
+        "DP_ClockMode_Static = 0",
+        "DP_ClockMode_Live = 1"
+      ]
+    },
+    {
+      "name": "DP_SizeMode",
+      "module": "M_DatePicker",
+      "kind": "Enum",
+      "classification": "supported",
+      "channels": [
+        "project-internal",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Enum DP_SizeMode"
+      ],
+      "members": [
+        "DP_SizeMode_Normal = 0",
+        "DP_SizeMode_Compact = 1"
+      ]
+    },
+    {
+      "name": "DP_WindowStyleResult",
+      "module": "M_DatePicker",
+      "kind": "Type",
+      "classification": "supported",
+      "channels": [
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Type DP_WindowStyleResult"
+      ],
+      "members": [
+        "Attempted As Boolean",
+        "Applied As Boolean",
+        "Committed As Boolean",
+        "RolledBack As Boolean",
+        "RecoveryRequired As Boolean",
+        "FailedStep As String",
+        "LastApiError As Long"
+      ]
+    },
+    {
+      "name": "DP_WriteResult",
+      "module": "M_DatePicker",
+      "kind": "Type",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Type DP_WriteResult"
+      ],
+      "members": [
+        "AttemptedCount As Double",
+        "WrittenCount As Double",
+        "LockedSkippedCount As Double",
+        "LockedSkippedAddresses As String",
+        "FormulaSkippedCount As Double",
+        "FormulaSkippedAddresses As String",
+        "FailedCount As Double",
+        "FailedAddresses As String",
+        "ResolvedTargetAddress As String",
+        "ExpandedToTableColumn As Boolean",
+        "TableName As String",
+        "ColumnName As String",
+        "AreasCount As Long",
+        "EventsDisabledByCaller As Boolean",
+        "TechnicalFailureOccurred As Boolean",
+        "TechnicalFailureStep As String",
+        "TechnicalFailureNumber As Long",
+        "TechnicalFailureDescription As String"
+      ]
+    },
+    {
+      "name": "gDP_Manager",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_Manager As cDatePickerManager"
+      ]
+    },
+    {
+      "name": "gDP_WriteValue",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_WriteValue As Date"
+      ]
+    },
+    {
+      "name": "gDP_ShowRightClick",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_ShowRightClick As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_ShowGridIcon",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_ShowGridIcon As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_GridIconShape",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_GridIconShape As Shape"
+      ]
+    },
+    {
+      "name": "gDP_FirstDayOfWeek",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_FirstDayOfWeek As Long"
+      ]
+    },
+    {
+      "name": "gDP_UseLocalNames",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_UseLocalNames As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_ClockMode",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_ClockMode As DP_ClockMode"
+      ]
+    },
+    {
+      "name": "gDP_SizeMode",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_SizeMode As DP_SizeMode"
+      ]
+    },
+    {
+      "name": "gDP_HighlightWeekends",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_HighlightWeekends As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_AllowOutsideMonthSelection",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_AllowOutsideMonthSelection As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_CloseAfterSelection",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_CloseAfterSelection As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_UseWinAPI",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_UseWinAPI As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_EnableKeyboardShortcut",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_EnableKeyboardShortcut As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_HolidayCallbackName",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_HolidayCallbackName As String"
+      ]
+    },
+    {
+      "name": "gDP_InitialDate",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_InitialDate As Date"
+      ]
+    },
+    {
+      "name": "gDP_HasInitialDate",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_HasInitialDate As Boolean"
+      ]
+    },
+    {
+      "name": "gDP_SelectedDate",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_SelectedDate As Date"
+      ]
+    },
+    {
+      "name": "gDP_HasSelectedDate",
+      "module": "M_DatePicker",
+      "kind": "Variable",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "gDP_HasSelectedDate As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_SetNamespace",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetNamespace(ByVal NamespaceName As String)"
+      ]
+    },
+    {
+      "name": "M_Settings_GetNamespace",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetNamespace() As String"
+      ]
+    },
+    {
+      "name": "M_Settings_Load",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Settings_Load()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Settings_Save",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Settings_Save()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Settings_EnsureLoaded",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Settings_EnsureLoaded()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Settings_SetFirstDayOfWeek",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetFirstDayOfWeek(ByVal FirstDayOfWeek As Long)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetFirstDayOfWeekText",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetUseLocalNames",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetUseLocalNames(ByVal UseLocalDayNames As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_ResolveKeyboardShortcutOnSave",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Settings_ResolveKeyboardShortcutOnSave(ByVal CurrentEnableKeyboard As Boolean, ByVal ResolvedShowRightClick As Boolean, ByVal ResolvedShowGridIcon As Boolean) As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_SetEnableKeyboardShortcut",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetEnableKeyboardShortcut(ByVal EnableKeyboardShortcut As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetUseWinAPI",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetUseWinAPI(ByVal UseWinAPI As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetAllowOutsideMonthSelection",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetAllowOutsideMonthSelection(ByVal AllowOutsideMonthSelection As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetHighlightWeekends",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetCloseAfterSelection",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetCloseAfterSelection(ByVal CloseAfterSelection As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetClockMode",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetClockMode(ByVal ClockMode As DP_ClockMode)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetSizeMode",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetSizeMode(ByVal SizeMode As DP_SizeMode)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetHolidayCallback",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetHolidayCallback(ByVal HolidayCallbackName As String)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetShowRightClick",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetShowRightClick(ByVal ShowRightClick As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_SetShowGridIcon",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Settings_GetFirstDayOfWeek",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetFirstDayOfWeek() As Long"
+      ]
+    },
+    {
+      "name": "M_Settings_GetUseLocalNames",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetUseLocalNames() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetAllowOutsideMonthSelection",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetAllowOutsideMonthSelection() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetFirstDayOfWeekText",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetFirstDayOfWeekText() As String"
+      ],
+      "note": "Getter of the FirstDayOfWeekText setting pair."
+    },
+    {
+      "name": "M_Settings_GetShowRightClick",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetShowRightClick() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetShowGridIcon",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetShowGridIcon() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetEnableKeyboardShortcut",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetEnableKeyboardShortcut() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetUseWinAPI",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetUseWinAPI() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetClockMode",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetClockMode() As DP_ClockMode"
+      ]
+    },
+    {
+      "name": "M_Settings_GetSizeMode",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetSizeMode() As DP_SizeMode"
+      ]
+    },
+    {
+      "name": "M_Settings_GetHighlightWeekends",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetHighlightWeekends() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetCloseAfterSelection",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetCloseAfterSelection() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Settings_GetHolidayCallback",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function M_Settings_GetHolidayCallback() As String"
+      ]
+    },
+    {
+      "name": "M_Settings_FirstDayOfWeekToText",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Settings_FirstDayOfWeekToText(ByVal FirstDayOfWeek As Long) As String"
+      ]
+    },
+    {
+      "name": "M_Settings_IsValidFirstDayOfWeek",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Settings_IsValidFirstDayOfWeek(ByVal FirstDayOfWeek As Long) As Boolean"
+      ]
+    },
+    {
+      "name": "M_Picker_EnsureManager",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "operator"
+      ],
+      "signatures": [
+        "Sub M_Picker_EnsureManager()"
+      ],
+      "pending": "#55",
+      "note": "Advanced maintenance helper, not supported API (v1.2.2 CHANGELOG). Parameterless since v1.2.2; the optional EventsDisabledByCaller argument was removed with a documented source break. It still preserves the caller's EnableEvents state."
+    },
+    {
+      "name": "DP_Preload",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Preload()"
+      ]
+    },
+    {
+      "name": "DP_ForceReleaseProviderLease",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_ForceReleaseProviderLease()"
+      ]
+    },
+    {
+      "name": "M_Lease_Test_ClearOwnerToken",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Lease_Test_ClearOwnerToken()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Lease_Test_SilenceRefusalReport",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Lease_Test_SilenceRefusalReport(ByVal Silence As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Lease_Test_RefusalReportCount",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lease_Test_RefusalReportCount() As Long"
+      ]
+    },
+    {
+      "name": "M_Lease_IsOwner",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lease_IsOwner() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lease_TryAcquire",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lease_TryAcquire() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_ArmFault",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Lifecycle_Test_ArmFault(ByVal StepName As String, ByVal ErrorNumber As Long)"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_Reset",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Lifecycle_Test_Reset(ByVal ResetState As Boolean)"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastTrace",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastTrace() As String"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastCleanupDetail",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastCleanupDetail() As String"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastCriticalClean",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastCriticalClean() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastLeaseReleased",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastLeaseReleased() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_HasLocalOwnerToken",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_HasLocalOwnerToken() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastPrimaryNumber",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastPrimaryNumber() As Long"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastPrimaryStep",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastPrimaryStep() As String"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastPrimaryDescription",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastPrimaryDescription() As String"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastOperation",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastOperation() As String"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastSucceeded",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastSucceeded() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastCleanupAttempted",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastCleanupAttempted() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastCleanupFailureCount",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastCleanupFailureCount() As Long"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastLeaseWasAlreadyOwned",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastLeaseWasAlreadyOwned() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lifecycle_Test_LastLeaseAcquiredThisCall",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Lifecycle_Test_LastLeaseAcquiredThisCall() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Lease_Release",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Lease_Release()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "DP_Start",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Start()"
+      ]
+    },
+    {
+      "name": "DP_Show",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Show()"
+      ]
+    },
+    {
+      "name": "DP_Click",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "callback",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "onaction"
+      ],
+      "signatures": [
+        "Sub DP_Click()"
+      ]
+    },
+    {
+      "name": "DP_OpenForActiveCell",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "callback",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "onkey"
+      ],
+      "signatures": [
+        "Sub DP_OpenForActiveCell()"
+      ]
+    },
+    {
+      "name": "DP_RepairRuntime",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_RepairRuntime()"
+      ]
+    },
+    {
+      "name": "DP_Close",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Close()"
+      ]
+    },
+    {
+      "name": "DP_Hide",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Hide()"
+      ]
+    },
+    {
+      "name": "DP_Stop",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Stop()"
+      ]
+    },
+    {
+      "name": "M_FormBridge_ConsumeInitialDate",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_FormBridge_ConsumeInitialDate(ByRef InitialDate As Date) As Boolean"
+      ]
+    },
+    {
+      "name": "M_Picker_SelectDate",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Picker_SelectDate(ByVal SelectedDate As Date, Optional ByVal NoTableGrow As Boolean = True)"
+      ]
+    },
+    {
+      "name": "DP_Today",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Today()"
+      ]
+    },
+    {
+      "name": "DP_Now",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub DP_Now()"
+      ]
+    },
+    {
+      "name": "DP_FillTableColumn",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "supported",
+      "channels": [
+        "test-harness",
+        "demo",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Function DP_FillTableColumn(ByVal ValueToWrite As Date, Optional ByVal ConfirmFill As Boolean = True, Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult"
+      ]
+    },
+    {
+      "name": "M_WriteBack_Apply",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_WriteBack_Apply(ByVal iType As DP_WriteAction, Optional ByVal NoTableGrow As Boolean = True, Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult"
+      ],
+      "note": "Compatibility decision (#25): internal. Hosts write through DP_FillTableColumn, DP_Today or DP_Now. DP_WriteAction and DP_WriteResult stay supported."
+    },
+    {
+      "name": "M_WriteBack_Test_SetFaultInjection",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_WriteBack_Test_SetFaultInjection(ByVal FailInAreaOrdinal As Long, Optional ByVal FailAfterWrittenCellsInArea As Long = 0)"
+      ]
+    },
+    {
+      "name": "M_WriteBack_ReportShortfall",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [],
+      "signatures": [
+        "Sub M_WriteBack_ReportShortfall(ByRef Result As DP_WriteResult)"
+      ]
+    },
+    {
+      "name": "M_WriteBack_DescribeShortfall",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_WriteBack_DescribeShortfall(ByRef Result As DP_WriteResult) As String"
+      ]
+    },
+    {
+      "name": "M_WriteBack_PopulateRange",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_WriteBack_PopulateRange(ByVal oRange As Range, ByVal iType As DP_WriteAction, ByRef Result As DP_WriteResult, Optional ByVal OverwriteFormulas As Boolean = False)"
+      ]
+    },
+    {
+      "name": "M_DatePolicy_CanSelectDate",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_DatePolicy_CanSelectDate(ByVal CandidateDate As Date, ByVal DisplayYear As Long, ByVal DisplayMonth As Long) As Boolean"
+      ]
+    },
+    {
+      "name": "M_HolidayPolicy_IsHolidayDate",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Boolean"
+      ]
+    },
+    {
+      "name": "M_Caption_GetMonth",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Caption_GetMonth(ByVal MonthNumber As Long, ByVal UseLocalNames As Boolean) As String"
+      ]
+    },
+    {
+      "name": "M_Caption_GetDate",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Caption_GetDate(ByVal DateValue As Date, ByVal UseLocalNames As Boolean) As String"
+      ]
+    },
+    {
+      "name": "M_Caption_GetEnglishMonthShort",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Caption_GetEnglishMonthShort(ByVal MonthNumber As Long) As String"
+      ]
+    },
+    {
+      "name": "M_Caption_GetEnglishMonthFull",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Caption_GetEnglishMonthFull(ByVal MonthNumber As Long) As String"
+      ]
+    },
+    {
+      "name": "M_Timer_EnsureHealthy",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_EnsureHealthy(ByVal EntryPoint As String)"
+      ],
+      "note": "Called by the picker form (#27)."
+    },
+    {
+      "name": "M_Timer_Test_ArmScheduleFault",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_Test_ArmScheduleFault(ByVal ErrorNumber As Long)"
+      ]
+    },
+    {
+      "name": "M_Timer_Test_LastRegistration",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_Test_LastRegistration(ByRef EarliestTime As Date, ByRef LatestTime As Date, ByRef ProcedureName As String, ByRef ScheduleFlag As Boolean, ByRef ErrorNumber As Long, ByRef CallCount As Long)"
+      ]
+    },
+    {
+      "name": "M_Timer_Test_IsUnresolved",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Timer_Test_IsUnresolved() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Timer_Test_IsRunning",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Timer_Test_IsRunning() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Timer_Test_ExpireRegistration",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_Test_ExpireRegistration()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Timer_Test_Reset",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_Test_Reset()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Timer_ApplyClockMode",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Timer_ApplyClockMode()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Timer_Start",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_Start()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Timer_Stop",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Timer_Stop()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_Timer_Tick",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "callback",
+      "channels": [
+        "macro-dialog",
+        "test-harness",
+        "ontime"
+      ],
+      "signatures": [
+        "Sub M_Timer_Tick()"
+      ]
+    },
+    {
+      "name": "M_Platform_CanUseWinAPI",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Platform_CanUseWinAPI() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Platform_ShouldUseWinAPI",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Platform_ShouldUseWinAPI() As Boolean"
+      ]
+    },
+    {
+      "name": "M_Window_Test_SetFaultInjection",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_Window_Test_SetFaultInjection(ByVal PrimaryFailurePoint As Long, Optional ByVal RollbackFailurePoint As Long = 0)"
+      ]
+    },
+    {
+      "name": "M_Window_RemoveTitleBar",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Window_RemoveTitleBar(ByVal Frm As Object) As DP_WindowStyleResult"
+      ],
+      "note": "Compatibility decision (#25): internal; only the picker form calls it. DP_WindowStyleResult stays a supported result type (v1.2.0)."
+    },
+    {
+      "name": "M_Window_BeginUserFormDrag",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Window_BeginUserFormDrag(ByVal TargetForm As Object)"
+      ]
+    },
+    {
+      "name": "M_Window_GetUserFormHwnd",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As LongPtr"
+      ]
+    },
+    {
+      "name": "M_Window_MoveFormToMouse",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Window_MoveFormToMouse(ByVal Frm As Object, Optional ByVal OffsetXPx As Long = 0, Optional ByVal OffsetYPx As Long = 12, Optional ByVal CenterOnMouse As Boolean = False)"
+      ]
+    },
+    {
+      "name": "M_ContextMenu_Update",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "operator"
+      ],
+      "signatures": [
+        "Sub M_ContextMenu_Update()"
+      ],
+      "pending": "#55",
+      "note": "Documented recovery step in the README recovery guide."
+    },
+    {
+      "name": "M_ContextMenu_EnsureForRightClick",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_ContextMenu_EnsureForRightClick()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_ContextMenu_Remove",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_ContextMenu_Remove()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_KeyboardShortcut_Update",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "operator"
+      ],
+      "signatures": [
+        "Sub M_KeyboardShortcut_Update()"
+      ],
+      "pending": "#55",
+      "note": "Documented recovery step in the README recovery guide."
+    },
+    {
+      "name": "M_KeyboardShortcut_Remove",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_KeyboardShortcut_Remove()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_GridIcon_ShowOrMove",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_GridIcon_ShowOrMove(Optional ByVal TargetCell As Excel.Range)"
+      ]
+    },
+    {
+      "name": "M_GridIcon_Hide",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_GridIcon_Hide()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_GridIcon_PreCreateHidden",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)"
+      ]
+    },
+    {
+      "name": "M_GridIcon_Remove",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_GridIcon_Remove()"
+      ],
+      "pending": "#55"
+    },
+    {
+      "name": "M_GridIcon_EnsureEmbeddedIconFile",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_GridIcon_EnsureEmbeddedIconFile() As String"
+      ]
+    },
+    {
+      "name": "M_GridIcon_PurgeAll",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "macro-dialog",
+        "project-internal",
+        "test-harness",
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_GridIcon_PurgeAll()"
+      ],
+      "note": "Supported because the documented host template calls it from Workbook_BeforeSave and Workbook_BeforePrint."
+    },
+    {
+      "name": "M_FormBridge_RefreshFromCell",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)"
+      ]
+    },
+    {
+      "name": "M_Settings_UseLocalNames",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "supported",
+      "channels": [
+        "direct-vba"
+      ],
+      "signatures": [
+        "Sub M_Settings_UseLocalNames(ByVal UseLocalDayNames As Boolean)"
+      ],
+      "note": "Legacy alias of M_Settings_SetUseLocalNames, kept for older callers."
+    },
+    {
+      "name": "Ribbon_ShowPicker",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "callback",
+      "channels": [
+        "ribbon-onaction",
+        "test-harness"
+      ],
+      "signatures": [
+        "Sub Ribbon_ShowPicker(ByVal control As IRibbonControl)"
+      ]
+    },
+    {
+      "name": "Ribbon_Reset",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "callback",
+      "channels": [
+        "ribbon-onaction"
+      ],
+      "signatures": [
+        "Sub Ribbon_Reset(ByVal control As IRibbonControl)"
+      ]
+    },
+    {
+      "name": "M_Ribbon_ResetShouldStart",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Ribbon_ResetShouldStart(ByVal IsLeaseOwner As Boolean, ByVal LeaseIsFree As Boolean) As Boolean"
+      ]
+    },
+    {
+      "name": "M_Ribbon_LifecycleSucceeded",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_Ribbon_LifecycleSucceeded(ByVal ExpectedOperation As String, ByVal ObservedOperation As String, ByVal ObservedSucceeded As Boolean) As Boolean"
+      ]
+    },
+    {
+      "name": "M_DemoSheet_ResolveShowOnToggle",
+      "module": "M_DatePicker",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "test-harness"
+      ],
+      "signatures": [
+        "Function M_DemoSheet_ResolveShowOnToggle(ByVal ExistedBefore As Boolean, ByVal VisibleBefore As Boolean) As Boolean"
+      ]
+    },
+    {
+      "name": "Ribbon_Demo",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "callback",
+      "channels": [
+        "ribbon-onaction"
+      ],
+      "signatures": [
+        "Sub Ribbon_Demo(ByVal control As IRibbonControl)"
+      ]
+    },
+    {
+      "name": "DP_DemoSheet_Show",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog"
+      ],
+      "signatures": [
+        "Sub DP_DemoSheet_Show()"
+      ],
+      "pending": "#55",
+      "note": "No caller in this project."
+    },
+    {
+      "name": "DP_DemoSheet_HideVeryHidden",
+      "module": "M_DatePicker",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "macro-dialog",
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_DemoSheet_HideVeryHidden()"
+      ],
+      "pending": "#55"
+    }
+  ]
+}

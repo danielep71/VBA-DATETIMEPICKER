@@ -2048,7 +2048,7 @@ Public Function M_Settings_ResolveKeyboardShortcutOnSave( _
 '
 '   This is the seam the settings-save regression drives. It is the same code
 '   the real UserForm save handler executes, not a module-level setter standing
-'   in for it. Classify internal under #25
+'   in for it. It is classified internal in src/public-surface.json
 '
 ' UPDATED
 '   2026-08-25
@@ -6155,7 +6155,7 @@ Public Sub M_Lease_Test_ClearOwnerToken()
 '   Drops this project's lease token without touching the lease itself.
 '
 '   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
-'   must be classified internal under #25.
+'   is classified internal in src/public-surface.json.
 '
 '   It exists because a regression suite cannot load a second VBA project. This
 '   reproduces exactly the state a second provider sees, and the state a VBA
@@ -6186,7 +6186,7 @@ Public Sub M_Lease_Test_SilenceRefusalReport(ByVal Silence As Boolean)
 '   instead.
 '
 '   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
-'   must be classified internal under #25.
+'   is classified internal in src/public-surface.json.
 '
 '   It exists because #37 requires automated coverage of the real entry points
 '   under a refused lease. Those paths report refusal through a modal MsgBox,
@@ -6220,7 +6220,7 @@ Public Function M_Lease_Test_RefusalReportCount() As Long
 '   Reports how many refusals were raised since reporting was silenced.
 '
 '   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
-'   must be classified internal under #25.
+'   is classified internal in src/public-surface.json.
 '
 '   A refusal that is silently skipped and a refusal that never happened look
 '   identical from outside. This lets a suite prove the entry path actually
@@ -14489,8 +14489,8 @@ Public Sub M_Timer_Test_ArmScheduleFault(ByVal ErrorNumber As Long)
 '
 ' NOTES
 '   Public only because the regression harness is a separate module. It takes an
-'   argument, so it does not appear in the macro dialog. Classifying and hiding
-'   production test seams belongs to #25
+'   argument, so it does not appear in the macro dialog. It is classified
+'   internal in src/public-surface.json
 '
 ' UPDATED
 '   2026-08-30
@@ -23542,84 +23542,6 @@ Public Sub Ribbon_Demo(ByVal control As IRibbonControl)
         Else
             DP_DemoSheet_HideVeryHidden
         End If
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Report the Ribbon callback failure
-        Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
-
-End Sub
-
-
-Public Sub Ribbon_HideDemo(ByVal control As IRibbonControl)
-
-'
-'------------------------------------------------------------------------------
-'                           RIBBON HIDE DEMO SHEET
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Hides the DatePicker demo worksheet. Written as a Ribbon onAction callback
-'
-'   CURRENTLY UNUSED. No control in src/ribbon/customUI.xml is wired to this
-'   callback: the Demo button calls Ribbon_Demo, which toggles the sheet. No
-'   procedure in this project calls it either
-'
-' WHY THIS EXISTS
-'   It was the companion of a separate show action, letting the user hide the
-'   demo sheet without relying on save events, which may be triggered
-'   automatically by AutoSave. Ribbon_Demo now covers both directions
-'
-'   It is kept because it is Public and has the RibbonX onAction signature, so
-'   the Ribbon XML can be wired to it again without a code change. The
-'   IRibbonControl argument keeps it out of the Macros dialog. Its removal is
-'   open in #182
-'
-' INPUTS
-'   Control
-'     Ribbon control that triggered the callback
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Delegates demo-sheet hiding to DP_DemoSheet_HideVeryHidden
-'
-' ERROR POLICY
-'   Catches runtime errors and reports them through Ribbon_ReportError
-'
-' DEPENDENCIES
-'   IRibbonControl
-'   DP_DemoSheet_HideVeryHidden
-'   Ribbon_ReportError
-'
-' UPDATED
-'   2026-11-09
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME As String = "Ribbon_HideDemo"
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' HIDE DEMO
-'------------------------------------------------------------------------------
-    'Hide the demo worksheet
-        DP_DemoSheet_HideVeryHidden
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
