@@ -830,8 +830,9 @@ Public Sub DEMO_FastMode_Test_ArmFault( _
 '   never sees one
 '
 '   Public only because the regression harness is a separate module. It takes
-'   arguments, so it does not appear in the macro dialog, and #25 classifies it
-'   as internal rather than supported API
+'   arguments, so it does not appear in the macro dialog. It is demo test
+'   infrastructure, not supported API; src/public-surface.json covers only the
+'   production modules
 '
 ' UPDATED
 '   2026-09-17

@@ -14,7 +14,7 @@ first failure:
     Python 3.11+ with the documentation packages is on the PATH;
  2. the static gates: the static-checks.json of that push run, downloaded
     from GitHub Actions (the report release-check.yml also reads), so the
-    eleven gates are those CI ran on this exact commit; and the Ribbon check
+    twelve gates are those CI ran on this exact commit; and the Ribbon check
     (.github/scripts/check-ribbon-resources.py), run here;
  3. the source runs: tools/Certify-Excel.ps1, standard and -WithUISmoke;
  4. the add-in and demo builds: tools/Build-Addin.ps1 and -Demo, with the
@@ -452,10 +452,10 @@ try {
             }
             $report = Get-Content -LiteralPath $staticReport -Raw -Encoding UTF8 | ConvertFrom-Json
             if ($report.status -ne "pass" -or $report.candidate_sha -ne $sha -or $report.dirty -ne $false -or
-                $report.mode -ne "committed" -or @($report.checks).Count -ne 11) {
-                Stop-Release $step "The static report of run $($script:staticRunId) is not a clean committed PASS of 11 gates for $sha."
+                $report.mode -ne "committed" -or @($report.checks).Count -ne 12) {
+                Stop-Release $step "The static report of run $($script:staticRunId) is not a clean committed PASS of 12 gates for $sha."
             }
-            $staticDetail = "11 gates PASS in CI run $($script:staticRunId)"
+            $staticDetail = "12 gates PASS in CI run $($script:staticRunId)"
         }
         $ribbon = Invoke-Python -Python $python -Arguments @((Join-Path $RepoRoot ".github\scripts\check-ribbon-resources.py"),
             "--root", (Join-Path $RepoRoot "src\ribbon"))

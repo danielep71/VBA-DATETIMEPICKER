@@ -2048,7 +2048,7 @@ Public Function M_Settings_ResolveKeyboardShortcutOnSave( _
 '
 '   This is the seam the settings-save regression drives. It is the same code
 '   the real UserForm save handler executes, not a module-level setter standing
-'   in for it. Classify internal under #25
+'   in for it. It is classified internal in src/public-surface.json
 '
 ' UPDATED
 '   2026-08-25
@@ -6155,7 +6155,7 @@ Public Sub M_Lease_Test_ClearOwnerToken()
 '   Drops this project's lease token without touching the lease itself.
 '
 '   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
-'   must be classified internal under #25.
+'   is classified internal in src/public-surface.json.
 '
 '   It exists because a regression suite cannot load a second VBA project. This
 '   reproduces exactly the state a second provider sees, and the state a VBA
@@ -6186,7 +6186,7 @@ Public Sub M_Lease_Test_SilenceRefusalReport(ByVal Silence As Boolean)
 '   instead.
 '
 '   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
-'   must be classified internal under #25.
+'   is classified internal in src/public-surface.json.
 '
 '   It exists because #37 requires automated coverage of the real entry points
 '   under a refused lease. Those paths report refusal through a modal MsgBox,
@@ -6220,7 +6220,7 @@ Public Function M_Lease_Test_RefusalReportCount() As Long
 '   Reports how many refusals were raised since reporting was silenced.
 '
 '   THIS IS INTERNAL TEST INFRASTRUCTURE. It is not supported DatePicker API and
-'   must be classified internal under #25.
+'   is classified internal in src/public-surface.json.
 '
 '   A refusal that is silently skipped and a refusal that never happened look
 '   identical from outside. This lets a suite prove the entry path actually
@@ -14489,8 +14489,8 @@ Public Sub M_Timer_Test_ArmScheduleFault(ByVal ErrorNumber As Long)
 '
 ' NOTES
 '   Public only because the regression harness is a separate module. It takes an
-'   argument, so it does not appear in the macro dialog. Classifying and hiding
-'   production test seams belongs to #25
+'   argument, so it does not appear in the macro dialog. It is classified
+'   internal in src/public-surface.json
 '
 ' UPDATED
 '   2026-08-30
@@ -23558,84 +23558,6 @@ ErrorHandler:
 
 End Sub
 
-
-Public Sub Ribbon_HideDemo(ByVal control As IRibbonControl)
-
-'
-'------------------------------------------------------------------------------
-'                           RIBBON HIDE DEMO SHEET
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Hides the DatePicker demo worksheet. Written as a Ribbon onAction callback
-'
-'   CURRENTLY UNUSED. No control in src/ribbon/customUI.xml is wired to this
-'   callback: the Demo button calls Ribbon_Demo, which toggles the sheet. No
-'   procedure in this project calls it either
-'
-' WHY THIS EXISTS
-'   It was the companion of a separate show action, letting the user hide the
-'   demo sheet without relying on save events, which may be triggered
-'   automatically by AutoSave. Ribbon_Demo now covers both directions
-'
-'   It is kept because it is Public and has the RibbonX onAction signature, so
-'   the Ribbon XML can be wired to it again without a code change. The
-'   IRibbonControl argument keeps it out of the Macros dialog. Its removal is
-'   open in #182
-'
-' INPUTS
-'   Control
-'     Ribbon control that triggered the callback
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Delegates demo-sheet hiding to DP_DemoSheet_HideVeryHidden
-'
-' ERROR POLICY
-'   Catches runtime errors and reports them through Ribbon_ReportError
-'
-' DEPENDENCIES
-'   IRibbonControl
-'   DP_DemoSheet_HideVeryHidden
-'   Ribbon_ReportError
-'
-' UPDATED
-'   2026-11-09
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME As String = "Ribbon_HideDemo"
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' HIDE DEMO
-'------------------------------------------------------------------------------
-    'Hide the demo worksheet
-        DP_DemoSheet_HideVeryHidden
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Report the Ribbon callback failure
-        Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
-
-End Sub
-
 Private Sub Ribbon_ReportError( _
     ByVal ProcedureName As String, _
     ByVal ErrorNumber As Long, _
@@ -23723,128 +23645,6 @@ Private Sub Ribbon_ReportError( _
 
     'Restore normal error handling
         On Error GoTo 0
-
-End Sub
-
-
-
-Public Sub DP_DemoSheet_Show()
-
-'
-'------------------------------------------------------------------------------
-'                           SHOW DEMO SHEET
-'------------------------------------------------------------------------------
-' PURPOSE
-'   Shows and activates the DatePicker demo worksheet
-'
-'   CURRENTLY UNUSED. No procedure in this project and no Ribbon control calls
-'   it. Ribbon_Demo shows the demo sheet itself
-'
-' WHY THIS EXISTS
-'   The demo worksheet is intentionally hidden during normal workbook startup
-'   and save lifecycle. This routine was written as the controlled way for a
-'   Ribbon action to make it visible again for showcase or validation purposes
-'
-'   It is kept because it is Public and takes no arguments, so a user can still
-'   run it by name from the Macros dialog or through Application.Run. Its
-'   removal is open in #182
-'
-' INPUTS
-'   None
-'
-' RETURNS
-'   Nothing
-'
-' BEHAVIOR
-'   Resolves the demo worksheet from the resolved host workbook, makes it
-'   visible, activates that workbook's window when possible, and activates the
-'   demo sheet
-'
-' ERROR POLICY
-'   Raises a descriptive runtime error if the demo worksheet cannot be resolved
-'   or activated
-'
-' DEPENDENCIES
-'   DP_DemoSheet_ResolveHostWorkbook
-'   Excel.Worksheet
-'   DP_DEMO_SHEET_NAME
-'
-' NOTES
-'   The host workbook is resolved through DP_DemoSheet_ResolveHostWorkbook, not
-'   assumed to be ThisWorkbook. This routine raises when no open workbook holds
-'   the demo sheet rather than creating one: showing a sheet the caller never
-'   built is not this routine's decision
-'
-' UPDATED
-'   2026-11-09
-'------------------------------------------------------------------------------
-
-'------------------------------------------------------------------------------
-' DECLARE
-'------------------------------------------------------------------------------
-    Const PROC_NAME     As String = "DP_DemoSheet_Show"
-
-    Dim HostBook        As Excel.Workbook        'Workbook that holds the demo sheet
-    Dim DemoSheet       As Excel.Worksheet       'DatePicker demo worksheet
-
-'------------------------------------------------------------------------------
-' INITIALIZE
-'------------------------------------------------------------------------------
-    'Enable controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' RESOLVE DEMO SHEET
-'------------------------------------------------------------------------------
-    'Resolve the workbook that holds the demo sheet
-        Set HostBook = DP_DemoSheet_ResolveHostWorkbook(False)
-
-    'Reject the case where no open workbook holds a demo sheet
-        If HostBook Is Nothing Then
-            Err.Raise vbObjectError + 541, PROC_NAME, _
-                "No open workbook contains the demo sheet '" & DP_DEMO_SHEET_NAME & "'."
-        End If
-
-    'Retrieve the demo worksheet from the resolved workbook
-        Set DemoSheet = HostBook.Worksheets(DP_DEMO_SHEET_NAME)
-
-'------------------------------------------------------------------------------
-' SHOW DEMO SHEET
-'------------------------------------------------------------------------------
-    'Make the demo sheet visible
-        DemoSheet.Visible = xlSheetVisible
-
-'------------------------------------------------------------------------------
-' ACTIVATE HOST WORKBOOK WINDOW
-'------------------------------------------------------------------------------
-    'Suppress window activation errors for hidden or add-in-like contexts
-        On Error Resume Next
-    'Activate the first window of the workbook holding the demo sheet
-        If HostBook.Windows.Count > 0 Then HostBook.Windows(1).Activate
-    'Clear any suppressed window activation error
-        Err.Clear
-    'Restore controlled error handling
-        On Error GoTo ErrorHandler
-
-'------------------------------------------------------------------------------
-' ACTIVATE DEMO SHEET
-'------------------------------------------------------------------------------
-    'Activate the demo worksheet
-        DemoSheet.Activate
-
-'------------------------------------------------------------------------------
-' EXIT PROCEDURE
-'------------------------------------------------------------------------------
-    'Exit before the error handler
-        Exit Sub
-
-'------------------------------------------------------------------------------
-' ERROR HANDLER
-'------------------------------------------------------------------------------
-ErrorHandler:
-    'Raise a descriptive error to the caller
-        Err.Raise Err.Number, PROC_NAME, _
-            "Unable to show the Date / Time Picker demo sheet '" & DP_DEMO_SHEET_NAME & "'. " & Err.Description
 
 End Sub
 

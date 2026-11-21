@@ -833,6 +833,26 @@ This is a compatibility boundary, not something the new provider can repair on b
 
 The project deliberately keeps the normal consumer surface small even though VBA callbacks and cross-module architecture require additional `Public` procedures internally.
 
+Every technically public declaration in a production standard module is
+classified exactly once in [`src/public-surface.json`](src/public-surface.json):
+
+| Classification | Meaning |
+|---|---|
+| `supported` | Consumer contract covered by Semantic Versioning |
+| `callback` | Public only because Excel or RibbonX resolves it by name |
+| `internal` | Implementation surface; may change or disappear without notice |
+
+The manifest also records each symbol's signature and invocation channels:
+direct VBA call, Alt+F8 or assigned control, Ribbon `onAction`, CommandBar or
+Shape `OnAction`, `Application.OnKey`, `Application.OnTime`, use by another
+production component, the regression harness and the demo.
+`tools/check_public_surface.py` recomputes what the source shows and fails on an
+unclassified addition, a changed or removed supported signature, an orphaned or
+unbound callback, or a README list that disagrees with the manifest. The two
+lists below are checked against it.
+
+<!-- public-surface:supported -->
+
 ## Primary consumer API
 
 | Member | Kind | Purpose |
@@ -848,42 +868,37 @@ The project deliberately keeps the normal consumer surface small even though VBA
 | `DP_FillTableColumn` | `Function → DP_WriteResult` | Explicitly fill the selected Excel Table data column; formula-safe by default |
 | `DP_RepairRuntime` | `Sub` | Explicit runtime repair path; may re-enable events |
 | `DP_ForceReleaseProviderLease` | `Sub` | Operator-only recovery for a stranded provider lease |
+| `M_GridIcon_PurgeAll` | `Sub` | Remove every in-grid icon; the host template calls it before save and print |
 | `M_Settings_SetNamespace` | `Sub` | Select an isolated persisted settings namespace before first settings load |
 | `M_Settings_GetNamespace` | `Function → String` | Return configured namespace; empty means the legacy scope |
 
-`DP_Click` and `DP_OpenForActiveCell` are also `Public`, but only as Excel
-callbacks: `DP_Click` is the macro assigned to the right-click entry and the
-in-grid icon, and `DP_OpenForActiveCell` is the `Ctrl + Shift + D` target. Both
-open the picker for the active cell through `DP_Show`; call `DP_Show` instead.
-[#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25) will classify
-this surface.
+## Settings setters and getters
 
-Each persisted setting also has a `Public` setter and getter pair,
-`M_Settings_Set<Name>` / `M_Settings_Get<Name>`, for example
-`M_Settings_SetEnableKeyboardShortcut` (see
-[Open from Excel](#open-from-excel)) and `M_Settings_SetShowRightClick`.
-A setter saves the value and applies it at once. The setters that change the
-shortcut, right-click entry or grid icons apply it only in the copy that owns
-the provider lease; any other copy saves the value and leaves those shared
-registrations alone, reporting a refusal if another copy holds the lease
+Each persisted setting has a setter and getter pair. A setter saves the value
+and applies it at once. The setters that change the shortcut, right-click entry
+or grid icons apply it only in the copy that owns the provider lease; any other
+copy saves the value and leaves those shared registrations alone, reporting a
+refusal if another copy holds the lease
 ([#194](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/194)).
 
-A normal host usually needs only:
+| Setting | Setter | Getter |
+|---|---|---|
+| First day of week | `M_Settings_SetFirstDayOfWeek` | `M_Settings_GetFirstDayOfWeek` |
+| First day of week, as text | `M_Settings_SetFirstDayOfWeekText` | `M_Settings_GetFirstDayOfWeekText` |
+| Local day and month names | `M_Settings_SetUseLocalNames` | `M_Settings_GetUseLocalNames` |
+| Keyboard shortcut (see [Open from Excel](#open-from-excel)) | `M_Settings_SetEnableKeyboardShortcut` | `M_Settings_GetEnableKeyboardShortcut` |
+| Right-click entry | `M_Settings_SetShowRightClick` | `M_Settings_GetShowRightClick` |
+| In-grid icon | `M_Settings_SetShowGridIcon` | `M_Settings_GetShowGridIcon` |
+| Native window behavior | `M_Settings_SetUseWinAPI` | `M_Settings_GetUseWinAPI` |
+| Outside-month selection | `M_Settings_SetAllowOutsideMonthSelection` | `M_Settings_GetAllowOutsideMonthSelection` |
+| Weekend highlight | `M_Settings_SetHighlightWeekends` | `M_Settings_GetHighlightWeekends` |
+| Close after selection | `M_Settings_SetCloseAfterSelection` | `M_Settings_GetCloseAfterSelection` |
+| Clock mode | `M_Settings_SetClockMode` | `M_Settings_GetClockMode` |
+| Size mode | `M_Settings_SetSizeMode` | `M_Settings_GetSizeMode` |
+| Holiday callback | `M_Settings_SetHolidayCallback` | `M_Settings_GetHolidayCallback` |
 
-```vb
-DP_Start
-DP_Show
-DP_Close
-DP_Stop
-```
-
-plus optional:
-
-```vb
-M_Settings_SetNamespace
-```
-
-before `DP_Start`.
+`M_Settings_UseLocalNames` is the older name of `M_Settings_SetUseLocalNames`
+and is kept for existing callers.
 
 ## Public result types
 
@@ -927,28 +942,53 @@ committed then rolled back
 recovery still required
 ```
 
-rather than collapsing all cases into a Boolean or no return value.
+rather than collapsing all cases into a Boolean or no return value. The type
+is supported; the procedure that produces it is internal (see below).
 
 ## Public enums
 
+| Enum | Used by |
+|---|---|
+| `DP_ClockMode` | Clock-mode setter and getter |
+| `DP_SizeMode` | Size-mode setter and getter |
+| `DP_WriteAction` | Write-back result and action identification |
+
+<!-- /public-surface:supported -->
+
+A normal host usually needs only:
+
 ```vb
-DP_WriteAction
-DP_ClockMode
-DP_SizeMode
+DP_Start
+DP_Show
+DP_Close
+DP_Stop
 ```
 
-## Ribbon callbacks
-
-RibbonX callbacks remain `Public` in a standard module because Office resolves them by name:
+plus optional:
 
 ```vb
-Ribbon_ShowPicker
-Ribbon_Reset
-Ribbon_Demo
+M_Settings_SetNamespace
 ```
 
-`Ribbon_HideDemo` has the same callback signature but is not wired in
-`customUI.xml`; it is currently unused.
+before `DP_Start`.
+
+## Callbacks
+
+These procedures are `Public` because Excel or RibbonX resolves them by name.
+Their names are fixed; host code should call `DP_Show` instead.
+
+<!-- public-surface:callback -->
+
+| Callback | Resolved by |
+|---|---|
+| `Ribbon_ShowPicker` | Ribbon **Date / Time Picker** button `onAction` |
+| `Ribbon_Reset` | Ribbon **Reset** button `onAction` |
+| `Ribbon_Demo` | Ribbon **Demo** button `onAction` |
+| `DP_Click` | Right-click entry and in-grid icon `OnAction` |
+| `DP_OpenForActiveCell` | `Ctrl + Shift + D` through `Application.OnKey` |
+| `M_Timer_Tick` | Live clock through `Application.OnTime` |
+
+<!-- /public-surface:callback -->
 
 Ribbon layout belongs in:
 
@@ -958,24 +998,33 @@ src/ribbon/customUI.xml
 
 Callbacks should stay thin and delegate to the normal DatePicker API.
 
-## Advanced public maintenance helpers
+## Internal surface — not supported API
 
-The current source also exposes maintenance/integration procedures used by the host and Excel callback model, including:
+Everything else that is `Public` is classified `internal`: helpers shared with
+the picker form and classes, global state, constants, decision helpers and test
+seams. Being `Public` is a consequence of the current single-module layout, not
+a decision that these belong on the callable surface.
+
+### Maintenance helpers
 
 ```text
 M_Picker_EnsureManager
 M_ContextMenu_Update
 M_KeyboardShortcut_Update
-M_GridIcon_PurgeAll
 ```
 
-`M_Picker_EnsureManager` preserves the caller's event state without changing it.
-It is currently parameterless, which leaves it reachable from Alt+F8 and from an
-assigned control. That reachability is present technical exposure, not a
-supported design pattern: [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)
-will classify this surface and hide what does not need to be reachable.
+The [recovery guide](#-recovery-guide) uses them by hand. They are internal, not
+supported API.
 
-### Internal test seams — not supported API
+`M_Picker_EnsureManager` preserves the caller's event state without changing it.
+It is parameterless, so it is reachable from Alt+F8 and from an assigned
+control. That reachability is technical exposure, not a supported entry point.
+
+`M_WriteBack_Apply` and `M_Window_RemoveTitleBar` are internal too: hosts write
+through `DP_FillTableColumn`, `DP_Today` or `DP_Now`, and only the picker form
+restyles its window.
+
+### Internal test seams
 
 Some procedures are `Public` solely so the regression harness can reach them.
 They follow the `<Area>_Test_*` naming pattern:
@@ -989,21 +1038,21 @@ M_WriteBack_Test_SetFaultInjection
 M_Window_Test_SetFaultInjection
 ```
 
-`M_Settings_ResolveKeyboardShortcutOnSave` is also `Public`, but the settings
-panel calls it in production; the harness tests it directly.
+They may change or disappear without notice. Do not call them from host code.
 
-They are internal infrastructure, may change or disappear without notice, and are to be classified `internal` under [#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25). Do not call them from host code.
+### Alt+F8 exposure still open
 
-Being `Public` is a consequence of the harness living in a separate module, not a
-decision that these belong on the callable surface. Most seams take arguments
-or are functions, which keeps them out of the macro dialog. Three parameterless
-`Sub` seams do appear in Alt+F8: `M_Lease_Test_ClearOwnerToken`,
-`M_Timer_Test_ExpireRegistration` and `M_Timer_Test_Reset`. Keeping seams out of
-the dialog is a mitigation while #25 is open, not the intended end state. #25 will move this surface behind
-`Option Private Module` boundaries or make it `Private` wherever the harness does
-not genuinely require reach.
+Nineteen parameterless internal `Sub`s still appear in the macro dialog, among
+them three test seams: `M_Lease_Test_ClearOwnerToken`,
+`M_Timer_Test_ExpireRegistration` and `M_Timer_Test_Reset`. The manifest marks
+each with `"pending": "#55"`.
+[#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55) moves this
+surface behind `Option Private Module` implementation modules, which hides it
+from the dialog; the check already requires `Option Private Module` on every
+production standard module other than `M_DatePicker`.
 
 ---
+
 
 ## 🧭 Event-state contract
 
@@ -1356,6 +1405,7 @@ VBA-DATETIMEPICKER/
 │  │  └─ UF_DatePicker.frx
 │  ├─ modules/
 │  │  └─ M_DatePicker.bas
+│  ├─ public-surface.json   (classified public surface; checked by tools/check_public_surface.py)
 │  └─ ribbon/
 │     ├─ customUI.xml
 │     ├─ _rels/customUI.xml.rels

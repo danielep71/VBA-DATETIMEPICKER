@@ -46,7 +46,7 @@ commit. Even a documentation-only new commit requires renewed candidate evidence
 Run `python tools/check.py --ci` on the clean candidate. Retain
 `test-results/static-checks.json` and `.md`, complete output and workflow URL.
 The JSON must have `status: pass`, exact `candidate_sha`, `dirty: false`,
-`mode: committed`, and exactly these eleven checks, each with `exit_code: 0`:
+`mode: committed`, and exactly these twelve checks, each with `exit_code: 0`:
 
 | Required check | Result / evidence |
 | --- | --- |
@@ -55,6 +55,7 @@ The JSON must have `status: pass`, exact `candidate_sha`, `dirty: false`,
 | `check_vba_jumps-fixtures` | <!-- --> |
 | `check_committed_whitespace-fixtures` | <!-- --> |
 | `check_source` | <!-- --> |
+| `check_public_surface` | <!-- --> |
 | `check_vba_conditionals` | <!-- --> |
 | `check_vba_jumps` | <!-- --> |
 | `check_committed_whitespace` | <!-- --> |
@@ -67,7 +68,7 @@ The JSON must have `status: pass`, exact `candidate_sha`, `dirty: false`,
 **Required separate Ribbon record:** run
 `python .github/scripts/check-ribbon-resources.py --root src/ribbon` on the
 same clean candidate and retain SHA, command, exit code and output here.
-This is not an additional member of the eleven-check JSON set. A missing
+This is not an additional member of the twelve-check JSON set. A missing
 path-filtered workflow run is not a pass; the local recorded result is required.
 Missing Ribbon parts/resources block release.
 

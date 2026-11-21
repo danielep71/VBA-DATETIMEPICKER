@@ -59,7 +59,7 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertIn('@("run", "download", $script:staticRunId,', step)
         self.assertIn('"--name", "static-checks-$sha"', step)
         self.assertIn('$report.status -ne "pass" -or $report.candidate_sha -ne $sha -or $report.dirty -ne $false', step)
-        self.assertIn("@($report.checks).Count -ne 11", step)
+        self.assertIn("@($report.checks).Count -ne 12", step)
         self.assertNotIn("check.py", step)
         self.assertNotIn("node", self.code.lower().replace("nodes", ""))
 
