@@ -66,6 +66,8 @@ class Symbol:
     kind: str
     signatures: list[str] = field(default_factory=list)
     members: list[str] = field(default_factory=list)
+    # Ordered member lists of #If variants that differ from ``members``.
+    member_variants: list[list[str]] = field(default_factory=list)
     parameterless_sub: bool = False
 
 
@@ -125,9 +127,10 @@ def add_symbol(component: Component, symbol: Symbol) -> None:
                 if signature not in existing.signatures:
                     existing.signatures.append(signature)
             existing.signatures.sort()
-            for member in symbol.members:
-                if member not in existing.members:
-                    existing.members.append(member)
+            if (symbol.kind in ("Enum", "Type") and symbol.members != existing.members
+                    and symbol.members not in existing.member_variants):
+                existing.member_variants.append(symbol.members)
+                existing.member_variants.sort()
             existing.parameterless_sub = existing.parameterless_sub or symbol.parameterless_sub
             return
     component.symbols.append(symbol)
@@ -139,7 +142,8 @@ def parse_component(path: str, text: str) -> Component:
     Each conditional-compilation environment that check_vba_conditionals
     models (VBA6 and VBA7, 32- and 64-bit Windows) is parsed on its own and
     the results merged, so an #If/#Else variant of a header, constant, enum or
-    type is compared too: alternate signatures and member lists are all kept.
+    type is compared too: alternate signatures are all kept, and an enum or type
+    whose ordered member list differs keeps each variant in member_variants.
     """
     sources, conditional = reachable_sources(path, text)
     merged = Component(path, "", text)
@@ -367,7 +371,8 @@ def analyze(files: dict[str, str], manifest: dict[str, Any], ribbon: bytes | Non
         if entry.get("module") != symbol.module or entry.get("kind") != symbol.kind:
             findings.append(f"{label} records {entry.get('module')}.{entry.get('kind')}; "
                             f"source has {symbol.module}.{symbol.kind}")
-        if entry.get("signatures") != symbol.signatures or entry.get("members", []) != symbol.members:
+        if (entry.get("signatures") != symbol.signatures or entry.get("members", []) != symbol.members
+                or entry.get("member_variants", []) != symbol.member_variants):
             impact = " (incompatible supported change)" if classification != "internal" else ""
             findings.append(f"{label} signature differs from source{impact}: {symbol.signatures}")
         facts = {

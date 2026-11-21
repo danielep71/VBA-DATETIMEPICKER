@@ -227,6 +227,19 @@ class PublicSurfaceTests(unittest.TestCase):
         same = "#If Win64 Then\n" + enum + "#Else\n" + enum + "#End If\n"
         self.assertEqual(self.run_case(files={FACADE: FACADE_SOURCE.replace(enum, same)}), [])
 
+    def test_conditional_member_order_is_compared(self) -> None:
+        enum = "    Public Enum DP_Mode\n        DP_Mode_A = 0 'First\n    End Enum\n"
+        two = "    Public Enum DP_Mode\n        DP_Mode_A\n        DP_Mode_B\n    End Enum\n"
+        reordered = two.replace("DP_Mode_A\n        DP_Mode_B", "DP_Mode_B\n        DP_Mode_A")
+        manifest = self.changed("DP_Mode", members=["DP_Mode_A", "DP_Mode_B"])
+        plain = FACADE_SOURCE.replace(enum, two)
+        self.assertEqual(self.run_case(files={FACADE: plain}, manifest=manifest), [])
+        source = FACADE_SOURCE.replace(enum, "#If Win64 Then\n" + reordered + "#Else\n" + two + "#End If\n")
+        self.assertFinding(self.run_case(files={FACADE: source}, manifest=manifest), "DP_Mode signature differs")
+        recorded = self.changed("DP_Mode", members=["DP_Mode_A", "DP_Mode_B"],
+                                member_variants=[["DP_Mode_B", "DP_Mode_A"]])
+        self.assertEqual(self.run_case(files={FACADE: source}, manifest=recorded), [])
+
     def test_unmodeled_conditional_symbol_is_reported(self) -> None:
         source = FACADE_SOURCE + "#If DEBUG_BUILD Then\nPublic Sub DP_Debug()\nEnd Sub\n#End If\n"
         findings = self.run_case(files={FACADE: source})
