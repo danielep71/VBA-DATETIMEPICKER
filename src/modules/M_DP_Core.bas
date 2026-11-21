@@ -1405,6 +1405,7 @@ ErrorHandler:
             "DatePicker settings save failed: " & Err.Description
 
 End Sub
+
 Private Sub M_Settings_InitializeDefaults()
 
 '
@@ -1518,6 +1519,7 @@ Private Sub M_Settings_InitializeDefaults()
         mSettingsLoaded = True
 
 End Sub
+
 Public Sub M_Settings_EnsureLoaded()
 
 '
@@ -2362,6 +2364,7 @@ ErrorHandler:
             "WinAPI setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetAllowOutsideMonthSelection_Impl(ByVal AllowOutsideMonthSelection As Boolean)
 
 '
@@ -3020,6 +3023,7 @@ ErrorHandler:
             "Size-mode setting update failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_Settings_SetHolidayCallback_Impl(ByVal HolidayCallbackName As String)
 
 '
@@ -3944,7 +3948,6 @@ ErrorHandler:
             "First-day-of-week text retrieval failed: " & Err.Description
 
 End Function
-
 
 Public Function M_Settings_GetShowRightClick_Impl() As Boolean
 
@@ -10014,6 +10017,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, "DatePicker Now command failed: " & ErrorDescription
 
 End Sub
+
 Public Function DP_FillTableColumn_Impl( _
     ByVal ValueToWrite As Date, _
     Optional ByVal ConfirmFill As Boolean = True, _
@@ -11682,6 +11686,7 @@ Private Sub M_WriteBack_ResolveAndApplyTarget( _
         Set Target = Nothing
 
 End Sub
+
 Public Sub M_WriteBack_PopulateRange( _
     ByVal oRange As Range, _
     ByVal iType As DP_WriteAction, _
@@ -12222,6 +12227,7 @@ BulkWriteFail:
         On Error GoTo 0
 
 End Function
+
 Private Function M_WriteBack_TryWriteCell( _
     ByVal TargetCell As Range, _
     ByVal WriteValue As Variant, _
@@ -12457,6 +12463,7 @@ WriteFail:
         On Error GoTo 0
 
 End Function
+
 Private Function M_WriteBack_GetPickedValue() As Date
 
 '
@@ -12728,6 +12735,7 @@ SafeExit:
         M_DatePolicy_CanSelectDate = False
 
 End Function
+
 Public Function M_HolidayPolicy_IsHolidayDate(ByVal CandidateDate As Date) As Boolean
 
 '
@@ -12956,7 +12964,6 @@ Public Function M_Caption_GetMonth( _
         M_Caption_GetMonth = VBA.UCase$(VBA.Trim$(MonthCaption))
 
 End Function
-
 
 Public Function M_Caption_GetDate( _
     ByVal DateValue As Date, _
@@ -13342,7 +13349,6 @@ ErrorHandler:
             "Timer procedure-name resolution failed: " & Err.Description
 
 End Function
-
 
 Private Function M_Timer_ApplySchedule( _
     ByVal EarliestTime As Date, _
@@ -14364,6 +14370,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Sub
+
 Public Sub M_Timer_Start()
 
 '
@@ -14510,6 +14517,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Sub
+
 Public Sub M_Timer_Stop()
 
 '
@@ -14660,6 +14668,7 @@ Public Sub M_Timer_Stop()
         On Error GoTo 0
 
 End Sub
+
 Public Sub M_Timer_Tick_Impl()
 
 '
@@ -14886,6 +14895,7 @@ Public Function M_Platform_CanUseWinAPI() As Boolean
 #End If
 
 End Function
+
 Public Function M_Platform_ShouldUseWinAPI() As Boolean
 
 '
@@ -16430,6 +16440,7 @@ ErrorHandler:
             "Right-click menu add failed: " & ErrorDescription
 
 End Sub
+
 Public Sub M_ContextMenu_Remove()
 
 '
@@ -16923,6 +16934,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Sub
+
 Private Sub M_ContextMenu_RemoveFromCommandBar(ByVal TargetCommandBar As CommandBar)
 
 '
@@ -17093,6 +17105,7 @@ ExitProcedure:
         On Error GoTo 0
 
 End Sub
+
 Private Function M_ContextMenu_ContainsDatePicker(ByVal TargetCommandBar As CommandBar) As Boolean
 
 '
@@ -17346,7 +17359,6 @@ ErrorHandler:
             "Keyboard shortcut synchronization failed: " & ErrorDescription
 
 End Sub
-
 
 Private Sub M_KeyboardShortcut_Register()
 
@@ -19497,6 +19509,7 @@ FailSafe:
         On Error GoTo 0
 
 End Sub
+
 Public Sub M_GridIcon_PreCreateHidden(Optional ByVal TargetCell As Excel.Range)
 
 '
@@ -19616,6 +19629,7 @@ ExitProcedure:
         On Error GoTo 0
 
 End Sub
+
 Private Function M_GridIcon_TrackedShapeIsLive() As Boolean
 
 '
@@ -19898,6 +19912,7 @@ Public Sub M_GridIcon_Remove()
         On Error GoTo 0
 
 End Sub
+
 Public Function M_GridIcon_EnsureEmbeddedIconFile() As String
 
 '
@@ -20356,7 +20371,6 @@ ErrorHandler:
 
 End Function
 
-
 Private Sub M_GridIcon_WriteBytesToFile( _
     ByVal IconPath As String, _
     ByRef IconBytes() As Byte)
@@ -20483,6 +20497,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Sub
+
 Private Function M_GridIcon_ByteArrayLength(ByRef SourceBytes() As Byte) As Long
 
 '
@@ -21557,6 +21572,7 @@ ErrorHandler:
         Resume CleanExit
 
 End Function
+
 Public Sub M_FormBridge_RefreshFromCell(ByVal TargetCell As Excel.Range)
 
 '
@@ -21937,6 +21953,7 @@ ErrorHandler:
         Err.Raise ErrorNumber, PROC_NAME, ErrorDescription
 
 End Sub
+
 Private Sub M_FormBridge_UnloadLoadedPicker()
 
 '
@@ -22234,7 +22251,6 @@ Public Sub M_Settings_UseLocalNames_Impl(ByVal UseLocalDayNames As Boolean)
         M_Settings_SetUseLocalNames_Impl UseLocalDayNames
 
 End Sub
-
 
 Private Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As String
 
@@ -22639,7 +22655,6 @@ ErrorHandler:
         Ribbon_ReportError PROC_NAME, Err.Number, Err.Description
 
 End Sub
-
 
 Public Function M_Ribbon_ResetShouldStart( _
     ByVal IsLeaseOwner As Boolean, _

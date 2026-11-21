@@ -69,22 +69,22 @@ Attribute VB_Name = "M_DEMO_BUILDER"
     Public Const COLOR_BUTTON       As Long = 13145700
     Public Const COLOR_TABLE        As Long = 16774635
     Public Const COLOR_HELP         As Long = 6697728
-    
+
     'Buttons color tokens
     Public Const BTN_PRIMARY_N      As Long = &HFF660A  ' #0A66FF (BGR in VBA)
     Public Const BTN_PRIMARY_H      As Long = &HB34700  ' #0047B3
     Public Const BTN_PRIMARY_P      As Long = &H853000  ' #003085
     Public Const WHITE              As Long = &HFFFFFF
-    
+
 '------------------------------------------------------------------------------
 ' DESIGN TOKENS (COLORS)
 '------------------------------------------------------------------------------
     Public Const UI_COLOR_PRIMARY_BG    As Long = &H3C70F2  'Modern blue
     Public Const UI_COLOR_PRIMARY_FG    As Long = &HFFFFFF  'White
-    
+
     Public Const UI_COLOR_NEUTRAL_900   As Long = &H1A1A1A  'Text
     Public Const UI_COLOR_NEUTRAL_200   As Long = &HDCDCDC  'Light gray
-    
+
     Public Const UI_COLOR_SUCCESS_BG    As Long = &H4FB06E
     Public Const UI_COLOR_WARNING_BG    As Long = &H3CB6F2
     Public Const UI_COLOR_ERROR_BG      As Long = &H3A4BF2
@@ -143,20 +143,20 @@ Attribute VB_Name = "M_DEMO_BUILDER"
     Private Type tButtonAppearance
         FillVisible         As MsoTriState      'Original fill visibility
         FillColor           As Long             'Original fill color
-    
+
         LineVisible         As MsoTriState      'Original line visibility
         LineColor           As Long             'Original line color
         LineWeight          As Single           'Original line weight
-    
+
         TextColor           As Long             'Original text color
         TextBold            As MsoTriState      'Original text bold flag
         TextSize            As Single           'Original text size
-    
+
         ShadowVisible       As MsoTriState      'Original shadow visibility
         ShadowBlur          As Single           'Original shadow blur
         ShadowOffsetX       As Single           'Original shadow X offset
         ShadowOffsetY       As Single           'Original shadow Y offset
-    
+
         TopPos              As Double           'Original top position
         LeftPos             As Double           'Original left position
     End Type
@@ -164,22 +164,22 @@ Attribute VB_Name = "M_DEMO_BUILDER"
 
     Private Type tSheetProtectionState
         WasProtected                As Boolean       'TRUE when the sheet was protected on entry
-    
+
         ProtectDrawingObjects       As Boolean       'Original DrawingObjects protection flag
         ProtectContents             As Boolean       'Original Contents protection flag
         ProtectScenarios            As Boolean       'Original Scenarios protection flag
-    
+
         AllowFormattingCells        As Boolean       'Original AllowFormattingCells flag
         AllowFormattingColumns      As Boolean       'Original AllowFormattingColumns flag
         AllowFormattingRows         As Boolean       'Original AllowFormattingRows flag
-    
+
         AllowInsertingColumns       As Boolean       'Original AllowInsertingColumns flag
         AllowInsertingRows          As Boolean       'Original AllowInsertingRows flag
         AllowInsertingHyperlinks    As Boolean       'Original AllowInsertingHyperlinks flag
-    
+
         AllowDeletingColumns        As Boolean       'Original AllowDeletingColumns flag
         AllowDeletingRows           As Boolean       'Original AllowDeletingRows flag
-    
+
         AllowSorting                As Boolean       'Original AllowSorting flag
         AllowFiltering              As Boolean       'Original AllowFiltering flag
         AllowUsingPivotTables       As Boolean       'Original AllowUsingPivotTables flag
@@ -1361,8 +1361,6 @@ Public Sub DEMO_SB_SetProgress( _
 
 End Sub
 
-
-
 Public Sub DEMO_SB_Reset()
 '
 '------------------------------------------------------------------------------
@@ -1486,7 +1484,6 @@ Public Function DEMO_Sheet_GetOrCreate( _
         Set DEMO_Sheet_GetOrCreate = WS
 
 End Function
-
 
 Public Sub DEMO_Sheet_Reset( _
     ByVal WS As Worksheet, _
@@ -1811,7 +1808,6 @@ CleanFail:
         Resume CleanExit
 
 End Sub
-
 
 Public Sub DEMO_Sheet_BuildTemplate( _
     ByVal WS_Name As String, Optional ByVal Title As String = "Title", _
@@ -2647,7 +2643,6 @@ Public Sub DEMO_Format_OutputCell( _
         DEMO_SetRangeBorder TargetRange, RGB(0, 0, 0), xlThin, True
 
 End Sub
-
 
 Public Sub DEMO_Write_BandHeader( _
     ByVal TargetRange As Range, _
@@ -3793,7 +3788,6 @@ Public Function DEMO_Table_Create( _
 
 End Function
 
-
 Public Sub DEMO_Table_ClearBody( _
     ByVal TableObject As ListObject)
 '
@@ -3857,7 +3851,6 @@ Public Sub DEMO_Table_ClearBody( _
         End If
 
 End Sub
-
 
 Public Sub DEMO_Table_AppendRow( _
     ByVal TableObject As ListObject, _
@@ -3959,7 +3952,6 @@ Public Sub DEMO_Table_AppendRow( _
         LR.Range.Cells(1, 1).Resize(1, MaxWrite).Value = WriteMatrix
 
 End Sub
-
 
 Public Function DEMO_Create_TableSection( _
     ByVal WS As Worksheet, _
@@ -4300,7 +4292,7 @@ Public Sub DEMO_Btn_Add( _
         If Len(Trim$(ShapeName)) = 0 Then
             ShapeName = "UI_BTN_" & Replace(CaptionText, " ", "_") & "_" & CLng(Timer * 1000)
         End If
-        
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -4349,7 +4341,6 @@ Public Sub DEMO_Btn_Add( _
         End With
 
 End Sub
-
 
 Public Sub DEMO_Btn_AddGrid( _
     ByVal WS As Worksheet, _
@@ -5235,8 +5226,6 @@ Private Function DEMO_RangeBelongsToWorksheet( _
 
 End Function
 
-
-
 Private Function DEMO_IsSingleRowRange( _
     ByVal TargetRange As Range) _
     As Boolean
@@ -5884,7 +5873,6 @@ Private Sub DEMO_Btn_RestoreAppearance( _
     End With
 
 End Sub
-
 
 Private Sub DEMO_CB_ValidateNamesInput( _
     ByVal AnchorRange As Range, _

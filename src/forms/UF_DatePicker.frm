@@ -292,7 +292,7 @@ Option Explicit
     Private Const DP_FOOTER_HALO_HEIGHT                 As Single = DP_FOOTER_GROUP_HEIGHT 'Footer halo height
     Private Const DP_FOOTER_HALO_BACK_COLOR             As Long = DP_HEADER_HOVER_BACK_COLOR 'Footer halo background
     Private Const DP_FOOTER_HOVER_FORE_COLOR            As Long = vbWhite                'Footer hover foreground
-    
+
     '-----------------------------FOOTER ICONS---------------------------------
     Private Const DP_FOOTER_ICON_FONT_NAME              As String = "Segoe MDL2 Assets"  'Footer icon font
     Private Const DP_FOOTER_ICON_FORE_COLOR             As Long = &H808000               'Footer icon foreground
@@ -474,7 +474,7 @@ Option Explicit
     Private mHoveredPickerItemIndex                     As Long                         'Currently hovered picker item index
     Private mHoveredFooterActionName                    As String                       'Currently hovered footer action
     Private mHoveredSettingsPanelLabelName              As String                       'Currently hovered settings-panel label name
-    
+
     Private mDayCellIndexMap                            As Object                       'Scripting.Dictionary: LabelName -> DayIndex
 
     '-----------------------------CONTROL CACHE--------------------------------
@@ -889,17 +889,17 @@ Private Sub UserForm_KeyDown( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UserForm_KeyDown"
-    
+
     Const SETTINGS_PANEL_NAME   As String = "Fra_Settings"              'Settings panel frame name
     Const PICKER_PANEL_NAME     As String = "Fra_PickerPanel"           'Month/year picker panel frame name
     Const MSFORMS_ALT_MASK      As Integer = 4                          'MSForms Alt modifier mask
 
     Dim CtrlIsPressed           As Boolean                              'True when Ctrl modifier is pressed
     Dim AltIsPressed            As Boolean                              'True when Alt modifier is pressed
-    
+
     Dim LetterShortcutAllowed   As Boolean                              'True when letter shortcuts may be routed
     Dim ActionHandled           As Boolean                              'True when the pressed key was handled
-    
+
     Dim SettingsPanel           As MSForms.control                      'Settings panel control reference
     Dim PickerPanel             As MSForms.control                      'Picker panel control reference
     Dim SettingsPanelVisible    As Boolean                              'True when settings panel is visible
@@ -978,7 +978,7 @@ Private Sub UserForm_KeyDown( _
 '------------------------------------------------------------------------------
     'Route the pressed key
         Select Case KeyCode
-        
+
             Case vbKeyEscape
                 'Close the DatePicker
                     DP_Close_Impl
@@ -1723,7 +1723,7 @@ Private Sub UF_DisplayPeriod_Initialize( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_DisplayPeriod_Initialize"
-    
+
     Const VBA_DATE_MIN_YEAR     As Long = 100           'Minimum year supported by VBA Date
     Const VBA_DATE_MAX_YEAR     As Long = 9999          'Maximum year supported by VBA Date
 
@@ -2159,7 +2159,7 @@ Private Sub UF_KeyboardDate_Set(ByVal NewKeyboardDate As Date)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_KeyboardDate_Set"
-    
+
     Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
     Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
 
@@ -2407,7 +2407,7 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_PickerPanel_HandleAction"
-    
+
     Const PICKER_ITEM_PREFIX    As String = "PICKER_ITEM_"          'Picker item action prefix
     Const DAY_PICKED_PREFIX     As String = "DAY_PICKED_"           'Day label click action prefix
     Const PICKER_MODE_NONE      As Long = 0                         'No picker-panel mode
@@ -2644,7 +2644,7 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Resolve picker panel"
-    
+
     'Suppress lookup errors while resolving the picker panel
         On Error Resume Next
     'Retrieve the existing picker panel control
@@ -3547,7 +3547,7 @@ Private Sub UF_Header_MoveMonth(ByVal MonthOffset As Long)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_Header_MoveMonth"
-    
+
     Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
     Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
 
@@ -3794,7 +3794,7 @@ Private Sub UF_Header_MoveYear(ByVal YearOffset As Long)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_Header_MoveYear"
-    
+
     Const VBA_DATE_MIN_YEAR     As Long = 100               'Minimum year supported by VBA Date
     Const VBA_DATE_MAX_YEAR     As Long = 9999              'Maximum year supported by VBA Date
     Const PICKER_MODE_NONE      As Long = 0                 'No picker-panel mode
@@ -3802,7 +3802,7 @@ Private Sub UF_Header_MoveYear(ByVal YearOffset As Long)
 
     Dim ExistingControl         As MSForms.control          'Control resolved by picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
-    
+
     Dim NewDisplayYear          As Long                     'New displayed year
     Dim NewYearPanelStart       As Long                     'New first year shown in panel
     Dim HandlerStep             As String                   'Current handler step for diagnostics
@@ -4081,7 +4081,7 @@ Public Sub UF_Header_HoverApply(ByVal LabelName As String)
     Dim RawLabelName            As String               'Trimmed label name supplied by caller
     Dim NormalizedLabelName     As String               'Uppercase label name used for routing
     Dim TargetLabelName         As String               'Canonical target label name
-    
+
     Dim ExistingControl         As MSForms.control      'Control resolved by name
     Dim Lbl_Header              As MSForms.Label        'Hovered header label
 
@@ -4801,7 +4801,7 @@ Private Sub UF_DayGrid_Build()
         mHoveredDayCellIndex = 0
     'Build the day-cell label-name to index map once
         UF_DayGrid_BuildIndexMap
-        
+
 '------------------------------------------------------------------------------
 ' CREATE / FORMAT DAY CELLS
 '------------------------------------------------------------------------------
@@ -4811,12 +4811,12 @@ Private Sub UF_DayGrid_Build()
                 RowIndex = (Index - 1) \ DP_DAY_LABELS_PER_ROW
             'Calculate the zero-based column index
                 ColIndex = (Index - 1) Mod DP_DAY_LABELS_PER_ROW
-            
+
             'Calculate the day text label left position
                 TextLeft = DP_DAY_GRID_START_LEFT + DP_DAY_LABEL_HORIZONTAL_STEP * ColIndex
             'Calculate the day text label top position
                 TextTop = DP_DAY_GRID_START_TOP + DP_DAY_LABEL_VERTICAL_STEP * RowIndex
-            
+
             'Center the larger background cell horizontally around the text label
                 CellLeft = TextLeft - ((DP_DAY_CELL_WIDTH - DP_DAY_LABEL_WIDTH) / 2)
             'Center the larger background cell vertically around the text label
@@ -5156,7 +5156,7 @@ Private Sub UF_DayGrid_EnsureFonts()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_DayGrid_EnsureFonts"
-    
+
     Dim ErrorNumber         As Long         'Original runtime error number
     Dim ErrorDescription    As String       'Original runtime error description
 
@@ -5306,13 +5306,13 @@ Public Sub UF_DayGrid_Populate( _
     Dim TrackingDate            As Date                 'Current date written to the grid
     Dim StartOfMonthDay         As Long                 'Weekday index of first month day
     Dim LabelIndex              As Long                 'Sequential day-cell index
-    
+
     Dim CellDateOnly            As Date                 'Date-only value for the current grid cell
     Dim TodayDateOnly           As Date                 'Current system date without time
     Dim SelectedVisualDateOnly  As Date                 'Date-only selected visual date
     Dim HasSelectedVisualDate   As Boolean              'True when selected visual date exists
     Dim HighlightWeekends       As Boolean              'Cached weekend-highlight setting
-    
+
     Dim Lbl_Day                 As MSForms.Label        'Day text label control
     Dim Lbl_DayBg               As MSForms.Label        'Day background label control
 
@@ -5325,7 +5325,7 @@ Public Sub UF_DayGrid_Populate( _
         UF_DayGrid_EnsureCache
     'Ensure cached day-grid fonts are available
         UF_DayGrid_EnsureFonts
-       
+
 '------------------------------------------------------------------------------
 ' CACHE RENDER SETTINGS
 '------------------------------------------------------------------------------
@@ -5489,8 +5489,6 @@ ErrorHandler:
 
 End Sub
 
-
-
 Private Sub UF_DayGrid_ClearCache()
 
 '
@@ -5557,7 +5555,7 @@ Private Sub UF_DayGrid_ClearCache()
         Next Index
     'Release the day-cell index map
         Set mDayCellIndexMap = Nothing
-        
+
 '------------------------------------------------------------------------------
 ' EXIT
 '------------------------------------------------------------------------------
@@ -5759,7 +5757,6 @@ ErrorHandler:
 
 End Sub
 
-
 Private Sub UF_DayCell_RefreshVisibleDate(ByVal TargetDate As Date)
 
 '
@@ -5809,7 +5806,7 @@ Private Sub UF_DayCell_RefreshVisibleDate(ByVal TargetDate As Date)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_DayCell_RefreshVisibleDate"
-    
+
     Dim Index               As Long         'Day-cell index
     Dim TargetDateOnly      As Date         'Target date without time
     Dim CellDateOnly        As Date         'Cached cell date without time
@@ -6322,6 +6319,7 @@ ErrorHandler:
         Err.Raise Err.Number, PROC_NAME, "Fast day-cell state application failed: " & Err.Description
 
 End Sub
+
 Private Sub UF_DayCell_HoverReset()
 
 '
@@ -6372,7 +6370,7 @@ Private Sub UF_DayCell_HoverReset()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_DayCell_HoverReset"
-    
+
     Dim HoverIndex              As Long                 'Previously hovered day-cell index
     Dim LabelDate               As Date                 'Date represented by the day cell
     Dim HasLabelDate            As Boolean              'True when cached date state is available
@@ -7394,7 +7392,7 @@ Private Sub UF_Footer_BuildSettingsArea()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_Footer_BuildSettingsArea"
-    
+
     Dim LabelHook           As cDatePickerLabelHook     'Runtime footer click / hover hook
     Dim BannerLeft          As Single                   'Footer banner left position
     Dim BannerTop           As Single                   'Footer banner top position
@@ -7662,7 +7660,7 @@ Public Sub UF_Footer_HoverApply(ByVal LabelName As String)
 '------------------------------------------------------------------------------
     'Retrieve labels for the requested footer action
         Select Case ActionName
-        
+
             Case "WRITE_TODAY"
                 'Today requires icon, caption, value, and halo
                     RequiresTextLabels = True
@@ -7896,7 +7894,7 @@ Private Sub UF_Footer_HoverReset()
 ' DECLARE
 '------------------------------------------------------------------------------
     Dim CurrentAction       As String               'Current hovered footer action
-    
+
     Dim Lbl_Halo            As MSForms.Label        'Footer halo label
     Dim Lbl_Icon            As MSForms.Label        'Footer icon label
     Dim Lbl_Caption         As MSForms.Label        'Footer caption label
@@ -8084,7 +8082,7 @@ Private Function UF_Footer_ActionFromLabelName(ByVal LabelName As String) As Str
                  "LBL_TODAYCAPTION", _
                  "LBL_TODAY", _
                  "LBL_TODAYHALO"
-                
+
                 UF_Footer_ActionFromLabelName = "WRITE_TODAY"
                 Exit Function
 
@@ -8171,7 +8169,7 @@ Private Sub UF_PickerPanel_Build()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_Build"
-    
+
     Dim ExistingControl     As MSForms.control              'Existing control using the picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame                'Reusable picker panel
     Dim LabelHook           As cDatePickerLabelHook         'Runtime click / hover hook
@@ -8222,7 +8220,7 @@ Private Sub UF_PickerPanel_Build()
         Err.Clear
     'Restore controlled error handling
         On Error GoTo ErrorHandler
-    
+
     'Create the picker panel if it does not already exist
         If ExistingControl Is Nothing Then
             'Create the reusable picker panel frame
@@ -8431,7 +8429,7 @@ Private Sub UF_PickerPanel_EnsureCache()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_EnsureCache"
-    
+
     Dim Index               As Long                 'Picker-panel item index
     Dim ExistingControl     As MSForms.control      'Existing control using the picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame        'Reusable picker panel
@@ -9049,7 +9047,7 @@ Private Sub UF_PickerPanel_PopulateYears()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_PickerPanel_PopulateYears"
-    
+
     Dim Lbl_Item            As MSForms.Label        'Picker item text label
     Dim Lbl_ItemBg          As MSForms.Label        'Picker item background label
     Dim Index               As Long                 'Panel item index
@@ -9224,7 +9222,7 @@ Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_PickerPanel_HoverApply"
-    
+
     Const PICKER_MODE_MONTHS    As Long = 1             'Month picker-panel mode
     Const PICKER_MODE_YEARS     As Long = 2             'Year picker-panel mode
 
@@ -9233,7 +9231,7 @@ Public Sub UF_PickerPanel_HoverApply(ByVal LabelName As String)
     Dim IsSelected              As Boolean              'True when hovered item is selected
     Dim CacheRefreshRequired    As Boolean              'True when cached labels must be rebuilt
     Dim RawTagValue             As String               'Picker text label Tag value
-    
+
     Dim Lbl_ItemBg              As MSForms.Label        'Picker item background label
     Dim Lbl_Item                As MSForms.Label        'Picker item text label
 
@@ -9454,7 +9452,7 @@ Private Sub UF_PickerPanel_HoverReset()
     Dim IsSelected              As Boolean              'True when hovered item is selected
     Dim CacheRefreshRequired    As Boolean              'True when cached labels must be rebuilt
     Dim RawTagValue             As String               'Picker text label Tag value
-    
+
     Dim Lbl_ItemBg              As MSForms.Label        'Picker item background label
     Dim Lbl_Item                As MSForms.Label        'Picker item text label
 
@@ -9940,14 +9938,14 @@ Private Sub UF_SettingsPanel_Build()
     Dim ExistingControl         As MSForms.control                                  'Existing control using the settings-panel name
     Dim Fra_Settings            As MSForms.Frame                                    'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage                                'Settings MultiPage control
-    
+
     Dim Pge_Display             As MSForms.Page                                     'Display settings page
     Dim Pge_Behavior            As MSForms.Page                                     'Behavior settings page
     Dim Pge_Integration         As MSForms.Page                                     'Integration settings page
-    
+
     Dim PanelLeft               As Single                                           'Settings panel left position
     Dim PanelTop                As Single                                           'Settings panel top position
-    
+
     Dim Lbl_Title               As MSForms.Label                                    'Settings title label
     Dim Lbl_Save                As MSForms.Label                                    'Settings save label
     Dim Lbl_Close               As MSForms.Label                                    'Settings close label
@@ -9962,9 +9960,9 @@ Private Sub UF_SettingsPanel_Build()
     Dim Chk_RightClick          As MSForms.CheckBox                                 'Right-click menu checkbox
     Dim Chk_InGridIcon          As MSForms.CheckBox                                 'In-grid icon checkbox
     Dim Chk_WinAPIStyle         As MSForms.CheckBox                                 'WinAPI styling checkbox
-    
+
     Dim LabelHook               As cDatePickerLabelHook                             'Runtime label hook
-    
+
     Dim TitleFont               As Object                                           'Clean title font object
     Dim BodyFont                As Object                                           'Clean body font object
     Dim SaveIconFont            As Object                                           'Clean save icon font object
@@ -10339,7 +10337,7 @@ Private Sub UF_SettingsPanel_Build()
             DP_SETTINGS_CHECK_LOCAL_NAMES_CAPTION, _
             DP_SETTINGS_CHECKBOX_LEFT, _
             DP_SETTINGS_CHECKBOX_TOP_1
-    
+
     'Create or retrieve the live-clock checkbox
         Set Chk_LiveClock = UF_Ensure_PageCheckBox(Pge_Display, "Chk_SettingsLiveClock")
     'Apply deterministic CheckBox formatting
@@ -10509,7 +10507,7 @@ Private Sub UF_SettingsPanel_Show()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_SettingsPanel_Show"
-    
+
     Dim ExistingControl     As MSForms.control              'Existing control resolved by name
     Dim Fra_Settings        As MSForms.Frame                'Reusable settings panel
     Dim Fra_PickerPanel     As MSForms.Frame                'Reusable picker panel
@@ -10839,7 +10837,7 @@ Private Sub UF_SettingsPanel_Save()
             Err.Raise vbObjectError + 516, PROC_NAME, _
                 "Control '" & DP_SETTINGS_MULTIPAGE_NAME & "' exists but is not an MSForms.MultiPage"
         End If
-    
+
     'Use the resolved settings MultiPage
         Set Mp_Settings = ExistingControl
     'Reject an incomplete settings MultiPage
@@ -10929,7 +10927,7 @@ Private Sub UF_SettingsPanel_Save()
                                 Err.Raise vbObjectError + 518, PROC_NAME, _
                                     "First-day setting must be Sunday or Monday"
                     End Select
-        
+
         End Select
 
     'Reject unsupported first-day settings
@@ -11092,7 +11090,7 @@ Private Sub UF_SettingsPanel_Save()
 '------------------------------------------------------------------------------
     'Track the current handler step
         HandlerStep = "Apply lightweight integration side effects"
-        
+
     'Synchronize right-click menu integration only when it changed
         If RightClickChanged Then M_ContextMenu_Update
     'Synchronize keyboard shortcut fallback only when it changed
@@ -11653,11 +11651,11 @@ Private Sub UF_SettingsPanel_RefreshCaptions()
     Dim ExistingControl         As MSForms.control          'Control resolved by name
     Dim Fra_Settings            As MSForms.Frame            'Reusable settings panel
     Dim Mp_Settings             As MSForms.MultiPage        'Settings MultiPage
-    
+
     Dim Pge_Display             As MSForms.Page             'Display settings page
     Dim Pge_Behavior            As MSForms.Page             'Behavior settings page
     Dim Pge_Integration         As MSForms.Page             'Integration settings page
-    
+
     Dim Cbo_FirstDay            As MSForms.ComboBox         'First-day ComboBox
     Dim Chk_LocalNames          As MSForms.CheckBox         'Use-local-names checkbox
     Dim Chk_LiveClock           As MSForms.CheckBox         'Live-clock checkbox
@@ -11668,7 +11666,7 @@ Private Sub UF_SettingsPanel_RefreshCaptions()
     Dim Chk_RightClick          As MSForms.CheckBox         'Right-click menu checkbox
     Dim Chk_InGridIcon          As MSForms.CheckBox         'In-grid icon checkbox
     Dim Chk_WinAPIStyle         As MSForms.CheckBox         'WinAPI styling checkbox
-    
+
     Dim HandlerStep             As String                   'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
@@ -12172,7 +12170,7 @@ Private Sub UF_SettingsPanel_SelectPage(ByVal PageIndex As Long)
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsPanel_SelectPage"
-    
+
     Const SETTINGS_PAGE_FIRST   As Long = 0                 'First supported settings page index
     Const SETTINGS_PAGE_LAST    As Long = 2                 'Last supported settings page index
 
@@ -12336,7 +12334,7 @@ Private Sub UF_SettingsTabs_RefreshVisualState( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "UF_DatePicker.UF_SettingsTabs_RefreshVisualState"
-    
+
     Const SETTINGS_PAGE_FIRST   As Long = 0                     'First supported settings page index
     Const SETTINGS_PAGE_LAST    As Long = 2                     'Last supported settings page index
 
@@ -12707,7 +12705,7 @@ Private Sub UF_SettingsPage_BackgroundBuild( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME         As String = "UF_DatePicker.UF_SettingsPage_BackgroundBuild"
-    
+
     Dim ParentPage          As MSForms.Page         'Resolved target page
     Dim Lbl_Background      As MSForms.Label        'Page background label
     Dim EffectiveName       As String               'Normalized background label name
@@ -12963,7 +12961,7 @@ Private Function UF_SettingsCheckBoxFont_Create() As Object
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "UF_DatePicker.UF_SettingsCheckBoxFont_Create"
-    
+
     Dim NewFont         As Object       'Fresh CheckBox font object
 
     Dim SavedErrNumber          As Long     'Captured original error number
@@ -13111,7 +13109,7 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
 
     Dim ExistingControl         As MSForms.control          'Control resolved by picker-panel name
     Dim Fra_PickerPanel         As MSForms.Frame            'Reusable picker panel
-    
+
     Dim PreviousDate            As Date                     'Previously selected keyboard date
     Dim HasPreviousDate         As Boolean                  'True when previous keyboard date exists
     Dim SelectedDateOnly        As Date                     'Selected date without time
@@ -13178,7 +13176,7 @@ Public Sub UF_DP_AfterSuccessfulSelection(ByVal SelectedDate As Date)
         If VBA.Len(mHoveredFooterActionName) <> 0 Then UF_Footer_HoverReset
     'Clear active settings-panel hover after selection
         If VBA.Len(mHoveredSettingsPanelLabelName) <> 0 Then UF_SettingsPanel_HoverReset
-        
+
 '------------------------------------------------------------------------------
 ' REFRESH ONLY AFFECTED DAY CELLS
 '------------------------------------------------------------------------------
@@ -13288,7 +13286,7 @@ Public Sub UF_DP_RefreshFromExternalSelection( _
 
     Dim ExistingControl     As MSForms.control      'Control resolved by picker-panel name
     Dim Fra_PickerPanel     As MSForms.Frame        'Reusable picker panel
-    
+
     Dim DisplayDate         As Date                 'Date used to resolve displayed month
     Dim HandlerStep         As String               'Current handler step for diagnostics
 
@@ -13517,7 +13515,7 @@ Public Sub UF_DP_RefreshSettings()
 
     Dim ExistingControl     As MSForms.control      'Control resolved by name
     Dim Lbl_Today           As MSForms.Label        'Footer Today value label
-    
+
     Dim HandlerStep         As String               'Current handler step for diagnostics
 
 '------------------------------------------------------------------------------
@@ -13808,7 +13806,7 @@ Private Function UF_Ensure_Label(ByVal ControlName As String) As MSForms.Label
     Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_Label"
 
     Dim EffectiveName       As String               'Normalized control name
-    
+
     Dim ExistingControl     As MSForms.control      'Existing runtime control
     Dim Lbl                 As MSForms.Label        'Target label control
 
@@ -13946,7 +13944,7 @@ Private Function UF_Ensure_FrameLabel( _
     Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_FrameLabel"
 
     Dim EffectiveName       As String               'Normalized control name
-    
+
     Dim ExistingControl     As MSForms.control      'Existing frame control
     Dim Lbl                 As MSForms.Label        'Target label control
 
@@ -14088,7 +14086,7 @@ Private Function UF_Ensure_FrameMultiPage( _
     Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_FrameMultiPage"
 
     Dim EffectiveName       As String                   'Normalized control name
-    
+
     Dim ExistingControl     As MSForms.control          'Existing frame control
     Dim Mp                  As MSForms.MultiPage        'Target MultiPage control
 
@@ -14233,7 +14231,7 @@ Private Function UF_Ensure_PageLabel( _
     Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_PageLabel"
 
     Dim EffectiveName       As String               'Normalized control name
-    
+
     Dim ExistingControl     As MSForms.control      'Existing page control
     Dim Lbl                 As MSForms.Label        'Target label control
 
@@ -14378,7 +14376,7 @@ Private Function UF_Ensure_PageComboBox( _
     Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_PageComboBox"
 
     Dim EffectiveName       As String               'Normalized control name
-    
+
     Dim ExistingControl     As MSForms.control      'Existing page control
     Dim Cbo                 As MSForms.ComboBox     'Target ComboBox control
 
@@ -14523,7 +14521,7 @@ Private Function UF_Ensure_PageCheckBox( _
     Const PROC_NAME         As String = "UF_DatePicker.UF_Ensure_PageCheckBox"
 
     Dim EffectiveName       As String                   'Normalized control name
-    
+
     Dim ExistingControl     As MSForms.control          'Existing page control
     Dim Chk                 As MSForms.CheckBox         'Target CheckBox control
 

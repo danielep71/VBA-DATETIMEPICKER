@@ -1406,7 +1406,7 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "PRECREATEHIDDEN"
                 TST_DP_RunSuite_PreCreateHidden
-            
+
             Case "SELECTDATE"
                 TST_DP_RunSuite_SelectDate
 
@@ -5294,7 +5294,6 @@ SuiteFail:
         Err.Clear
 
 End Sub
-
 
 Private Sub TST_DP_RunSuite_ContextMenuCoverage()
 

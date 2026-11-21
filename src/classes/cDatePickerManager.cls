@@ -412,7 +412,7 @@ Public Property Get Is_PickerLoaded() As Boolean
 '------------------------------------------------------------------------------
     'Return whether the DatePicker form is currently loaded
         Is_PickerLoaded = Is_UserFormLoaded(M_DP_Core.DP_FORM_NAME)
-        
+
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -475,7 +475,7 @@ Public Property Get PickerVisible() As Boolean
 '------------------------------------------------------------------------------
     'Return whether the DatePicker form is currently visible
         PickerVisible = Is_UserFormVisible(M_DP_Core.DP_FORM_NAME)
-    
+
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -645,7 +645,7 @@ Public Sub Reset_DatePickerUI()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "cDatePickerManager.Reset_DatePickerUI"
-    
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -677,7 +677,6 @@ CleanFail:
         Err.Clear
 
 End Sub
-
 
 Public Sub Handle_SelectionChange(Optional ByVal vTarget As Variant)
 
@@ -976,7 +975,7 @@ Public Sub Handle_WorkbookContextChange()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "cDatePickerManager.Handle_WorkbookContextChange"
-    
+
     Dim GuardWasEntered         As Boolean          'True when this routine owns the busy guard
     Dim ErrorNumber             As Long             'Captured error number
     Dim ErrorDescription        As String           'Captured error description
@@ -1179,7 +1178,7 @@ Public Function Should_ShowGridIcon(Optional ByVal vTarget As Variant) As Boolea
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "cDatePickerManager.Should_ShowGridIcon"
-    
+
     Dim TargetCell              As Excel.Range      'Resolved single target cell
     Dim TargetWasProvided       As Boolean          'True when an explicit target was supplied
 
@@ -1300,7 +1299,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
     Const PROC_NAME             As String = "cDatePickerManager.Refresh_CurrentUI"
 
     Dim TargetCell              As Excel.Range      'Resolved authoritative target cell
-    
+
     Dim KeepPickerOpen          As Boolean          'True to keep open form alive
     Dim TargetWasProvided       As Boolean          'True when an explicit target was supplied
     Dim TargetWasResolved       As Boolean          'True when a valid target cell was resolved
@@ -3310,7 +3309,7 @@ Private Sub mExcelApp_SheetChange( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "cDatePickerManager.mExcelApp_SheetChange"
-    
+
     Dim SheetName               As String       'Diagnostic sheet name
     Dim TargetAddress           As String       'Diagnostic target address
     Dim ErrorNumber             As Long         'Captured error number

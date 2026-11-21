@@ -133,7 +133,7 @@ Attribute mLabel.VB_VarHelpID = -1
     Private mClickHandlerName           As String               'Normalized owner-form click handler method name
     Private mHoverMode                  As String               'Normalized hover behavior mode
     Private mIsInitialized              As Boolean              'True after successful initialization
-    
+
     Private mDragEnabled                As Boolean              'True when MouseDown should start UserForm drag
 
 
@@ -556,6 +556,7 @@ ErrorHandler:
             ErrorDescription
 
 End Sub
+
 Private Sub mLabel_Click()
 
 '
