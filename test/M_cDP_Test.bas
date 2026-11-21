@@ -155,7 +155,7 @@ Option Explicit
 '   a transaction only from the result the transaction returns is the function
 '   testing itself
 '
-'   GWL_STYLE and WS_CAPTION are duplicated from M_DP_Core, where they are
+'   GWL_STYLE and WS_CAPTION are duplicated from M_DP_Window, where they are
 '   Private. They are fixed Windows values and cannot drift
 '------------------------------------------------------------------------------
     Private Const TST_DP_GWL_STYLE      As Long = -16           'Window style index
@@ -9900,8 +9900,8 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const FAULT_SET_WINDOW_POS  As Long = 3         'Matches M_DP_Core
-    Const FAULT_ROLLBACK_STYLE  As Long = 1         'Matches M_DP_Core
+    Const FAULT_SET_WINDOW_POS  As Long = 3         'Matches M_DP_Window
+    Const FAULT_ROLLBACK_STYLE  As Long = 1         'Matches M_DP_Window
 
     Dim LoadRaised              As Boolean          'True when the form load failed
     Dim OldUseWinAPI            As Boolean          'WinAPI styling setting on entry
@@ -10060,7 +10060,7 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '
 ' NOTES
 '   The failure-point numbers below are duplicated from private constants in
-'   M_DP_Core rather than shared through a public enum, so the seam does not
+'   M_DP_Window rather than shared through a public enum, so the seam does not
 '   enlarge the public API. The two lists must be changed together
 '
 '   A resolvable window handle is asserted before any injected failure. A
@@ -10082,12 +10082,12 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const FAULT_STYLE_READ      As Long = 1     'Matches M_DP_Core
-    Const FAULT_STYLE_WRITE     As Long = 2     'Matches M_DP_Core
-    Const FAULT_SET_WINDOW_POS  As Long = 3     'Matches M_DP_Core
-    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Matches M_DP_Core
-    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Matches M_DP_Core
-    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Matches M_DP_Core
+    Const FAULT_STYLE_READ      As Long = 1     'Matches M_DP_Window
+    Const FAULT_STYLE_WRITE     As Long = 2     'Matches M_DP_Window
+    Const FAULT_SET_WINDOW_POS  As Long = 3     'Matches M_DP_Window
+    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Matches M_DP_Window
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Matches M_DP_Window
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Matches M_DP_Window
 
     #If VBA7 Then
         Dim FormHandle          As LongPtr      'Native window behind the picker form
