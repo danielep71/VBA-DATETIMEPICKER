@@ -219,6 +219,19 @@ class PublicSurfaceTests(unittest.TestCase):
                                      "Public Sub DP_Open()\n    Dim X As Long\nEnd Sub\n")
         self.assertEqual(self.run_case(files={FACADE: body}), [])
 
+    def test_conditional_enum_and_type_members_are_all_compared(self) -> None:
+        enum = "    Public Enum DP_Mode\n        DP_Mode_A = 0 'First\n    End Enum\n"
+        alternate = ("#If Win64 Then\n" + enum + "#Else\n" + enum.replace("= 0", "= 99") + "#End If\n")
+        self.assertFinding(self.run_case(files={FACADE: FACADE_SOURCE.replace(enum, alternate)}),
+                           "DP_Mode signature differs")
+        same = "#If Win64 Then\n" + enum + "#Else\n" + enum + "#End If\n"
+        self.assertEqual(self.run_case(files={FACADE: FACADE_SOURCE.replace(enum, same)}), [])
+
+    def test_unmodeled_conditional_symbol_is_reported(self) -> None:
+        source = FACADE_SOURCE + "#If DEBUG_BUILD Then\nPublic Sub DP_Debug()\nEnd Sub\n#End If\n"
+        findings = self.run_case(files={FACADE: source})
+        self.assertTrue(any("M_Fac.bas:" in f and "DEBUG_BUILD" in f for f in findings), findings)
+
     def test_dispatched_names_resolve_constants_and_literals(self) -> None:
         source = ('Const TICK As String = "M_Tick"\nx = M_GetQualifiedMacroName(TICK)\n'
                   "Application.OnKey \"^+d\", \"'Book.xlsm'!DP_Key\"\n.OnAction = \"DP_Menu\"\n")

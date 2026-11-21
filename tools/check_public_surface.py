@@ -34,7 +34,7 @@ from xml.parsers import expat
 
 from _gatelib import parse_report_args, run_gate, tracked_files
 from check_source import ribbon_callbacks
-from check_vba_conditionals import logical_units, strip_vba
+from check_vba_conditionals import logical_units, reachable_sources, strip_vba
 
 MANIFEST = "src/public-surface.json"
 RIBBON = "src/ribbon/customUI.xml"
@@ -125,19 +125,42 @@ def add_symbol(component: Component, symbol: Symbol) -> None:
                 if signature not in existing.signatures:
                     existing.signatures.append(signature)
             existing.signatures.sort()
+            for member in symbol.members:
+                if member not in existing.members:
+                    existing.members.append(member)
             existing.parameterless_sub = existing.parameterless_sub or symbol.parameterless_sub
             return
     component.symbols.append(symbol)
 
 
 def parse_component(path: str, text: str) -> Component:
-    """Collect the public declarations of one exported VBA component."""
+    """Collect the public declarations of one component in every modeled environment.
+
+    Each conditional-compilation environment that check_vba_conditionals
+    models (VBA6 and VBA7, 32- and 64-bit Windows) is parsed on its own and
+    the results merged, so an #If/#Else variant of a header, constant, enum or
+    type is compared too: alternate signatures and member lists are all kept.
+    """
+    sources, conditional = reachable_sources(path, text)
+    merged = Component(path, "", text)
+    merged.findings.extend(f"{path}:{f.get('line')}: {f.get('message')}" for f in conditional)
+    for source in sources.values():
+        variant = parse_environment(path, source)
+        merged.name = variant.name
+        merged.private_module = merged.private_module or variant.private_module
+        merged.findings.extend(f for f in variant.findings if f not in merged.findings)
+        for symbol in variant.symbols:
+            add_symbol(merged, symbol)
+    return merged
+
+
+def parse_environment(path: str, text: str) -> Component:
+    """Collect the public declarations of one component with no live directives."""
     matches = re.findall(r'^Attribute VB_Name = "([^"]+)"', text, re.M)
     component = Component(path, matches[0] if matches else Path(path).stem, text)
     block: Symbol | None = None
     block_end = ""
     in_procedure = False
-    header_only = False
     for start, _end, kind, unit in logical_units(text.splitlines()):
         if kind != "code" or not unit.strip():
             continue
@@ -152,19 +175,15 @@ def parse_component(path: str, text: str) -> Component:
             else:
                 block.members.append(normalize(line))
             continue
-        procedure = PROCEDURE.match(line)
-        # #If/#Else may give one body several headers; only directives (which
-        # logical_units reports separately) can sit between them.
-        if in_procedure and not (procedure and header_only):
-            header_only = False
+        if in_procedure:
             if re.match(r"^End\s+(Sub|Function|Property)\b", line, re.I):
                 in_procedure = False
             continue
         if line.startswith("Attribute "):
             continue
+        procedure = PROCEDURE.match(line)
         if procedure:
             in_procedure = True
-            header_only = True
             scope, proc_kind, name, rest = procedure.groups()
             if scope is None:
                 component.findings.append(f"{path}:{start}: {name} has implicit visibility; declare it")

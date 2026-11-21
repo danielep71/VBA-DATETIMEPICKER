@@ -57,7 +57,9 @@ python tools/check_public_surface.py --root .
 A `check.py` gate. `src/public-surface.json` classifies every public
 declaration in a production standard module once, as `supported`, `callback`
 or `internal`, and records its signature and invocation channels. The gate
-reparses the source and fails when:
+reparses the source once per conditional-compilation environment that
+`check_vba_conditionals.py` models (VBA6 and VBA7, 32- and 64-bit), so every
+`#If` variant of a declaration is compared, and fails when:
 
 - a public declaration is unclassified, or a manifest entry no longer exists;
 - a signature, enum or type member list differs from the manifest (for a
