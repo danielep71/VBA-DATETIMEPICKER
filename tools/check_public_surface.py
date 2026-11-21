@@ -137,6 +137,7 @@ def parse_component(path: str, text: str) -> Component:
     block: Symbol | None = None
     block_end = ""
     in_procedure = False
+    header_only = False
     for start, _end, kind, unit in logical_units(text.splitlines()):
         if kind != "code" or not unit.strip():
             continue
@@ -151,15 +152,19 @@ def parse_component(path: str, text: str) -> Component:
             else:
                 block.members.append(normalize(line))
             continue
-        if in_procedure:
+        procedure = PROCEDURE.match(line)
+        # #If/#Else may give one body several headers; only directives (which
+        # logical_units reports separately) can sit between them.
+        if in_procedure and not (procedure and header_only):
+            header_only = False
             if re.match(r"^End\s+(Sub|Function|Property)\b", line, re.I):
                 in_procedure = False
             continue
         if line.startswith("Attribute "):
             continue
-        procedure = PROCEDURE.match(line)
         if procedure:
             in_procedure = True
+            header_only = True
             scope, proc_kind, name, rest = procedure.groups()
             if scope is None:
                 component.findings.append(f"{path}:{start}: {name} has implicit visibility; declare it")

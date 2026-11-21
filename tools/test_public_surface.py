@@ -205,6 +205,20 @@ class PublicSurfaceTests(unittest.TestCase):
         self.assertEqual(len(hwnd), 1)
         self.assertEqual(hwnd[0].signatures, ["Function DP_Hwnd() As Long", "Function DP_Hwnd() As LongPtr"])
 
+    def test_conditional_headers_with_shared_body_are_all_compared(self) -> None:
+        header = "Public Function DP_Get( _\n    ByVal Mode As DP_Mode) As Long\n"
+        alternate = ("#If Win64 Then\n" + header + "#Else\nPublic Function DP_Get(ByVal Mode As Long) As Long\n"
+                     "#End If\n")
+        source = FACADE_SOURCE.replace(header, alternate)
+        self.assertFinding(self.run_case(files={FACADE: source}), "DP_Get signature differs")
+        component = surface.parse_component(FACADE, source)
+        get = [s for s in component.symbols if s.name == "DP_Get"][0]
+        self.assertEqual(get.signatures, ["Function DP_Get(ByVal Mode As DP_Mode) As Long",
+                                          "Function DP_Get(ByVal Mode As Long) As Long"])
+        body = FACADE_SOURCE.replace("Public Sub DP_Open()\nEnd Sub\n",
+                                     "Public Sub DP_Open()\n    Dim X As Long\nEnd Sub\n")
+        self.assertEqual(self.run_case(files={FACADE: body}), [])
+
     def test_dispatched_names_resolve_constants_and_literals(self) -> None:
         source = ('Const TICK As String = "M_Tick"\nx = M_GetQualifiedMacroName(TICK)\n'
                   "Application.OnKey \"^+d\", \"'Book.xlsm'!DP_Key\"\n.OnAction = \"DP_Menu\"\n")

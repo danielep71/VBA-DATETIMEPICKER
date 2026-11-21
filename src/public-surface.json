@@ -1932,6 +1932,7 @@
         "test-harness"
       ],
       "signatures": [
+        "Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As Long",
         "Function M_Window_GetUserFormHwnd(ByVal Frm As Object) As LongPtr"
       ]
     },
