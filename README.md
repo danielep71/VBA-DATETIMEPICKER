@@ -167,6 +167,11 @@ src/modules/M_DP_Captions.bas
 src/modules/M_DP_DatePolicy.bas
 src/modules/M_DP_MacroNames.bas
 src/modules/M_DP_Window.bas
+src/modules/M_DP_Timer.bas
+src/modules/M_DP_ContextMenu.bas
+src/modules/M_DP_Keyboard.bas
+src/modules/M_DP_GridIcon.bas
+src/modules/M_DP_GridIconAsset.bas
 src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
 src/forms/UF_DatePicker.frm      (keep UF_DatePicker.frx beside it)
@@ -1069,6 +1074,11 @@ splits it into private responsibility modules without changing the facade.
 [#56](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/56) moved the first
 four out: `M_DP_Captions`, `M_DP_DatePolicy`, `M_DP_MacroNames` and
 `M_DP_Window`, which owns every production Windows API declaration.
+[#57](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/57) moved the
+application-wide integrations: `M_DP_Timer`, `M_DP_ContextMenu`,
+`M_DP_Keyboard`, `M_DP_GridIcon` and `M_DP_GridIconAsset`. Each owns its state
+and verifies its own teardown; the facade's `M_Timer_Tick` and
+`M_GridIcon_PurgeAll` delegate to `M_DP_Timer` and `M_DP_GridIcon`.
 
 ---
 
@@ -1121,6 +1131,7 @@ flowchart TD
     FACADE[M_DatePicker<br/>stable facade: supported API and callbacks]
     MODULE[M_DP_Core<br/>settings, write-back and infrastructure]
     SERVICES[M_DP_Captions · M_DP_DatePolicy<br/>M_DP_MacroNames · M_DP_Window]
+    INTEGRATIONS[M_DP_Timer · M_DP_ContextMenu · M_DP_Keyboard<br/>M_DP_GridIcon · M_DP_GridIconAsset]
     FORM[UF_DatePicker<br/>runtime UI and interaction]
     HOOKS[cDatePickerLabelHook<br/>runtime label events]
     SETTINGS[Registry-backed settings<br/>optional namespace]
@@ -1133,12 +1144,14 @@ flowchart TD
     FACADE --> MODULE
     MANAGER --> MODULE
     MODULE --> SERVICES
+    MODULE --> INTEGRATIONS
+    FACADE --> INTEGRATIONS
     FORM --> SERVICES
     MODULE --> FORM
     FORM --> HOOKS
     HOOKS --> FORM
     MODULE --> SETTINGS
-    MODULE --> SURFACES
+    INTEGRATIONS --> SURFACES
     MODULE --> LEASE
     SERVICES --> WINAPI
 ```
@@ -1148,11 +1161,16 @@ flowchart TD
 | Component | Responsibility |
 |---|---|
 | `M_DatePicker.bas` | Stable facade: supported enums and types, supported API wrappers, Ribbon and other Excel callbacks |
-| `M_DP_Core.bas` | Private implementation: settings, write-back engine, context menu, shortcut, grid icon, timer, provider lease |
+| `M_DP_Core.bas` | Private implementation: settings, write-back engine, provider lease and runtime lifecycle |
 | `M_DP_Captions.bas` | Private: month and date captions, fixed-English month names |
 | `M_DP_DatePolicy.bas` | Private: date selectability and the optional holiday callback |
 | `M_DP_MacroNames.bas` | Private: workbook-qualified callback names and their cache |
 | `M_DP_Window.bas` | Private: Windows API declarations, platform predicates, native form styling, drag and positioning |
+| `M_DP_Timer.bas` | Private: live footer clock through `Application.OnTime` |
+| `M_DP_ContextMenu.bas` | Private: the right-click menu entry |
+| `M_DP_Keyboard.bas` | Private: the Ctrl+Shift+D shortcut through `Application.OnKey` |
+| `M_DP_GridIcon.bas` | Private: the in-grid icon shape, its placement and ownership |
+| `M_DP_GridIconAsset.bas` | Private: the embedded icon image and its temporary file |
 | `cDatePickerManager.cls` | Application-level Excel events, selection refresh, workbook/worksheet lifecycle orchestration |
 | `UF_DatePicker.frm/.frx` | Modeless picker UI, calendar rendering, settings overlay, keyboard interaction, footer actions |
 | `cDatePickerLabelHook.cls` | `WithEvents` routing for runtime-created MSForms labels |
@@ -1439,7 +1457,12 @@ VBA-DATETIMEPICKER/
 │  │  ├─ M_DP_Captions.bas  (private: captions)
 │  │  ├─ M_DP_DatePolicy.bas (private: selectability and holidays)
 │  │  ├─ M_DP_MacroNames.bas (private: qualified callback names)
-│  │  └─ M_DP_Window.bas    (private: Windows API and native window)
+│  │  ├─ M_DP_Window.bas    (private: Windows API and native window)
+│  │  ├─ M_DP_Timer.bas     (private: live clock)
+│  │  ├─ M_DP_ContextMenu.bas (private: right-click entry)
+│  │  ├─ M_DP_Keyboard.bas  (private: keyboard shortcut)
+│  │  ├─ M_DP_GridIcon.bas  (private: in-grid icon)
+│  │  └─ M_DP_GridIconAsset.bas (private: embedded icon image)
 │  ├─ public-surface.json   (classified public surface; checked by tools/check_public_surface.py)
 │  └─ ribbon/
 │     ├─ customUI.xml

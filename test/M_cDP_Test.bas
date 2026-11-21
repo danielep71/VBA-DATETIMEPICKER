@@ -12432,7 +12432,7 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '
 '     keyboard shortcut   Excel exposes no getter for Application.OnKey, so the
 '                         assignment cannot be read back at all. See #42
-'     live-clock timer    mDP_TimerIsRunning is Private to M_DP_Core and
+'     live-clock timer    mDP_TimerIsRunning is Private to M_DP_Timer and
 '                         Application.OnTime schedules cannot be enumerated
 '
 '   Both are covered instead by per-operation cleanup accounting: M_Timer_Stop
@@ -13990,10 +13990,10 @@ Private Function TST_DP_ContextMenuControlCount() As Long
 '   one a name lookup returns: Excel has a separate "Cell" bar for Page Layout
 '   view, and an entry left there is just as much a leak (#114).
 '
-'   The tag is duplicated here rather than read from M_DP_Core, where it is a
-'   Private constant. It is documented as a stable legacy identifier that cannot
-'   be renamed for backward compatibility, so duplicating it is safe in a way
-'   that duplicating an ordinary constant would not be.
+'   The tag is duplicated here rather than read from M_DP_ContextMenu, where it
+'   is a Private constant. It is documented as a stable legacy identifier that
+'   cannot be renamed for backward compatibility, so duplicating it is safe in a
+'   way that duplicating an ordinary constant would not be.
 '==============================================================================
 
 '------------------------------------------------------------------------------
