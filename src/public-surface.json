@@ -589,6 +589,7 @@
       "kind": "Variable",
       "classification": "internal",
       "channels": [
+        "project-internal",
         "test-harness"
       ],
       "signatures": [
@@ -2161,7 +2162,7 @@
     },
     {
       "name": "M_DatePolicy_CanSelectDate",
-      "module": "M_DP_Core",
+      "module": "M_DP_DatePolicy",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2174,7 +2175,7 @@
     },
     {
       "name": "M_HolidayPolicy_IsHolidayDate",
-      "module": "M_DP_Core",
+      "module": "M_DP_DatePolicy",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2186,7 +2187,7 @@
     },
     {
       "name": "M_Caption_GetMonth",
-      "module": "M_DP_Core",
+      "module": "M_DP_Captions",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2199,7 +2200,7 @@
     },
     {
       "name": "M_Caption_GetDate",
-      "module": "M_DP_Core",
+      "module": "M_DP_Captions",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2212,7 +2213,7 @@
     },
     {
       "name": "M_Caption_GetEnglishMonthShort",
-      "module": "M_DP_Core",
+      "module": "M_DP_Captions",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2224,7 +2225,7 @@
     },
     {
       "name": "M_Caption_GetEnglishMonthFull",
-      "module": "M_DP_Core",
+      "module": "M_DP_Captions",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2386,10 +2387,11 @@
     },
     {
       "name": "M_Platform_CanUseWinAPI",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Function",
       "classification": "internal",
       "channels": [
+        "project-internal",
         "test-harness"
       ],
       "signatures": [
@@ -2398,7 +2400,7 @@
     },
     {
       "name": "M_Platform_ShouldUseWinAPI",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2411,7 +2413,7 @@
     },
     {
       "name": "M_Window_Test_SetFaultInjection",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -2423,7 +2425,7 @@
     },
     {
       "name": "M_Window_RemoveTitleBar",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2437,7 +2439,7 @@
     },
     {
       "name": "M_Window_BeginUserFormDrag",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -2449,7 +2451,7 @@
     },
     {
       "name": "M_Window_GetUserFormHwnd",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2462,7 +2464,7 @@
     },
     {
       "name": "M_Window_MoveFormToMouse",
-      "module": "M_DP_Core",
+      "module": "M_DP_Window",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -2470,6 +2472,30 @@
       ],
       "signatures": [
         "Sub M_Window_MoveFormToMouse(ByVal Frm As Object, Optional ByVal OffsetXPx As Long = 0, Optional ByVal OffsetYPx As Long = 12, Optional ByVal CenterOnMouse As Boolean = False)"
+      ]
+    },
+    {
+      "name": "M_GetQualifiedMacroName",
+      "module": "M_DP_MacroNames",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_GetQualifiedMacroName(ByVal ProcedureName As String) As String"
+      ]
+    },
+    {
+      "name": "M_GetQualifiedMacroName_ClearCache",
+      "module": "M_DP_MacroNames",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_GetQualifiedMacroName_ClearCache()"
       ]
     },
     {

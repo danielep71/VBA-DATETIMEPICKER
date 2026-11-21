@@ -163,6 +163,10 @@ Import:
 ```text
 src/modules/M_DatePicker.bas
 src/modules/M_DP_Core.bas
+src/modules/M_DP_Captions.bas
+src/modules/M_DP_DatePolicy.bas
+src/modules/M_DP_MacroNames.bas
+src/modules/M_DP_Window.bas
 src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
 src/forms/UF_DatePicker.frm      (keep UF_DatePicker.frx beside it)
@@ -1004,8 +1008,8 @@ Callbacks should stay thin and delegate to the normal DatePicker API.
 Everything else that is `Public` is classified `internal`: helpers shared with
 the picker form and classes, global state, constants, decision helpers, test
 seams and the `<Name>_Impl` procedures behind the facade. All of it lives in
-`M_DP_Core`, which uses `Option Private Module`: other VBA projects and the
-Alt+F8 macro dialog do not see it. It is `Public` only so the form, the
+`M_DP_Core` and the `M_DP_*` service modules, which use `Option Private Module`:
+other VBA projects and the Alt+F8 macro dialog do not see it. It is `Public` only so the form, the
 classes and the regression harness in the same project can reach it.
 
 ### Maintenance helpers
@@ -1062,6 +1066,9 @@ non-private module.
 
 `M_DP_Core` is transitional: [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24)
 splits it into private responsibility modules without changing the facade.
+[#56](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/56) moved the first
+four out: `M_DP_Captions`, `M_DP_DatePolicy`, `M_DP_MacroNames` and
+`M_DP_Window`, which owns every production Windows API declaration.
 
 ---
 
@@ -1113,6 +1120,7 @@ flowchart TD
     MANAGER[cDatePickerManager<br/>Application events and lifecycle]
     FACADE[M_DatePicker<br/>stable facade: supported API and callbacks]
     MODULE[M_DP_Core<br/>settings, write-back and infrastructure]
+    SERVICES[M_DP_Captions · M_DP_DatePolicy<br/>M_DP_MacroNames · M_DP_Window]
     FORM[UF_DatePicker<br/>runtime UI and interaction]
     HOOKS[cDatePickerLabelHook<br/>runtime label events]
     SETTINGS[Registry-backed settings<br/>optional namespace]
@@ -1124,13 +1132,15 @@ flowchart TD
     EXCEL --> FACADE
     FACADE --> MODULE
     MANAGER --> MODULE
+    MODULE --> SERVICES
+    FORM --> SERVICES
     MODULE --> FORM
     FORM --> HOOKS
     HOOKS --> FORM
     MODULE --> SETTINGS
     MODULE --> SURFACES
     MODULE --> LEASE
-    MODULE --> WINAPI
+    SERVICES --> WINAPI
 ```
 
 ## Component responsibilities
@@ -1138,7 +1148,11 @@ flowchart TD
 | Component | Responsibility |
 |---|---|
 | `M_DatePicker.bas` | Stable facade: supported enums and types, supported API wrappers, Ribbon and other Excel callbacks |
-| `M_DP_Core.bas` | Private implementation: settings, write-back engine, context menu, shortcut, grid icon, timer, WinAPI helpers, provider lease |
+| `M_DP_Core.bas` | Private implementation: settings, write-back engine, context menu, shortcut, grid icon, timer, provider lease |
+| `M_DP_Captions.bas` | Private: month and date captions, fixed-English month names |
+| `M_DP_DatePolicy.bas` | Private: date selectability and the optional holiday callback |
+| `M_DP_MacroNames.bas` | Private: workbook-qualified callback names and their cache |
+| `M_DP_Window.bas` | Private: Windows API declarations, platform predicates, native form styling, drag and positioning |
 | `cDatePickerManager.cls` | Application-level Excel events, selection refresh, workbook/worksheet lifecycle orchestration |
 | `UF_DatePicker.frm/.frx` | Modeless picker UI, calendar rendering, settings overlay, keyboard interaction, footer actions |
 | `cDatePickerLabelHook.cls` | `WithEvents` routing for runtime-created MSForms labels |
@@ -1421,7 +1435,11 @@ VBA-DATETIMEPICKER/
 │  │  └─ UF_DatePicker.frx
 │  ├─ modules/
 │  │  ├─ M_DatePicker.bas   (stable facade)
-│  │  └─ M_DP_Core.bas      (private implementation)
+│  │  ├─ M_DP_Core.bas      (private implementation)
+│  │  ├─ M_DP_Captions.bas  (private: captions)
+│  │  ├─ M_DP_DatePolicy.bas (private: selectability and holidays)
+│  │  ├─ M_DP_MacroNames.bas (private: qualified callback names)
+│  │  └─ M_DP_Window.bas    (private: Windows API and native window)
 │  ├─ public-surface.json   (classified public surface; checked by tools/check_public_surface.py)
 │  └─ ribbon/
 │     ├─ customUI.xml

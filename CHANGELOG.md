@@ -132,6 +132,13 @@ Use only the categories needed by a release.
   with the same number, source and description. `M_DP_Core` is transitional:
   [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24) splits it
   into responsibility modules.
+- The first four responsibility modules are split out of `M_DP_Core`
+  ([#56](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/56)), all with
+  `Option Private Module`: `M_DP_Captions` (captions), `M_DP_DatePolicy`
+  (selectability and holiday callback), `M_DP_MacroNames` (workbook-qualified
+  callback names) and `M_DP_Window`, which now owns every production Windows
+  API declaration. Code moved unchanged; captions, date policy, callback names
+  and window styling behave as before.
 
 ### Documentation
 
@@ -139,8 +146,8 @@ Use only the categories needed by a release.
   manifest, adds the settings setter and getter pairs, and separates the
   internal maintenance helpers and test seams. CONTRIBUTING describes the
   manifest, the `Option Private Module` rule for implementation modules and the
-  facade dependency rule. README and INSTALLATION list `M_DP_Core` and describe
-  the facade.
+  facade dependency rule. README and INSTALLATION list `M_DP_Core` and the
+  four `M_DP_*` service modules, and describe the facade.
 
 ### Compatibility
 
@@ -159,9 +166,11 @@ Use only the categories needed by a release.
   - `M_WriteBack_Apply` and `M_Window_RemoveTitleBar` are internal. Hosts
     write through `DP_FillTableColumn`, `DP_Today` or `DP_Now`;
     `DP_WindowStyleResult` and `DP_WriteAction` stay supported.
-- **Embedded source needs one more module.** Import `src/modules/M_DP_Core.bas`
-  beside `M_DatePicker.bas`; an upgrade replaces `M_DatePicker` and adds
-  `M_DP_Core`. Host code that uses the supported API needs no change.
+- **Embedded source needs five more modules.** Import `M_DP_Core.bas`,
+  `M_DP_Captions.bas`, `M_DP_DatePolicy.bas`, `M_DP_MacroNames.bas` and
+  `M_DP_Window.bas` from `src/modules/` beside `M_DatePicker.bas`; an upgrade
+  replaces `M_DatePicker` and adds the five. Host code that uses the supported
+  API needs no change.
 - **Internal symbols are no longer visible outside the project.** The
   nineteen internal parameterless procedures, including three test seams, no
   longer appear in Alt+F8, and another VBA project that referenced the add-in

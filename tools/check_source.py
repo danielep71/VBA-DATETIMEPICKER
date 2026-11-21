@@ -13,6 +13,8 @@ from check_vba_conditionals import strip_vba
 
 REQUIRED = {
     "src/modules/M_DatePicker.bas", "src/modules/M_DP_Core.bas",
+    "src/modules/M_DP_Captions.bas", "src/modules/M_DP_DatePolicy.bas",
+    "src/modules/M_DP_MacroNames.bas", "src/modules/M_DP_Window.bas",
     "src/classes/cDatePickerManager.cls",
     "src/classes/cDatePickerLabelHook.cls", "src/forms/UF_DatePicker.frm",
     "src/forms/UF_DatePicker.frx", "src/ribbon/customUI.xml",

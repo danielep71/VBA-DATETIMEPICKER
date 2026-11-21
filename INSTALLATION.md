@@ -68,14 +68,19 @@ or copied workbooks.
 | Order | Repository source | VBE component | Responsibility |
 |---:|---|---|---|
 | 1 | `src/modules/M_DatePicker.bas` | `M_DatePicker` | Stable facade: supported enums and types, supported API, and Excel callbacks |
-| 2 | `src/modules/M_DP_Core.bas` | `M_DP_Core` | Private implementation (`Option Private Module`): settings, write-back, integrations, provider lease, and WinAPI helpers |
-| 3 | `src/classes/cDatePickerManager.cls` | `cDatePickerManager` | Application-level Excel event orchestration |
-| 4 | `src/classes/cDatePickerLabelHook.cls` | `cDatePickerLabelHook` | Runtime MSForms label-event routing |
-| 5 | `src/forms/UF_DatePicker.frm` with adjacent `.frx` | `UF_DatePicker` | Modeless Date / Time Picker UI and resources |
+| 2 | `src/modules/M_DP_Core.bas` | `M_DP_Core` | Private implementation (`Option Private Module`): settings, write-back, integrations, timer, and provider lease |
+| 3 | `src/modules/M_DP_Captions.bas` | `M_DP_Captions` | Private: month and date captions |
+| 4 | `src/modules/M_DP_DatePolicy.bas` | `M_DP_DatePolicy` | Private: date selectability and the optional holiday callback |
+| 5 | `src/modules/M_DP_MacroNames.bas` | `M_DP_MacroNames` | Private: workbook-qualified callback names |
+| 6 | `src/modules/M_DP_Window.bas` | `M_DP_Window` | Private: Windows API declarations and native window operations |
+| 7 | `src/classes/cDatePickerManager.cls` | `cDatePickerManager` | Application-level Excel event orchestration |
+| 8 | `src/classes/cDatePickerLabelHook.cls` | `cDatePickerLabelHook` | Runtime MSForms label-event routing |
+| 9 | `src/forms/UF_DatePicker.frm` with adjacent `.frx` | `UF_DatePicker` | Modeless Date / Time Picker UI and resources |
 
-Import both modules. `M_DatePicker` only delegates to `M_DP_Core`, so neither
-compiles without the other. An upgrade from a release before `v1.3.0` replaces
-`M_DatePicker` and adds `M_DP_Core`; nothing else changes for host code.
+Import all six modules. `M_DatePicker` only delegates to `M_DP_Core`, which
+calls the four `M_DP_*` service modules, so none of them compiles without the
+others. An upgrade from a release before `v1.3.0` replaces `M_DatePicker` and
+adds the five `M_DP_*` modules; nothing else changes for host code.
 
 Additional source. Only the RibbonX metadata is genuinely optional; the rest is
 required to compile or to test the project as it currently stands:
@@ -89,7 +94,7 @@ required to compile or to test the project as it currently stands:
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
 
 > [!IMPORTANT]
-> The five `src/` components above do not compile on their own. `M_DP_Core`
+> The nine `src/` components above do not compile on their own. `M_DP_Core`
 > implements the Ribbon demo command, and that command calls
 > `DP_Demo_EnsureDemoSheet`, which lives in `demo/M_DP_DEMO.bas`. Omitting the
 > demo source leaves an unresolved reference at **Debug → Compile VBAProject**.
