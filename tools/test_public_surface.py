@@ -8,18 +8,35 @@ import check_public_surface as surface
 FACADE = "src/modules/M_Fac.bas"
 FACADE_SOURCE = """Attribute VB_Name = "M_Fac"
 Option Explicit
-    Public Const DP_LIMIT As Long = 5 'Limit
     Public Enum DP_Mode
         DP_Mode_A = 0 'First
     End Enum
 Public Sub DP_Open()
+    M_Impl.DP_Open_Impl
 End Sub
 Public Function DP_Get( _
     ByVal Mode As DP_Mode) As Long
+    DP_Get = M_Impl.DP_Get_Impl(Mode)
 End Function
 Public Sub Ribbon_Open(ByVal control As IRibbonControl)
+    M_Impl.Ribbon_Open_Impl control
 End Sub
 Public Sub DP_Click()
+    M_Impl.DP_Click_Impl
+End Sub
+"""
+IMPL = "src/modules/M_Impl.bas"
+IMPL_SOURCE = """Attribute VB_Name = "M_Impl"
+Option Explicit
+Option Private Module
+    Public Const DP_LIMIT As Long = 5 'Limit
+Public Sub DP_Open_Impl()
+End Sub
+Public Function DP_Get_Impl(ByVal Mode As DP_Mode) As Long
+End Function
+Public Sub Ribbon_Open_Impl(ByVal control As IRibbonControl)
+End Sub
+Public Sub DP_Click_Impl()
 End Sub
 Public Sub M_Area_Test_Reset()
 End Sub
@@ -58,28 +75,35 @@ RIBBON = b'<customUI><button id="b" onAction="Ribbon_Open"/></customUI>'
 
 
 def entry(name: str, kind: str, classification: str, channels: list[str], signature: str,
-          **extra: Any) -> dict[str, Any]:
-    return {"name": name, "module": "M_Fac", "kind": kind, "classification": classification,
+          module: str = "M_Fac", **extra: Any) -> dict[str, Any]:
+    return {"name": name, "module": module, "kind": kind, "classification": classification,
             "channels": channels, "signatures": [signature], **extra}
 
 
 MANIFEST: dict[str, Any] = {"schema_version": 1, "facade": FACADE, "symbols": [
-    entry("DP_LIMIT", "Const", "internal", ["project-internal"], "Const DP_LIMIT As Long = 5"),
-    entry("DP_Mode", "Enum", "supported", ["direct-vba"], "Enum DP_Mode", members=["DP_Mode_A = 0"]),
+    entry("DP_LIMIT", "Const", "internal", ["project-internal"], "Const DP_LIMIT As Long = 5", "M_Impl"),
+    entry("DP_Mode", "Enum", "supported", ["direct-vba", "project-internal"], "Enum DP_Mode",
+          members=["DP_Mode_A = 0"]),
     entry("DP_Open", "Sub", "supported", ["direct-vba", "macro-dialog"], "Sub DP_Open()"),
+    entry("DP_Open_Impl", "Sub", "internal", ["project-internal"], "Sub DP_Open_Impl()", "M_Impl"),
     entry("DP_Get", "Function", "supported", ["direct-vba"], "Function DP_Get(ByVal Mode As DP_Mode) As Long"),
+    entry("DP_Get_Impl", "Function", "internal", ["project-internal"],
+          "Function DP_Get_Impl(ByVal Mode As DP_Mode) As Long", "M_Impl"),
     entry("Ribbon_Open", "Sub", "callback", ["ribbon-onaction"],
           "Sub Ribbon_Open(ByVal control As IRibbonControl)"),
+    entry("Ribbon_Open_Impl", "Sub", "internal", ["project-internal"],
+          "Sub Ribbon_Open_Impl(ByVal control As IRibbonControl)", "M_Impl"),
     entry("DP_Click", "Sub", "callback", ["onaction", "macro-dialog"], "Sub DP_Click()"),
-    entry("M_Area_Test_Reset", "Sub", "internal", ["macro-dialog", "test-harness"], "Sub M_Area_Test_Reset()",
-          pending="#55"),
+    entry("DP_Click_Impl", "Sub", "internal", ["project-internal"], "Sub DP_Click_Impl()", "M_Impl"),
+    entry("M_Area_Test_Reset", "Sub", "internal", ["test-harness"], "Sub M_Area_Test_Reset()", "M_Impl"),
 ]}
 
 
 class PublicSurfaceTests(unittest.TestCase):
     def run_case(self, *, files: dict[str, str] | None = None, manifest: dict[str, Any] | None = None,
                  readme: str = README, ribbon: bytes = RIBBON) -> list[str]:
-        project = {FACADE: FACADE_SOURCE, "src/forms/UF_X.frm": FORM_SOURCE, "test/M_T.bas": TEST_SOURCE}
+        project = {FACADE: FACADE_SOURCE, IMPL: IMPL_SOURCE, "src/forms/UF_X.frm": FORM_SOURCE,
+                   "test/M_T.bas": TEST_SOURCE}
         project.update(files or {})
         report = surface.analyze(project, manifest or MANIFEST, ribbon, readme)
         findings: list[str] = report["findings"]
@@ -117,7 +141,7 @@ class PublicSurfaceTests(unittest.TestCase):
         self.assertFinding(self.run_case(files={FACADE: source}), "DP_Mode signature differs")
 
     def test_removed_supported_symbol_fails(self) -> None:
-        source = FACADE_SOURCE.replace("Public Sub DP_Open()\nEnd Sub\n", "")
+        source = FACADE_SOURCE.replace("Public Sub DP_Open()\n    M_Impl.DP_Open_Impl\nEnd Sub\n", "")
         self.assertFinding(self.run_case(files={FACADE: source}), "no longer declared (incompatible")
 
     def test_orphaned_ribbon_callback_fails(self) -> None:
@@ -137,15 +161,17 @@ class PublicSurfaceTests(unittest.TestCase):
 
     def test_test_seam_must_be_internal(self) -> None:
         manifest = self.changed("M_Area_Test_Reset", classification="supported",
-                                channels=["direct-vba", "macro-dialog", "test-harness"])
-        manifest["symbols"][-1].pop("pending")
+                                channels=["direct-vba", "test-harness"])
         readme = README.replace("`DP_Mode`", "`DP_Mode` `M_Area_Test_Reset`")
         self.assertFinding(self.run_case(manifest=manifest, readme=readme), "test seam and must be internal")
 
     def test_internal_macro_needs_pending_issue(self) -> None:
-        manifest = copy.deepcopy(MANIFEST)
-        manifest["symbols"][-1].pop("pending")
+        manifest = self.changed("DP_Open", classification="internal", channels=["macro-dialog"])
         self.assertFinding(self.run_case(manifest=manifest), "reachable from Alt+F8")
+        pending = self.changed("DP_Open", classification="internal", channels=["macro-dialog"], pending="#55")
+        self.assertNotIn(True, ["reachable from Alt+F8" in f for f in self.run_case(manifest=pending)])
+        stale = self.changed("DP_Open_Impl", pending="#55")
+        self.assertFinding(self.run_case(manifest=stale), "'pending' is only for internal symbols")
 
     def test_computed_channel_must_match(self) -> None:
         manifest = self.changed("DP_Open", channels=["direct-vba", "macro-dialog", "project-internal"])
@@ -164,22 +190,22 @@ class PublicSurfaceTests(unittest.TestCase):
         self.assertFinding(self.run_case(readme="# API\n"), "no public-surface:callback block")
 
     def test_implementation_modules_need_option_private_module(self) -> None:
-        implementation = 'Attribute VB_Name = "M_Impl"\nOption Explicit\nPrivate Sub Work()\nEnd Sub\n'
-        findings = self.run_case(files={"src/modules/M_Impl.bas": implementation})
-        self.assertFinding(findings, "M_Impl.bas: implementation modules must use Option Private Module")
+        implementation = 'Attribute VB_Name = "M_Other"\nOption Explicit\nPrivate Sub Work()\nEnd Sub\n'
+        findings = self.run_case(files={"src/modules/M_Other.bas": implementation})
+        self.assertFinding(findings, "M_Other.bas: implementation modules must use Option Private Module")
         private = implementation.replace("Option Explicit\n", "Option Explicit\nOption Private Module\n")
-        self.assertEqual(self.run_case(files={"src/modules/M_Impl.bas": private}), [])
+        self.assertEqual(self.run_case(files={"src/modules/M_Other.bas": private}), [])
         facade = FACADE_SOURCE.replace("Option Explicit\n", "Option Explicit\nOption Private Module\n")
         self.assertFinding(self.run_case(files={FACADE: facade}), "facade must not use Option Private Module")
 
     def test_private_module_procedure_is_not_a_macro(self) -> None:
-        implementation = ('Attribute VB_Name = "M_Impl"\nOption Explicit\nOption Private Module\n'
-                          "Public Sub M_Impl_Run()\nEnd Sub\n")
+        implementation = ('Attribute VB_Name = "M_Other"\nOption Explicit\nOption Private Module\n'
+                          "Public Sub M_Other_Run()\nEnd Sub\n")
         manifest = copy.deepcopy(MANIFEST)
-        manifest["symbols"].append({"name": "M_Impl_Run", "module": "M_Impl", "kind": "Sub",
+        manifest["symbols"].append({"name": "M_Other_Run", "module": "M_Other", "kind": "Sub",
                                     "classification": "internal", "channels": [],
-                                    "signatures": ["Sub M_Impl_Run()"]})
-        self.assertEqual(self.run_case(files={"src/modules/M_Impl.bas": implementation}, manifest=manifest), [])
+                                    "signatures": ["Sub M_Other_Run()"]})
+        self.assertEqual(self.run_case(files={"src/modules/M_Other.bas": implementation}, manifest=manifest), [])
 
     def test_exposed_object_component_cannot_declare_public_members(self) -> None:
         form = FORM_SOURCE.replace("VB_Exposed = False", "VB_Exposed = True")
@@ -190,12 +216,13 @@ class PublicSurfaceTests(unittest.TestCase):
                          'Const T As String = "Date  /  Time" \'x')
         self.assertEqual(surface.normalize('Sub X( Optional ByVal S As String = "a ,b( c" )'),
                          'Sub X(Optional ByVal S As String = "a ,b( c")')
-        source = FACADE_SOURCE + '    Public Const DP_TITLE As String = "A / B" \'Title\n'
+        source = IMPL_SOURCE + '    Public Const DP_TITLE As String = "A / B" \'Title\n'
         manifest = copy.deepcopy(MANIFEST)
-        manifest["symbols"].append(entry("DP_TITLE", "Const", "internal", [], 'Const DP_TITLE As String = "A / B"'))
-        self.assertEqual(self.run_case(files={FACADE: source}, manifest=manifest), [])
+        manifest["symbols"].append(entry("DP_TITLE", "Const", "internal", [], 'Const DP_TITLE As String = "A / B"',
+                                         "M_Impl"))
+        self.assertEqual(self.run_case(files={IMPL: source}, manifest=manifest), [])
         changed = source.replace('"A / B"', '"A  /  B"')
-        self.assertFinding(self.run_case(files={FACADE: changed}, manifest=manifest), "DP_TITLE signature differs")
+        self.assertFinding(self.run_case(files={IMPL: changed}, manifest=manifest), "DP_TITLE signature differs")
 
     def test_conditional_declarations_merge(self) -> None:
         source = FACADE_SOURCE + ("#If VBA7 Then\nPublic Function DP_Hwnd() As LongPtr\nEnd Function\n"
@@ -215,9 +242,9 @@ class PublicSurfaceTests(unittest.TestCase):
         get = [s for s in component.symbols if s.name == "DP_Get"][0]
         self.assertEqual(get.signatures, ["Function DP_Get(ByVal Mode As DP_Mode) As Long",
                                           "Function DP_Get(ByVal Mode As Long) As Long"])
-        body = FACADE_SOURCE.replace("Public Sub DP_Open()\nEnd Sub\n",
-                                     "Public Sub DP_Open()\n    Dim X As Long\nEnd Sub\n")
-        self.assertEqual(self.run_case(files={FACADE: body}), [])
+        body = IMPL_SOURCE.replace("Public Sub DP_Open_Impl()\nEnd Sub\n",
+                                   "Public Sub DP_Open_Impl()\n    Dim X As Long\nEnd Sub\n")
+        self.assertEqual(self.run_case(files={IMPL: body}), [])
 
     def test_conditional_enum_and_type_members_are_all_compared(self) -> None:
         enum = "    Public Enum DP_Mode\n        DP_Mode_A = 0 'First\n    End Enum\n"
@@ -249,6 +276,38 @@ class PublicSurfaceTests(unittest.TestCase):
         source = ('Const TICK As String = "M_Tick"\nx = M_GetQualifiedMacroName(TICK)\n'
                   "Application.OnKey \"^+d\", \"'Book.xlsm'!DP_Key\"\n.OnAction = \"DP_Menu\"\n")
         self.assertEqual(surface.dispatched_names(source), {"M_Tick", "DP_Key", "DP_Menu"})
+
+    def test_facade_holds_no_implementation(self) -> None:
+        for declaration, expected in (
+                ("    Private Declare PtrSafe Function GetTick Lib \"kernel32\" () As Long\n", "Declare PtrSafe"),
+                ("    Private mCache As Object 'Cache\n", "Private mCache"),
+                ("    Public Const DP_EXTRA As Long = 1 'Extra\n", "Public Const DP_EXTRA"),
+                ("    Private Type DP_Hidden\n        A As Long\n    End Type\n", "move DP_Hidden"),
+                ("Private Sub Helper()\nEnd Sub\n", "move Helper")):
+            source = FACADE_SOURCE.replace("Option Explicit\n", "Option Explicit\n" + declaration)
+            self.assertFinding(self.run_case(files={FACADE: source}), expected)
+
+    def test_facade_wrapper_must_delegate_once(self) -> None:
+        cases = (
+            ("    M_Impl.DP_Open_Impl\n", "    M_Impl.DP_Open_Impl\n    M_Impl.DP_Open_Impl\n"),
+            ("    M_Impl.DP_Open_Impl\n", ""),
+            ("    M_Impl.DP_Open_Impl\n", "    DP_Open_Impl\n"),
+            ("    M_Impl.DP_Open_Impl\n", "    M_Impl.DP_Click_Impl\n"),
+            ("    M_Impl.DP_Open_Impl\n", "    M_Fac.DP_Open_Impl\n"),
+        )
+        for old, new in cases:
+            source = FACADE_SOURCE.replace(old, new)
+            self.assertFinding(self.run_case(files={FACADE: source}), "DP_Open must delegate in one statement")
+
+    def test_internal_code_never_calls_the_facade(self) -> None:
+        source = IMPL_SOURCE.replace("Public Sub DP_Click_Impl()\n", "Public Sub DP_Click_Impl()\n    DP_Open\n")
+        self.assertFinding(self.run_case(files={IMPL: source}), "M_Impl.bas: calls the facade wrapper DP_Open")
+        form = FORM_SOURCE.replace("Debug.Print DP_LIMIT", "Debug.Print DP_LIMIT\n    M_Fac.DP_Get DP_Mode_A")
+        self.assertFinding(self.run_case(files={"src/forms/UF_X.frm": form}), "calls the facade wrapper DP_Get")
+        host = ('Attribute VB_Name = "ThisWorkbook"\nOption Explicit\nPrivate Sub Workbook_Open()\n'
+                "    DP_Open\nEnd Sub\n")
+        manifest = self.changed("DP_Open", channels=["direct-vba", "macro-dialog", "project-internal"])
+        self.assertEqual(self.run_case(files={"src/addin/ThisWorkbook.cls": host}, manifest=manifest), [])
 
 
 if __name__ == "__main__":

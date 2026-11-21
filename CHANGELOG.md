@@ -99,9 +99,10 @@ Use only the categories needed by a release.
 
 ### Added
 
-- `src/public-surface.json` classifies every public declaration in
-  `M_DatePicker` once, as `supported` (46), `callback` (6) or `internal`
-  (121), with its signature and invocation channels
+- `src/public-surface.json` classifies every public declaration in the
+  production standard modules once, as `supported` (46), `callback` (6) or
+  `internal` (168 after the facade split below), with its signature and
+  invocation channels
   ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)). The new
   `check_public_surface` static gate checks it against the source, the Ribbon
   XML and the README lists. It fails on an unclassified addition, a changed or
@@ -109,13 +110,37 @@ Use only the categories needed by a release.
   outside `internal`, and a production standard module other than
   `M_DatePicker` without `Option Private Module`. `tools/check.py` now runs
   twelve gates, and the release command expects twelve.
+- The `check_public_surface` gate also enforces the facade rules of
+  [#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55): the facade
+  declares only public enums, public types and one-statement wrappers that
+  delegate to `<private module>.<Name>_Impl`, and no production component
+  except the add-in's `ThisWorkbook` calls a facade wrapper.
+- New `CallbackResolution` regression suite. It runs each callback registered
+  with Excel (`DP_Click`, `DP_OpenForActiveCell`, `M_Timer_Tick` and the three
+  Ribbon callbacks) through `Application.Run` with the workbook-qualified name
+  production uses, and proves each one reaches its implementation without
+  lasting effects. `Ribbon_Demo` is exercised only where the demo sheet
+  already exists, as in the packaged demo workbook.
+
+### Changed
+
+- `M_DatePicker` is now a thin, stable facade
+  ([#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55)). It keeps
+  every supported enum, type, procedure and callback with the same name,
+  signature and defaults; each wrapper calls its implementation in the new
+  private module `M_DP_Core` (`Option Private Module`). Errors reach callers
+  with the same number, source and description. `M_DP_Core` is transitional:
+  [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24) splits it
+  into responsibility modules.
 
 ### Documentation
 
 - README **Public API** lists the supported surface and the callbacks from the
   manifest, adds the settings setter and getter pairs, and separates the
   internal maintenance helpers and test seams. CONTRIBUTING describes the
-  manifest and the `Option Private Module` rule for implementation modules.
+  manifest, the `Option Private Module` rule for implementation modules and the
+  facade dependency rule. README and INSTALLATION list `M_DP_Core` and describe
+  the facade.
 
 ### Compatibility
 
@@ -134,10 +159,17 @@ Use only the categories needed by a release.
   - `M_WriteBack_Apply` and `M_Window_RemoveTitleBar` are internal. Hosts
     write through `DP_FillTableColumn`, `DP_Today` or `DP_Now`;
     `DP_WindowStyleResult` and `DP_WriteAction` stay supported.
-- Nineteen internal parameterless procedures, including three test seams, are
-  still reachable from Alt+F8 until
-  [#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55) moves them
-  behind `Option Private Module`.
+- **Embedded source needs one more module.** Import `src/modules/M_DP_Core.bas`
+  beside `M_DatePicker.bas`; an upgrade replaces `M_DatePicker` and adds
+  `M_DP_Core`. Host code that uses the supported API needs no change.
+- **Internal symbols are no longer visible outside the project.** The
+  nineteen internal parameterless procedures, including three test seams, no
+  longer appear in Alt+F8, and another VBA project that referenced the add-in
+  can no longer reach internal constants, global variables or helpers. They
+  were never supported API. Alt+F8 now lists only the facade's supported
+  commands and the `DP_Click` and `M_Timer_Tick` callbacks. The maintenance
+  helpers remain callable from the Immediate window of the project that holds
+  the DatePicker.
 
 ---
 

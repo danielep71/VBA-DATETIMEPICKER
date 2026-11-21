@@ -162,6 +162,7 @@ Import:
 
 ```text
 src/modules/M_DatePicker.bas
+src/modules/M_DP_Core.bas
 src/classes/cDatePickerManager.cls
 src/classes/cDatePickerLabelHook.cls
 src/forms/UF_DatePicker.frm      (keep UF_DatePicker.frx beside it)
@@ -169,7 +170,7 @@ demo/M_DP_DEMO.bas
 demo/M_DEMO_BUILDER.bas
 ```
 
-The two `demo/` modules are currently required for `M_DatePicker` to compile;
+The two `demo/` modules are currently required for `M_DP_Core` to compile;
 see [INSTALLATION.md](INSTALLATION.md) and [#86](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/86).
 
 If you use the Ribbon, also copy `src/ribbon/` into the package's `customUI/`
@@ -1001,9 +1002,11 @@ Callbacks should stay thin and delegate to the normal DatePicker API.
 ## Internal surface — not supported API
 
 Everything else that is `Public` is classified `internal`: helpers shared with
-the picker form and classes, global state, constants, decision helpers and test
-seams. Being `Public` is a consequence of the current single-module layout, not
-a decision that these belong on the callable surface.
+the picker form and classes, global state, constants, decision helpers, test
+seams and the `<Name>_Impl` procedures behind the facade. All of it lives in
+`M_DP_Core`, which uses `Option Private Module`: other VBA projects and the
+Alt+F8 macro dialog do not see it. It is `Public` only so the form, the
+classes and the regression harness in the same project can reach it.
 
 ### Maintenance helpers
 
@@ -1017,8 +1020,9 @@ The [recovery guide](#-recovery-guide) uses them by hand. They are internal, not
 supported API.
 
 `M_Picker_EnsureManager` preserves the caller's event state without changing it.
-It is parameterless, so it is reachable from Alt+F8 and from an assigned
-control. That reachability is technical exposure, not a supported entry point.
+Since [#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55) it is no
+longer listed in Alt+F8; run it from the Immediate window of the project that
+holds the DatePicker.
 
 `M_WriteBack_Apply` and `M_Window_RemoveTitleBar` are internal too: hosts write
 through `DP_FillTableColumn`, `DP_Today` or `DP_Now`, and only the picker form
@@ -1040,16 +1044,24 @@ M_Window_Test_SetFaultInjection
 
 They may change or disappear without notice. Do not call them from host code.
 
-### Alt+F8 exposure still open
+### Facade and implementation
 
-Nineteen parameterless internal `Sub`s still appear in the macro dialog, among
-them three test seams: `M_Lease_Test_ClearOwnerToken`,
-`M_Timer_Test_ExpireRegistration` and `M_Timer_Test_Reset`. The manifest marks
-each with `"pending": "#55"`.
-[#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55) moves this
-surface behind `Option Private Module` implementation modules, which hides it
-from the dialog; the check already requires `Option Private Module` on every
-production standard module other than `M_DatePicker`.
+`M_DatePicker` is the stable facade. It declares the supported enums and types
+and one thin wrapper for each supported procedure and callback; each wrapper
+calls the matching `<Name>_Impl` procedure in `M_DP_Core` and nothing else.
+Errors reach the caller unchanged, with the same error source as before.
+
+Internal code never calls the facade: it calls the `_Impl` procedures, and only
+the callback names registered with Excel point back at the facade.
+`tools/check_public_surface.py` enforces both rules.
+
+The Alt+F8 dialog therefore lists only the facade's parameterless procedures:
+the supported commands such as `DP_Start`, `DP_Show` and `DP_Today`, and the two
+by-name callbacks `DP_Click` and `M_Timer_Tick`, which Excel needs in a
+non-private module.
+
+`M_DP_Core` is transitional: [#24](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/24)
+splits it into private responsibility modules without changing the facade.
 
 ---
 
@@ -1099,7 +1111,8 @@ which is the recovery operation that may deliberately re-enable events.
 flowchart TD
     EXCEL[Excel Workbook / Worksheet]
     MANAGER[cDatePickerManager<br/>Application events and lifecycle]
-    MODULE[M_DatePicker<br/>public API, settings and infrastructure]
+    FACADE[M_DatePicker<br/>stable facade: supported API and callbacks]
+    MODULE[M_DP_Core<br/>settings, write-back and infrastructure]
     FORM[UF_DatePicker<br/>runtime UI and interaction]
     HOOKS[cDatePickerLabelHook<br/>runtime label events]
     SETTINGS[Registry-backed settings<br/>optional namespace]
@@ -1108,6 +1121,8 @@ flowchart TD
     WINAPI[Optional Windows UI layer]
 
     EXCEL --> MANAGER
+    EXCEL --> FACADE
+    FACADE --> MODULE
     MANAGER --> MODULE
     MODULE --> FORM
     FORM --> HOOKS
@@ -1122,7 +1137,8 @@ flowchart TD
 
 | Component | Responsibility |
 |---|---|
-| `M_DatePicker.bas` | Public API, settings, write-back engine, context menu, shortcut, grid icon, timer, Ribbon callbacks, WinAPI helpers, provider lease |
+| `M_DatePicker.bas` | Stable facade: supported enums and types, supported API wrappers, Ribbon and other Excel callbacks |
+| `M_DP_Core.bas` | Private implementation: settings, write-back engine, context menu, shortcut, grid icon, timer, WinAPI helpers, provider lease |
 | `cDatePickerManager.cls` | Application-level Excel events, selection refresh, workbook/worksheet lifecycle orchestration |
 | `UF_DatePicker.frm/.frx` | Modeless picker UI, calendar rendering, settings overlay, keyboard interaction, footer actions |
 | `cDatePickerLabelHook.cls` | `WithEvents` routing for runtime-created MSForms labels |
@@ -1321,7 +1337,7 @@ It does not blindly retry `Worksheets.Add`.
 State=PASS; Run=911; Passed=911; Failed=0; CleanupFailures=0
 ```
 
-This is the latest recorded **standard regression pack**, 911/911 at [`69a94d0`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/69a94d0a00d35f33bcb0ace7ca98a6b6399d94f2), during the unreleased `v1.2.3` work, on the embedded macro-enabled workbook. At that commit the harness had 31 standard suites, 32 with UI smoke; the UI smoke total was not observed. The current source has 32 standard suites, 33 with UI smoke: `ContextMenuResync` was added after `69a94d0`, so 911 is not its total. The current source's totals are re-measured at release certification, which for a tagged commit on both packaged hosts will be recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
+This is the latest recorded **standard regression pack**, 911/911 at [`69a94d0`](https://github.com/danielep71/VBA-DATETIMEPICKER/commit/69a94d0a00d35f33bcb0ace7ca98a6b6399d94f2), during the unreleased `v1.2.3` work, on the embedded macro-enabled workbook. At that commit the harness had 31 standard suites, 32 with UI smoke; the UI smoke total was not observed. The current source has 33 standard suites, 34 with UI smoke: `ContextMenuResync` was added after `69a94d0` and `CallbackResolution` with [#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55), so 911 is not its total. The current source's totals are re-measured at release certification, which for a tagged commit on both packaged hosts will be recorded in [#122](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/122).
 
 For `v1.2.2` the pack recorded 879 standard and 882 with UI smoke (28 and 29 suites).
 
@@ -1404,7 +1420,8 @@ VBA-DATETIMEPICKER/
 │  │  ├─ UF_DatePicker.frm
 │  │  └─ UF_DatePicker.frx
 │  ├─ modules/
-│  │  └─ M_DatePicker.bas
+│  │  ├─ M_DatePicker.bas   (stable facade)
+│  │  └─ M_DP_Core.bas      (private implementation)
 │  ├─ public-surface.json   (classified public surface; checked by tools/check_public_surface.py)
 │  └─ ribbon/
 │     ├─ customUI.xml

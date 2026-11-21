@@ -79,6 +79,11 @@ member list differs between variants records each list under
   supported;
 - the facade uses `Option Private Module`, another production standard module
   does not, or an exposed class or document module declares public members;
+- the facade declares anything other than public enums, public types and
+  wrappers, or a wrapper is not one statement delegating to
+  `<private module>.<Name>_Impl`;
+- a production component other than the facade and the add-in host
+  (`src/addin/`) calls a facade wrapper instead of its `_Impl` procedure;
 - the `public-surface:supported` or `public-surface:callback` list in
   `README.md` differs from the manifest.
 

@@ -293,8 +293,19 @@ anything but `internal`.
 types and enums they use, and callbacks live there. Every other production
 standard module must start with `Option Private Module`, which keeps its public
 procedures out of other projects and out of the macro dialog. An internal
-parameterless `Sub` still in the facade is reachable from Alt+F8; the manifest
-records the issue that hides it in `pending`.
+parameterless `Sub` in a non-private module is reachable from Alt+F8; the
+manifest records the issue that hides it in `pending`.
+
+The facade holds nothing else: no `Declare`, constant, variable, private
+member or logic. Each wrapper is one statement that calls `<Name>_Impl` in a
+private module, qualified with the module name, for example
+`M_DP_Core.DP_Show_Impl`. Calls flow one way, from the facade to the private
+modules: internal code (other modules, the form and the classes) calls the
+`_Impl` procedure, never the wrapper. Callback names registered with Excel
+are strings that name the facade procedure. The add-in's own `ThisWorkbook`
+code under `src/addin/` is a host and calls the supported API like any other.
+To add a supported procedure, write the implementation as `<Name>_Impl` in the
+private module, add the wrapper to the facade, and classify both.
 
 `Application.OnKey` is an explicit ownership exception. Excel exposes no getter
 for the predecessor binding. The DatePicker may remove only the binding it

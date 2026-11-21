@@ -83,7 +83,7 @@ Option Explicit
 '   Runtime UserForm control / label event wiring does not belong here. It is
 '   handled by cDatePickerLabelHook and UF_DatePicker
 '
-'   Right-click menu registration is owned by M_DatePicker. This class only
+'   Right-click menu registration is owned by M_DP_Core. This class only
 '   asks it to restore a missing entry from SheetBeforeRightClick (#113)
 '
 '   The manager distinguishes between:
@@ -411,8 +411,8 @@ Public Property Get Is_PickerLoaded() As Boolean
 ' RETURN STATE
 '------------------------------------------------------------------------------
     'Return whether the DatePicker form is currently loaded
-        Is_PickerLoaded = Is_UserFormLoaded(M_DatePicker.DP_FORM_NAME)
-        
+        Is_PickerLoaded = Is_UserFormLoaded(M_DP_Core.DP_FORM_NAME)
+
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -474,8 +474,8 @@ Public Property Get PickerVisible() As Boolean
 ' RETURN STATE
 '------------------------------------------------------------------------------
     'Return whether the DatePicker form is currently visible
-        PickerVisible = Is_UserFormVisible(M_DatePicker.DP_FORM_NAME)
-    
+        PickerVisible = Is_UserFormVisible(M_DP_Core.DP_FORM_NAME)
+
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
 '------------------------------------------------------------------------------
@@ -645,7 +645,7 @@ Public Sub Reset_DatePickerUI()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME     As String = "cDatePickerManager.Reset_DatePickerUI"
-    
+
 '------------------------------------------------------------------------------
 ' INITIALIZE
 '------------------------------------------------------------------------------
@@ -677,7 +677,6 @@ CleanFail:
         Err.Clear
 
 End Sub
-
 
 Public Sub Handle_SelectionChange(Optional ByVal vTarget As Variant)
 
@@ -976,7 +975,7 @@ Public Sub Handle_WorkbookContextChange()
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "cDatePickerManager.Handle_WorkbookContextChange"
-    
+
     Dim GuardWasEntered         As Boolean          'True when this routine owns the busy guard
     Dim ErrorNumber             As Long             'Captured error number
     Dim ErrorDescription        As String           'Captured error description
@@ -1112,14 +1111,14 @@ Public Sub Clear_AllDatePickerUI( _
 ' CLOSE PICKER IF REQUESTED
 '------------------------------------------------------------------------------
     'Close the DatePicker form when requested
-        If ClosePicker Then DP_Close
+        If ClosePicker Then DP_Close_Impl
 
 '------------------------------------------------------------------------------
 ' REMOVE OR PURGE GRID ICONS
 '------------------------------------------------------------------------------
     'Use the hard all-workbook grid-icon purge path when requested
         If PurgeGridIcons Then
-            M_GridIcon_PurgeAll
+            M_GridIcon_PurgeAll_Impl
     'Otherwise use the lightweight active-context grid-icon removal path
         Else
             M_GridIcon_Remove
@@ -1179,7 +1178,7 @@ Public Function Should_ShowGridIcon(Optional ByVal vTarget As Variant) As Boolea
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "cDatePickerManager.Should_ShowGridIcon"
-    
+
     Dim TargetCell              As Excel.Range      'Resolved single target cell
     Dim TargetWasProvided       As Boolean          'True when an explicit target was supplied
 
@@ -1300,7 +1299,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
     Const PROC_NAME             As String = "cDatePickerManager.Refresh_CurrentUI"
 
     Dim TargetCell              As Excel.Range      'Resolved authoritative target cell
-    
+
     Dim KeepPickerOpen          As Boolean          'True to keep open form alive
     Dim TargetWasProvided       As Boolean          'True when an explicit target was supplied
     Dim TargetWasResolved       As Boolean          'True when a valid target cell was resolved
@@ -1374,7 +1373,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
             'Suppress close errors while capturing diagnostics
                 On Error Resume Next
             'Close the DatePicker form
-                DP_Close
+                DP_Close_Impl
             'Capture picker-close error number
                 CloseErrNumber = Err.Number
             'Capture picker-close error description
@@ -1423,7 +1422,7 @@ Private Sub Refresh_CurrentUI(Optional ByVal vTarget As Variant)
                     'Suppress close errors while capturing diagnostics
                         On Error Resume Next
                     'Close the picker to avoid stale visible form state
-                        DP_Close
+                        DP_Close_Impl
                     'Capture picker-close error number
                         CloseErrNumber = Err.Number
                     'Capture picker-close error description
@@ -3310,7 +3309,7 @@ Private Sub mExcelApp_SheetChange( _
 ' DECLARE
 '------------------------------------------------------------------------------
     Const PROC_NAME             As String = "cDatePickerManager.mExcelApp_SheetChange"
-    
+
     Dim SheetName               As String       'Diagnostic sheet name
     Dim TargetAddress           As String       'Diagnostic target address
     Dim ErrorNumber             As Long         'Captured error number

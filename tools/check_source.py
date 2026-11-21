@@ -12,7 +12,8 @@ from _gatelib import parse_report_args, run_gate, tracked_files
 from check_vba_conditionals import strip_vba
 
 REQUIRED = {
-    "src/modules/M_DatePicker.bas", "src/classes/cDatePickerManager.cls",
+    "src/modules/M_DatePicker.bas", "src/modules/M_DP_Core.bas",
+    "src/classes/cDatePickerManager.cls",
     "src/classes/cDatePickerLabelHook.cls", "src/forms/UF_DatePicker.frm",
     "src/forms/UF_DatePicker.frx", "src/ribbon/customUI.xml",
     "test/M_cDP_Test.bas", "demo/M_DEMO_BUILDER.bas", "demo/M_DP_DEMO.bas",
