@@ -80,11 +80,18 @@ class Component:
 
 
 def normalize(text: str) -> str:
-    """Collapse whitespace so continuation lines and alignment do not matter."""
-    text = re.sub(r"\s+", " ", text.strip())
-    text = re.sub(r"\(\s+", "(", text)
-    text = re.sub(r"\s+\)", ")", text)
-    return re.sub(r"\s*,\s*", ", ", text)
+    """Collapse whitespace so continuation lines and alignment do not matter.
+
+    String literals are kept byte for byte, so a changed constant value or
+    string default still differs from the manifest.
+    """
+    parts = re.split(r'("(?:[^"]|"")*")', text.strip())
+    for index in range(0, len(parts), 2):
+        part = re.sub(r"\s+", " ", parts[index])
+        part = re.sub(r"\(\s+", "(", part)
+        part = re.sub(r"\s+\)", ")", part)
+        parts[index] = re.sub(r"\s*,\s*", ", ", part)
+    return "".join(parts)
 
 
 def split_top(text: str) -> list[str]:

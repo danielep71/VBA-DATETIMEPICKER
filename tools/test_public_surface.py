@@ -185,6 +185,18 @@ class PublicSurfaceTests(unittest.TestCase):
         form = FORM_SOURCE.replace("VB_Exposed = False", "VB_Exposed = True")
         self.assertFinding(self.run_case(files={"src/forms/UF_X.frm": form}), "declares public members: UF_Do")
 
+    def test_string_values_are_not_normalized(self) -> None:
+        self.assertEqual(surface.normalize('Const T As String = "Date  /  Time" \'x'),
+                         'Const T As String = "Date  /  Time" \'x')
+        self.assertEqual(surface.normalize('Sub X( Optional ByVal S As String = "a ,b( c" )'),
+                         'Sub X(Optional ByVal S As String = "a ,b( c")')
+        source = FACADE_SOURCE + '    Public Const DP_TITLE As String = "A / B" \'Title\n'
+        manifest = copy.deepcopy(MANIFEST)
+        manifest["symbols"].append(entry("DP_TITLE", "Const", "internal", [], 'Const DP_TITLE As String = "A / B"'))
+        self.assertEqual(self.run_case(files={FACADE: source}, manifest=manifest), [])
+        changed = source.replace('"A / B"', '"A  /  B"')
+        self.assertFinding(self.run_case(files={FACADE: changed}, manifest=manifest), "DP_TITLE signature differs")
+
     def test_conditional_declarations_merge(self) -> None:
         source = FACADE_SOURCE + ("#If VBA7 Then\nPublic Function DP_Hwnd() As LongPtr\nEnd Function\n"
                                   "#Else\nPublic Function DP_Hwnd() As Long\nEnd Function\n#End If\n")
