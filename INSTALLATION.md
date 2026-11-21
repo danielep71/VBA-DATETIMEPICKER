@@ -67,10 +67,15 @@ or copied workbooks.
 
 | Order | Repository source | VBE component | Responsibility |
 |---:|---|---|---|
-| 1 | `src/modules/M_DatePicker.bas` | `M_DatePicker` | Public API, settings, write-back, integrations, provider lease, and WinAPI helpers |
-| 2 | `src/classes/cDatePickerManager.cls` | `cDatePickerManager` | Application-level Excel event orchestration |
-| 3 | `src/classes/cDatePickerLabelHook.cls` | `cDatePickerLabelHook` | Runtime MSForms label-event routing |
-| 4 | `src/forms/UF_DatePicker.frm` with adjacent `.frx` | `UF_DatePicker` | Modeless Date / Time Picker UI and resources |
+| 1 | `src/modules/M_DatePicker.bas` | `M_DatePicker` | Stable facade: supported enums and types, supported API, and Excel callbacks |
+| 2 | `src/modules/M_DP_Core.bas` | `M_DP_Core` | Private implementation (`Option Private Module`): settings, write-back, integrations, provider lease, and WinAPI helpers |
+| 3 | `src/classes/cDatePickerManager.cls` | `cDatePickerManager` | Application-level Excel event orchestration |
+| 4 | `src/classes/cDatePickerLabelHook.cls` | `cDatePickerLabelHook` | Runtime MSForms label-event routing |
+| 5 | `src/forms/UF_DatePicker.frm` with adjacent `.frx` | `UF_DatePicker` | Modeless Date / Time Picker UI and resources |
+
+Import both modules. `M_DatePicker` only delegates to `M_DP_Core`, so neither
+compiles without the other. An upgrade from a release before `v1.3.0` replaces
+`M_DatePicker` and adds `M_DP_Core`; nothing else changes for host code.
 
 Additional source. Only the RibbonX metadata is genuinely optional; the rest is
 required to compile or to test the project as it currently stands:
@@ -80,19 +85,19 @@ required to compile or to test the project as it currently stands:
 | `src/ribbon/customUI.xml`, `_rels/`, `images/` | Optional RibbonX package parts; not VBE modules. Copy into the package's `customUI/` folder, and point the package's root relationship at `customUI/customUI.xml` with the Office 2007 extensibility type (see [RELEASING.md](RELEASING.md#7-build-release-artifacts)) |
 | `src/addin/ThisWorkbook.cls` | The published add-in's `ThisWorkbook` code: hides the demo sheet, starts and preloads the picker on open, stops it before close, and clears the picker and grid icons before printing. A build input for the add-in package, copied into the workbook's own `ThisWorkbook` module by `tools/Build-Addin.cmd`. Do not import it: **File → Import** would create a class named `ThisWorkbook1`. For your own workbook, use the lifecycle hooks shown in README instead |
 | `test/M_cDP_Test.bas` | Regression harness |
-| `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DatePicker`** |
+| `demo/M_DP_DEMO.bas` | Demonstration entry points, **and required to compile `M_DP_Core`** |
 | `demo/M_DEMO_BUILDER.bas` | Demonstration builder, **required by `M_DP_DEMO` and, independently, by the regression harness** |
 
 > [!IMPORTANT]
-> The four `src/` components above do not compile on their own. `M_DatePicker`
-> exposes the Ribbon demo command, and that command calls
+> The five `src/` components above do not compile on their own. `M_DP_Core`
+> implements the Ribbon demo command, and that command calls
 > `DP_Demo_EnsureDemoSheet`, which lives in `demo/M_DP_DEMO.bas`. Omitting the
 > demo source leaves an unresolved reference at **Debug → Compile VBAProject**.
 >
 > The current compile and test dependencies are:
 >
 > ~~~text
-> M_DatePicker.bas  ->  M_DP_DEMO.bas  ->  M_DEMO_BUILDER.bas
+> M_DP_Core.bas     ->  M_DP_DEMO.bas  ->  M_DEMO_BUILDER.bas
 > M_cDP_Test.bas    ->  M_DEMO_BUILDER.bas
 > ~~~
 >

@@ -1053,6 +1053,8 @@ Private Sub TST_DP_RunAllInternal(ByVal IncludeUISmoke As Boolean)
         TST_DP_RunSuiteSafe "RibbonDemo"
     'Run the Ribbon Reset outcome checks
         TST_DP_RunSuiteSafe "RibbonReset"
+    'Run the Excel callback-name resolution checks
+        TST_DP_RunSuiteSafe "CallbackResolution"
     'Run demo builder fast-mode transaction and button-grid checks
         TST_DP_RunSuiteSafe "DemoFastMode"
 
@@ -1413,6 +1415,9 @@ Private Sub TST_DP_RunSuiteSafe(ByVal SuiteName As String)
 
             Case "RIBBONRESET"
                 TST_DP_RunSuite_RibbonReset
+
+            Case "CALLBACKRESOLUTION"
+                TST_DP_RunSuite_CallbackResolution
 
             Case "DEMOFASTMODE"
                 TST_DP_RunSuite_DemoFastMode
@@ -8644,6 +8649,392 @@ SuiteFail:
         Resume SuiteExit
 
 End Sub
+
+Private Sub TST_DP_RunSuite_CallbackResolution()
+
+'
+'==============================================================================
+'                         CALLBACK RESOLUTION SUITE
+'==============================================================================
+' PURPOSE
+'   Proves Excel resolves every callback name registered with it to the
+'   M_DatePicker facade, and that each facade wrapper reaches its
+'   implementation
+'
+' WHY THIS EXISTS
+'   The implementation sits behind Option Private Module (#55). The Ribbon,
+'   OnAction, OnKey and OnTime bind by name when Excel calls them, so a
+'   misspelt, ambiguous or wrongly shaped callback compiles cleanly and fails
+'   only at that moment. The other suites call the procedures directly from VBA
+'   and cannot see that failure
+'
+' INPUTS
+'   None
+'
+' RETURNS
+'   Nothing
+'
+' BEHAVIOR
+'   Runs each callback through Excel.Application.Run with the workbook-
+'   qualified name production registers, in a state where the call leaves
+'   nothing behind:
+'     - DP_Click, DP_OpenForActiveCell and Ribbon_ShowPicker under a foreign
+'       lease, where each one refuses at the admission boundary
+'     - Ribbon_Reset under a foreign lease, where its repair refuses
+'     - M_Timer_Tick while the timer is stopped with a registration left
+'       outstanding, which the tick drains without rescheduling
+'     - Ribbon_Demo twice, toggling an existing demo sheet and back, then
+'       restoring its visibility and the active sheet
+'
+' ERROR POLICY
+'   Suite failures are recorded and never raised. Reporting, lease, runtime
+'   manager, timer and sheet state are restored in both exit paths
+'
+' DEPENDENCIES
+'   Excel.Application.Run
+'   M_Lease_Test_SilenceRefusalReport, M_Lease_Test_RefusalReportCount
+'   M_Lease_TryAcquire, M_Lease_Test_ClearOwnerToken, M_Lease_IsOwner
+'   M_Lifecycle_Test_Reset, M_Lifecycle_Test_LastOperation
+'   M_Timer_* test seams
+'   TST_DP_RunCallbackForTest
+'
+' NOTES
+'   Ribbon_Demo builds the demo sheet when it is missing, which adds workbook
+'   names and tables a test cannot remove cleanly. It is therefore exercised
+'   only when the workbook Ribbon_Demo would use already holds the demo sheet
+'   beside another visible sheet, as the packaged demo workbook does.
+'   Otherwise the suite records why it was not exercised
+'
+'   The Ribbon callbacks never dereference their IRibbonControl argument, so
+'   Nothing stands in for the Excel-supplied control
+'
+' UPDATED
+'   2026-11-21
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const DEMO_SHEET_NAME   As String = "DATE PICKER DEMO"  'Matches M_DP_Core
+
+    Dim EventsBefore        As Boolean          'Application.EnableEvents on entry
+    Dim OwnerToken          As String           'Lease token planted as the foreign owner
+    Dim RefusalsBefore      As Long             'Refusal count before a callback runs
+    Dim RunError            As String           'Application.Run failure, empty on success
+    Dim CallbackNames       As Variant          'Entry callbacks driven under the foreign lease
+    Dim CallbackIndex       As Long             'Current entry callback
+    Dim CallbackName        As String           'Current entry callback name
+    Dim RegEarliest         As Date             'Recorded registration time
+    Dim RegLatest           As Date             'Recorded registration deadline
+    Dim RegProcedure        As String           'Recorded registration procedure
+    Dim RegSchedule         As Boolean          'Recorded schedule flag
+    Dim RegErrNumber        As Long             'Recorded scheduling error
+    Dim RegCallCount        As Long             'Scheduling calls after the tick
+    Dim BaselineCount       As Long             'Scheduling calls before the tick
+    Dim ArmedEarliest       As Date             'Registration left outstanding
+    Dim ArmedProcedure      As String           'Procedure of that registration
+    Dim TimerArmed          As Boolean          'True while a registration is outstanding
+    Dim DemoBook            As Excel.Workbook   'Workbook Ribbon_Demo would use
+    Dim CandidateBook       As Excel.Workbook   'Open workbook scan variable
+    Dim DemoSheet           As Excel.Worksheet  'Existing demo sheet
+    Dim OtherSheet          As Excel.Worksheet  'Sheet scan variable
+    Dim OtherVisible        As Boolean          'True when another sheet stays visible
+    Dim VisibilityBefore    As Long             'Demo sheet visibility on entry
+    Dim ActiveBefore        As Object           'Active sheet on entry
+    Dim DemoTouched         As Boolean          'True once Ribbon_Demo has run
+    Dim ManagerBefore       As Boolean          'True when a runtime manager existed on entry
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Set the current suite name
+        mTST_DP_CurrentSuite = "CallbackResolution"
+    'Enable suite-level error handling
+        On Error GoTo SuiteFail
+    'Record the event state: a refused repair deliberately leaves events on
+        EventsBefore = Excel.Application.EnableEvents
+    'Silence the modal refusal report so the refused callbacks stay drivable
+        M_Lease_Test_SilenceRefusalReport True
+    'Record the runtime manager so the suite can leave the run as it found it
+        ManagerBefore = Not (gDP_Manager Is Nothing)
+
+'------------------------------------------------------------------------------
+' PLANT A FOREIGN LEASE
+'------------------------------------------------------------------------------
+    'Take the lease, then drop the local token: exactly what a second copy sees
+        TST_DP_ForceClearLeaseForTest
+        Set gDP_Manager = Nothing
+        TST_DP_AssertTrue "Callback setup acquires a free lease", M_Lease_TryAcquire()
+        OwnerToken = TST_DP_ReadLeaseOwnerForTest()
+        M_Lease_Test_ClearOwnerToken
+        TST_DP_AssertFalse "Callback setup leaves this project without the lease", _
+            M_Lease_IsOwner()
+
+'------------------------------------------------------------------------------
+' ENTRY CALLBACKS REACH THE ADMISSION BOUNDARY
+'------------------------------------------------------------------------------
+    'The grid icon, the right-click entry, the keyboard shortcut and the Ribbon
+    'button each reach Excel by one of these names
+        CallbackNames = VBA.Array("DP_Click", "DP_OpenForActiveCell", "Ribbon_ShowPicker")
+        For CallbackIndex = LBound(CallbackNames) To UBound(CallbackNames)
+            CallbackName = VBA.CStr(CallbackNames(CallbackIndex))
+            RefusalsBefore = M_Lease_Test_RefusalReportCount()
+            Set gDP_Manager = Nothing
+            RunError = TST_DP_RunCallbackForTest(CallbackName, _
+                (VBA.StrComp(VBA.Left$(CallbackName, 7), "Ribbon_", vbBinaryCompare) = 0))
+            TST_DP_AssertEqualsString CallbackName & " resolves through Application.Run", _
+                VBA.vbNullString, RunError
+            TST_DP_AssertTrue CallbackName & " reaches the admission boundary", _
+                (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+            TST_DP_AssertFalse CallbackName & " creates no manager under a foreign lease", _
+                Not (gDP_Manager Is Nothing)
+        Next CallbackIndex
+
+'------------------------------------------------------------------------------
+' RIBBON RESET REACHES THE REPAIR PATH
+'------------------------------------------------------------------------------
+    'Under a foreign lease Reset repairs rather than starts, and the repair refuses
+        M_Lifecycle_Test_Reset True
+        RefusalsBefore = M_Lease_Test_RefusalReportCount()
+        RunError = TST_DP_RunCallbackForTest("Ribbon_Reset", True)
+        TST_DP_AssertEqualsString "Ribbon_Reset resolves through Application.Run", _
+            VBA.vbNullString, RunError
+        TST_DP_AssertEqualsString "Ribbon_Reset reaches the repair path", _
+            "DP_RepairRuntime", M_Lifecycle_Test_LastOperation()
+        TST_DP_AssertTrue "Ribbon_Reset repair refuses under a foreign lease", _
+            (M_Lease_Test_RefusalReportCount() > RefusalsBefore)
+        TST_DP_AssertEqualsString "Ribbon_Reset leaves the owner's lease", _
+            OwnerToken, TST_DP_ReadLeaseOwnerForTest()
+
+'------------------------------------------------------------------------------
+' RECLAIM THE LEASE
+'------------------------------------------------------------------------------
+    'The remaining callbacks do not depend on the lease
+        TST_DP_ForceClearLeaseForTest
+        TST_DP_AssertTrue "Callback setup reclaims the lease", M_Lease_TryAcquire()
+
+'------------------------------------------------------------------------------
+' TIMER TICK DRAINS AN OUTSTANDING REGISTRATION
+'------------------------------------------------------------------------------
+    'Leave a registration outstanding behind a stopped timer, as a failed
+    'cancellation does
+        M_Timer_Stop
+        M_Timer_Test_Reset
+        M_Timer_Start
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        ArmedEarliest = RegEarliest
+        ArmedProcedure = RegProcedure
+        TimerArmed = True
+        M_Timer_Test_ArmScheduleFault 1004
+        M_Timer_Stop
+        TST_DP_AssertTrue "Timer setup leaves a registration outstanding", _
+            M_Timer_Test_IsUnresolved()
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, BaselineCount
+    'Deliver the tick the way Excel does
+        RunError = TST_DP_RunCallbackForTest("M_Timer_Tick", False)
+        M_Timer_Test_LastRegistration RegEarliest, RegLatest, RegProcedure, _
+            RegSchedule, RegErrNumber, RegCallCount
+        TST_DP_AssertEqualsString "M_Timer_Tick resolves through Application.Run", _
+            VBA.vbNullString, RunError
+        TST_DP_AssertFalse "M_Timer_Tick reaches the drain path", _
+            M_Timer_Test_IsUnresolved()
+        TST_DP_AssertEqualsLong "M_Timer_Tick schedules nothing for a stopped timer", _
+            BaselineCount, RegCallCount
+        TST_DP_AssertFalse "M_Timer_Tick does not restart a stopped timer", _
+            M_Timer_Test_IsRunning()
+    'Cancel the registration the failed cancellation left armed
+        TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+        TimerArmed = False
+
+'------------------------------------------------------------------------------
+' RESOLVE THE WORKBOOK RIBBON_DEMO WOULD USE
+'------------------------------------------------------------------------------
+    'Embedded: the host workbook. Add-in: the first open workbook that already
+    'holds the demo sheet, as DP_DemoSheet_ResolveHostWorkbook decides
+        If Not ThisWorkbook.IsAddin Then
+            Set DemoBook = ThisWorkbook
+        Else
+            For Each CandidateBook In Excel.Application.Workbooks
+                If DemoBook Is Nothing And Not CandidateBook.IsAddin Then
+                    If TST_DP_SheetExists(CandidateBook, DEMO_SHEET_NAME) Then
+                        Set DemoBook = CandidateBook
+                    End If
+                End If
+            Next CandidateBook
+        End If
+    'Find the existing demo sheet and another sheet that stays visible
+        If Not DemoBook Is Nothing Then
+            If TST_DP_SheetExists(DemoBook, DEMO_SHEET_NAME) Then
+                Set DemoSheet = DemoBook.Worksheets(DEMO_SHEET_NAME)
+                For Each OtherSheet In DemoBook.Worksheets
+                    If Not OtherSheet Is DemoSheet Then
+                        If OtherSheet.Visible = xlSheetVisible Then OtherVisible = True
+                    End If
+                Next OtherSheet
+            End If
+        End If
+
+'------------------------------------------------------------------------------
+' RIBBON DEMO TOGGLES AND RESTORES AN EXISTING SHEET
+'------------------------------------------------------------------------------
+    'Record why the callback could not be exercised without lasting effects
+        If DemoSheet Is Nothing Or Not OtherVisible Then
+            TST_DP_RecordInfo mTST_DP_CurrentSuite, _
+                "Ribbon_Demo resolution not exercised", _
+                "The workbook Ribbon_Demo would use holds no demo sheet beside " & _
+                "another visible sheet; building one would leave workbook names " & _
+                "and tables behind. Run the packaged demo workbook to cover it."
+            GoTo SuiteExit
+        End If
+    'Toggle once and back; the second click must restore the first state
+        VisibilityBefore = DemoSheet.Visible
+        Set ActiveBefore = Excel.Application.ActiveSheet
+        DemoTouched = True
+        RunError = TST_DP_RunCallbackForTest("Ribbon_Demo", True)
+        TST_DP_AssertEqualsString "Ribbon_Demo resolves through Application.Run", _
+            VBA.vbNullString, RunError
+        TST_DP_AssertTrue "Ribbon_Demo toggles the demo sheet", _
+            ((DemoSheet.Visible = xlSheetVisible) <> (VisibilityBefore = xlSheetVisible))
+        RunError = TST_DP_RunCallbackForTest("Ribbon_Demo", True)
+        TST_DP_AssertEqualsString "A second Ribbon_Demo resolves through Application.Run", _
+            VBA.vbNullString, RunError
+        TST_DP_AssertTrue "A second Ribbon_Demo toggles the demo sheet back", _
+            ((DemoSheet.Visible = xlSheetVisible) = (VisibilityBefore = xlSheetVisible))
+
+'------------------------------------------------------------------------------
+' SUITE EXIT
+'------------------------------------------------------------------------------
+SuiteExit:
+    'Never let restoration raise back into the suite handler
+        On Error Resume Next
+    'Put the demo sheet and the active sheet back as they were
+        If DemoTouched Then
+            DemoSheet.Visible = VisibilityBefore
+            ActiveBefore.Parent.Activate
+            ActiveBefore.Activate
+        End If
+    'Cancel a registration a failure left armed, and disarm the timer seams
+        If TimerArmed Then TST_DP_CancelRegistrationForTest ArmedEarliest, ArmedProcedure
+        M_Timer_Test_ArmScheduleFault 0
+        M_Timer_Test_Reset
+    'Leave the run owning the lease, as it did before this suite
+        If Not M_Lease_IsOwner() Then
+            TST_DP_ForceClearLeaseForTest
+            M_Lease_TryAcquire
+        End If
+    'Recreate the runtime manager the suite released, now as the owner
+        If ManagerBefore Then M_Picker_EnsureManager
+    'Restore reporting so a genuine conflict is never hidden from the operator
+        M_Lease_Test_SilenceRefusalReport False
+    'Put back the event state the suite found, for the suites that follow
+        Excel.Application.EnableEvents = EventsBefore
+    'Release object references
+        Set ActiveBefore = Nothing
+        Set OtherSheet = Nothing
+        Set DemoSheet = Nothing
+        Set CandidateBook = Nothing
+        Set DemoBook = Nothing
+    'Clear any suppressed restoration error
+        Err.Clear
+    'Restore normal error handling
+        On Error GoTo 0
+    'Exit after the suite completes
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' SUITE FAIL
+'------------------------------------------------------------------------------
+SuiteFail:
+    'Record the failure and clear the error
+        TST_DP_RecordFail "CallbackResolution suite failed", _
+            "Error " & VBA.CStr(Err.Number) & " - " & Err.Description
+        Err.Clear
+    'Restore reporting, lease, timer and sheet state regardless
+        Resume SuiteExit
+
+End Sub
+
+Private Function TST_DP_RunCallbackForTest( _
+    ByVal ProcedureName As String, _
+    ByVal PassRibbonControl As Boolean) As String
+
+'
+'==============================================================================
+'                       RUN A CALLBACK THE WAY EXCEL DOES
+'==============================================================================
+' PURPOSE
+'   Runs one facade callback through Excel.Application.Run with the
+'   workbook-qualified name production registers
+'
+' WHY THIS EXISTS
+'   Excel resolves callback names when it calls them. A direct VBA call proves
+'   nothing about that resolution, so the callback suite goes through
+'   Application.Run with the same name text Excel receives
+'
+' INPUTS
+'   ProcedureName
+'     Unqualified facade callback name, for example DP_Click
+'
+'   PassRibbonControl
+'     True to pass Nothing as the IRibbonControl argument of a Ribbon callback
+'
+' RETURNS
+'   An empty string when the call ran, otherwise the error number and
+'   description
+'
+' BEHAVIOR
+'   Builds 'Workbook'!ProcedureName with doubled single quotes, as
+'   M_GetQualifiedMacroName does, and runs it once
+'
+' ERROR POLICY
+'   Never raises: the failure is returned so the suite can assert on it
+'
+' DEPENDENCIES
+'   Excel.Application.Run
+'   ThisWorkbook
+'
+' NOTES
+'   None
+'
+' UPDATED
+'   2026-11-21
+'==============================================================================
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim QualifiedName       As String       'Workbook-qualified callback name
+
+'------------------------------------------------------------------------------
+' BUILD THE NAME EXCEL RECEIVES
+'------------------------------------------------------------------------------
+    'Quote the workbook name exactly as production does
+        QualifiedName = "'" & VBA.Replace(ThisWorkbook.Name, "'", "''") & "'!" & ProcedureName
+
+'------------------------------------------------------------------------------
+' RUN THE CALLBACK
+'------------------------------------------------------------------------------
+    'Capture a resolution or runtime failure instead of raising it
+        On Error Resume Next
+        Err.Clear
+        If PassRibbonControl Then
+            Excel.Application.Run QualifiedName, Nothing
+        Else
+            Excel.Application.Run QualifiedName
+        End If
+    'Return the failure text, empty when the call ran
+        If Err.Number <> 0 Then
+            TST_DP_RunCallbackForTest = VBA.CStr(Err.Number) & " - " & Err.Description
+        Else
+            TST_DP_RunCallbackForTest = VBA.vbNullString
+        End If
+    'Clear the captured error and restore normal error handling
+        Err.Clear
+        On Error GoTo 0
+
+End Function
 
 Private Sub TST_DP_RunSuite_DemoFastMode()
 
