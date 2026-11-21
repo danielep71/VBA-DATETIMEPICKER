@@ -42,6 +42,7 @@ Option Explicit
 '
 ' DEPENDENCIES
 '   M_DatePicker
+'   M_DP_Core
 '   cDatePickerManager
 '   UF_DatePicker
 '   M_DEMO_BUILDER
@@ -154,7 +155,7 @@ Option Explicit
 '   a transaction only from the result the transaction returns is the function
 '   testing itself
 '
-'   GWL_STYLE and WS_CAPTION are duplicated from M_DatePicker, where they are
+'   GWL_STYLE and WS_CAPTION are duplicated from M_DP_Core, where they are
 '   Private. They are fixed Windows values and cannot drift
 '------------------------------------------------------------------------------
     Private Const TST_DP_GWL_STYLE      As Long = -16           'Window style index
@@ -6726,7 +6727,7 @@ Private Function TST_DP_ReadLeaseOwnerForTest() As String
 '   Reads the lease marker directly, so the suite can assert on the workbook
 '   state rather than on the routine under test.
 '
-'   The bar name and marker tag are duplicated from M_DatePicker, where they are
+'   The bar name and marker tag are duplicated from M_DP_Core, where they are
 '   Private. They are fixed identifiers that cannot drift without this suite
 '   failing.
 '==============================================================================
@@ -9509,8 +9510,8 @@ Private Sub TST_DP_RunSuite_WindowRecovery()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const FAULT_SET_WINDOW_POS  As Long = 3         'Matches M_DatePicker
-    Const FAULT_ROLLBACK_STYLE  As Long = 1         'Matches M_DatePicker
+    Const FAULT_SET_WINDOW_POS  As Long = 3         'Matches M_DP_Core
+    Const FAULT_ROLLBACK_STYLE  As Long = 1         'Matches M_DP_Core
 
     Dim LoadRaised              As Boolean          'True when the form load failed
     Dim OldUseWinAPI            As Boolean          'WinAPI styling setting on entry
@@ -9669,7 +9670,7 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '
 ' NOTES
 '   The failure-point numbers below are duplicated from private constants in
-'   M_DatePicker rather than shared through a public enum, so the seam does not
+'   M_DP_Core rather than shared through a public enum, so the seam does not
 '   enlarge the public API. The two lists must be changed together
 '
 '   A resolvable window handle is asserted before any injected failure. A
@@ -9691,12 +9692,12 @@ Private Sub TST_DP_RunSuite_WindowStyle()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Const FAULT_STYLE_READ      As Long = 1     'Matches M_DatePicker
-    Const FAULT_STYLE_WRITE     As Long = 2     'Matches M_DatePicker
-    Const FAULT_SET_WINDOW_POS  As Long = 3     'Matches M_DatePicker
-    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Matches M_DatePicker
-    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Matches M_DatePicker
-    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Matches M_DatePicker
+    Const FAULT_STYLE_READ      As Long = 1     'Matches M_DP_Core
+    Const FAULT_STYLE_WRITE     As Long = 2     'Matches M_DP_Core
+    Const FAULT_SET_WINDOW_POS  As Long = 3     'Matches M_DP_Core
+    Const FAULT_DRAW_MENU_BAR   As Long = 4     'Matches M_DP_Core
+    Const FAULT_ROLLBACK_STYLE  As Long = 1     'Matches M_DP_Core
+    Const FAULT_ROLLBACK_FRAME  As Long = 2     'Matches M_DP_Core
 
     #If VBA7 Then
         Dim FormHandle          As LongPtr      'Native window behind the picker form
@@ -12041,7 +12042,7 @@ Private Sub TST_DP_VerifyFinalState(ByRef AppSnapshot As TRegDPApplicationSnapsh
 '
 '     keyboard shortcut   Excel exposes no getter for Application.OnKey, so the
 '                         assignment cannot be read back at all. See #42
-'     live-clock timer    mDP_TimerIsRunning is Private to M_DatePicker and
+'     live-clock timer    mDP_TimerIsRunning is Private to M_DP_Core and
 '                         Application.OnTime schedules cannot be enumerated
 '
 '   Both are covered instead by per-operation cleanup accounting: M_Timer_Stop
@@ -13599,7 +13600,7 @@ Private Function TST_DP_ContextMenuControlCount() As Long
 '   one a name lookup returns: Excel has a separate "Cell" bar for Page Layout
 '   view, and an entry left there is just as much a leak (#114).
 '
-'   The tag is duplicated here rather than read from M_DatePicker, where it is a
+'   The tag is duplicated here rather than read from M_DP_Core, where it is a
 '   Private constant. It is documented as a stable legacy identifier that cannot
 '   be renamed for backward compatibility, so duplicating it is safe in a way
 '   that duplicating an ordinary constant would not be.

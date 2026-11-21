@@ -21,6 +21,17 @@ Computed channels:
 
 Declared channels: ``direct-vba`` (required on, and only on, supported
 symbols) and ``operator`` (an internal helper documented for manual recovery).
+
+Facade rules (#55):
+
+- The facade holds only public enums, public types and public wrappers. It has
+  no ``Declare``, constant, variable or private member.
+- Each wrapper is one statement that delegates to ``<Module>.<Name>_Impl`` in
+  a production module with ``Option Private Module``.
+- No other production component calls a facade wrapper. Internal code calls
+  the ``_Impl`` procedure; callback names reach Excel only as strings. The
+  add-in's own workbook module (``src/addin/``) is a host and may call the
+  supported API.
 """
 from __future__ import annotations
 
@@ -45,6 +56,8 @@ CALLBACK_CHANNELS = ("ribbon-onaction", *BY_NAME)
 COMPUTED = ("macro-dialog", "ribbon-onaction", "project-internal", "test-harness", "demo")
 DECLARED = ("direct-vba", "operator", *BY_NAME)
 CHANNELS = (*COMPUTED, *DECLARED)
+# Production components that host the add-in and consume the supported API.
+HOSTS = ("src/addin/",)
 # Production helpers that qualify a procedure name before Excel resolves it.
 QUALIFIERS = ("M_GetQualifiedMacroName",)
 README_BLOCKS = ("supported", "callback")
@@ -288,6 +301,53 @@ def object_findings(path: str, text: str) -> list[str]:
     return []
 
 
+def facade_findings(path: str, text: str, private_modules: set[str]) -> list[str]:
+    """The facade declares public enums, types and one-statement delegating wrappers only."""
+    findings: list[str] = []
+    block_end: str | None = None
+    procedure: tuple[str, int, list[str]] | None = None
+    for start, _end, kind, unit in logical_units(text.splitlines()):
+        line = unit.strip()
+        if kind != "code" or not line:
+            continue
+        if block_end is not None:
+            if re.fullmatch(block_end, line, re.I):
+                block_end = None
+            continue
+        if procedure is not None:
+            if not re.match(r"^End\s+(Sub|Function|Property)\b", line, re.I):
+                procedure[2].append(line)
+                continue
+            name, at, body = procedure
+            delegate = re.fullmatch(rf"(?:Set\s+)?(?:{name}\s*=\s*)?(\w+)\.{name}_Impl\b.*", body[0],
+                                    re.I) if len(body) == 1 else None
+            if delegate is None or delegate.group(1).casefold() not in private_modules:
+                findings.append(f"{path}:{at}: {name} must delegate in one statement to "
+                                f"<private module>.{name}_Impl")
+            procedure = None
+            continue
+        if line.startswith("Attribute ") or re.fullmatch(r"Option\s+\w+(?:\s+\w+)?", line, re.I):
+            continue
+        declared = PROCEDURE.match(line)
+        if declared:
+            scope, _kind, name, _rest = declared.groups()
+            if scope is None or scope.casefold() not in ("public", "global"):
+                findings.append(f"{path}:{start}: the facade declares only public wrappers; "
+                                f"move {name} to an implementation module")
+            procedure = (name, start, [])
+            continue
+        block = BLOCK.match(line)
+        if block:
+            if (block.group(1) or "").casefold() == "private":
+                findings.append(f"{path}:{start}: the facade declares only public enums and types; "
+                                f"move {block.group(3)} to an implementation module")
+            block_end = rf"End\s+{block.group(2)}"
+            continue
+        findings.append(f"{path}:{start}: the facade holds only public enums, types and wrappers; "
+                        f"move this declaration to an implementation module: {line[:60]}")
+    return findings
+
+
 def analyze(files: dict[str, str], manifest: dict[str, Any], ribbon: bytes | None,
             readme: str) -> dict[str, Any]:
     """Compare the classified manifest with what the tracked source declares."""
@@ -306,6 +366,9 @@ def analyze(files: dict[str, str], manifest: dict[str, Any], ribbon: bytes | Non
     for path, text in sorted(production.items()):
         if path.endswith((".cls", ".frm")):
             findings.extend(object_findings(path, text))
+    if facade_path in modules:
+        private_modules = {c.name.casefold() for c in modules.values() if c.private_module}
+        findings.extend(facade_findings(facade_path, production[facade_path], private_modules))
 
     symbols: dict[str, Symbol] = {}
     for component in modules.values():
@@ -314,6 +377,16 @@ def analyze(files: dict[str, str], manifest: dict[str, Any], ribbon: bytes | Non
             if key in symbols:
                 findings.append(f"Ambiguous public name {parsed.name} in {symbols[key].path} and {parsed.path}")
             symbols[key] = parsed
+
+    wrappers = [s.name for s in modules[facade_path].symbols
+                if s.kind not in ("Enum", "Type", "Const", "Variable", "Declare")] if facade_path in modules else []
+    for path in sorted(production):
+        if path == facade_path or path.startswith(HOSTS):
+            continue
+        code = code_without_strings(production[path])
+        for name in wrappers:
+            if re.search(rf"\b{re.escape(name)}\b", code, re.I):
+                findings.append(f"{path}: calls the facade wrapper {name}; call {name}_Impl instead")
 
     ribbon_names: set[str] = set()
     if ribbon is not None:
@@ -394,7 +467,8 @@ def analyze(files: dict[str, str], manifest: dict[str, Any], ribbon: bytes | Non
         if (classification == "callback") != is_callback:
             findings.append(f"{label}: classification callback requires, and only callbacks have, a callback "
                             "channel")
-        if any("IRibbonControl" in s for s in symbol.signatures) and key not in ribbon_names:
+        if (any("IRibbonControl" in s for s in symbol.signatures) and key not in ribbon_names
+                and not modules[symbol.path].private_module):
             findings.append(f"{label} has a Ribbon callback signature but no Ribbon binding (orphaned callback)")
         if ("direct-vba" in channels) != (classification == "supported"):
             findings.append(f"{label}: direct-vba is required on supported symbols and forbidden elsewhere")

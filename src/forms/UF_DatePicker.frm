@@ -981,7 +981,7 @@ Private Sub UserForm_KeyDown( _
         
             Case vbKeyEscape
                 'Close the DatePicker
-                    DP_Close
+                    DP_Close_Impl
                     ActionHandled = True
 
             Case vbKeyReturn, vbKeySpace
@@ -1077,14 +1077,14 @@ Private Sub UserForm_KeyDown( _
             Case vbKeyT
                 'Write today without time when no conflicting modifier is pressed
                     If LetterShortcutAllowed Then
-                        DP_Today
+                        DP_Today_Impl
                         ActionHandled = True
                     End If
 
             Case vbKeyN
                 'Write today with the current system time when no conflicting modifier is pressed
                     If LetterShortcutAllowed Then
-                        DP_Now
+                        DP_Now_Impl
                         ActionHandled = True
                     End If
 
@@ -2499,7 +2499,7 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
                 'Track the current handler step
                     HandlerStep = "Write now"
                 'Write today with the current system time
-                    DP_Now
+                    DP_Now_Impl
                 'Exit after routing the action
                     Exit Sub
 
@@ -2507,7 +2507,7 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
                 'Track the current handler step
                     HandlerStep = "Write today"
                 'Write today without time
-                    DP_Today
+                    DP_Today_Impl
                 'Exit after routing the action
                     Exit Sub
 
@@ -2563,7 +2563,7 @@ Public Sub UF_PickerPanel_HandleAction(ByVal ActionName As String)
                 'Track the current handler step
                     HandlerStep = "Close picker"
                 'Close the DatePicker
-                    DP_Close
+                    DP_Close_Impl
                 'Exit after routing the action
                     Exit Sub
 

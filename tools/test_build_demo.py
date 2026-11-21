@@ -13,7 +13,7 @@ import assemble_release
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "Build-Addin.ps1"
 DEMO = ROOT / "demo" / "M_DP_DEMO.bas"
-RUNTIME = ROOT / "src" / "modules" / "M_DatePicker.bas"
+RUNTIME = ROOT / "src" / "modules" / "M_DP_Core.bas"
 LAUNCHER = ROOT / "tools" / "Build-Demo.cmd"
 
 

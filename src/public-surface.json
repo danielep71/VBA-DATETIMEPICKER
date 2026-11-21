@@ -5,7 +5,7 @@
   "symbols": [
     {
       "name": "DP_FORM_NAME",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [
@@ -17,7 +17,7 @@
     },
     {
       "name": "DP_MIN_YEAR",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [
@@ -29,7 +29,7 @@
     },
     {
       "name": "DP_MAX_YEAR",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [
@@ -41,7 +41,7 @@
     },
     {
       "name": "DP_SETTINGS_APP_NAME",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [
@@ -53,7 +53,7 @@
     },
     {
       "name": "DP_GRID_ICON_NAME",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [
@@ -65,7 +65,7 @@
     },
     {
       "name": "DP_MSGBOX_TITLE",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [
@@ -78,7 +78,7 @@
     },
     {
       "name": "DP_DEFAULT_FIRST_DAY_OF_WEEK",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -88,7 +88,7 @@
     },
     {
       "name": "DP_DEFAULT_USE_LOCAL_NAMES",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -98,7 +98,7 @@
     },
     {
       "name": "DP_DEFAULT_ALLOW_OUTSIDE_MONTH_SELECTION",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -108,7 +108,7 @@
     },
     {
       "name": "DP_DEFAULT_HIGHLIGHT_WEEKENDS",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -118,7 +118,7 @@
     },
     {
       "name": "DP_DEFAULT_CLOSE_AFTER_SELECTION",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -128,7 +128,7 @@
     },
     {
       "name": "DP_DEFAULT_SHOW_RIGHT_CLICK",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -138,7 +138,7 @@
     },
     {
       "name": "DP_DEFAULT_SHOW_GRID_ICON",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -148,7 +148,7 @@
     },
     {
       "name": "DP_DEFAULT_ENABLE_KEYBOARD",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -158,7 +158,7 @@
     },
     {
       "name": "DP_KEYBOARD_SHORTCUT_TEXT",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -168,7 +168,7 @@
     },
     {
       "name": "DP_DEFAULT_HOLIDAY_CALLBACK",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -178,7 +178,7 @@
     },
     {
       "name": "DP_THEME_COLOR_HEADER",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -188,7 +188,7 @@
     },
     {
       "name": "DP_THEME_COLOR_HEADER_FORE",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -198,7 +198,7 @@
     },
     {
       "name": "DP_THEME_COLOR_FORM_BACK",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -208,7 +208,7 @@
     },
     {
       "name": "DP_THEME_COLOR_TEXT",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -218,7 +218,7 @@
     },
     {
       "name": "DP_THEME_COLOR_TEXT_MUTED",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -228,7 +228,7 @@
     },
     {
       "name": "DP_THEME_COLOR_BORDER_LIGHT",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -238,7 +238,7 @@
     },
     {
       "name": "DP_THEME_COLOR_HOVER",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -248,7 +248,7 @@
     },
     {
       "name": "DP_THEME_COLOR_FOOTER",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -258,7 +258,7 @@
     },
     {
       "name": "DP_THEME_COLOR_SELECTED_BACK",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -268,7 +268,7 @@
     },
     {
       "name": "DP_THEME_COLOR_SELECTED_FORE",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -278,7 +278,7 @@
     },
     {
       "name": "DP_THEME_COLOR_TODAY_BACK",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -288,7 +288,7 @@
     },
     {
       "name": "DP_THEME_COLOR_HOLIDAY_FORE",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Const",
       "classification": "internal",
       "channels": [],
@@ -302,7 +302,8 @@
       "kind": "Enum",
       "classification": "supported",
       "channels": [
-        "direct-vba"
+        "direct-vba",
+        "project-internal"
       ],
       "signatures": [
         "Enum DP_WriteAction"
@@ -376,7 +377,8 @@
       "classification": "supported",
       "channels": [
         "test-harness",
-        "direct-vba"
+        "direct-vba",
+        "project-internal"
       ],
       "signatures": [
         "Type DP_WriteResult"
@@ -404,7 +406,7 @@
     },
     {
       "name": "gDP_Manager",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -416,7 +418,7 @@
     },
     {
       "name": "gDP_WriteValue",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -428,7 +430,7 @@
     },
     {
       "name": "gDP_ShowRightClick",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -441,7 +443,7 @@
     },
     {
       "name": "gDP_ShowGridIcon",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -454,7 +456,7 @@
     },
     {
       "name": "gDP_GridIconShape",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -466,7 +468,7 @@
     },
     {
       "name": "gDP_FirstDayOfWeek",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -479,7 +481,7 @@
     },
     {
       "name": "gDP_UseLocalNames",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -492,7 +494,7 @@
     },
     {
       "name": "gDP_ClockMode",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -505,7 +507,7 @@
     },
     {
       "name": "gDP_SizeMode",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -518,7 +520,7 @@
     },
     {
       "name": "gDP_HighlightWeekends",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -531,7 +533,7 @@
     },
     {
       "name": "gDP_AllowOutsideMonthSelection",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -544,7 +546,7 @@
     },
     {
       "name": "gDP_CloseAfterSelection",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -557,7 +559,7 @@
     },
     {
       "name": "gDP_UseWinAPI",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -570,7 +572,7 @@
     },
     {
       "name": "gDP_EnableKeyboardShortcut",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -583,7 +585,7 @@
     },
     {
       "name": "gDP_HolidayCallbackName",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -595,7 +597,7 @@
     },
     {
       "name": "gDP_InitialDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -607,7 +609,7 @@
     },
     {
       "name": "gDP_HasInitialDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -619,7 +621,7 @@
     },
     {
       "name": "gDP_SelectedDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -632,7 +634,7 @@
     },
     {
       "name": "gDP_HasSelectedDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Variable",
       "classification": "internal",
       "channels": [
@@ -657,6 +659,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetNamespace_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetNamespace_Impl(ByVal NamespaceName As String)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetNamespace; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetNamespace",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -670,49 +685,56 @@
       ]
     },
     {
+      "name": "M_Settings_GetNamespace_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetNamespace_Impl() As String"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetNamespace; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_Load",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Settings_Load()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Settings_Save",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Settings_Save()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Settings_EnsureLoaded",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Settings_EnsureLoaded()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Settings_SetFirstDayOfWeek",
@@ -728,6 +750,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetFirstDayOfWeek_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetFirstDayOfWeek_Impl(ByVal FirstDayOfWeek As Long)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetFirstDayOfWeek; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_SetFirstDayOfWeekText",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -739,6 +774,19 @@
       "signatures": [
         "Sub M_Settings_SetFirstDayOfWeekText(ByVal FirstDayOfWeekText As String)"
       ]
+    },
+    {
+      "name": "M_Settings_SetFirstDayOfWeekText_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetFirstDayOfWeekText_Impl(ByVal FirstDayOfWeekText As String)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetFirstDayOfWeekText; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_SetUseLocalNames",
@@ -754,8 +802,21 @@
       ]
     },
     {
+      "name": "M_Settings_SetUseLocalNames_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetUseLocalNames_Impl(ByVal UseLocalDayNames As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetUseLocalNames; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_ResolveKeyboardShortcutOnSave",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -780,6 +841,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetEnableKeyboardShortcut_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetEnableKeyboardShortcut_Impl(ByVal EnableKeyboardShortcut As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetEnableKeyboardShortcut; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_SetUseWinAPI",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -791,6 +865,19 @@
       "signatures": [
         "Sub M_Settings_SetUseWinAPI(ByVal UseWinAPI As Boolean)"
       ]
+    },
+    {
+      "name": "M_Settings_SetUseWinAPI_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetUseWinAPI_Impl(ByVal UseWinAPI As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetUseWinAPI; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_SetAllowOutsideMonthSelection",
@@ -806,6 +893,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetAllowOutsideMonthSelection_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetAllowOutsideMonthSelection_Impl(ByVal AllowOutsideMonthSelection As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetAllowOutsideMonthSelection; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_SetHighlightWeekends",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -817,6 +917,19 @@
       "signatures": [
         "Sub M_Settings_SetHighlightWeekends(ByVal HighlightWeekends As Boolean)"
       ]
+    },
+    {
+      "name": "M_Settings_SetHighlightWeekends_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetHighlightWeekends_Impl(ByVal HighlightWeekends As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetHighlightWeekends; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_SetCloseAfterSelection",
@@ -832,6 +945,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetCloseAfterSelection_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetCloseAfterSelection_Impl(ByVal CloseAfterSelection As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetCloseAfterSelection; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_SetClockMode",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -843,6 +969,19 @@
       "signatures": [
         "Sub M_Settings_SetClockMode(ByVal ClockMode As DP_ClockMode)"
       ]
+    },
+    {
+      "name": "M_Settings_SetClockMode_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetClockMode_Impl(ByVal ClockMode As DP_ClockMode)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetClockMode; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_SetSizeMode",
@@ -858,6 +997,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetSizeMode_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetSizeMode_Impl(ByVal SizeMode As DP_SizeMode)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetSizeMode; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_SetHolidayCallback",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -869,6 +1021,19 @@
       "signatures": [
         "Sub M_Settings_SetHolidayCallback(ByVal HolidayCallbackName As String)"
       ]
+    },
+    {
+      "name": "M_Settings_SetHolidayCallback_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetHolidayCallback_Impl(ByVal HolidayCallbackName As String)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetHolidayCallback; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_SetShowRightClick",
@@ -884,6 +1049,19 @@
       ]
     },
     {
+      "name": "M_Settings_SetShowRightClick_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetShowRightClick_Impl(ByVal ShowRightClick As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetShowRightClick; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_SetShowGridIcon",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -895,6 +1073,19 @@
       "signatures": [
         "Sub M_Settings_SetShowGridIcon(ByVal ShowGridIcon As Boolean)"
       ]
+    },
+    {
+      "name": "M_Settings_SetShowGridIcon_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_SetShowGridIcon_Impl(ByVal ShowGridIcon As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_SetShowGridIcon; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetFirstDayOfWeek",
@@ -910,6 +1101,19 @@
       ]
     },
     {
+      "name": "M_Settings_GetFirstDayOfWeek_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetFirstDayOfWeek_Impl() As Long"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetFirstDayOfWeek; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetUseLocalNames",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -921,6 +1125,19 @@
       "signatures": [
         "Function M_Settings_GetUseLocalNames() As Boolean"
       ]
+    },
+    {
+      "name": "M_Settings_GetUseLocalNames_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetUseLocalNames_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetUseLocalNames; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetAllowOutsideMonthSelection",
@@ -936,6 +1153,19 @@
       ]
     },
     {
+      "name": "M_Settings_GetAllowOutsideMonthSelection_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetAllowOutsideMonthSelection_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetAllowOutsideMonthSelection; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetFirstDayOfWeekText",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -947,6 +1177,19 @@
         "Function M_Settings_GetFirstDayOfWeekText() As String"
       ],
       "note": "Getter of the FirstDayOfWeekText setting pair."
+    },
+    {
+      "name": "M_Settings_GetFirstDayOfWeekText_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetFirstDayOfWeekText_Impl() As String"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetFirstDayOfWeekText; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetShowRightClick",
@@ -962,6 +1205,19 @@
       ]
     },
     {
+      "name": "M_Settings_GetShowRightClick_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetShowRightClick_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetShowRightClick; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetShowGridIcon",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -973,6 +1229,19 @@
       "signatures": [
         "Function M_Settings_GetShowGridIcon() As Boolean"
       ]
+    },
+    {
+      "name": "M_Settings_GetShowGridIcon_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetShowGridIcon_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetShowGridIcon; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetEnableKeyboardShortcut",
@@ -988,6 +1257,19 @@
       ]
     },
     {
+      "name": "M_Settings_GetEnableKeyboardShortcut_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetEnableKeyboardShortcut_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetEnableKeyboardShortcut; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetUseWinAPI",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -999,6 +1281,19 @@
       "signatures": [
         "Function M_Settings_GetUseWinAPI() As Boolean"
       ]
+    },
+    {
+      "name": "M_Settings_GetUseWinAPI_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetUseWinAPI_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetUseWinAPI; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetClockMode",
@@ -1014,6 +1309,19 @@
       ]
     },
     {
+      "name": "M_Settings_GetClockMode_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetClockMode_Impl() As DP_ClockMode"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetClockMode; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetSizeMode",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -1025,6 +1333,19 @@
       "signatures": [
         "Function M_Settings_GetSizeMode() As DP_SizeMode"
       ]
+    },
+    {
+      "name": "M_Settings_GetSizeMode_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetSizeMode_Impl() As DP_SizeMode"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetSizeMode; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetHighlightWeekends",
@@ -1040,6 +1361,19 @@
       ]
     },
     {
+      "name": "M_Settings_GetHighlightWeekends_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetHighlightWeekends_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetHighlightWeekends; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_GetCloseAfterSelection",
       "module": "M_DatePicker",
       "kind": "Function",
@@ -1051,6 +1385,19 @@
       "signatures": [
         "Function M_Settings_GetCloseAfterSelection() As Boolean"
       ]
+    },
+    {
+      "name": "M_Settings_GetCloseAfterSelection_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetCloseAfterSelection_Impl() As Boolean"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetCloseAfterSelection; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "M_Settings_GetHolidayCallback",
@@ -1066,8 +1413,21 @@
       ]
     },
     {
+      "name": "M_Settings_GetHolidayCallback_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function M_Settings_GetHolidayCallback_Impl() As String"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_GetHolidayCallback; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Settings_FirstDayOfWeekToText",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1079,7 +1439,7 @@
     },
     {
       "name": "M_Settings_IsValidFirstDayOfWeek",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1092,18 +1452,16 @@
     },
     {
       "name": "M_Picker_EnsureManager",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "test-harness",
         "operator"
       ],
       "signatures": [
         "Sub M_Picker_EnsureManager()"
       ],
-      "pending": "#55",
       "note": "Advanced maintenance helper, not supported API (v1.2.2 CHANGELOG). Parameterless since v1.2.2; the optional EventsDisabledByCaller argument was removed with a documented source break. It still preserves the caller's EnableEvents state."
     },
     {
@@ -1122,6 +1480,19 @@
       ]
     },
     {
+      "name": "DP_Preload_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Preload_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Preload; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "DP_ForceReleaseProviderLease",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -1136,22 +1507,33 @@
       ]
     },
     {
-      "name": "M_Lease_Test_ClearOwnerToken",
-      "module": "M_DatePicker",
+      "name": "DP_ForceReleaseProviderLease_Impl",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_ForceReleaseProviderLease_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_ForceReleaseProviderLease; internal code calls it instead of the facade wrapper."
+    },
+    {
+      "name": "M_Lease_Test_ClearOwnerToken",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
         "test-harness"
       ],
       "signatures": [
         "Sub M_Lease_Test_ClearOwnerToken()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Lease_Test_SilenceRefusalReport",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1163,7 +1545,7 @@
     },
     {
       "name": "M_Lease_Test_RefusalReportCount",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1175,7 +1557,7 @@
     },
     {
       "name": "M_Lease_IsOwner",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1187,7 +1569,7 @@
     },
     {
       "name": "M_Lease_TryAcquire",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1199,7 +1581,7 @@
     },
     {
       "name": "M_Lifecycle_Test_ArmFault",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1211,7 +1593,7 @@
     },
     {
       "name": "M_Lifecycle_Test_Reset",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1223,7 +1605,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastTrace",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1235,7 +1617,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastCleanupDetail",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [],
@@ -1245,7 +1627,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastCriticalClean",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1257,7 +1639,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastLeaseReleased",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1269,7 +1651,7 @@
     },
     {
       "name": "M_Lifecycle_Test_HasLocalOwnerToken",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1281,7 +1663,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastPrimaryNumber",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1293,7 +1675,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastPrimaryStep",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [],
@@ -1303,7 +1685,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastPrimaryDescription",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [],
@@ -1313,7 +1695,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastOperation",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1325,7 +1707,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastSucceeded",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1337,7 +1719,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastCleanupAttempted",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1349,7 +1731,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastCleanupFailureCount",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1361,7 +1743,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastLeaseWasAlreadyOwned",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1373,7 +1755,7 @@
     },
     {
       "name": "M_Lifecycle_Test_LastLeaseAcquiredThisCall",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1385,17 +1767,15 @@
     },
     {
       "name": "M_Lease_Release",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Lease_Release()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "DP_Start",
@@ -1413,6 +1793,19 @@
       ]
     },
     {
+      "name": "DP_Start_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Start_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Start; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "DP_Show",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -1425,6 +1818,19 @@
       "signatures": [
         "Sub DP_Show()"
       ]
+    },
+    {
+      "name": "DP_Show_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Show_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Show; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "DP_Click",
@@ -1441,6 +1847,19 @@
       ]
     },
     {
+      "name": "DP_Click_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Click_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Click; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "DP_OpenForActiveCell",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -1455,6 +1874,19 @@
       ]
     },
     {
+      "name": "DP_OpenForActiveCell_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_OpenForActiveCell_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_OpenForActiveCell; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "DP_RepairRuntime",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -1467,6 +1899,19 @@
       "signatures": [
         "Sub DP_RepairRuntime()"
       ]
+    },
+    {
+      "name": "DP_RepairRuntime_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_RepairRuntime_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_RepairRuntime; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "DP_Close",
@@ -1484,6 +1929,19 @@
       ]
     },
     {
+      "name": "DP_Close_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Close_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Close; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "DP_Hide",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -1495,6 +1953,19 @@
       "signatures": [
         "Sub DP_Hide()"
       ]
+    },
+    {
+      "name": "DP_Hide_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Hide_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Hide; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "DP_Stop",
@@ -1512,8 +1983,21 @@
       ]
     },
     {
+      "name": "DP_Stop_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Stop_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Stop; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_FormBridge_ConsumeInitialDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1526,7 +2010,7 @@
     },
     {
       "name": "M_Picker_SelectDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1544,12 +2028,24 @@
       "classification": "supported",
       "channels": [
         "macro-dialog",
-        "project-internal",
         "direct-vba"
       ],
       "signatures": [
         "Sub DP_Today()"
       ]
+    },
+    {
+      "name": "DP_Today_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Today_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Today; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "DP_Now",
@@ -1558,12 +2054,24 @@
       "classification": "supported",
       "channels": [
         "macro-dialog",
-        "project-internal",
         "direct-vba"
       ],
       "signatures": [
         "Sub DP_Now()"
       ]
+    },
+    {
+      "name": "DP_Now_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub DP_Now_Impl()"
+      ],
+      "note": "Implementation of the facade procedure DP_Now; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "DP_FillTableColumn",
@@ -1580,8 +2088,21 @@
       ]
     },
     {
+      "name": "DP_FillTableColumn_Impl",
+      "module": "M_DP_Core",
+      "kind": "Function",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Function DP_FillTableColumn_Impl(ByVal ValueToWrite As Date, Optional ByVal ConfirmFill As Boolean = True, Optional ByVal OverwriteFormulas As Boolean = False) As DP_WriteResult"
+      ],
+      "note": "Implementation of the facade procedure DP_FillTableColumn; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_WriteBack_Apply",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1594,7 +2115,7 @@
     },
     {
       "name": "M_WriteBack_Test_SetFaultInjection",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1606,7 +2127,7 @@
     },
     {
       "name": "M_WriteBack_ReportShortfall",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [],
@@ -1616,7 +2137,7 @@
     },
     {
       "name": "M_WriteBack_DescribeShortfall",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1628,7 +2149,7 @@
     },
     {
       "name": "M_WriteBack_PopulateRange",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1640,7 +2161,7 @@
     },
     {
       "name": "M_DatePolicy_CanSelectDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1653,7 +2174,7 @@
     },
     {
       "name": "M_HolidayPolicy_IsHolidayDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1665,7 +2186,7 @@
     },
     {
       "name": "M_Caption_GetMonth",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1678,7 +2199,7 @@
     },
     {
       "name": "M_Caption_GetDate",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1691,7 +2212,7 @@
     },
     {
       "name": "M_Caption_GetEnglishMonthShort",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1703,7 +2224,7 @@
     },
     {
       "name": "M_Caption_GetEnglishMonthFull",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1715,7 +2236,7 @@
     },
     {
       "name": "M_Timer_EnsureHealthy",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1729,7 +2250,7 @@
     },
     {
       "name": "M_Timer_Test_ArmScheduleFault",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1741,7 +2262,7 @@
     },
     {
       "name": "M_Timer_Test_LastRegistration",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1753,7 +2274,7 @@
     },
     {
       "name": "M_Timer_Test_IsUnresolved",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1765,7 +2286,7 @@
     },
     {
       "name": "M_Timer_Test_IsRunning",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1777,74 +2298,64 @@
     },
     {
       "name": "M_Timer_Test_ExpireRegistration",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Timer_Test_ExpireRegistration()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Timer_Test_Reset",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Timer_Test_Reset()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Timer_ApplyClockMode",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal"
       ],
       "signatures": [
         "Sub M_Timer_ApplyClockMode()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Timer_Start",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Timer_Start()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Timer_Stop",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_Timer_Stop()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_Timer_Tick",
@@ -1861,8 +2372,21 @@
       ]
     },
     {
+      "name": "M_Timer_Tick_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Timer_Tick_Impl()"
+      ],
+      "note": "Implementation of the facade procedure M_Timer_Tick; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Platform_CanUseWinAPI",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1874,7 +2398,7 @@
     },
     {
       "name": "M_Platform_ShouldUseWinAPI",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1887,7 +2411,7 @@
     },
     {
       "name": "M_Window_Test_SetFaultInjection",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1899,7 +2423,7 @@
     },
     {
       "name": "M_Window_RemoveTitleBar",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1913,7 +2437,7 @@
     },
     {
       "name": "M_Window_BeginUserFormDrag",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1925,7 +2449,7 @@
     },
     {
       "name": "M_Window_GetUserFormHwnd",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -1938,7 +2462,7 @@
     },
     {
       "name": "M_Window_MoveFormToMouse",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -1950,11 +2474,10 @@
     },
     {
       "name": "M_ContextMenu_Update",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness",
         "operator"
@@ -1962,45 +2485,39 @@
       "signatures": [
         "Sub M_ContextMenu_Update()"
       ],
-      "pending": "#55",
       "note": "Documented recovery step in the README recovery guide."
     },
     {
       "name": "M_ContextMenu_EnsureForRightClick",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_ContextMenu_EnsureForRightClick()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_ContextMenu_Remove",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "test-harness"
       ],
       "signatures": [
         "Sub M_ContextMenu_Remove()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_KeyboardShortcut_Update",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness",
         "operator"
@@ -2008,27 +2525,24 @@
       "signatures": [
         "Sub M_KeyboardShortcut_Update()"
       ],
-      "pending": "#55",
       "note": "Documented recovery step in the README recovery guide."
     },
     {
       "name": "M_KeyboardShortcut_Remove",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_KeyboardShortcut_Remove()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_GridIcon_ShowOrMove",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -2041,21 +2555,19 @@
     },
     {
       "name": "M_GridIcon_Hide",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal"
       ],
       "signatures": [
         "Sub M_GridIcon_Hide()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_GridIcon_PreCreateHidden",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -2067,22 +2579,20 @@
     },
     {
       "name": "M_GridIcon_Remove",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
         "project-internal",
         "test-harness"
       ],
       "signatures": [
         "Sub M_GridIcon_Remove()"
-      ],
-      "pending": "#55"
+      ]
     },
     {
       "name": "M_GridIcon_EnsureEmbeddedIconFile",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2109,8 +2619,21 @@
       "note": "Supported because the documented host template calls it from Workbook_BeforeSave and Workbook_BeforePrint."
     },
     {
+      "name": "M_GridIcon_PurgeAll_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_GridIcon_PurgeAll_Impl()"
+      ],
+      "note": "Implementation of the facade procedure M_GridIcon_PurgeAll; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_FormBridge_RefreshFromCell",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
@@ -2135,6 +2658,19 @@
       "note": "Legacy alias of M_Settings_SetUseLocalNames, kept for older callers."
     },
     {
+      "name": "M_Settings_UseLocalNames_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub M_Settings_UseLocalNames_Impl(ByVal UseLocalDayNames As Boolean)"
+      ],
+      "note": "Implementation of the facade procedure M_Settings_UseLocalNames; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "Ribbon_ShowPicker",
       "module": "M_DatePicker",
       "kind": "Sub",
@@ -2146,6 +2682,19 @@
       "signatures": [
         "Sub Ribbon_ShowPicker(ByVal control As IRibbonControl)"
       ]
+    },
+    {
+      "name": "Ribbon_ShowPicker_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub Ribbon_ShowPicker_Impl(ByVal control As IRibbonControl)"
+      ],
+      "note": "Implementation of the facade procedure Ribbon_ShowPicker; internal code calls it instead of the facade wrapper."
     },
     {
       "name": "Ribbon_Reset",
@@ -2160,8 +2709,21 @@
       ]
     },
     {
+      "name": "Ribbon_Reset_Impl",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub Ribbon_Reset_Impl(ByVal control As IRibbonControl)"
+      ],
+      "note": "Implementation of the facade procedure Ribbon_Reset; internal code calls it instead of the facade wrapper."
+    },
+    {
       "name": "M_Ribbon_ResetShouldStart",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2173,7 +2735,7 @@
     },
     {
       "name": "M_Ribbon_LifecycleSucceeded",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2185,7 +2747,7 @@
     },
     {
       "name": "M_DemoSheet_ResolveShowOnToggle",
-      "module": "M_DatePicker",
+      "module": "M_DP_Core",
       "kind": "Function",
       "classification": "internal",
       "channels": [
@@ -2208,18 +2770,29 @@
       ]
     },
     {
-      "name": "DP_DemoSheet_HideVeryHidden",
-      "module": "M_DatePicker",
+      "name": "Ribbon_Demo_Impl",
+      "module": "M_DP_Core",
       "kind": "Sub",
       "classification": "internal",
       "channels": [
-        "macro-dialog",
+        "project-internal"
+      ],
+      "signatures": [
+        "Sub Ribbon_Demo_Impl(ByVal control As IRibbonControl)"
+      ],
+      "note": "Implementation of the facade procedure Ribbon_Demo; internal code calls it instead of the facade wrapper."
+    },
+    {
+      "name": "DP_DemoSheet_HideVeryHidden",
+      "module": "M_DP_Core",
+      "kind": "Sub",
+      "classification": "internal",
+      "channels": [
         "project-internal"
       ],
       "signatures": [
         "Sub DP_DemoSheet_HideVeryHidden()"
-      ],
-      "pending": "#55"
+      ]
     }
   ]
 }
