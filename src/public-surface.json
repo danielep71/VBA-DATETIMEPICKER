@@ -2207,20 +2207,6 @@
       ]
     },
     {
-      "name": "DP_DemoSheet_Show",
-      "module": "M_DatePicker",
-      "kind": "Sub",
-      "classification": "internal",
-      "channels": [
-        "macro-dialog"
-      ],
-      "signatures": [
-        "Sub DP_DemoSheet_Show()"
-      ],
-      "pending": "#55",
-      "note": "No caller in this project."
-    },
-    {
       "name": "DP_DemoSheet_HideVeryHidden",
       "module": "M_DatePicker",
       "kind": "Sub",

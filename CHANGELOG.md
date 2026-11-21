@@ -101,7 +101,7 @@ Use only the categories needed by a release.
 
 - `src/public-surface.json` classifies every public declaration in
   `M_DatePicker` once, as `supported` (46), `callback` (6) or `internal`
-  (122), with its signature and invocation channels
+  (121), with its signature and invocation channels
   ([#25](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/25)). The new
   `check_public_surface` static gate checks it against the source, the Ribbon
   XML and the README lists. It fails on an unclassified addition, a changed or
@@ -122,6 +122,9 @@ Use only the categories needed by a release.
 - **`Ribbon_HideDemo` is removed.** It was never bound in the shipped Ribbon,
   and the **Demo** button (`Ribbon_Demo`) already hides a visible demo sheet. A
   custom Ribbon that bound it can bind `Ribbon_Demo`, which toggles the sheet.
+- **`DP_DemoSheet_Show` is removed.** Nothing called it, and `Ribbon_Demo`
+  shows the demo sheet itself. A macro or `Application.Run` call that named it
+  must use the Ribbon **Demo** button instead.
 - Classification decisions, with no signature change:
   - `M_GridIcon_PurgeAll` is supported API, because the documented host
     template calls it before save and print.
@@ -131,7 +134,7 @@ Use only the categories needed by a release.
   - `M_WriteBack_Apply` and `M_Window_RemoveTitleBar` are internal. Hosts
     write through `DP_FillTableColumn`, `DP_Today` or `DP_Now`;
     `DP_WindowStyleResult` and `DP_WriteAction` stay supported.
-- Twenty internal parameterless procedures, including three test seams, are
+- Nineteen internal parameterless procedures, including three test seams, are
   still reachable from Alt+F8 until
   [#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55) moves them
   behind `Option Private Module`.

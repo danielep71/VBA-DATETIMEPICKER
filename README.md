@@ -1042,7 +1042,7 @@ They may change or disappear without notice. Do not call them from host code.
 
 ### Alt+F8 exposure still open
 
-Twenty parameterless internal `Sub`s still appear in the macro dialog, among
+Nineteen parameterless internal `Sub`s still appear in the macro dialog, among
 them three test seams: `M_Lease_Test_ClearOwnerToken`,
 `M_Timer_Test_ExpireRegistration` and `M_Timer_Test_Reset`. The manifest marks
 each with `"pending": "#55"`.
