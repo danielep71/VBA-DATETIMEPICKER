@@ -308,9 +308,9 @@ For each artifact:
    ```text
    src/ribbon/customUI.xml                  -> customUI/customUI.xml
    src/ribbon/_rels/customUI.xml.rels       -> customUI/_rels/customUI.xml.rels
-   src/ribbon/images/DP_GridIcon_64.png     -> customUI/images/DP_GridIcon_64.png
-   src/ribbon/images/reset.png              -> customUI/images/reset.png
-   src/ribbon/images/demo.png               -> customUI/images/demo.png
+   src/ribbon/images/dp_show_picker.png     -> customUI/images/dp_show_picker.png
+   src/ribbon/images/dp_reset.png           -> customUI/images/dp_reset.png
+   src/ribbon/images/dp_demo.png            -> customUI/images/dp_demo.png
    ```
 
    The package's root relationship must use the Office 2007 extensibility type

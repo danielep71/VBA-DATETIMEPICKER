@@ -188,9 +188,9 @@ mapping, and `tools/Build-Addin.cmd` does all of this from a clean checkout
 ```text
 src/ribbon/customUI.xml
 src/ribbon/_rels/customUI.xml.rels
-src/ribbon/images/DP_GridIcon_64.png
-src/ribbon/images/reset.png
-src/ribbon/images/demo.png
+src/ribbon/images/dp_show_picker.png
+src/ribbon/images/dp_reset.png
+src/ribbon/images/dp_demo.png
 ```
 
 Then compile:
@@ -1444,7 +1444,7 @@ VBA-DATETIMEPICKER/
 │  └─ ribbon/
 │     ├─ customUI.xml
 │     ├─ _rels/customUI.xml.rels
-│     └─ images/ (DP_GridIcon_64, reset, demo)
+│     └─ images/ (dp_show_picker, dp_reset, dp_demo; drawn by tools/build_ribbon_icons.py)
 ├─ test/
 │  └─ M_cDP_Test.bas
 ├─ tools/
