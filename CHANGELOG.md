@@ -154,6 +154,14 @@ Use only the categories needed by a release.
   callback names) and `M_DP_Window`, which now owns every production Windows
   API declaration. Code moved unchanged; captions, date policy, callback names
   and window styling behave as before.
+- The application-wide integrations are split out of `M_DP_Core`
+  ([#57](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/57)):
+  `M_DP_Timer` (live clock), `M_DP_ContextMenu` (right-click entry),
+  `M_DP_Keyboard` (Ctrl+Shift+D), `M_DP_GridIcon` (icon shape and placement)
+  and `M_DP_GridIconAsset` (embedded image). Each owns its state and verifies
+  its own teardown for `DP_Stop` and `DP_RepairRuntime`; every callback
+  registered with Excel still names the facade (`DP_Click`,
+  `DP_OpenForActiveCell`, `M_Timer_Tick`). Behavior is unchanged.
 
 ### Documentation
 
@@ -162,7 +170,7 @@ Use only the categories needed by a release.
   internal maintenance helpers and test seams. CONTRIBUTING describes the
   manifest, the `Option Private Module` rule for implementation modules and the
   facade dependency rule. README and INSTALLATION list `M_DP_Core` and the
-  four `M_DP_*` service modules, and describe the facade.
+  other `M_DP_*` modules, and describe the facade.
 
 ### Compatibility
 
@@ -181,11 +189,10 @@ Use only the categories needed by a release.
   - `M_WriteBack_Apply` and `M_Window_RemoveTitleBar` are internal. Hosts
     write through `DP_FillTableColumn`, `DP_Today` or `DP_Now`;
     `DP_WindowStyleResult` and `DP_WriteAction` stay supported.
-- **Embedded source needs five more modules.** Import `M_DP_Core.bas`,
-  `M_DP_Captions.bas`, `M_DP_DatePolicy.bas`, `M_DP_MacroNames.bas` and
-  `M_DP_Window.bas` from `src/modules/` beside `M_DatePicker.bas`; an upgrade
-  replaces `M_DatePicker` and adds the five. Host code that uses the supported
-  API needs no change.
+- **Embedded source needs ten more modules.** Import `M_DP_Core.bas` and the
+  nine other `M_DP_*.bas` files from `src/modules/` beside `M_DatePicker.bas`
+  (INSTALLATION lists them in order); an upgrade replaces `M_DatePicker` and
+  adds the ten. Host code that uses the supported API needs no change.
 - **Internal symbols are no longer visible outside the project.** The
   nineteen internal parameterless procedures, including three test seams, no
   longer appear in Alt+F8, and another VBA project that referenced the add-in

@@ -22,8 +22,9 @@ Option Explicit
 '   Nothing at module level
 '
 ' BEHAVIOR
-'   Every procedure delegates at once to the matching <Name>_Impl procedure in
-'   M_DP_Core, qualified with the module name
+'   Every procedure delegates at once to the matching <Name>_Impl procedure,
+'   qualified with the name of the private module that holds it: M_DP_Core,
+'   M_DP_Timer for M_Timer_Tick, M_DP_GridIcon for M_GridIcon_PurgeAll
 '
 ' ERROR POLICY
 '   Wrappers have no error handler: errors raised by the implementation reach
@@ -31,6 +32,8 @@ Option Explicit
 '
 ' DEPENDENCIES
 '   M_DP_Core
+'   M_DP_Timer
+'   M_DP_GridIcon
 '
 ' NOTES
 '   src/public-surface.json classifies every public symbol; tools/
@@ -2549,7 +2552,7 @@ Public Sub M_Timer_Tick()
 '   Writes diagnostics to the Immediate Window
 '
 ' DEPENDENCIES
-'   M_DP_Core.M_Timer_Tick_Impl, which holds the implementation
+'   M_DP_Timer.M_Timer_Tick_Impl, which holds the implementation
 '
 ' NOTES
 '   This routine must remain Public because Application.OnTime calls it by name
@@ -2571,7 +2574,7 @@ Public Sub M_Timer_Tick()
 ' DELEGATE TO IMPLEMENTATION
 '------------------------------------------------------------------------------
     'Run the private implementation; its errors reach the caller unchanged
-        M_DP_Core.M_Timer_Tick_Impl
+        M_DP_Timer.M_Timer_Tick_Impl
 
 End Sub
 
@@ -2614,7 +2617,7 @@ Public Sub M_GridIcon_PurgeAll()
 '   explicit incomplete-cleanup condition
 '
 ' DEPENDENCIES
-'   M_DP_Core.M_GridIcon_PurgeAll_Impl, which holds the implementation
+'   M_DP_GridIcon.M_GridIcon_PurgeAll_Impl, which holds the implementation
 '
 ' NOTES
 '   None
@@ -2627,7 +2630,7 @@ Public Sub M_GridIcon_PurgeAll()
 ' DELEGATE TO IMPLEMENTATION
 '------------------------------------------------------------------------------
     'Run the private implementation; its errors reach the caller unchanged
-        M_DP_Core.M_GridIcon_PurgeAll_Impl
+        M_DP_GridIcon.M_GridIcon_PurgeAll_Impl
 
 End Sub
 
