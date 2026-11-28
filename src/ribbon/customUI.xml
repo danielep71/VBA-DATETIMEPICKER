@@ -7,19 +7,19 @@
           <splitButton id="spbDateTimePicker" size="large">
             <button id="btnShowPicker"
                     label="Show Picker"
-                    image="DP_GridIcon_64"
+                    image="dp_show_picker"
                     onAction="Ribbon_ShowPicker"/>
 
             <menu id="mnuDateTimePicker"
                   itemSize="large">
               <button id="BtnMenu_Reset"
                       label="Reset"
-                      image="reset"
+                      image="dp_reset"
                       onAction="Ribbon_Reset"/>
 
               <button id="BtnMenu_Demo"
                       label="Demo"
-                      image="demo"
+                      image="dp_demo"
                       onAction="Ribbon_Demo"/>
 
             </menu>

@@ -60,9 +60,9 @@ class InjectionTests(unittest.TestCase):
             for source, part in (
                 ("customUI.xml", "customUI/customUI.xml"),
                 ("_rels/customUI.xml.rels", "customUI/_rels/customUI.xml.rels"),
-                ("images/DP_GridIcon_64.png", "customUI/images/DP_GridIcon_64.png"),
-                ("images/reset.png", "customUI/images/reset.png"),
-                ("images/demo.png", "customUI/images/demo.png"),
+                ("images/dp_show_picker.png", "customUI/images/dp_show_picker.png"),
+                ("images/dp_reset.png", "customUI/images/dp_reset.png"),
+                ("images/dp_demo.png", "customUI/images/dp_demo.png"),
             ):
                 self.assertEqual(archive.read(part), (RIBBON_ROOT / source).read_bytes(), part)
         self.assertEqual(len(report["parts"]), 5)
@@ -133,24 +133,24 @@ class InjectionTests(unittest.TestCase):
 
     def test_missing_image_is_refused(self) -> None:
         ribbon = copy_ribbon(self.folder)
-        (ribbon / "images" / "reset.png").unlink()
+        (ribbon / "images" / "dp_reset.png").unlink()
         package = make_package(self.folder)
         before = package.read_bytes()
-        with self.assertRaisesRegex(builder.PackageError, "missing file: images/reset.png"):
+        with self.assertRaisesRegex(builder.PackageError, "missing file: images/dp_reset.png"):
             builder.inject(package, ribbon)
         self.assertEqual(package.read_bytes(), before)
 
     def test_image_without_relationship_is_refused(self) -> None:
         ribbon = copy_ribbon(self.folder)
         part = ribbon / "customUI.xml"
-        part.write_bytes(part.read_bytes().replace(b'image="demo"', b'image="ghost"'))
+        part.write_bytes(part.read_bytes().replace(b'image="dp_demo"', b'image="ghost"'))
         with self.assertRaisesRegex(builder.PackageError, "no relationship: ghost"):
             builder.inject(make_package(self.folder), ribbon)
 
     def test_target_outside_the_ribbon_root_is_refused(self) -> None:
         ribbon = copy_ribbon(self.folder)
         rels = ribbon / "_rels" / "customUI.xml.rels"
-        rels.write_bytes(rels.read_bytes().replace(b'Target="images/demo.png"', b'Target="../demo.png"'))
+        rels.write_bytes(rels.read_bytes().replace(b'Target="images/dp_demo.png"', b'Target="../dp_demo.png"'))
         with self.assertRaisesRegex(builder.PackageError, "outside the Ribbon root"):
             builder.inject(make_package(self.folder), ribbon)
 
@@ -168,10 +168,10 @@ class InjectionTests(unittest.TestCase):
         with zipfile.ZipFile(package) as source, zipfile.ZipFile(tampered, "w") as target:
             for entry in source.infolist():
                 payload = source.read(entry)
-                if entry.filename == "customUI/images/demo.png":
+                if entry.filename == "customUI/images/dp_demo.png":
                     payload = payload + b"\0"
                 target.writestr(entry, payload)
-        self.assertEqual(builder.verify(tampered, RIBBON_ROOT), ["customUI/images/demo.png differs from its source"])
+        self.assertEqual(builder.verify(tampered, RIBBON_ROOT), ["customUI/images/dp_demo.png differs from its source"])
 
     def test_cli_writes_the_report_and_fails_closed(self) -> None:
         package = make_package(self.folder)
