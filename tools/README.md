@@ -334,6 +334,33 @@ is clean; and the package hash never changes. The run proves what these bytes
 did in Excel; the build evidence of `tools/Build-Addin.cmd` records which
 commit built them.
 
+## Draw the Ribbon icons
+
+`tools/build_ribbon_icons.py` draws the three custom Ribbon images in
+`src/ribbon/images/` from the shapes defined in the script
+([#238](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/238)): a navy
+`1F3864` rounded tile with a white glyph, 32 × 32 RGBA.
+
+| File | Button | Glyph |
+|---|---|---|
+| `dp_show_picker.png` | Show Picker | calendar |
+| `dp_reset.png` | Reset | circular arrow |
+| `dp_demo.png` | Demo | screen with a play mark |
+
+It needs only the Python standard library. To change an icon, edit its drawing
+in the script, then rewrite the files and check them:
+
+```sh
+python tools/build_ribbon_icons.py
+python tools/build_ribbon_icons.py --check
+```
+
+`--check` decodes each tracked PNG and compares it with the drawing pixel by
+pixel; it does not compare file bytes, because zlib builds can compress the
+same pixels differently. `tools/test_build_ribbon_icons.py` runs the same
+comparison in the tool tests, so CI fails when a tracked icon and its drawing
+disagree. Never edit the PNG files by hand.
+
 ## Build the add-in and check its Ribbon (Windows)
 
 `tools/Build-Addin.cmd` (double click) or `tools/Build-Addin.ps1` builds the

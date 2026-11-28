@@ -1125,7 +1125,7 @@ Private Function M_GridIcon_EmbeddedIconBase64() As String
 '   None
 '
 ' NOTES
-'   Matches src/ribbon/images/DP_GridIcon_64.png pixel for pixel (64 x 64,
+'   Matches assets/DP_GridIcon_64.png pixel for pixel (64 x 64,
 '   8-bit RGBA) but not byte for byte. The decoded PNG is 4,671 bytes against
 '   the tracked file's 5,198: it omits the sRGB, gAMA and pHYs chunks and
 '   compresses the image data differently

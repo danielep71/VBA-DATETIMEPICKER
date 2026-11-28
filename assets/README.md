@@ -29,5 +29,14 @@ paths for both files. Check that the result is 1280×640 and under GitHub's
 1 MB limit, then upload it in **Settings → General → Social preview**. GitHub
 offers no API for that step.
 
+## In-grid icon
+
+[`DP_GridIcon_64.png`](DP_GridIcon_64.png) is the reference image of the icon
+the picker places beside the selected cell. The VBA carries it as an embedded
+Base64 payload that matches this file pixel for pixel. It is not a Ribbon
+image: the Ribbon icons live in `src/ribbon/images/` and are drawn by
+`tools/build_ribbon_icons.py`
+([#238](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/238)).
+
 Keep assets free of personal or confidential information, and update every
 reference when an asset moves.

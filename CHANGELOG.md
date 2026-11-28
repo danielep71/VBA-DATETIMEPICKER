@@ -121,8 +121,23 @@ Use only the categories needed by a release.
   production uses, and proves each one reaches its implementation without
   lasting effects. `Ribbon_Demo` is exercised only where the demo sheet
   already exists, as in the packaged demo workbook.
+- `tools/build_ribbon_icons.py` draws the Ribbon icons with the Python
+  standard library, and a tool test fails when a tracked icon differs from its
+  drawing in any pixel
+  ([#238](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/238)). The
+  Ribbon images now have a source in the repository.
 
 ### Changed
+
+- The Ribbon icons are redrawn as one set: a navy rounded tile with a white
+  glyph, 32 × 32, for **Show Picker** (calendar), **Reset** (circular arrow) and
+  **Demo** (screen with a play mark)
+  ([#238](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/238)). They
+  replace three images of different sizes and styles, and are tracked as
+  `src/ribbon/images/dp_show_picker.png`, `dp_reset.png` and `dp_demo.png`. A
+  custom Ribbon that copied the old image names must copy the new files. The
+  in-grid icon is unchanged; its reference image moves to
+  `assets/DP_GridIcon_64.png`.
 
 - `M_DatePicker` is now a thin, stable facade
   ([#55](https://github.com/danielep71/VBA-DATETIMEPICKER/issues/55)). It keeps
